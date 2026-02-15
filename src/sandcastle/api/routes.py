@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -286,14 +289,99 @@ async def get_run(run_id: str) -> ApiResponse:
     )
 
 
+@router.get("/runs/{run_id}/stream")
+async def stream_run(run_id: str) -> StreamingResponse:
+    """Stream live progress of a run via SSE."""
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run ID format")
+
+    async def event_generator():
+        """Poll the database and emit SSE events as status changes."""
+        last_status = None
+        last_step_count = 0
+
+        for _ in range(600):  # Max 10 minutes of polling (1s intervals)
+            async with async_session() as session:
+                stmt = (
+                    select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
+                )
+                result = await session.execute(stmt)
+                run = result.scalar_one_or_none()
+
+            if not run:
+                yield _sse_event("error", {"message": f"Run '{run_id}' not found"})
+                return
+
+            current_status = run.status.value if hasattr(run.status, "value") else run.status
+
+            # Emit status change events
+            if current_status != last_status:
+                yield _sse_event("status", {
+                    "run_id": str(run.id),
+                    "status": current_status,
+                    "total_cost_usd": run.total_cost_usd,
+                })
+                last_status = current_status
+
+            # Emit step update events
+            if len(run.steps) > last_step_count:
+                for step in run.steps[last_step_count:]:
+                    step_status = (
+                        step.status.value if hasattr(step.status, "value") else step.status
+                    )
+                    yield _sse_event("step", {
+                        "step_id": step.step_id,
+                        "parallel_index": step.parallel_index,
+                        "status": step_status,
+                        "cost_usd": step.cost_usd,
+                        "duration_seconds": step.duration_seconds,
+                    })
+                last_step_count = len(run.steps)
+
+            # Terminal states — emit final result and stop
+            if current_status in ("completed", "failed", "partial"):
+                yield _sse_event("result", {
+                    "run_id": str(run.id),
+                    "status": current_status,
+                    "outputs": run.output_data,
+                    "total_cost_usd": run.total_cost_usd,
+                    "error": run.error,
+                })
+                return
+
+            await asyncio.sleep(1.0)
+
+        yield _sse_event("error", {"message": "Stream timed out"})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _sse_event(event: str, data: dict) -> str:
+    """Format a server-sent event."""
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
 @router.get("/runs")
 async def list_runs(
     status: str | None = Query(None, description="Filter by status"),
     workflow: str | None = Query(None, description="Filter by workflow name"),
+    since: datetime | None = Query(None, description="Filter runs created after this datetime"),
+    until: datetime | None = Query(None, description="Filter runs created before this datetime"),
+    tenant_id: str | None = Query(None, description="Filter by tenant ID"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
-    """List workflow runs with optional filters and pagination."""
+    """List workflow runs with filters and pagination."""
     async with async_session() as session:
         stmt = select(Run).order_by(Run.created_at.desc())
 
@@ -301,6 +389,12 @@ async def list_runs(
             stmt = stmt.where(Run.status == status)
         if workflow:
             stmt = stmt.where(Run.workflow_name == workflow)
+        if since:
+            stmt = stmt.where(Run.created_at >= since)
+        if until:
+            stmt = stmt.where(Run.created_at <= until)
+        if tenant_id:
+            stmt = stmt.where(Run.tenant_id == tenant_id)
 
         stmt = stmt.offset(offset).limit(limit)
         result = await session.execute(stmt)
