@@ -1,6 +1,6 @@
 # Sandcastle
 
-**Production-ready workflow orchestrator for AI agents. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).**
+**AI agent workflow orchestrator with DAG pipelines, parallel execution, policy enforcement, SLO-based model routing, human-in-the-loop approvals, cost tracking, and a real-time dashboard. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).**
 
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
