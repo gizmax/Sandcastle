@@ -10,6 +10,7 @@ export const STATUS_COLORS: Record<string, string> = {
   budget_exceeded: "bg-warning/15 text-warning border-warning/30",
   pending: "bg-muted/15 text-muted border-muted/30",
   skipped: "bg-muted/15 text-muted border-muted/30",
+  awaiting_approval: "bg-warning/15 text-warning border-warning/30",
 };
 
 export const STATUS_DOT_COLORS: Record<string, string> = {
@@ -22,6 +23,7 @@ export const STATUS_DOT_COLORS: Record<string, string> = {
   budget_exceeded: "bg-warning",
   pending: "bg-muted",
   skipped: "bg-muted",
+  awaiting_approval: "bg-warning animate-pulse",
 };
 
 export const POLL_INTERVAL = 5000;

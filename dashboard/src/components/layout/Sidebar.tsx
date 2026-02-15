@@ -2,10 +2,12 @@ import { NavLink } from "react-router-dom";
 import {
   Calendar,
   Castle,
+  FlaskConical,
   GitBranch,
   Inbox,
   LayoutDashboard,
   PlayCircle,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -14,17 +16,20 @@ interface SidebarProps {
   open: boolean;
   onClose: () => void;
   dlqCount?: number;
+  approvalsCount?: number;
 }
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Overview", end: true },
   { to: "/runs", icon: PlayCircle, label: "Runs" },
   { to: "/workflows", icon: GitBranch, label: "Workflows" },
+  { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" as const },
+  { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
   { to: "/schedules", icon: Calendar, label: "Schedules" },
-  { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: true },
+  { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" as const },
 ];
 
-export function Sidebar({ open, onClose, dlqCount = 0 }: SidebarProps) {
+export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
   return (
     <>
       {open && (
@@ -76,9 +81,14 @@ export function Sidebar({ open, onClose, dlqCount = 0 }: SidebarProps) {
             >
               <item.icon className="h-[18px] w-[18px] shrink-0" />
               <span className="flex-1">{item.label}</span>
-              {item.badge && dlqCount > 0 && (
+              {item.badge === "dlq" && dlqCount > 0 && (
                 <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-semibold text-white">
                   {dlqCount}
+                </span>
+              )}
+              {item.badge === "approvals" && approvalsCount > 0 && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white">
+                  {approvalsCount}
                 </span>
               )}
             </NavLink>
@@ -86,7 +96,7 @@ export function Sidebar({ open, onClose, dlqCount = 0 }: SidebarProps) {
         </nav>
 
         <div className="border-t border-border px-5 py-4">
-          <p className="text-xs text-muted-foreground">Sandcastle v0.1.0</p>
+          <p className="text-xs text-muted-foreground">Sandcastle v0.2.0</p>
         </div>
       </aside>
     </>

@@ -228,6 +228,36 @@ Failed steps that exhausted all retries land here. Retry triggers a full re-run.
   <img src="docs/screenshots/dead-letter.png" alt="Dead Letter Queue" width="720" />
 </p>
 
+### Approval Gates
+
+Workflow steps paused for human review. Pending approvals show action buttons (Approve, Reject, Skip). Expand any item to see the full request data. Sidebar badge shows pending count.
+
+<p align="center">
+  <img src="docs/screenshots/approvals.png" alt="Approval Gates" width="720" />
+</p>
+
+<details>
+<summary>Expanded with request data</summary>
+<p align="center">
+  <img src="docs/screenshots/approvals-detail.png" alt="Approval Gate Detail" width="720" />
+</p>
+</details>
+
+### AutoPilot
+
+Self-optimizing experiments across your workflows. Stats cards show active experiments, total samples, quality improvement, and cost savings. Expand an experiment to compare variants side-by-side with quality scores, costs, and duration.
+
+<p align="center">
+  <img src="docs/screenshots/autopilot.png" alt="AutoPilot Experiments" width="720" />
+</p>
+
+<details>
+<summary>Expanded with variant comparison</summary>
+<p align="center">
+  <img src="docs/screenshots/autopilot-detail.png" alt="AutoPilot Variant Comparison" width="720" />
+</p>
+</details>
+
 ---
 
 ## Run Time Machine

@@ -5,6 +5,8 @@ import Runs from "@/pages/Runs";
 import RunDetailPage from "@/pages/RunDetailPage";
 import Workflows from "@/pages/Workflows";
 import WorkflowBuilderPage from "@/pages/WorkflowBuilderPage";
+import ApprovalsPage from "@/pages/ApprovalsPage";
+import AutoPilotPage from "@/pages/AutoPilotPage";
 import Schedules from "@/pages/Schedules";
 import DeadLetterPage from "@/pages/DeadLetterPage";
 import Onboarding from "@/pages/Onboarding";
@@ -19,6 +21,8 @@ export default function App() {
           <Route path="/runs/:id" element={<RunDetailPage />} />
           <Route path="/workflows" element={<Workflows />} />
           <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
+          <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/autopilot" element={<AutoPilotPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/dead-letter" element={<DeadLetterPage />} />
           <Route path="/onboarding" element={<Onboarding />} />
