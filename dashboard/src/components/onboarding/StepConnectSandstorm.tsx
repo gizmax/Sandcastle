@@ -1,0 +1,75 @@
+import { useState } from "react";
+import { CheckCircle, Loader2, Server } from "lucide-react";
+import { api } from "@/api/client";
+import { cn } from "@/lib/utils";
+
+interface StepConnectSandstormProps {
+  onComplete: () => void;
+}
+
+export function StepConnectSandstorm({ onComplete }: StepConnectSandstormProps) {
+  const [testing, setTesting] = useState(false);
+  const [connected, setConnected] = useState(false);
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const res = await api.get<{ status: string; sandstorm: boolean }>("/health");
+      if (res.data?.sandstorm) {
+        setConnected(true);
+      }
+    } catch {
+      // Not connected
+    }
+    setTesting(false);
+  }
+
+  return (
+    <div className="space-y-6 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
+        <Server className="h-8 w-8 text-accent" />
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Connect to Sandstorm</h2>
+        <p className="mt-1 text-sm text-muted">
+          Verify that your Sandstorm instance is running and accessible.
+        </p>
+      </div>
+
+      {connected ? (
+        <div className="flex items-center justify-center gap-2 text-success">
+          <CheckCircle className="h-5 w-5" />
+          <span className="text-sm font-medium">Connected successfully</span>
+        </div>
+      ) : (
+        <button
+          onClick={handleTest}
+          disabled={testing}
+          className={cn(
+            "rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-accent-foreground",
+            "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+            "disabled:opacity-50"
+          )}
+        >
+          {testing ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Testing...
+            </span>
+          ) : (
+            "Test Connection"
+          )}
+        </button>
+      )}
+
+      <div className="pt-4">
+        <button
+          onClick={onComplete}
+          className="text-sm text-muted hover:text-foreground transition-colors"
+        >
+          {connected ? "Continue" : "Skip"}
+        </button>
+      </div>
+    </div>
+  );
+}
