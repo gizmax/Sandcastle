@@ -83,9 +83,40 @@ const MOCK_STATS = {
 };
 
 const MOCK_WORKFLOWS = [
-  { name: "Lead Enrichment", description: "Scrape target websites, enrich with company data, and score leads for sales outreach priority.", steps_count: 3, file_name: "lead-enrichment.yaml" },
-  { name: "Competitor Monitor", description: "Track competitor websites for changes, analyze differences, and generate a summary report.", steps_count: 4, file_name: "competitor-monitor.yaml" },
-  { name: "SEO Audit", description: "Crawl a website, analyze on-page SEO factors, and produce actionable recommendations.", steps_count: 3, file_name: "seo-audit.yaml" },
+  {
+    name: "Lead Enrichment",
+    description: "Scrape target websites, enrich with company data, and score leads for sales outreach priority.",
+    steps_count: 3,
+    file_name: "lead-enrichment.yaml",
+    steps: [
+      { id: "scrape", model: "sonnet", depends_on: [] },
+      { id: "enrich", model: "sonnet", depends_on: ["scrape"] },
+      { id: "score", model: "haiku", depends_on: ["enrich"] },
+    ],
+  },
+  {
+    name: "Competitor Monitor",
+    description: "Track competitor websites for changes, analyze differences, and generate a summary report.",
+    steps_count: 4,
+    file_name: "competitor-monitor.yaml",
+    steps: [
+      { id: "fetch-competitors", model: "sonnet", depends_on: [] },
+      { id: "analyze", model: "sonnet", depends_on: ["fetch-competitors"] },
+      { id: "summarize", model: "sonnet", depends_on: ["analyze"] },
+      { id: "format-report", model: "haiku", depends_on: ["summarize"] },
+    ],
+  },
+  {
+    name: "SEO Audit",
+    description: "Crawl a website, analyze on-page SEO factors, and produce actionable recommendations.",
+    steps_count: 3,
+    file_name: "seo-audit.yaml",
+    steps: [
+      { id: "crawl", model: "sonnet", depends_on: [] },
+      { id: "analyze-technical", model: "sonnet", depends_on: ["crawl"] },
+      { id: "recommendations", model: "haiku", depends_on: ["analyze-technical"] },
+    ],
+  },
 ];
 
 const MOCK_SCHEDULES = [

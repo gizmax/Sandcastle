@@ -64,3 +64,26 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-muted);
 }
+
+/* ReactFlow controls theme override */
+.react-flow__controls {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  border-radius: var(--radius-md) !important;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  fill: var(--color-muted) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--color-border) !important;
+  fill: var(--color-foreground) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: inherit !important;
+}

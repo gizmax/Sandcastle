@@ -9,11 +9,18 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { cn } from "@/lib/utils";
 
+interface WorkflowStep {
+  id: string;
+  model?: string;
+  depends_on?: string[];
+}
+
 interface WorkflowInfo {
   name: string;
   description: string;
   steps_count: number;
   file_name: string;
+  steps?: WorkflowStep[];
 }
 
 export default function Workflows() {
@@ -103,7 +110,7 @@ export default function Workflows() {
             </button>
           </div>
           <DagGraph
-            steps={Array.from({ length: dagWorkflow.steps_count }, (_, i) => ({
+            steps={dagWorkflow.steps || Array.from({ length: dagWorkflow.steps_count }, (_, i) => ({
               id: `step_${i + 1}`,
             }))}
           />
