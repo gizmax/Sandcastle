@@ -1,16 +1,124 @@
-import { GitBranch } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { GitBranch, Plus } from "lucide-react";
+import { api } from "@/api/client";
+import { WorkflowList } from "@/components/workflows/WorkflowList";
+import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
+import { DagGraph } from "@/components/workflows/DagGraph";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { cn } from "@/lib/utils";
+
+interface WorkflowInfo {
+  name: string;
+  description: string;
+  steps_count: number;
+  file_name: string;
+}
 
 export default function Workflows() {
+  const navigate = useNavigate();
+  const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [runModal, setRunModal] = useState<WorkflowInfo | null>(null);
+  const [dagWorkflow, setDagWorkflow] = useState<WorkflowInfo | null>(null);
+
+  const fetchWorkflows = useCallback(async () => {
+    const res = await api.get<WorkflowInfo[]>("/workflows");
+    if (res.data) setWorkflows(res.data);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchWorkflows();
+  }, [fetchWorkflows]);
+
+  const handleRun = useCallback(
+    async (input: Record<string, unknown>, callbackUrl?: string) => {
+      if (!runModal) return;
+      // Read the workflow file content - for now use the name
+      await api.post("/workflows/run", {
+        workflow: `name: "${runModal.name}"`,
+        input,
+        callback_url: callbackUrl,
+      });
+      setRunModal(null);
+      navigate("/runs");
+    },
+    [runModal, navigate]
+  );
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
-      <EmptyState
-        icon={GitBranch}
-        title="No workflows found"
-        description="Build your first workflow!"
-        action={{ label: "Create Workflow", onClick: () => window.location.assign("/workflows/builder") }}
-      />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
+        <button
+          onClick={() => navigate("/workflows/builder")}
+          className={cn(
+            "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
+            "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
+          )}
+        >
+          <Plus className="h-4 w-4" />
+          New Workflow
+        </button>
+      </div>
+
+      {workflows.length === 0 ? (
+        <EmptyState
+          icon={GitBranch}
+          title="No workflows found"
+          description="Build your first workflow!"
+          action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
+        />
+      ) : (
+        <WorkflowList
+          workflows={workflows}
+          onRun={setRunModal}
+          onEdit={() => navigate("/workflows/builder")}
+          onViewDag={setDagWorkflow}
+        />
+      )}
+
+      {/* DAG Viewer */}
+      {dagWorkflow && (
+        <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-5 py-3">
+            <h3 className="text-sm font-semibold text-foreground">
+              DAG - {dagWorkflow.name}
+            </h3>
+            <button
+              onClick={() => setDagWorkflow(null)}
+              className="text-xs text-muted hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
+          <DagGraph
+            steps={Array.from({ length: dagWorkflow.steps_count }, (_, i) => ({
+              id: `step_${i + 1}`,
+            }))}
+          />
+        </div>
+      )}
+
+      {/* Run Modal */}
+      {runModal && (
+        <RunWorkflowModal
+          open={true}
+          workflowName={runModal.name}
+          onClose={() => setRunModal(null)}
+          onRun={handleRun}
+        />
+      )}
     </div>
   );
 }
