@@ -15,9 +15,11 @@ interface Step {
 
 interface StepTimelineProps {
   steps: Step[];
+  onReplay?: (stepId: string) => void;
+  onFork?: (stepId: string) => void;
 }
 
-export function StepTimeline({ steps }: StepTimelineProps) {
+export function StepTimeline({ steps, onReplay, onFork }: StepTimelineProps) {
   if (steps.length === 0) {
     return <p className="py-4 text-sm text-muted">No steps recorded</p>;
   }
@@ -50,6 +52,8 @@ export function StepTimeline({ steps }: StepTimelineProps) {
               error={step.error}
               output={step.output}
               parallelIndex={step.parallel_index}
+              onReplay={onReplay}
+              onFork={onFork}
             />
           </div>
         </div>

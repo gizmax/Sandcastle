@@ -56,12 +56,24 @@ function getRunDetail(runId: string) {
   if (run.status === "running") steps = MOCK_STEPS_RUNNING;
   if (run.status === "failed") steps = MOCK_STEPS_FAILED;
 
+  // Add budget for the first run to demo the BudgetBar
+  const maxCost = runId === "a1b2c3d4-1111-4000-8000-000000000001" ? 0.15 : null;
+  // Demo parent_run_id for the third run (replay)
+  const parentRunId = runId === "a1b2c3d4-3333-4000-8000-000000000003"
+    ? "a1b2c3d4-1111-4000-8000-000000000001"
+    : null;
+  const replayFromStep = parentRunId ? "analyze-technical" : null;
+
   return {
     ...run,
     input_data: { target_url: "https://example.com", max_depth: 3 },
     outputs: run.status === "completed" ? { final: "Lead enrichment complete" } : null,
     error: run.status === "failed" ? "Step 'enrich' failed after 3 attempts" : null,
     steps,
+    max_cost_usd: maxCost,
+    parent_run_id: parentRunId,
+    replay_from_step: replayFromStep,
+    fork_changes: null,
   };
 }
 

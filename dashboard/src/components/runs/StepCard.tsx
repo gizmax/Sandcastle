@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, RotateCcw, GitFork } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { cn, formatDuration, formatCost } from "@/lib/utils";
 
@@ -12,6 +12,8 @@ interface StepCardProps {
   error: string | null;
   output: unknown;
   parallelIndex: number | null;
+  onReplay?: (stepId: string) => void;
+  onFork?: (stepId: string) => void;
 }
 
 export function StepCard({
@@ -23,8 +25,11 @@ export function StepCard({
   error,
   output,
   parallelIndex,
+  onReplay,
+  onFork,
 }: StepCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const isCompleted = status === "completed" || status === "failed";
 
   return (
     <div className="rounded-lg border border-border bg-surface shadow-sm">
@@ -70,6 +75,44 @@ export function StepCard({
               <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono text-xs text-foreground">
                 {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
               </pre>
+            </div>
+          )}
+
+          {/* Replay / Fork buttons for completed steps */}
+          {isCompleted && (onReplay || onFork) && (
+            <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+              {onReplay && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReplay(stepId);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium",
+                    "border border-border text-muted",
+                    "hover:bg-border/40 hover:text-foreground transition-colors"
+                  )}
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Replay from here
+                </button>
+              )}
+              {onFork && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFork(stepId);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium",
+                    "border border-accent/30 text-accent",
+                    "hover:bg-accent/10 transition-colors"
+                  )}
+                >
+                  <GitFork className="h-3 w-3" />
+                  Fork from here
+                </button>
+              )}
             </div>
           )}
         </div>
