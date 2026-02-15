@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
 from arq import create_pool
-from arq.connections import ArqRedis, RedisSettings
+from arq.connections import RedisSettings
 
 from sandcastle.config import settings
 
@@ -31,21 +30,24 @@ def _parse_redis_url(url: str) -> RedisSettings:
 async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_id: str) -> dict:
     """Arq job: execute a workflow asynchronously.
 
-    Updates the database with progress and results.
+    Updates the database with progress and results. Dispatches webhooks.
     """
     from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
     from sandcastle.engine.executor import execute_workflow
     from sandcastle.engine.storage import LocalStorage
     from sandcastle.models.db import Run, RunStatus, async_session
+    from sandcastle.webhooks.dispatcher import dispatch_webhook
 
     logger.info(f"Worker picked up run {run_id}")
 
+    callback_url = None
+
     async with async_session() as session:
-        # Update run status to RUNNING
         run = await session.get(Run, uuid.UUID(run_id))
         if run:
             run.status = RunStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)
+            callback_url = run.callback_url
             await session.commit()
 
     try:
@@ -69,12 +71,36 @@ async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_
         async with async_session() as session:
             run = await session.get(Run, uuid.UUID(run_id))
             if run:
-                run.status = RunStatus.COMPLETED if result.status == "completed" else RunStatus.FAILED
+                run.status = (
+                    RunStatus.COMPLETED if result.status == "completed" else RunStatus.FAILED
+                )
                 run.output_data = result.outputs
                 run.total_cost_usd = result.total_cost_usd
                 run.completed_at = datetime.now(timezone.utc)
                 run.error = result.error
                 await session.commit()
+
+        # Dispatch completion webhook
+        webhook_url = callback_url
+        if not webhook_url and workflow.on_complete and workflow.on_complete.webhook:
+            webhook_url = workflow.on_complete.webhook
+
+        if webhook_url:
+            duration = 0.0
+            if result.started_at and result.completed_at:
+                duration = (result.completed_at - result.started_at).total_seconds()
+
+            await dispatch_webhook(
+                url=webhook_url,
+                event="workflow.completed" if result.status == "completed" else "workflow.failed",
+                run_id=run_id,
+                workflow=workflow.name,
+                status=result.status,
+                outputs=result.outputs,
+                costs=result.total_cost_usd,
+                duration_seconds=duration,
+                error=result.error,
+            )
 
         logger.info(f"Run {run_id} completed with status {result.status}")
         return {"run_id": run_id, "status": result.status}
@@ -88,6 +114,18 @@ async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_
                 run.completed_at = datetime.now(timezone.utc)
                 run.error = str(e)
                 await session.commit()
+
+        # Dispatch failure webhook
+        if callback_url:
+            await dispatch_webhook(
+                url=callback_url,
+                event="workflow.failed",
+                run_id=run_id,
+                workflow="unknown",
+                status="failed",
+                error=str(e),
+            )
+
         return {"run_id": run_id, "status": "failed", "error": str(e)}
 
 
@@ -109,7 +147,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     redis_settings = _parse_redis_url(settings.redis_url)
     max_jobs = 10
-    job_timeout = 600  # 10 minutes max per workflow
+    job_timeout = 600
 
 
 async def enqueue_workflow(

@@ -1,7 +1,8 @@
-"""Workflow executor — runs steps sequentially (Phase 1)."""
+"""Workflow executor — parallel execution with retries and cost tracking."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -28,6 +29,7 @@ class StepResult:
     duration_seconds: float = 0.0
     status: str = "completed"  # "completed" | "failed" | "skipped"
     error: str | None = None
+    attempt: int = 1
 
 
 @dataclass
@@ -93,11 +95,9 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
         step_data = context.step_outputs.get(step_id)
         if step_data is None:
             return None
-        # parts[2] should be "output"
         if parts[2] == "output":
             if len(parts) == 3:
                 return step_data
-            # Navigate deeper: steps.X.output.field
             obj = step_data
             for part in parts[3:]:
                 if isinstance(obj, dict):
@@ -124,7 +124,7 @@ def resolve_templates(template: str, context: RunContext) -> str:
         var_path = match.group(1)
         value = resolve_variable(var_path, context)
         if value is None:
-            return match.group(0)  # Leave unresolved
+            return match.group(0)
         if isinstance(value, (dict, list)):
             return json.dumps(value)
         return str(value)
@@ -140,7 +140,6 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
         content = await storage.read(path)
         return content if content is not None else match.group(0)
 
-    # Process storage refs one at a time (async)
     pattern = re.compile(r"\{storage\.([^}]+)\}")
     result = prompt
     for match in pattern.finditer(prompt):
@@ -150,22 +149,63 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
     return result
 
 
-async def execute_step(
+def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
+    """Calculate backoff delay in seconds."""
+    if backoff == "exponential":
+        return min(2**attempt, 60)  # Cap at 60s
+    return 2.0  # Fixed 2s delay
+
+
+async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
     sandbox: SandstormClient,
     storage: StorageBackend,
     parallel_index: int | None = None,
 ) -> StepResult:
-    """Execute a single step by calling Sandstorm."""
+    """Execute a step with retry logic and exponential backoff."""
+    max_attempts = step.retry.max_attempts if step.retry else 1
+    backoff = step.retry.backoff if step.retry else "exponential"
+
+    for attempt in range(1, max_attempts + 1):
+        result = await _execute_step_once(
+            step, context, sandbox, storage, parallel_index, attempt
+        )
+
+        if result.status == "completed":
+            return result
+
+        # Last attempt — no more retries
+        if attempt >= max_attempts:
+            logger.warning(
+                f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}"
+            )
+            return result
+
+        delay = _backoff_delay(attempt, backoff)
+        logger.info(
+            f"Step '{step.id}' attempt {attempt} failed, retrying in {delay}s..."
+        )
+        await asyncio.sleep(delay)
+
+    return result  # Should not reach here
+
+
+async def _execute_step_once(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: SandstormClient,
+    storage: StorageBackend,
+    parallel_index: int | None = None,
+    attempt: int = 1,
+) -> StepResult:
+    """Execute a single attempt of a step."""
     started_at = datetime.now(timezone.utc)
 
     try:
-        # Resolve template variables in prompt
         prompt = resolve_templates(step.prompt, context)
         prompt = await resolve_storage_refs(prompt, storage)
 
-        # Build Sandstorm request
         request: dict[str, Any] = {
             "prompt": prompt,
             "model": step.model,
@@ -178,7 +218,8 @@ async def execute_step(
                 "schema": step.output_schema,
             }
 
-        logger.info(f"Executing step '{step.id}' (model={step.model})")
+        idx_str = f" [{parallel_index}]" if parallel_index is not None else ""
+        logger.info(f"Executing step '{step.id}'{idx_str} attempt {attempt} (model={step.model})")
         result = await sandbox.query(request)
 
         output = result.structured_output if result.structured_output else result.text
@@ -191,11 +232,12 @@ async def execute_step(
             cost_usd=result.total_cost_usd,
             duration_seconds=duration,
             status="completed",
+            attempt=attempt,
         )
 
-    except SandstormError as e:
+    except (SandstormError, Exception) as e:
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
-        logger.error(f"Step '{step.id}' failed: {e}")
+        logger.error(f"Step '{step.id}' attempt {attempt} error: {e}")
         return StepResult(
             step_id=step.id,
             parallel_index=parallel_index,
@@ -203,18 +245,7 @@ async def execute_step(
             duration_seconds=duration,
             status="failed",
             error=str(e),
-        )
-
-    except Exception as e:
-        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
-        logger.error(f"Step '{step.id}' unexpected error: {e}")
-        return StepResult(
-            step_id=step.id,
-            parallel_index=parallel_index,
-            cost_usd=0.0,
-            duration_seconds=duration,
-            status="failed",
-            error=str(e),
+            attempt=attempt,
         )
 
 
@@ -225,7 +256,7 @@ async def execute_workflow(
     run_id: str | None = None,
     storage: StorageBackend | None = None,
 ) -> WorkflowResult:
-    """Execute a full workflow sequentially (Phase 1 — no parallelism)."""
+    """Execute a full workflow with parallel stages and retry logic."""
     from sandcastle.config import settings
     from sandcastle.engine.storage import LocalStorage
 
@@ -246,48 +277,88 @@ async def execute_workflow(
 
     try:
         for stage in plan.stages:
+            # Collect all tasks for this stage (parallel execution)
+            tasks: list[asyncio.Task] = []
+            task_meta: list[dict] = []  # Track which step/item each task is for
+
             for step_id in stage:
                 step = workflow.get_step(step_id)
 
                 if step.parallel_over:
-                    # Fan-out: run one step per item (sequentially in Phase 1)
+                    # Fan-out: one task per item
                     items = resolve_variable(step.parallel_over, context)
                     if not isinstance(items, list):
                         items = [items]
 
-                    fan_results = []
                     for i, item in enumerate(items):
                         item_context = context.with_item(item, i)
-                        result = await execute_step(
-                            step, item_context, sandbox, storage, parallel_index=i
+                        task = asyncio.create_task(
+                            execute_step_with_retry(
+                                step, item_context, sandbox, storage, parallel_index=i
+                            )
                         )
-                        if result.status == "failed":
-                            on_failure = step.retry.on_failure if step.retry else "abort"
-                            if on_failure == "abort":
-                                raise StepExecutionError(
-                                    f"Step '{step_id}' item {i} failed: {result.error}"
-                                )
-                            elif on_failure == "skip":
-                                result.status = "skipped"
-                        fan_results.append(result.output)
-                        context.costs.append(result.cost_usd)
-
-                    context.step_outputs[step_id] = fan_results
+                        tasks.append(task)
+                        task_meta.append({
+                            "step_id": step_id,
+                            "fan_out": True,
+                            "index": i,
+                        })
                 else:
-                    result = await execute_step(step, context, sandbox, storage)
+                    task = asyncio.create_task(
+                        execute_step_with_retry(step, context, sandbox, storage)
+                    )
+                    tasks.append(task)
+                    task_meta.append({"step_id": step_id, "fan_out": False})
+
+            # Await all tasks in the stage concurrently
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results
+            fan_out_results: dict[str, list] = {}
+
+            for i, (result, meta) in enumerate(zip(results, task_meta)):
+                step_id = meta["step_id"]
+                step = workflow.get_step(step_id)
+
+                if isinstance(result, Exception):
+                    result = StepResult(
+                        step_id=step_id,
+                        status="failed",
+                        error=str(result),
+                    )
+
+                context.costs.append(result.cost_usd)
+
+                if meta["fan_out"]:
+                    if step_id not in fan_out_results:
+                        fan_out_results[step_id] = []
+
+                    if result.status == "failed":
+                        on_failure = step.retry.on_failure if step.retry else "abort"
+                        if on_failure == "abort":
+                            raise StepExecutionError(
+                                f"Step '{step_id}' item {meta['index']} failed: {result.error}"
+                            )
+                        elif on_failure == "skip":
+                            fan_out_results[step_id].append(None)
+                        else:
+                            fan_out_results[step_id].append(None)
+                    else:
+                        fan_out_results[step_id].append(result.output)
+                else:
                     if result.status == "failed":
                         on_failure = step.retry.on_failure if step.retry else "abort"
                         if on_failure == "abort":
                             raise StepExecutionError(
                                 f"Step '{step_id}' failed: {result.error}"
                             )
-                        elif on_failure == "skip":
-                            context.step_outputs[step_id] = None
-                        else:
-                            context.step_outputs[step_id] = None
+                        context.step_outputs[step_id] = None
                     else:
                         context.step_outputs[step_id] = result.output
-                    context.costs.append(result.cost_usd)
+
+            # Store fan-out results
+            for step_id, items in fan_out_results.items():
+                context.step_outputs[step_id] = items
 
         completed_at = datetime.now(timezone.utc)
 

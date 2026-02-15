@@ -17,6 +17,8 @@ from sandcastle.api.schemas import (
     HealthResponse,
     RunListItem,
     RunStatusResponse,
+    ScheduleCreateRequest,
+    ScheduleResponse,
     StepStatusResponse,
     WorkflowRunRequest,
 )
@@ -25,7 +27,8 @@ from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
 from sandcastle.engine.sandbox import SandstormClient
 from sandcastle.engine.storage import LocalStorage
-from sandcastle.models.db import Run, RunStatus, RunStep, async_session, get_session
+from sandcastle.models.db import Run, RunStatus, RunStep, Schedule, async_session, get_session
+from sandcastle.queue.scheduler import add_schedule, remove_schedule
 from sandcastle.queue.worker import enqueue_workflow
 
 logger = logging.getLogger(__name__)
@@ -316,3 +319,113 @@ async def list_runs(
     ]
 
     return ApiResponse(data=items)
+
+
+# --- Schedules ---
+
+
+@router.post("/schedules")
+async def create_schedule(request: ScheduleCreateRequest) -> ApiResponse:
+    """Create a scheduled workflow execution."""
+    schedule_id = str(uuid.uuid4())
+
+    try:
+        async with async_session() as session:
+            db_schedule = Schedule(
+                id=uuid.UUID(schedule_id),
+                workflow_name=request.workflow_name,
+                cron_expression=request.cron_expression,
+                input_data=request.input_data,
+                notify=request.notify,
+                enabled=request.enabled,
+            )
+            session.add(db_schedule)
+            await session.commit()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="DB_ERROR", message=f"Could not create schedule: {e}")
+            ).model_dump(),
+        )
+
+    # Register with APScheduler if enabled
+    if request.enabled:
+        try:
+            add_schedule(
+                schedule_id=schedule_id,
+                cron_expression=request.cron_expression,
+                workflow_name=request.workflow_name,
+                workflow_yaml="",  # Will need to be loaded at execution time
+                input_data=request.input_data,
+            )
+        except Exception as e:
+            logger.warning(f"Could not register schedule with APScheduler: {e}")
+
+    return ApiResponse(
+        data=ScheduleResponse(
+            id=schedule_id,
+            workflow_name=request.workflow_name,
+            cron_expression=request.cron_expression,
+            input_data=request.input_data,
+            enabled=request.enabled,
+        )
+    )
+
+
+@router.get("/schedules")
+async def list_schedules() -> ApiResponse:
+    """List all workflow schedules."""
+    async with async_session() as session:
+        stmt = select(Schedule).order_by(Schedule.created_at.desc())
+        result = await session.execute(stmt)
+        schedules = result.scalars().all()
+
+    items = [
+        ScheduleResponse(
+            id=str(s.id),
+            workflow_name=s.workflow_name,
+            cron_expression=s.cron_expression,
+            input_data=s.input_data or {},
+            enabled=s.enabled,
+            last_run_id=str(s.last_run_id) if s.last_run_id else None,
+            created_at=s.created_at,
+        )
+        for s in schedules
+    ]
+
+    return ApiResponse(data=items)
+
+
+@router.delete("/schedules/{schedule_id}")
+async def delete_schedule(schedule_id: str) -> ApiResponse:
+    """Delete a workflow schedule."""
+    try:
+        schedule_uuid = uuid.UUID(schedule_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid schedule ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        schedule = await session.get(Schedule, schedule_uuid)
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Schedule '{schedule_id}' not found",
+                    )
+                ).model_dump(),
+            )
+        await session.delete(schedule)
+        await session.commit()
+
+    # Remove from APScheduler
+    remove_schedule(schedule_id)
+
+    return ApiResponse(data={"deleted": True, "id": schedule_id})
