@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     logger.info("Sandcastle starting up")
 
     # Start the cron scheduler
-    from sandcastle.queue.scheduler import start_scheduler, restore_schedules
+    from sandcastle.queue.scheduler import restore_schedules, start_scheduler
 
     await start_scheduler()
     await restore_schedules()
@@ -36,8 +36,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    from sandcastle.queue.scheduler import stop_scheduler
     from sandcastle.models.db import engine
+    from sandcastle.queue.scheduler import stop_scheduler
 
     await stop_scheduler()
     await engine.dispose()

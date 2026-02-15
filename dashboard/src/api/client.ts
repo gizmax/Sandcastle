@@ -67,21 +67,24 @@ class ApiClient {
         });
       }
       const res = await fetch(url.toString(), { headers: this.headers() });
-      if (!res.ok) {
-        // Return structured error for HTTP errors - do NOT fall back to mock
-        try {
-          return await res.json();
-        } catch {
-          return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
-        }
-      }
-      return res.json();
+      return this.handleResponse<T>(res);
     } catch {
       // Only fall back to mock on actual network errors (backend unreachable)
       console.info(`[Sandcastle] Backend unavailable, using demo data`);
       this.useMock = true;
       return this.mock<T>(path, params);
     }
+  }
+
+  private async handleResponse<T>(res: Response): Promise<ApiResponse<T>> {
+    if (!res.ok) {
+      try {
+        return await res.json();
+      } catch {
+        return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
+      }
+    }
+    return res.json();
   }
 
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
@@ -96,7 +99,7 @@ class ApiClient {
         headers: this.headers(),
         body: body ? JSON.stringify(body) : undefined,
       });
-      return res.json();
+      return this.handleResponse<T>(res);
     } catch {
       this.useMock = true;
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
@@ -115,7 +118,7 @@ class ApiClient {
         headers: this.headers(),
         body: JSON.stringify(body),
       });
-      return res.json();
+      return this.handleResponse<T>(res);
     } catch {
       this.useMock = true;
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
@@ -133,7 +136,7 @@ class ApiClient {
         method: "DELETE",
         headers: this.headers(),
       });
-      return res.json();
+      return this.handleResponse<T>(res);
     } catch {
       this.useMock = true;
       return { data: { message: "Demo mode - action simulated" } as T, error: null };

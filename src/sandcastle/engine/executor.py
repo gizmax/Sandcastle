@@ -13,7 +13,6 @@ from typing import Any
 
 from sandcastle.engine.dag import (
     ExecutionPlan,
-    FailureConfig,
     StepDefinition,
     WorkflowDefinition,
 )
@@ -206,13 +205,23 @@ async def _save_run_step(
                 step_id=step_id,
                 parallel_index=parallel_index,
                 status=status_map.get(status, StepStatus.PENDING),
-                output_data=output if isinstance(output, dict) else {"result": output} if output else None,
+                output_data=(
+                    output if isinstance(output, dict)
+                    else {"result": output} if output else None
+                ),
                 cost_usd=cost_usd,
                 duration_seconds=duration_seconds,
                 attempt=attempt,
                 error=error,
-                started_at=datetime.now(timezone.utc) if status == "running" else None,
-                completed_at=datetime.now(timezone.utc) if status in ("completed", "failed", "skipped") else None,
+                started_at=(
+                    datetime.now(timezone.utc) if status == "running"
+                    else None
+                ),
+                completed_at=(
+                    datetime.now(timezone.utc)
+                    if status in ("completed", "failed", "skipped")
+                    else None
+                ),
             )
             session.add(step)
             await session.commit()
@@ -247,6 +256,7 @@ async def _check_cancel(run_id: str) -> bool:
     """Check if a run has been cancelled via Redis flag."""
     try:
         import redis.asyncio as aioredis
+
         from sandcastle.config import settings
 
         r = aioredis.from_url(settings.redis_url)
@@ -559,18 +569,26 @@ async def execute_workflow(
             # Check budget before each stage
             budget_status = _check_budget(context)
             if budget_status == "exceeded":
-                logger.warning(f"Run {run_id} budget exceeded (${context.total_cost:.4f} / ${context.max_cost_usd:.4f})")
+                cost = context.total_cost
+                limit = context.max_cost_usd
+                logger.warning(
+                    f"Run {run_id} budget exceeded "
+                    f"(${cost:.4f} / ${limit:.4f})"
+                )
                 return WorkflowResult(
                     run_id=run_id,
                     outputs=context.step_outputs,
-                    total_cost_usd=context.total_cost,
+                    total_cost_usd=cost,
                     status="budget_exceeded",
-                    error=f"Budget exceeded: ${context.total_cost:.4f} >= ${context.max_cost_usd:.4f}",
+                    error=f"Budget exceeded: ${cost:.4f} >= ${limit:.4f}",
                     started_at=started_at,
                     completed_at=datetime.now(timezone.utc),
                 )
             elif budget_status == "warning":
-                logger.warning(f"Run {run_id} at 80%+ budget (${context.total_cost:.4f} / ${context.max_cost_usd:.4f})")
+                logger.warning(
+                    f"Run {run_id} at 80%+ budget "
+                    f"(${cost:.4f} / ${limit:.4f})"
+                )
 
             # Collect all tasks for this stage (parallel execution)
             tasks: list[asyncio.Task] = []
@@ -696,30 +714,38 @@ async def execute_workflow(
             last_step_in_stage = stage[-1] if stage else "unknown"
             await _save_checkpoint(run_id, last_step_in_stage, stage_idx, context)
 
-        # Post-loop checks: cancel and budget after final stage
-        if await _check_cancel(run_id):
-            logger.info(f"Run {run_id} cancelled after final stage")
-            return WorkflowResult(
-                run_id=run_id,
-                outputs=context.step_outputs,
-                total_cost_usd=context.total_cost,
-                status="cancelled",
-                started_at=started_at,
-                completed_at=datetime.now(timezone.utc),
-            )
+            # Post-stage cancel check (catches cancel during execution)
+            if await _check_cancel(run_id):
+                logger.info(
+                    f"Run {run_id} cancelled after stage {stage_idx}"
+                )
+                return WorkflowResult(
+                    run_id=run_id,
+                    outputs=context.step_outputs,
+                    total_cost_usd=context.total_cost,
+                    status="cancelled",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                )
 
-        budget_status = _check_budget(context)
-        if budget_status == "exceeded":
-            logger.warning(f"Run {run_id} budget exceeded after final stage (${context.total_cost:.4f} / ${context.max_cost_usd:.4f})")
-            return WorkflowResult(
-                run_id=run_id,
-                outputs=context.step_outputs,
-                total_cost_usd=context.total_cost,
-                status="budget_exceeded",
-                error=f"Budget exceeded: ${context.total_cost:.4f} >= ${context.max_cost_usd:.4f}",
-                started_at=started_at,
-                completed_at=datetime.now(timezone.utc),
-            )
+            # Post-stage budget check (catches overrun immediately)
+            post_budget = _check_budget(context)
+            if post_budget == "exceeded":
+                cost = context.total_cost
+                limit = context.max_cost_usd
+                logger.warning(
+                    f"Run {run_id} budget exceeded after stage "
+                    f"{stage_idx} (${cost:.4f} / ${limit:.4f})"
+                )
+                return WorkflowResult(
+                    run_id=run_id,
+                    outputs=context.step_outputs,
+                    total_cost_usd=cost,
+                    status="budget_exceeded",
+                    error=f"Budget exceeded: ${cost:.4f} >= ${limit:.4f}",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                )
 
         completed_at = datetime.now(timezone.utc)
 

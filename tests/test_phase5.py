@@ -350,24 +350,26 @@ class TestDbModels:
 
 
 class TestBudgetResolution:
-    def test_request_budget_takes_priority(self):
+    async def test_request_budget_takes_priority(self):
         from sandcastle.api.routes import _resolve_budget
 
-        result = _resolve_budget(5.0, "tenant1")
+        result = await _resolve_budget(5.0, "tenant1")
         assert result == 5.0
 
-    def test_no_budget_returns_none(self):
+    async def test_no_budget_returns_none(self):
         from sandcastle.api.routes import _resolve_budget
 
         with patch("sandcastle.api.routes.settings") as mock_settings:
             mock_settings.default_max_cost_usd = 0.0
-            result = _resolve_budget(None, "tenant1")
+            mock_settings.auth_required = False
+            result = await _resolve_budget(None, "tenant1")
         assert result is None
 
-    def test_env_budget_fallback(self):
+    async def test_env_budget_fallback(self):
         from sandcastle.api.routes import _resolve_budget
 
         with patch("sandcastle.api.routes.settings") as mock_settings:
             mock_settings.default_max_cost_usd = 10.0
-            result = _resolve_budget(None, "tenant1")
+            mock_settings.auth_required = False
+            result = await _resolve_budget(None, "tenant1")
         assert result == 10.0

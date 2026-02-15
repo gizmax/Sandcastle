@@ -73,7 +73,9 @@ async def auth_middleware(request: Request, call_next):
     key_hash = hash_key(api_key)
     try:
         async with async_session() as session:
-            stmt = select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True)
+            stmt = select(ApiKey).where(
+                ApiKey.key_hash == key_hash, ApiKey.is_active.is_(True)
+            )
             result = await session.execute(stmt)
             db_key = result.scalar_one_or_none()
     except Exception as e:

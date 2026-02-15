@@ -22,29 +22,36 @@ class LocalStorage:
     """Filesystem-based storage backend for local development."""
 
     def __init__(self, base_dir: str = "./data/storage") -> None:
-        self.base_dir = Path(base_dir)
+        self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _safe_path(self, path: str) -> Path:
+        """Resolve path and ensure it stays within base_dir."""
+        resolved = (self.base_dir / path).resolve()
+        if not str(resolved).startswith(str(self.base_dir)):
+            raise ValueError(f"Path traversal denied: {path}")
+        return resolved
 
     async def read(self, path: str) -> str | None:
         """Read content from a file."""
-        file_path = self.base_dir / path
+        file_path = self._safe_path(path)
         if not file_path.exists():
             return None
         return file_path.read_text(encoding="utf-8")
 
     async def write(self, path: str, content: str) -> None:
         """Write content to a file."""
-        file_path = self.base_dir / path
+        file_path = self._safe_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
 
     async def list(self, prefix: str) -> list[str]:
         """List files matching a prefix."""
-        prefix_path = self.base_dir / prefix
-        if not prefix_path.parent.exists():
+        safe_base = self._safe_path(prefix)
+        search_dir = safe_base.parent if not safe_base.is_dir() else safe_base
+        if not search_dir.exists():
             return []
         results: list[str] = []
-        search_dir = prefix_path.parent if not prefix_path.is_dir() else prefix_path
         for p in search_dir.rglob("*"):
             if p.is_file():
                 rel = str(p.relative_to(self.base_dir))
@@ -54,7 +61,7 @@ class LocalStorage:
 
     async def delete(self, path: str) -> None:
         """Delete a file."""
-        file_path = self.base_dir / path
+        file_path = self._safe_path(path)
         if file_path.exists():
             file_path.unlink()
 

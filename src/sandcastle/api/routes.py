@@ -6,19 +6,18 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from sandcastle.api.auth import get_tenant_id
+from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key
 from sandcastle.api.schemas import (
-    ApiKeyCreateRequest,
     ApiKeyCreatedResponse,
+    ApiKeyCreateRequest,
     ApiKeyResponse,
     ApiResponse,
     DeadLetterItemResponse,
@@ -50,11 +49,9 @@ from sandcastle.models.db import (
     Run,
     RunCheckpoint,
     RunStatus,
-    RunStep,
     Schedule,
     async_session,
 )
-from sandcastle.api.auth import generate_api_key, hash_key
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
 from sandcastle.queue.worker import enqueue_workflow
 
@@ -98,34 +95,32 @@ def _apply_tenant_filter(stmt, tenant_id: str | None, column):
     return stmt
 
 
-def _resolve_budget(request_budget: float | None, tenant_id: str | None) -> float | None:
-    """Resolve max_cost_usd: request > tenant api_key > env default.
+async def _resolve_budget(
+    request_budget: float | None, tenant_id: str | None
+) -> float | None:
+    """Resolve max_cost_usd with precedence: request > tenant > env.
 
     Returns None if no budget is set (unlimited).
     """
-    # Request-level budget takes priority
+    # 1. Request-level budget takes priority
     if request_budget is not None and request_budget > 0:
         return request_budget
-    # Env-level default
+    # 2. Tenant API key budget
+    if tenant_id and settings.auth_required:
+        try:
+            async with async_session() as session:
+                stmt = select(ApiKey.max_cost_per_run_usd).where(
+                    ApiKey.tenant_id == tenant_id,
+                    ApiKey.is_active.is_(True),
+                ).limit(1)
+                result = await session.scalar(stmt)
+                if result and result > 0:
+                    return result
+        except Exception:
+            pass
+    # 3. Env-level default
     if settings.default_max_cost_usd > 0:
         return settings.default_max_cost_usd
-    return None
-
-
-async def _resolve_tenant_budget(tenant_id: str | None) -> float | None:
-    """Look up the tenant's API key budget limit."""
-    if not tenant_id or not settings.auth_required:
-        return None
-    try:
-        async with async_session() as session:
-            stmt = select(ApiKey.max_cost_per_run_usd).where(
-                ApiKey.tenant_id == tenant_id, ApiKey.is_active == True
-            ).limit(1)
-            result = await session.scalar(stmt)
-            if result and result > 0:
-                return result
-    except Exception:
-        pass
     return None
 
 
@@ -398,11 +393,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         )
 
     # Resolve budget
-    budget = _resolve_budget(request.max_cost_usd, tenant_id)
-    if budget is None:
-        tenant_budget = await _resolve_tenant_budget(tenant_id)
-        if tenant_budget:
-            budget = tenant_budget
+    budget = await _resolve_budget(request.max_cost_usd, tenant_id)
 
     # Idempotency check (scoped to tenant)
     run_id = str(uuid.uuid4())
@@ -519,11 +510,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
         )
 
     # Resolve budget
-    budget = _resolve_budget(request.max_cost_usd, tenant_id)
-    if budget is None:
-        tenant_budget = await _resolve_tenant_budget(tenant_id)
-        if tenant_budget:
-            budget = tenant_budget
+    budget = await _resolve_budget(request.max_cost_usd, tenant_id)
 
     # Idempotency check (scoped to tenant)
     if request.idempotency_key:
@@ -932,7 +919,8 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_STEP",
-                    message=f"Step '{request.from_step}' not found in workflow '{original_run.workflow_name}'",
+                    message=f"Step '{request.from_step}' not found in workflow "
+                    f"'{original_run.workflow_name}'",
                 )
             ).model_dump(),
         )
@@ -1070,7 +1058,8 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_STEP",
-                    message=f"Step '{request.from_step}' not found in workflow '{original_run.workflow_name}'",
+                    message=f"Step '{request.from_step}' not found in workflow "
+                    f"'{original_run.workflow_name}'",
                 )
             ).model_dump(),
         )
@@ -1177,6 +1166,21 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
+    # Validate cron expression before saving
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        CronTrigger.from_crontab(request.cron_expression)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_CRON",
+                    message=f"Invalid cron expression: {e}",
+                )
+            ).model_dump(),
+        )
+
     schedule_id = str(uuid.uuid4())
 
     try:
@@ -1196,21 +1200,21 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="DB_ERROR", message=f"Could not create schedule: {e}")
+                error=ErrorResponse(
+                    code="DB_ERROR",
+                    message=f"Could not create schedule: {e}",
+                )
             ).model_dump(),
         )
 
     # Register with APScheduler if enabled
     if request.enabled:
-        try:
-            add_schedule(
-                schedule_id=schedule_id,
-                cron_expression=request.cron_expression,
-                workflow_name=request.workflow_name,
-                input_data=request.input_data,
-            )
-        except Exception as e:
-            logger.warning(f"Could not register schedule with APScheduler: {e}")
+        add_schedule(
+            schedule_id=schedule_id,
+            cron_expression=request.cron_expression,
+            workflow_name=request.workflow_name,
+            input_data=request.input_data,
+        )
 
     return ApiResponse(
         data=ScheduleResponse(
@@ -1262,7 +1266,9 @@ async def list_schedules(
 
 
 @router.patch("/schedules/{schedule_id}")
-async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest, req: Request) -> ApiResponse:
+async def update_schedule(
+    schedule_id: str, request: ScheduleUpdateRequest, req: Request,
+) -> ApiResponse:
     """Enable or disable a schedule."""
     tenant_id = get_tenant_id(req)
 
@@ -1296,15 +1302,12 @@ async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest, req:
 
     # Update APScheduler
     if request.enabled:
-        try:
-            add_schedule(
-                schedule_id=schedule_id,
-                cron_expression=schedule.cron_expression,
-                workflow_name=schedule.workflow_name,
-                input_data=schedule.input_data,
-            )
-        except Exception as e:
-            logger.warning(f"Could not register schedule with APScheduler: {e}")
+        add_schedule(
+            schedule_id=schedule_id,
+            cron_expression=schedule.cron_expression,
+            workflow_name=schedule.workflow_name,
+            input_data=schedule.input_data,
+        )
     else:
         remove_schedule(schedule_id)
 
@@ -1378,8 +1381,13 @@ async def list_dead_letter(
 
         # Tenant isolation via join on parent Run
         if settings.auth_required and tenant_id is not None:
-            base = base.join(Run, DeadLetterItem.run_id == Run.id).where(Run.tenant_id == tenant_id)
-            count_base = count_base.join(Run, DeadLetterItem.run_id == Run.id).where(Run.tenant_id == tenant_id)
+            join_cond = DeadLetterItem.run_id == Run.id
+            base = base.join(Run, join_cond).where(
+                Run.tenant_id == tenant_id
+            )
+            count_base = count_base.join(Run, join_cond).where(
+                Run.tenant_id == tenant_id
+            )
 
         if not resolved:
             base = base.where(DeadLetterItem.resolved_at.is_(None))
@@ -1510,7 +1518,10 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
 
 
 @router.post("/dead-letter/{item_id}/resolve")
-async def resolve_dead_letter(item_id: str, req: Request, request: DeadLetterResolveRequest | None = None) -> ApiResponse:
+async def resolve_dead_letter(
+    item_id: str, req: Request,
+    request: DeadLetterResolveRequest | None = None,
+) -> ApiResponse:
     """Manually resolve a dead letter queue item."""
     tenant_id = get_tenant_id(req)
 
@@ -1579,7 +1590,10 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
         raise HTTPException(
             status_code=403,
             detail=ApiResponse(
-                error=ErrorResponse(code="FORBIDDEN", message="Cannot create API keys for a different tenant")
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message="Cannot create API keys for a different tenant",
+                )
             ).model_dump(),
         )
 
@@ -1628,8 +1642,8 @@ async def list_api_keys(
     tenant_id = get_tenant_id(request)
 
     async with async_session() as session:
-        base = select(ApiKey).where(ApiKey.is_active == True)
-        count_base = select(func.count(ApiKey.id)).where(ApiKey.is_active == True)
+        base = select(ApiKey).where(ApiKey.is_active.is_(True))
+        count_base = select(func.count(ApiKey.id)).where(ApiKey.is_active.is_(True))
 
         # Tenant isolation - only see own keys
         base = _apply_tenant_filter(base, tenant_id, ApiKey.tenant_id)
