@@ -1,4 +1,4 @@
-"""Sandstorm HTTP client — calls the /query endpoint via SSE."""
+"""Sandstorm HTTP client - calls the /query endpoint via SSE."""
 
 from __future__ import annotations
 

@@ -136,6 +136,6 @@ async def init_db() -> None:
 
 
 async def get_session():
-    """Dependency for FastAPI — yields an async session."""
+    """Dependency for FastAPI - yields an async session."""
     async with async_session() as session:
         yield session

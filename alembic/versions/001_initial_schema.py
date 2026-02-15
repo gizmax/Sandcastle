@@ -1,4 +1,4 @@
-"""Initial schema — runs, run_steps, schedules.
+"""Initial schema - runs, run_steps, schedules.
 
 Revision ID: 001
 Revises: None

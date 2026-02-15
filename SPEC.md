@@ -1,10 +1,10 @@
-# Sandcastle — Technical Specification v1.0
+# Sandcastle -Technical Specification v1.0
 # Workflow Orchestrator Built on Sandstorm
 
 ## OVERVIEW
 
 Sandcastle is a workflow orchestrator for AI agents. It uses Sandstorm
-(https://github.com/tomascupr/sandstorm) as the execution engine — every
+(https://github.com/tomascupr/sandstorm) as the execution engine -every
 agent step is a Sandstorm API call. Sandcastle adds: DAG-based workflow
 orchestration, persistent storage between runs, webhook callbacks,
 scheduled runs, retry logic, and cost tracking.
@@ -64,7 +64,7 @@ sandcastle/
 
 ---
 
-## CORE COMPONENTS — DETAILED SPECS
+## CORE COMPONENTS -DETAILED SPECS
 
 ### 1. WORKFLOW DEFINITION FORMAT (sandcastle.yaml)
 
@@ -230,7 +230,7 @@ class WorkflowDefinition:
 
 @dataclass
 class ExecutionPlan:
-    '''Result of topological sort — groups of steps that can run in parallel'''
+    '''Result of topological sort -groups of steps that can run in parallel'''
     stages: list[list[str]]   # e.g. [["scrape"], ["enrich"], ["score"]]
 
 Key methods:
@@ -433,8 +433,8 @@ class StorageBackend(Protocol):
         '''Delete a file'''
 
 Implementations:
-- S3Storage — uses boto3/aioboto3, works with AWS S3, R2, MinIO
-- LocalStorage — filesystem, for development
+- S3Storage -uses boto3/aioboto3, works with AWS S3, R2, MinIO
+- LocalStorage -filesystem, for development
 
 Config:
     STORAGE_BACKEND=s3           # s3 | local
@@ -581,7 +581,7 @@ GET /runs
     → Pagination support
 
 POST /workflows/run/sync
-    → Synchronous execution — blocks until complete, returns full result
+    → Synchronous execution -blocks until complete, returns full result
     → For simple use cases where caller wants to wait
 
 POST /schedules
@@ -741,21 +741,21 @@ dev = [
 Build in this sequence so you have something runnable at each step:
 
 ### Phase 1: Core (get a single workflow running end-to-end)
-1. config.py — load .env settings
-2. engine/sandbox.py — Sandstorm client
-3. engine/dag.py — YAML parser + topological sort
-4. engine/executor.py — basic sequential execution (no parallelism yet)
-5. api/routes.py — POST /workflows/run/sync (synchronous, blocking)
-6. main.py — wire it all up
+1. config.py -load .env settings
+2. engine/sandbox.py -Sandstorm client
+3. engine/dag.py -YAML parser + topological sort
+4. engine/executor.py -basic sequential execution (no parallelism yet)
+5. api/routes.py -POST /workflows/run/sync (synchronous, blocking)
+6. main.py -wire it all up
 
 TEST: curl with a simple 2-step workflow → get result back.
 
 ### Phase 2: Async + Persistence
-7. models/db.py — SQLAlchemy models
+7. models/db.py -SQLAlchemy models
 8. Alembic migrations
-9. queue/worker.py — arq worker
-10. api/routes.py — add POST /workflows/run (async) + GET /runs/{id}
-11. engine/storage.py — S3 storage backend
+9. queue/worker.py -arq worker
+10. api/routes.py -add POST /workflows/run (async) + GET /runs/{id}
+11. engine/storage.py -S3 storage backend
 12. docker-compose.yaml
 
 TEST: Submit workflow, poll /runs/{id}, see status progress.
@@ -765,14 +765,14 @@ TEST: Submit workflow, poll /runs/{id}, see status progress.
 14. parallel_over fan-out logic
 15. Retry logic with backoff
 16. webhooks/dispatcher.py
-17. queue/scheduler.py — cron scheduling
+17. queue/scheduler.py -cron scheduling
 18. Cost tracking in DB
 
 TEST: Run the lead enrichment workflow end-to-end with 5 companies.
 
 ### Phase 4: Polish
 19. GET /runs with filters + pagination
-20. GET /runs/{id}/stream — SSE progress proxy
+20. GET /runs/{id}/stream -SSE progress proxy
 21. Error handling edge cases
 22. Tests
 23. README + docs
@@ -781,24 +781,24 @@ TEST: Run the lead enrichment workflow end-to-end with 5 companies.
 
 ## KEY DESIGN DECISIONS
 
-1. **YAML over JSON for workflow definitions** — more readable for prompts
+1. **YAML over JSON for workflow definitions** -more readable for prompts
    which are multi-line strings. JSON schema for output_schema stays as-is.
 
-2. **arq over Celery** — async-native, simpler, no kombu/amqp complexity.
+2. **arq over Celery** -async-native, simpler, no kombu/amqp complexity.
    Perfect for our use case.
 
-3. **Sandstorm as external service, not embedded** — Sandcastle calls
+3. **Sandstorm as external service, not embedded** -Sandcastle calls
    Sandstorm over HTTP. This means you can run Sandstorm anywhere
    (Vercel, Docker, separate server) and Sandcastle orchestrates it.
    Clean separation of concerns.
 
-4. **Fan-out via parallel_over** — instead of requiring users to write
+4. **Fan-out via parallel_over** -instead of requiring users to write
    loops, they declare which input list to iterate over. The executor
    handles creating N parallel Sandstorm calls. This is the killer
    feature for batch processing (enriching 500 companies = 500
    parallel agents).
 
-5. **Template variables use {curly braces}** — simple string interpolation,
+5. **Template variables use {curly braces}** -simple string interpolation,
    not Jinja2. Keep it dead simple. If we need conditionals later,
    we can upgrade.
 """

@@ -23,8 +23,8 @@ def main() -> None:
     else:
         print(f"Unknown command: {' '.join(args)}")
         print("Usage:")
-        print("  python -m sandcastle serve      — Start the API server")
-        print("  python -m sandcastle db migrate  — Run database migrations")
+        print("  python -m sandcastle serve      - Start the API server")
+        print("  python -m sandcastle db migrate  - Run database migrations")
         sys.exit(1)
 
 

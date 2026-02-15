@@ -10,11 +10,11 @@
 
 ## Why Sandcastle?
 
-[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering — one API call, a full Claude agent, completely sandboxed. It nails the core problem: giving AI agents full system access without worrying about what they do with it. We love it. We use it. You should too.
+[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full AI agent, completely sandboxed. It nails the core problem: giving AI agents full system access without worrying about what they do with it. We love it. We use it. You should too.
 
 But sometimes you need to **build something lasting from the storm.**
 
-Sandstorm gives you isolated, one-shot agent runs — fire a prompt, get a result, sandbox destroyed. That's perfect for a lot of things. But when we started building real products on top of it, we kept hitting the same walls:
+Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result, sandbox destroyed. That's perfect for a lot of things. But when we started building real products on top of it, we kept hitting the same walls:
 
 - **"I need this agent to remember what it found yesterday."** → No persistence between runs.
 - **"Agent A should feed its results into Agent B."** → No workflow orchestration.
@@ -38,14 +38,14 @@ Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everythin
 | Subagents | ✅ | ✅ |
 | MCP servers | ✅ | ✅ |
 | File uploads | ✅ | ✅ |
-| **DAG workflow orchestration** | — | ✅ |
-| **Persistent storage between runs** | — | ✅ |
-| **Webhook callbacks** | — | ✅ |
-| **Scheduled / cron agents** | — | ✅ |
-| **Retry logic & dead letter queue** | — | ✅ |
-| **Per-run cost tracking** | — | ✅ |
-| **Multi-tenant API keys & billing** | — | ✅ |
-| **Dashboard & run history** | — | ✅ |
+| **DAG workflow orchestration** | - | ✅ |
+| **Persistent storage between runs** | - | ✅ |
+| **Webhook callbacks** | - | ✅ |
+| **Scheduled / cron agents** | - | ✅ |
+| **Retry logic & dead letter queue** | - | ✅ |
+| **Per-run cost tracking** | - | ✅ |
+| **Multi-tenant API keys & billing** | - | ✅ |
+| **Dashboard & run history** | - | ✅ |
 
 ---
 
@@ -318,7 +318,9 @@ Your App ──POST /workflows/run──▶ Sandcastle API
 
 ## Acknowledgements
 
-Sandcastle would not exist without [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr). Sandstorm is the core engine that powers every agent run in Sandcastle — we didn't reinvent it, we built on it. If you haven't already, go star the repo. It's one of the cleanest abstractions for sandboxed AI agent execution out there.
+Sandcastle would not exist without [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr). Sandstorm is the core engine that powers every agent run in Sandcastle - we didn't reinvent it, we built on it. If you haven't already, go star the repo. It's one of the cleanest abstractions for sandboxed AI agent execution out there.
+
+Created by [**Tomas Pflanzer**](https://github.com/gizmax) ([@gizmax](https://github.com/gizmax)).
 
 Sandcastle uses Sandstorm as a dependency and extends it with orchestration, persistence, and production infrastructure. All original Sandstorm code remains under its [MIT license](https://github.com/tomascupr/sandstorm/blob/main/LICENSE).
 

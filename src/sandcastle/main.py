@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifecycle — startup and shutdown hooks."""
+    """Application lifecycle - startup and shutdown hooks."""
     logger.info("Sandcastle starting up")
     # DB engine is created on import; nothing else needed for startup
     yield

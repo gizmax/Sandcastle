@@ -1,4 +1,4 @@
-"""Workflow executor — parallel execution with retries and cost tracking."""
+"""Workflow executor - parallel execution with retries and cost tracking."""
 
 from __future__ import annotations
 
@@ -175,7 +175,7 @@ async def execute_step_with_retry(
         if result.status == "completed":
             return result
 
-        # Last attempt — no more retries
+        # Last attempt - no more retries
         if attempt >= max_attempts:
             logger.warning(
                 f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}"

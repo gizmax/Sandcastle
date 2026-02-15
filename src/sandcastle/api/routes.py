@@ -340,7 +340,7 @@ async def stream_run(run_id: str) -> StreamingResponse:
                     })
                 last_step_count = len(run.steps)
 
-            # Terminal states — emit final result and stop
+            # Terminal states - emit final result and stop
             if current_status in ("completed", "failed", "partial"):
                 yield _sse_event("result", {
                     "run_id": str(run.id),
