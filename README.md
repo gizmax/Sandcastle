@@ -235,9 +235,9 @@ Failed steps that exhausted all retries land here. Retry triggers a full re-run.
   <img src="docs/screenshots/dead-letter.png" alt="Dead Letter Queue" width="720" />
 </p>
 
-### Approval Gates
+### Approval Gates (v0.2.0)
 
-Workflow steps paused for human review. Pending approvals show action buttons (Approve, Reject, Skip). Expand any item to see the full request data. Sidebar badge shows pending count.
+**New in v0.2.0.** Any workflow step can pause execution and wait for human review before continuing. The approvals page shows all pending, approved, rejected, and skipped gates with filterable tabs. Each pending approval has Approve, Reject, and Skip buttons. Configurable timeouts auto-resolve approvals if nobody responds. Webhook notifications fire when approval is needed.
 
 <p align="center">
   <img src="docs/screenshots/approvals.png" alt="Approval Gates" width="720" />
@@ -245,14 +245,17 @@ Workflow steps paused for human review. Pending approvals show action buttons (A
 
 <details>
 <summary>Expanded with request data</summary>
+
+Click any approval to expand it and see the full request data the agent produced. If `allow_edit` is enabled, reviewers can modify the data before approving - giving humans final control over what the next step receives.
+
 <p align="center">
   <img src="docs/screenshots/approvals-detail.png" alt="Approval Gate Detail" width="720" />
 </p>
 </details>
 
-### AutoPilot
+### AutoPilot - Self-Optimizing Workflows (v0.2.0)
 
-Self-optimizing experiments across your workflows. Stats cards show active experiments, total samples, quality improvement, and cost savings. Expand an experiment to compare variants side-by-side with quality scores, costs, and duration.
+**New in v0.2.0.** A/B test different models, prompts, and configurations on any workflow step. Sandcastle automatically runs variants, evaluates quality (LLM judge or schema completeness), and tracks cost vs latency vs quality. Stats cards show active experiments, total samples collected, average quality improvement, and total cost savings. Once enough samples are collected, the best-performing variant is auto-deployed.
 
 <p align="center">
   <img src="docs/screenshots/autopilot.png" alt="AutoPilot Experiments" width="720" />
@@ -260,6 +263,9 @@ Self-optimizing experiments across your workflows. Stats cards show active exper
 
 <details>
 <summary>Expanded with variant comparison</summary>
+
+Expand an experiment to see the variant comparison table. Each variant shows sample count, average quality score (color-coded), average cost, and average duration. The "BEST" badge highlights the current leader. Deploy any variant manually, or let AutoPilot pick the winner automatically based on your optimization target (quality, cost, latency, or pareto).
+
 <p align="center">
   <img src="docs/screenshots/autopilot-detail.png" alt="AutoPilot Variant Comparison" width="720" />
 </p>
