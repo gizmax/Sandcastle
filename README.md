@@ -5,11 +5,85 @@
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-77%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen?style=flat-square)]()
 
 <p align="center">
   <img src="docs/screenshots/overview-dark.png" alt="Sandcastle Dashboard" width="720" />
 </p>
+
+---
+
+## What's New in v0.2.0
+
+### Human Approval Gates
+Pause any workflow at a critical step and wait for human review before continuing. Define approval steps in YAML, set timeouts with auto-actions (skip or abort), and approve/reject/skip via API or dashboard. Reviewers can edit the request data before approving. Webhook notifications fire when approval is needed.
+
+```yaml
+steps:
+  - id: "generate-report"
+    prompt: "Generate quarterly report..."
+
+  - id: "review"
+    type: approval
+    depends_on: ["generate-report"]
+    approval_config:
+      message: "Review the generated report before sending to client"
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  - id: "send"
+    depends_on: ["review"]
+    prompt: "Send the approved report to {input.client_email}"
+```
+
+### Self-Optimizing Workflows (AutoPilot)
+A/B test different models, prompts, and configurations for any step. Sandcastle automatically runs variants, evaluates quality (via LLM judge or schema completeness), tracks cost and latency, and picks the best-performing variant. Supports quality, cost, latency, and pareto optimization targets.
+
+```yaml
+steps:
+  - id: "enrich"
+    prompt: "Enrich this lead: {input.company}"
+    autopilot:
+      enabled: true
+      optimize_for: quality
+      min_samples: 20
+      auto_deploy: true
+      variants:
+        - id: fast
+          model: haiku
+        - id: quality
+          model: opus
+          prompt: "Thoroughly research and enrich: {input.company}"
+      evaluation:
+        method: llm_judge
+        criteria: "Rate completeness, accuracy, and depth 1-10"
+```
+
+### Hierarchical Workflows (Workflow-as-Step)
+Call one workflow from another. Parent workflows can pass data to children via input mapping, collect results via output mapping, and fan out over lists with configurable concurrency. Depth limiting prevents runaway recursion.
+
+```yaml
+steps:
+  - id: "find-leads"
+    prompt: "Find 10 leads in {input.industry}"
+
+  - id: "enrich-each"
+    type: sub_workflow
+    depends_on: ["find-leads"]
+    sub_workflow:
+      workflow: lead-enrichment
+      input_mapping:
+        company: steps.find-leads.output.company
+      output_mapping:
+        result: enriched_data
+      max_concurrent: 5
+      timeout: 600
+
+  - id: "summarize"
+    depends_on: ["enrich-each"]
+    prompt: "Summarize enrichment results: {steps.enrich-each.output}"
+```
 
 ---
 
@@ -57,6 +131,9 @@ Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everythin
 | **Multi-tenant API keys** | - | Yes |
 | **Dashboard with real-time monitoring** | - | Yes |
 | **Visual workflow builder** | - | Yes |
+| **Human approval gates** | - | Yes |
+| **Self-optimizing workflows (AutoPilot)** | - | Yes |
+| **Hierarchical workflows (workflow-as-step)** | - | Yes |
 
 ---
 
@@ -374,6 +451,26 @@ steps:
 | `POST` | `/dead-letter/{id}/retry` | Retry failed step (full replay) |
 | `POST` | `/dead-letter/{id}/resolve` | Mark as resolved |
 
+### Approval Gates
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/approvals` | List pending approvals (filterable by status) |
+| `GET` | `/approvals/{id}` | Get approval detail with request data |
+| `POST` | `/approvals/{id}/approve` | Approve (optional edit + comment) |
+| `POST` | `/approvals/{id}/reject` | Reject and fail the run |
+| `POST` | `/approvals/{id}/skip` | Skip step and continue workflow |
+
+### AutoPilot
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/autopilot/experiments` | List experiments |
+| `GET` | `/autopilot/experiments/{id}` | Experiment detail with samples + stats |
+| `POST` | `/autopilot/experiments/{id}/deploy` | Manually deploy a winning variant |
+| `POST` | `/autopilot/experiments/{id}/reset` | Reset experiment |
+| `GET` | `/autopilot/stats` | Savings and quality overview |
+
 ### API Keys
 
 | Method | Endpoint | Description |
@@ -439,28 +536,43 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
                                |  (DAG executor) |
                                +-------+--------+
                                        |
-                     +---------+-------+-------+----------+
-                     v         v               v          v
-                Sandstorm  Sandstorm      Sandstorm   Sandstorm
-                Agent A    Agent B        Agent C     Agent D
-                (scrape)   (scrape)       (enrich)    (report)
-                     |         |               |          |
-                     v         v               v          v
-                  E2B VM    E2B VM          E2B VM     E2B VM
-                     |         |               |          |
-                     +---------+-------+-------+----------+
-                                       |
-                     +-----------------+-----------------+
-                     v                 v                  v
-                PostgreSQL          Redis             S3 / MinIO
-              (runs, keys,       (job queue,       (persistent
-               dead letter,      cancel flags,      storage)
-               checkpoints)      scheduling)
-                                       |
-                               +-------+--------+
-                               |  Webhook POST   |--> Your App
-                               |  SSE Stream     |--> Dashboard
-                               +----------------+
+                            +----------+-----------+
+                            |                      |
+                     Standard Steps          Sub-Workflow Steps
+                            |              (recursive execution)
+                     +------+------+               |
+                     v      v      v        +------+------+
+                 Sandstorm (parallel)       | Child Engine |
+                  Agent A  Agent B  ...     +------+------+
+                     |      |                      |
+                     v      v               Sandstorm (child)
+                  E2B VMs                       |
+                     |                       E2B VMs
+                     |                          |
+          +----[Approval Gate?]----+            |
+          |                        |            |
+        Pause               Continue            |
+     (wait for              (auto)              |
+      human)                   |                |
+          |          [AutoPilot?]               |
+          v          Pick variant               |
+     Approve/          |                        |
+     Reject/     Evaluate quality               |
+     Skip              |                        |
+                       +-----------+------------+
+                                   |
+                  +----------------+-----------------+
+                  v                v                  v
+             PostgreSQL          Redis            S3 / MinIO
+           (runs, keys,       (job queue,       (persistent
+            approvals,        cancel flags,      storage)
+            experiments,      scheduling)
+            checkpoints)
+                                   |
+                           +-------+--------+
+                           |  Webhook POST   |--> Your App
+                           |  SSE Stream     |--> Dashboard
+                           +----------------+
 ```
 
 ### Tech Stack
@@ -506,6 +618,7 @@ AWS_SECRET_ACCESS_KEY=minioadmin
 WEBHOOK_SECRET=your-webhook-signing-secret
 AUTH_REQUIRED=false
 DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
+MAX_WORKFLOW_DEPTH=5      # max recursion depth for hierarchical workflows
 
 # Dashboard
 DASHBOARD_ORIGIN=http://localhost:5173
@@ -518,7 +631,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (77 passing)
+# Run tests (120 passing)
 uv run pytest
 
 # Type check backend
