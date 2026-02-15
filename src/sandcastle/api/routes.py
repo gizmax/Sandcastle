@@ -20,6 +20,8 @@ from sandcastle.api.schemas import (
     ApiKeyCreateRequest,
     ApiKeyResponse,
     ApiResponse,
+    ApprovalRespondRequest,
+    ApprovalResponse,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
     ErrorResponse,
@@ -45,6 +47,8 @@ from sandcastle.engine.sandbox import SandstormClient
 from sandcastle.engine.storage import LocalStorage
 from sandcastle.models.db import (
     ApiKey,
+    ApprovalRequest,
+    ApprovalStatus,
     DeadLetterItem,
     Run,
     RunCheckpoint,
@@ -443,6 +447,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         "failed": RunStatus.FAILED,
         "cancelled": RunStatus.CANCELLED,
         "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
+        "awaiting_approval": RunStatus.AWAITING_APPROVAL,
     }
 
     # Update DB record
@@ -453,7 +458,8 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 db_run.status = status_map.get(result.status, RunStatus.FAILED)
                 db_run.output_data = result.outputs
                 db_run.total_cost_usd = result.total_cost_usd
-                db_run.completed_at = result.completed_at
+                if result.status != "awaiting_approval":
+                    db_run.completed_at = result.completed_at
                 db_run.error = result.error
                 await session.commit()
     except Exception:
@@ -703,7 +709,10 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 last_step_count = len(run.steps)
 
             # Terminal states - emit final result and stop
-            if current_status in ("completed", "failed", "partial", "cancelled", "budget_exceeded"):
+            if current_status in (
+                "completed", "failed", "partial", "cancelled",
+                "budget_exceeded", "awaiting_approval",
+            ):
                 yield _sse_event("result", {
                     "run_id": str(run.id),
                     "status": current_status,
@@ -1575,6 +1584,339 @@ async def resolve_dead_letter(
             resolved_by=item.resolved_by,
         )
     )
+
+
+# --- Approval Gates ---
+
+
+@router.get("/approvals")
+async def list_approvals(
+    request: Request,
+    status: str | None = Query(None, description="Filter by status (pending, approved, etc.)"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List approval requests, scoped to tenant."""
+    tenant_id = get_tenant_id(request)
+
+    async with async_session() as session:
+        base = select(ApprovalRequest)
+        count_base = select(func.count(ApprovalRequest.id))
+
+        # Tenant isolation via join on parent Run
+        if settings.auth_required and tenant_id is not None:
+            join_cond = ApprovalRequest.run_id == Run.id
+            base = base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
+            count_base = count_base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
+
+        if status:
+            base = base.where(ApprovalRequest.status == status)
+            count_base = count_base.where(ApprovalRequest.status == status)
+
+        total = await session.scalar(count_base)
+
+        stmt = base.order_by(ApprovalRequest.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+    data = [
+        ApprovalResponse(
+            id=str(a.id),
+            run_id=str(a.run_id),
+            step_id=a.step_id,
+            status=a.status.value if hasattr(a.status, "value") else a.status,
+            request_data=a.request_data,
+            response_data=a.response_data,
+            message=a.message,
+            reviewer_id=a.reviewer_id,
+            reviewer_comment=a.reviewer_comment,
+            timeout_at=a.timeout_at,
+            on_timeout=a.on_timeout,
+            allow_edit=a.allow_edit,
+            created_at=a.created_at,
+            resolved_at=a.resolved_at,
+        )
+        for a in items
+    ]
+
+    return ApiResponse(
+        data=data,
+        meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+@router.get("/approvals/{approval_id}")
+async def get_approval(approval_id: str, request: Request) -> ApiResponse:
+    """Get details of a specific approval request."""
+    tenant_id = get_tenant_id(request)
+
+    try:
+        approval_uuid = uuid.UUID(approval_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid approval ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.join(Run, ApprovalRequest.run_id == Run.id).where(
+                Run.tenant_id == tenant_id
+            )
+        result = await session.execute(stmt)
+        approval = result.scalar_one_or_none()
+
+    if not approval:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Approval request not found")
+            ).model_dump(),
+        )
+
+    return ApiResponse(
+        data=ApprovalResponse(
+            id=str(approval.id),
+            run_id=str(approval.run_id),
+            step_id=approval.step_id,
+            status=approval.status.value if hasattr(approval.status, "value") else approval.status,
+            request_data=approval.request_data,
+            response_data=approval.response_data,
+            message=approval.message,
+            reviewer_id=approval.reviewer_id,
+            reviewer_comment=approval.reviewer_comment,
+            timeout_at=approval.timeout_at,
+            on_timeout=approval.on_timeout,
+            allow_edit=approval.allow_edit,
+            created_at=approval.created_at,
+            resolved_at=approval.resolved_at,
+        )
+    )
+
+
+async def _resolve_approval(
+    approval_id: str,
+    tenant_id: str | None,
+    action: str,
+    request_body: ApprovalRespondRequest | None = None,
+) -> ApprovalRequest:
+    """Shared logic for approve/reject/skip actions."""
+    try:
+        approval_uuid = uuid.UUID(approval_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid approval ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.join(Run, ApprovalRequest.run_id == Run.id).where(
+                Run.tenant_id == tenant_id
+            )
+        result = await session.execute(stmt)
+        approval = result.scalar_one_or_none()
+
+    if not approval:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Approval request not found")
+            ).model_dump(),
+        )
+
+    ap_status = approval.status.value if hasattr(approval.status, "value") else approval.status
+    if ap_status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="ALREADY_RESOLVED",
+                    message=f"Approval already resolved with status '{ap_status}'",
+                )
+            ).model_dump(),
+        )
+
+    return approval
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approve_approval(
+    approval_id: str,
+    req: Request,
+    request: ApprovalRespondRequest | None = None,
+) -> ApiResponse:
+    """Approve an approval gate and resume the workflow."""
+    tenant_id = get_tenant_id(req)
+    approval = await _resolve_approval(approval_id, tenant_id, "approve", request)
+
+    now = datetime.now(timezone.utc)
+    response_data = approval.request_data  # Default: use original data
+
+    # Apply edited data if allowed and provided
+    if request and request.edited_data and approval.allow_edit:
+        response_data = request.edited_data
+
+    async with async_session() as session:
+        ap = await session.get(ApprovalRequest, approval.id)
+        if ap:
+            ap.status = ApprovalStatus.APPROVED
+            ap.resolved_at = now
+            ap.response_data = response_data
+            if request and request.comment:
+                ap.reviewer_comment = request.comment
+            await session.commit()
+
+    # Resume the workflow
+    await _resume_after_approval(
+        approval, output_data=response_data or {"approved": True}
+    )
+
+    return ApiResponse(
+        data={"approved": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
+    )
+
+
+@router.post("/approvals/{approval_id}/reject")
+async def reject_approval(
+    approval_id: str,
+    req: Request,
+    request: ApprovalRespondRequest | None = None,
+) -> ApiResponse:
+    """Reject an approval gate and fail the workflow."""
+    tenant_id = get_tenant_id(req)
+    approval = await _resolve_approval(approval_id, tenant_id, "reject", request)
+
+    now = datetime.now(timezone.utc)
+
+    async with async_session() as session:
+        ap = await session.get(ApprovalRequest, approval.id)
+        if ap:
+            ap.status = ApprovalStatus.REJECTED
+            ap.resolved_at = now
+            if request and request.comment:
+                ap.reviewer_comment = request.comment
+            await session.commit()
+
+        # Fail the run
+        run = await session.get(Run, approval.run_id)
+        if run:
+            run.status = RunStatus.FAILED
+            run.completed_at = now
+            run.error = f"Approval rejected at step '{approval.step_id}'"
+            await session.commit()
+
+    return ApiResponse(
+        data={"rejected": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
+    )
+
+
+@router.post("/approvals/{approval_id}/skip")
+async def skip_approval(
+    approval_id: str,
+    req: Request,
+    request: ApprovalRespondRequest | None = None,
+) -> ApiResponse:
+    """Skip an approval gate and continue the workflow."""
+    tenant_id = get_tenant_id(req)
+    approval = await _resolve_approval(approval_id, tenant_id, "skip", request)
+
+    now = datetime.now(timezone.utc)
+
+    async with async_session() as session:
+        ap = await session.get(ApprovalRequest, approval.id)
+        if ap:
+            ap.status = ApprovalStatus.SKIPPED
+            ap.resolved_at = now
+            if request and request.comment:
+                ap.reviewer_comment = request.comment
+            await session.commit()
+
+    # Resume with null output for skipped step
+    await _resume_after_approval(approval, output_data=None)
+
+    return ApiResponse(
+        data={"skipped": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
+    )
+
+
+async def _resume_after_approval(
+    approval: ApprovalRequest,
+    output_data: dict | None,
+) -> None:
+    """Resume a workflow after an approval gate is resolved.
+
+    Loads the checkpoint, sets the approval step output, and re-enqueues.
+    """
+    run_id = str(approval.run_id)
+    step_id = approval.step_id
+
+    # Load the run to get workflow info
+    async with async_session() as session:
+        run = await session.get(Run, approval.run_id)
+        if not run:
+            logger.error(f"Cannot resume: run {run_id} not found")
+            return
+
+        workflow_name = run.workflow_name
+        input_data = run.input_data or {}
+        max_cost_usd = run.max_cost_usd
+
+    # Load workflow YAML
+    try:
+        yaml_content = _load_workflow_yaml(workflow_name)
+    except FileNotFoundError:
+        logger.error(f"Cannot resume: workflow '{workflow_name}' not found")
+        return
+
+    # Find the checkpoint (saved before the approval step)
+    async with async_session() as session:
+        checkpoint_stmt = (
+            select(RunCheckpoint)
+            .where(RunCheckpoint.run_id == approval.run_id)
+            .order_by(RunCheckpoint.stage_index.desc())
+        )
+        result = await session.execute(checkpoint_stmt)
+        checkpoints = result.scalars().all()
+
+    # Use the latest checkpoint
+    initial_context = checkpoints[0].context_snapshot if checkpoints else None
+
+    # Set the approval step output in the context
+    if initial_context:
+        initial_context["step_outputs"][step_id] = output_data
+    else:
+        initial_context = {"step_outputs": {step_id: output_data}, "costs": []}
+
+    # Steps already completed (including the approval step now)
+    skip_steps = list(initial_context["step_outputs"].keys())
+
+    # Enqueue continuation
+    try:
+        await enqueue_workflow(
+            yaml_content,
+            input_data,
+            run_id,
+            max_cost_usd=max_cost_usd,
+            initial_context=initial_context,
+            skip_steps=skip_steps,
+        )
+        logger.info(f"Resumed workflow {run_id} after approval of step '{step_id}'")
+    except Exception as e:
+        logger.error(f"Failed to resume workflow {run_id}: {e}")
+        async with async_session() as session:
+            run = await session.get(Run, approval.run_id)
+            if run:
+                run.status = RunStatus.FAILED
+                run.error = f"Failed to resume after approval: {e}"
+                run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
 
 
 # --- API Keys ---

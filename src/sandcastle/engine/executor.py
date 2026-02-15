@@ -197,6 +197,7 @@ async def _save_run_step(
             "completed": StepStatus.COMPLETED,
             "failed": StepStatus.FAILED,
             "skipped": StepStatus.SKIPPED,
+            "awaiting_approval": StepStatus.AWAITING_APPROVAL,
         }
 
         async with async_session() as session:
@@ -505,6 +506,100 @@ async def _execute_step_once(
         )
 
 
+async def _execute_approval_step(
+    step: StepDefinition,
+    context: RunContext,
+    stage_index: int,
+) -> None:
+    """Create an approval request and pause the workflow.
+
+    Raises WorkflowPaused to halt execution until the approval is resolved.
+    """
+    from sandcastle.models.db import (
+        ApprovalRequest,
+        ApprovalStatus,
+        Run,
+        RunStatus,
+        async_session,
+    )
+
+    # Resolve show_data if configured
+    request_data = None
+    if step.approval_config and step.approval_config.show_data:
+        request_data_val = resolve_variable(step.approval_config.show_data, context)
+        if request_data_val is not None:
+            if isinstance(request_data_val, dict):
+                request_data = request_data_val
+            else:
+                request_data = {"value": request_data_val}
+
+    # Calculate timeout
+    timeout_at = None
+    if step.approval_config and step.approval_config.timeout_hours:
+        from datetime import timedelta
+        timeout_at = datetime.now(timezone.utc) + timedelta(
+            hours=step.approval_config.timeout_hours
+        )
+
+    on_timeout = step.approval_config.on_timeout if step.approval_config else "abort"
+    allow_edit = step.approval_config.allow_edit if step.approval_config else False
+    message = step.approval_config.message if step.approval_config else "Approval required"
+
+    # Save checkpoint before pausing
+    await _save_checkpoint(context.run_id, step.id, stage_index, context)
+
+    # Record step as awaiting approval
+    await _save_run_step(
+        run_id=context.run_id,
+        step_id=step.id,
+        status="awaiting_approval",
+    )
+
+    # Create approval request
+    async with async_session() as session:
+        approval = ApprovalRequest(
+            run_id=uuid.UUID(context.run_id),
+            step_id=step.id,
+            status=ApprovalStatus.PENDING,
+            request_data=request_data,
+            message=message,
+            timeout_at=timeout_at,
+            on_timeout=on_timeout,
+            allow_edit=allow_edit,
+        )
+        session.add(approval)
+
+        # Update run status to AWAITING_APPROVAL
+        run = await session.get(Run, uuid.UUID(context.run_id))
+        if run:
+            run.status = RunStatus.AWAITING_APPROVAL
+        await session.commit()
+        await session.refresh(approval)
+        approval_id = str(approval.id)
+
+    # Fire webhook
+    try:
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        run_obj = None
+        async with async_session() as session:
+            run_obj = await session.get(Run, uuid.UUID(context.run_id))
+
+        if run_obj and run_obj.callback_url:
+            await dispatch_webhook(
+                url=run_obj.callback_url,
+                event="approval.requested",
+                run_id=context.run_id,
+                workflow=run_obj.workflow_name or "",
+                status="awaiting_approval",
+                outputs={"approval_id": approval_id, "step_id": step.id, "message": message},
+            )
+    except Exception as e:
+        logger.warning(f"Could not dispatch approval webhook: {e}")
+
+    raise WorkflowPaused(approval_id=approval_id, run_id=context.run_id)
+
+
 async def execute_workflow(
     workflow: WorkflowDefinition,
     plan: ExecutionPlan,
@@ -602,6 +697,11 @@ async def execute_workflow(
 
                 step = workflow.get_step(step_id)
                 overrides = (step_overrides or {}).get(step_id)
+
+                # Handle approval gate steps
+                if step.type == "approval":
+                    await _execute_approval_step(step, context, stage_idx)
+                    continue  # Won't reach here - WorkflowPaused is raised
 
                 if step.parallel_over:
                     # Fan-out: one task per item
@@ -763,6 +863,17 @@ async def execute_workflow(
             completed_at=completed_at,
         )
 
+    except WorkflowPaused:
+        return WorkflowResult(
+            run_id=run_id,
+            outputs=context.step_outputs,
+            total_cost_usd=context.total_cost,
+            status="awaiting_approval",
+            error=None,
+            started_at=started_at,
+            completed_at=None,
+        )
+
     except StepExecutionError as e:
         completed_at = datetime.now(timezone.utc)
         return WorkflowResult(
@@ -822,3 +933,12 @@ async def _send_to_dead_letter(
 
 class StepExecutionError(Exception):
     """A step failed and the workflow should abort."""
+
+
+class WorkflowPaused(Exception):
+    """A workflow is paused waiting for human approval."""
+
+    def __init__(self, approval_id: str, run_id: str):
+        self.approval_id = approval_id
+        self.run_id = run_id
+        super().__init__(f"Workflow paused: approval {approval_id} for run {run_id}")

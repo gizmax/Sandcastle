@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from sandcastle.main import app
@@ -94,8 +93,9 @@ steps: []
         assert response.status_code == 400
 
     def test_successful_sync_run(self):
-        from sandcastle.engine.executor import WorkflowResult
         from datetime import datetime, timezone
+
+        from sandcastle.engine.executor import WorkflowResult
 
         mock_result = WorkflowResult(
             run_id="test-123",

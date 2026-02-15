@@ -44,6 +44,17 @@ class FailureConfig:
 
 
 @dataclass
+class ApprovalConfig:
+    """Configuration for an approval gate step."""
+
+    message: str = ""
+    show_data: str | None = None  # Variable path to resolve and show reviewer
+    timeout_hours: float | None = None
+    on_timeout: str = "abort"  # "abort" | "skip"
+    allow_edit: bool = False
+
+
+@dataclass
 class StepDefinition:
     """Definition of a single workflow step."""
 
@@ -57,6 +68,8 @@ class StepDefinition:
     output_schema: dict | None = None
     retry: RetryConfig | None = None
     fallback: FallbackConfig | None = None
+    type: str = "standard"  # "standard" | "approval"
+    approval_config: ApprovalConfig | None = None
 
 
 @dataclass
@@ -120,11 +133,31 @@ def _parse_fallback(data: dict | None) -> FallbackConfig | None:
     )
 
 
+def _parse_approval_config(data: dict | None) -> ApprovalConfig | None:
+    """Parse approval configuration from YAML data."""
+    if data is None:
+        return None
+    return ApprovalConfig(
+        message=data.get("message", ""),
+        show_data=data.get("show_data"),
+        timeout_hours=data.get("timeout_hours"),
+        on_timeout=data.get("on_timeout", "abort"),
+        allow_edit=data.get("allow_edit", False),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
+    step_type = data.get("type", "standard")
+    # Approval steps don't require a prompt - use message as fallback
+    prompt = data.get("prompt", "")
+    if step_type == "approval" and not prompt:
+        ac = data.get("approval_config", {})
+        prompt = ac.get("message", "Approval required")
+
     return StepDefinition(
         id=data["id"],
-        prompt=data["prompt"],
+        prompt=prompt,
         depends_on=data.get("depends_on", []),
         model=data.get("model", defaults.get("model", "sonnet")),
         max_turns=data.get("max_turns", defaults.get("max_turns", 10)),
@@ -133,6 +166,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         output_schema=data.get("output_schema"),
         retry=_parse_retry(data.get("retry")),
         fallback=_parse_fallback(data.get("fallback")),
+        type=step_type,
+        approval_config=_parse_approval_config(data.get("approval_config")),
     )
 
 
@@ -258,6 +293,14 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         for dep in step.depends_on:
             if dep not in step_ids:
                 errors.append(f"Step '{step.id}' depends on unknown step '{dep}'")
+
+    # Check approval steps have required config
+    for step in workflow.steps:
+        if step.type == "approval":
+            if not step.approval_config or not step.approval_config.message:
+                errors.append(
+                    f"Approval step '{step.id}' must have approval_config with a message"
+                )
 
     # Check for cycles
     cycle_errors = _detect_cycles(workflow.steps)

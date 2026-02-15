@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -26,10 +27,20 @@ def get_scheduler() -> AsyncIOScheduler:
 
 
 async def start_scheduler() -> None:
-    """Start the cron scheduler."""
+    """Start the cron scheduler and register periodic jobs."""
     scheduler = get_scheduler()
     if not scheduler.running:
         scheduler.start()
+        # Register approval timeout checker every 60 seconds
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        scheduler.add_job(
+            _check_approval_timeouts,
+            trigger=IntervalTrigger(seconds=60),
+            id="approval_timeout_checker",
+            replace_existing=True,
+            misfire_grace_time=30,
+        )
         logger.info("Scheduler started")
 
 
@@ -147,6 +158,71 @@ async def _run_scheduled_workflow(
         logger.error(
             f"Schedule '{schedule_id}' failed to create run: {e}"
         )
+
+
+async def _check_approval_timeouts() -> None:
+    """Check for timed-out approval requests and apply on_timeout action."""
+    from datetime import timezone
+
+    from sqlalchemy import select
+
+    from sandcastle.models.db import (
+        ApprovalRequest,
+        ApprovalStatus,
+        Run,
+        RunStatus,
+        async_session,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        async with async_session() as session:
+            stmt = select(ApprovalRequest).where(
+                ApprovalRequest.status == ApprovalStatus.PENDING,
+                ApprovalRequest.timeout_at.isnot(None),
+                ApprovalRequest.timeout_at <= now,
+            )
+            result = await session.execute(stmt)
+            timed_out = result.scalars().all()
+
+        for approval in timed_out:
+            logger.info(
+                f"Approval {approval.id} for step '{approval.step_id}' timed out "
+                f"(on_timeout={approval.on_timeout})"
+            )
+
+            async with async_session() as session:
+                ap = await session.get(ApprovalRequest, approval.id)
+                if not ap or ap.status != ApprovalStatus.PENDING:
+                    continue
+
+                ap.status = ApprovalStatus.TIMED_OUT
+                ap.resolved_at = now
+
+                if approval.on_timeout == "skip":
+                    # Skip the step and continue
+                    await session.commit()
+                    try:
+                        from sandcastle.api.routes import _resume_after_approval
+
+                        await _resume_after_approval(approval, output_data=None)
+                    except Exception as e:
+                        logger.error(f"Failed to resume after timeout skip: {e}")
+                else:
+                    # Abort - fail the run
+                    run = await session.get(Run, approval.run_id)
+                    if run:
+                        run.status = RunStatus.FAILED
+                        run.completed_at = now
+                        run.error = f"Approval timed out at step '{approval.step_id}'"
+                    await session.commit()
+
+        if timed_out:
+            logger.info(f"Processed {len(timed_out)} timed-out approval(s)")
+
+    except Exception as e:
+        logger.error(f"Error checking approval timeouts: {e}")
 
 
 def add_schedule(

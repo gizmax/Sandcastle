@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from sandcastle.engine.dag import (
-    ExecutionPlan,
-    StepDefinition,
-    WorkflowDefinition,
     build_plan,
     parse_yaml_string,
 )
@@ -19,7 +16,6 @@ from sandcastle.engine.executor import (
     execute_workflow,
 )
 from sandcastle.engine.sandbox import SandstormResult
-
 
 # --- Budget checks ---
 

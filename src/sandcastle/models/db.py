@@ -37,6 +37,7 @@ class RunStatus(str, enum.Enum):
     PARTIAL = "partial"
     CANCELLED = "cancelled"
     BUDGET_EXCEEDED = "budget_exceeded"
+    AWAITING_APPROVAL = "awaiting_approval"
 
 
 class StepStatus(str, enum.Enum):
@@ -47,6 +48,17 @@ class StepStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    AWAITING_APPROVAL = "awaiting_approval"
+
+
+class ApprovalStatus(str, enum.Enum):
+    """Possible statuses for an approval request."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SKIPPED = "skipped"
+    TIMED_OUT = "timed_out"
 
 
 class Run(Base):
@@ -182,6 +194,37 @@ class DeadLetterItem(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class ApprovalRequest(Base):
+    """Human approval gate for a workflow step."""
+
+    __tablename__ = "approval_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[ApprovalStatus] = mapped_column(
+        Enum(ApprovalStatus), nullable=False, default=ApprovalStatus.PENDING
+    )
+    request_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    response_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reviewer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewer_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timeout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    on_timeout: Mapped[str] = mapped_column(String(50), nullable=False, default="abort")
+    allow_edit: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped[Run] = relationship(foreign_keys=[run_id])
 
 
 class RunCheckpoint(Base):

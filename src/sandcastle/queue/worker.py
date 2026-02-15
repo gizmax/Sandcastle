@@ -90,6 +90,7 @@ async def run_workflow_job(
             "failed": RunStatus.FAILED,
             "cancelled": RunStatus.CANCELLED,
             "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
+            "awaiting_approval": RunStatus.AWAITING_APPROVAL,
         }
 
         # Update DB with result
@@ -99,7 +100,9 @@ async def run_workflow_job(
                 run.status = status_map.get(result.status, RunStatus.FAILED)
                 run.output_data = result.outputs
                 run.total_cost_usd = result.total_cost_usd
-                run.completed_at = datetime.now(timezone.utc)
+                # Don't set completed_at for paused workflows
+                if result.status != "awaiting_approval":
+                    run.completed_at = datetime.now(timezone.utc)
                 run.error = result.error
                 await session.commit()
 

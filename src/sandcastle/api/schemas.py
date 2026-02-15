@@ -77,6 +77,15 @@ class DeadLetterResolveRequest(BaseModel):
     reason: str | None = None
 
 
+class ApprovalRespondRequest(BaseModel):
+    """Request to approve/reject/skip an approval gate."""
+
+    comment: str | None = Field(None, description="Reviewer comment")
+    edited_data: dict[str, Any] | None = Field(
+        None, description="Edited request data (only if allow_edit is true)"
+    )
+
+
 # --- Responses ---
 
 
@@ -224,6 +233,25 @@ class DeadLetterItemResponse(BaseModel):
     created_at: datetime | None = None
     resolved_at: datetime | None = None
     resolved_by: str | None = None
+
+
+class ApprovalResponse(BaseModel):
+    """Approval request details."""
+
+    id: str
+    run_id: str
+    step_id: str
+    status: str
+    request_data: dict[str, Any] | None = None
+    response_data: dict[str, Any] | None = None
+    message: str = ""
+    reviewer_id: str | None = None
+    reviewer_comment: str | None = None
+    timeout_at: datetime | None = None
+    on_timeout: str = "abort"
+    allow_edit: bool = False
+    created_at: datetime | None = None
+    resolved_at: datetime | None = None
 
 
 # Fix forward reference for ApiResponse.meta
