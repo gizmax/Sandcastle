@@ -11,9 +11,32 @@ class ApiClient {
   private baseUrl: string;
   private apiKey: string | null = null;
   private useMock = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
+    // Probe backend on first load
+    this.initPromise = this.probe();
+  }
+
+  private async probe(): Promise<void> {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) throw new Error("unhealthy");
+      const data = await res.json();
+      if (data?.data?.status !== "ok") throw new Error("unhealthy");
+      console.info("[Sandcastle] Backend connected");
+    } catch {
+      console.info("[Sandcastle] Backend unavailable, using demo data");
+      this.useMock = true;
+    }
+  }
+
+  private async ensureInit(): Promise<void> {
+    if (this.initPromise) {
+      await this.initPromise;
+      this.initPromise = null;
+    }
   }
 
   setApiKey(key: string | null) {
@@ -33,6 +56,7 @@ class ApiClient {
   }
 
   async get<T>(path: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
+    await this.ensureInit();
     if (this.useMock) return this.mock<T>(path, params);
 
     try {
@@ -61,6 +85,7 @@ class ApiClient {
   }
 
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    await this.ensureInit();
     if (this.useMock) {
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
     }
@@ -79,6 +104,7 @@ class ApiClient {
   }
 
   async patch<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
+    await this.ensureInit();
     if (this.useMock) {
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
     }
@@ -97,6 +123,7 @@ class ApiClient {
   }
 
   async delete<T>(path: string): Promise<ApiResponse<T>> {
+    await this.ensureInit();
     if (this.useMock) {
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
     }

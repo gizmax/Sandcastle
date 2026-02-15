@@ -5,10 +5,10 @@
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-51%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-77%20passing-brightgreen?style=flat-square)]()
 
 <p align="center">
-  <img src="docs/screenshots/overview.png" alt="Sandcastle Dashboard" width="720" />
+  <img src="docs/screenshots/overview-dark.png" alt="Sandcastle Dashboard" width="720" />
 </p>
 
 ---
@@ -43,71 +43,154 @@ Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everythin
 | MCP servers & file uploads | Yes | Yes |
 | **DAG workflow orchestration** | - | Yes |
 | **Parallel step execution** | - | Yes |
+| **Run Time Machine (replay/fork)** | - | Yes |
+| **Budget guardrails** | - | Yes |
+| **Run cancellation** | - | Yes |
+| **Idempotent run requests** | - | Yes |
 | **Persistent storage (S3/MinIO)** | - | Yes |
 | **Webhook callbacks (HMAC-signed)** | - | Yes |
 | **Scheduled / cron agents** | - | Yes |
 | **Retry logic with exponential backoff** | - | Yes |
-| **Dead letter queue** | - | Yes |
+| **Dead letter queue with full replay** | - | Yes |
 | **Per-run cost tracking** | - | Yes |
 | **SSE live streaming** | - | Yes |
 | **Multi-tenant API keys** | - | Yes |
 | **Dashboard with real-time monitoring** | - | Yes |
+| **Visual workflow builder** | - | Yes |
 
 ---
 
 ## Dashboard
 
-Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS.
+Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS. Dark and light theme, real-time updates, and zero configuration - just `npm run dev`.
 
-### Overview - KPI cards, run trends, cost breakdown per workflow
+### Overview
 
-<p align="center">
-  <img src="docs/screenshots/overview.png" alt="Overview" width="720" />
-</p>
-
-### Dark Mode
+KPI cards, 30-day run trends, cost breakdown per workflow, recent runs at a glance.
 
 <p align="center">
-  <img src="docs/screenshots/overview-dark.png" alt="Overview Dark" width="720" />
+  <img src="docs/screenshots/overview-dark.png" alt="Overview - Dark Mode" width="720" />
 </p>
 
-### Runs - Filterable run history with status, duration, and cost
+<details>
+<summary>Light mode</summary>
+<p align="center">
+  <img src="docs/screenshots/overview-light.png" alt="Overview - Light Mode" width="720" />
+</p>
+</details>
+
+### Runs
+
+Filterable run history with status badges, duration, cost per run. Auto-refreshes every 5 seconds for active runs.
 
 <p align="center">
   <img src="docs/screenshots/runs.png" alt="Runs" width="720" />
 </p>
 
-### Run Detail - Step timeline with expandable output, live SSE stream for running agents
+### Run Detail - Completed with Budget Bar
+
+Step-by-step timeline with expandable outputs, per-step cost and duration. Budget bar shows how close a run got to its spending limit.
 
 <p align="center">
-  <img src="docs/screenshots/run-detail.png" alt="Run Detail" width="720" />
-  <br/>
-  <img src="docs/screenshots/run-detail-running.png" alt="Running Run with Parallel Steps" width="720" />
+  <img src="docs/screenshots/run-detail.png" alt="Run Detail with Budget Bar" width="720" />
 </p>
 
-### Workflows - Manage workflows, preview DAG, trigger runs
+### Run Detail - Failed with Replay & Fork
+
+When a step fails, expand it to see the full error, retry count, and two powerful recovery options: **Replay from here** re-runs from that step with the same context. **Fork from here** lets you change the prompt, model, or parameters before re-running.
+
+<p align="center">
+  <img src="docs/screenshots/run-detail-failed.png" alt="Failed Run with Replay and Fork" width="720" />
+</p>
+
+### Run Detail - Running with Parallel Steps
+
+Live view of a running workflow showing parallel step execution. Steps with a pulsing blue dot are currently executing inside Sandstorm sandboxes.
+
+<p align="center">
+  <img src="docs/screenshots/run-detail-running.png" alt="Running Workflow with Parallel Steps" width="720" />
+</p>
+
+### Run Lineage
+
+When you replay or fork a run, Sandcastle tracks the full lineage. The run detail page shows the parent-child relationship so you can trace exactly how you got here.
+
+<p align="center">
+  <img src="docs/screenshots/run-detail-replay.png" alt="Run Lineage Tree" width="720" />
+</p>
+
+### Workflows
+
+Grid of workflow cards with step count, descriptions, and quick-action buttons. Click "Run" to trigger a workflow with custom input and budget limits.
 
 <p align="center">
   <img src="docs/screenshots/workflows.png" alt="Workflows" width="720" />
 </p>
 
-### DAG Preview - Interactive visualization of step dependencies with model badges
+### Visual Workflow Builder
+
+Drag-and-drop workflow editor with a live YAML preview. Add steps, configure prompts, models, retries, and connect them visually. Export as YAML or run directly.
 
 <p align="center">
-  <img src="docs/screenshots/dag-preview.png" alt="DAG Preview" width="720" />
+  <img src="docs/screenshots/workflow-builder.png" alt="Workflow Builder" width="720" />
 </p>
 
-### Schedules - Cron-based scheduling with enable/disable toggle
+### Schedules
+
+Cron-based scheduling with human-readable descriptions, enable/disable toggle, and links to the last triggered run.
 
 <p align="center">
   <img src="docs/screenshots/schedules.png" alt="Schedules" width="720" />
 </p>
 
-### Dead Letter Queue - Failed steps with retry and manual resolve actions
+### Dead Letter Queue
+
+Failed steps that exhausted all retries land here. Retry triggers a full re-run. Resolve marks the issue as handled. Sidebar badge shows unresolved count.
 
 <p align="center">
   <img src="docs/screenshots/dead-letter.png" alt="Dead Letter Queue" width="720" />
 </p>
+
+---
+
+## Run Time Machine
+
+The killer feature. Every completed step saves a checkpoint. When something goes wrong - or you just want to try a different approach - you don't have to start over.
+
+**Replay** - Re-run from any step. Sandcastle loads the checkpoint from just before that step and continues execution. All prior steps are skipped, their outputs restored from the checkpoint. Costs only what's re-executed.
+
+**Fork** - Same as replay, but you change something first. Swap the model from Haiku to Opus. Rewrite the prompt. Adjust max_turns. The new run branches off with your changes and Sandcastle tracks the full lineage.
+
+```bash
+# Replay from the "enrich" step
+curl -X POST http://localhost:8080/runs/{run_id}/replay \
+  -H "Content-Type: application/json" \
+  -d '{ "from_step": "enrich" }'
+
+# Fork with a different model
+curl -X POST http://localhost:8080/runs/{run_id}/fork \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_step": "score",
+    "changes": { "model": "opus", "prompt": "Score more conservatively..." }
+  }'
+```
+
+---
+
+## Budget Guardrails
+
+Set a spending limit per run, per tenant, or as a global default. Sandcastle checks the budget after every step:
+
+- **80%** - Warning logged, execution continues
+- **100%** - Hard stop, status = `budget_exceeded`
+
+Budget resolution order: request `max_cost_usd` > tenant API key limit > `DEFAULT_MAX_COST_USD` env var.
+
+```bash
+curl -X POST http://localhost:8080/workflows/run \
+  -d '{ "workflow": "enrichment", "input": {...}, "max_cost_usd": 0.50 }'
+```
 
 ---
 
@@ -151,7 +234,7 @@ cd dashboard && npm install && npm run dev
 
 ```bash
 # Run a workflow asynchronously
-curl -X POST http://localhost:8000/workflows/run \
+curl -X POST http://localhost:8080/workflows/run \
   -H "Content-Type: application/json" \
   -d '{
     "workflow": "lead-enrichment",
@@ -162,13 +245,13 @@ curl -X POST http://localhost:8000/workflows/run \
     "callback_url": "https://your-app.com/api/done"
   }'
 
-# Response: { "run_id": "a1b2c3d4-...", "status": "queued" }
+# Response: { "data": { "run_id": "a1b2c3d4-...", "status": "queued" } }
 ```
 
 Or run synchronously and wait for the result:
 
 ```bash
-curl -N -X POST http://localhost:8000/workflows/run/sync \
+curl -X POST http://localhost:8080/workflows/run/sync \
   -H "Content-Type: application/json" \
   -d '{
     "workflow": "lead-enrichment",
@@ -268,8 +351,11 @@ steps:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/runs` | List runs (filterable by status, workflow, date, tenant) |
-| `GET` | `/runs/{run_id}` | Get run detail with step statuses |
-| `GET` | `/runs/{run_id}/stream` | SSE stream of live progress |
+| `GET` | `/runs/{id}` | Get run detail with step statuses |
+| `GET` | `/runs/{id}/stream` | SSE stream of live progress |
+| `POST` | `/runs/{id}/cancel` | Cancel a running workflow |
+| `POST` | `/runs/{id}/replay` | Replay from a specific step |
+| `POST` | `/runs/{id}/fork` | Fork from a step with overrides |
 
 ### Schedules
 
@@ -285,7 +371,7 @@ steps:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/dead-letter` | List failed items |
-| `POST` | `/dead-letter/{id}/retry` | Retry failed step |
+| `POST` | `/dead-letter/{id}/retry` | Retry failed step (full replay) |
 | `POST` | `/dead-letter/{id}/resolve` | Mark as resolved |
 
 ### API Keys
@@ -293,7 +379,7 @@ steps:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api-keys` | Create API key (returns plaintext once) |
-| `GET` | `/api-keys` | List active keys |
+| `GET` | `/api-keys` | List active keys (prefix only) |
 | `DELETE` | `/api-keys/{id}` | Deactivate key |
 
 ### Other
@@ -303,22 +389,32 @@ steps:
 | `GET` | `/health` | Health check (Sandstorm, DB, Redis) |
 | `GET` | `/stats` | Aggregated stats and cost trends |
 
+All responses follow the envelope format: `{ "data": ..., "error": null }` or `{ "data": null, "error": { "code": "...", "message": "..." } }`.
+
+---
+
+## Multi-Tenant Auth
+
+Sandcastle supports strict multi-tenant isolation via API keys. Every API key maps to a `tenant_id`, and all queries are automatically scoped.
+
+```bash
+# Create an API key
+curl -X POST http://localhost:8080/api-keys \
+  -d '{ "tenant_id": "acme-corp", "name": "Production" }'
+# Returns: { "data": { "key": "sc_abc123...", "key_prefix": "sc_abc12" } }
+
+# Use it
+curl http://localhost:8080/runs -H "X-API-Key: sc_abc123..."
+# Only sees runs belonging to acme-corp
+```
+
+Toggle with `AUTH_REQUIRED=true|false` (default: false for local dev). When enabled, all endpoints except `/health` require a valid API key.
+
 ---
 
 ## Webhooks
 
-Sandcastle signs all webhook payloads with HMAC-SHA256 so you can verify they're authentic:
-
-```bash
-curl -X POST http://localhost:8000/workflows/run \
-  -d '{
-    "workflow": "enrichment",
-    "input": { "target_url": "https://example.com" },
-    "callback_url": "https://your-app.com/api/done"
-  }'
-```
-
-Your callback receives:
+Sandcastle signs all webhook payloads with HMAC-SHA256:
 
 ```json
 {
@@ -329,76 +425,21 @@ Your callback receives:
 }
 ```
 
-With the header `X-Sandcastle-Signature` for HMAC verification.
-
----
-
-## Scheduling
-
-Run workflows on a cron schedule via API or dashboard:
-
-```bash
-curl -X POST http://localhost:8000/schedules \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow_name": "competitor-monitor",
-    "cron_expression": "0 */6 * * *",
-    "input_data": { "company_url": "https://example.com" }
-  }'
-```
-
-Powered by APScheduler with Redis-backed job storage.
-
----
-
-## Cost Tracking
-
-Every run automatically tracks Sandstorm execution costs per step:
-
-```json
-{
-  "run_id": "a1b2c3d4-...",
-  "workflow_name": "lead-enrichment",
-  "total_cost_usd": 0.12,
-  "steps": [
-    { "step_id": "scrape", "cost_usd": 0.04, "duration_seconds": 12.3 },
-    { "step_id": "enrich", "cost_usd": 0.05, "duration_seconds": 18.7 },
-    { "step_id": "score", "cost_usd": 0.03, "duration_seconds": 8.2 }
-  ]
-}
-```
-
-The dashboard aggregates costs by workflow and shows daily trends.
-
----
-
-## Error Handling
-
-```yaml
-steps:
-  - id: scrape
-    prompt: "..."
-    retry:
-      max_attempts: 3
-      backoff: exponential    # 1s, 2s, 4s
-      on_failure: skip        # skip | abort | fallback
-```
-
-Failed steps (after all retry attempts) land in the **Dead Letter Queue** where you can inspect the error, retry, or manually resolve them via the dashboard or API.
+Header: `X-Sandcastle-Signature` for verification against your `WEBHOOK_SECRET`.
 
 ---
 
 ## Architecture
 
 ```
-Your App ──POST /workflows/run──> Sandcastle API (FastAPI)
+Your App --POST /workflows/run--> Sandcastle API (FastAPI)
                                        |
-                               ┌───────┴────────┐
-                               │  Workflow Engine │
-                               │  (DAG executor) │
-                               └───────┬────────┘
+                               +-------+--------+
+                               |  Workflow Engine |
+                               |  (DAG executor) |
+                               +-------+--------+
                                        |
-                     ┌─────────┬───────┴───────┬──────────┐
+                     +---------+-------+-------+----------+
                      v         v               v          v
                 Sandstorm  Sandstorm      Sandstorm   Sandstorm
                 Agent A    Agent B        Agent C     Agent D
@@ -407,18 +448,19 @@ Your App ──POST /workflows/run──> Sandcastle API (FastAPI)
                      v         v               v          v
                   E2B VM    E2B VM          E2B VM     E2B VM
                      |         |               |          |
-                     └─────────┴───────┬───────┴──────────┘
+                     +---------+-------+-------+----------+
                                        |
-                     ┌─────────────────┼─────────────────┐
+                     +-----------------+-----------------+
                      v                 v                  v
                 PostgreSQL          Redis             S3 / MinIO
               (runs, keys,       (job queue,       (persistent
-               dead letter)      scheduling)        storage)
+               dead letter,      cancel flags,      storage)
+               checkpoints)      scheduling)
                                        |
-                               ┌───────┴────────┐
-                               │  Webhook POST   │──> Your App
-                               │  SSE Stream     │──> Dashboard
-                               └────────────────┘
+                               +-------+--------+
+                               |  Webhook POST   |--> Your App
+                               |  SSE Stream     |--> Dashboard
+                               +----------------+
 ```
 
 ### Tech Stack
@@ -463,6 +505,7 @@ AWS_SECRET_ACCESS_KEY=minioadmin
 # Security
 WEBHOOK_SECRET=your-webhook-signing-secret
 AUTH_REQUIRED=false
+DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
 
 # Dashboard
 DASHBOARD_ORIGIN=http://localhost:5173
@@ -475,13 +518,16 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (51 passing)
+# Run tests (77 passing)
 uv run pytest
 
-# Type check
+# Type check backend
+uv run mypy src/
+
+# Type check frontend
 cd dashboard && npx tsc --noEmit
 
-# Dashboard dev server
+# Dashboard dev server (starts with demo data when backend is offline)
 cd dashboard && npm run dev
 ```
 
