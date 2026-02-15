@@ -424,7 +424,7 @@ Click "DAG" on any workflow card to expand an interactive graph of all steps, th
 
 ### Workflow Builder
 
-Visual drag-and-drop editor for building workflows. Add steps, connect dependencies, configure models and timeouts, then preview the generated YAML. Editing an existing workflow loads its steps and edges into the canvas.
+Visual drag-and-drop editor for building workflows. Add steps, connect dependencies, configure models and timeouts, then preview the generated YAML. Collapsible advanced sections for retry logic, approval gates, policy rules, and SLO optimizer - all reflected in the YAML preview. Editing an existing workflow loads its steps and edges into the canvas.
 
 <p align="center">
   <img src="docs/screenshots/workflow-builder.png" alt="Workflow Builder" width="720" />
@@ -432,10 +432,18 @@ Visual drag-and-drop editor for building workflows. Add steps, connect dependenc
 
 ### Schedules
 
-Cron-based scheduling with human-readable descriptions, enable/disable toggle, and links to the last triggered run.
+Cron-based scheduling with human-readable descriptions, enable/disable toggle, and inline edit. Click "Edit" to change the cron expression or toggle a schedule without leaving the page.
 
 <p align="center">
   <img src="docs/screenshots/schedules.png" alt="Schedules" width="720" />
+</p>
+
+### API Keys
+
+Create, view, and deactivate multi-tenant API keys. Key prefix shown in monospace, full key revealed only once on creation with a copy-to-clipboard flow and warning banner.
+
+<p align="center">
+  <img src="docs/screenshots/api-keys.png" alt="API Keys" width="720" />
 </p>
 
 ### Dead Letter Queue
