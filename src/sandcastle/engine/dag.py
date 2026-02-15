@@ -99,6 +99,25 @@ class SubWorkflowConfig:
 
 
 @dataclass
+class SLOConfig:
+    """Service Level Objective for optimizer-driven model selection."""
+
+    quality_min: float = 0.6
+    cost_max_usd: float = 0.20
+    latency_max_seconds: int = 120
+    optimize_for: str = "balanced"  # "cost" | "quality" | "latency" | "balanced"
+
+
+@dataclass
+class ModelPoolOption:
+    """A model variant available for optimizer selection."""
+
+    id: str
+    model: str
+    max_turns: int = 10
+
+
+@dataclass
 class PolicyPattern:
     """A pattern to match in step output."""
 
@@ -157,6 +176,8 @@ class StepDefinition:
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
     policies: list[str | PolicyDefinition] | None = None  # Policy refs or inline defs
+    slo: SLOConfig | None = None
+    model_pool: list[ModelPoolOption] | None = None
 
 
 @dataclass
@@ -343,6 +364,43 @@ def _parse_step_policies(
     return result
 
 
+def _parse_slo_config(data: dict | None) -> SLOConfig | None:
+    """Parse SLO configuration from YAML data."""
+    if data is None:
+        return None
+    return SLOConfig(
+        quality_min=data.get("quality_min", 0.6),
+        cost_max_usd=data.get("cost_max_usd", 0.20),
+        latency_max_seconds=data.get("latency_max_seconds", 120),
+        optimize_for=data.get("optimize_for", "balanced"),
+    )
+
+
+def _parse_model_pool(data) -> list[ModelPoolOption] | None:
+    """Parse model pool from YAML data.
+
+    Accepts a list of dicts or the string "auto" for default pool.
+    """
+    if data is None:
+        return None
+    if data == "auto":
+        return [
+            ModelPoolOption(id="fast-cheap", model="haiku", max_turns=5),
+            ModelPoolOption(id="balanced", model="sonnet", max_turns=10),
+            ModelPoolOption(id="thorough", model="opus", max_turns=20),
+        ]
+    if isinstance(data, list):
+        return [
+            ModelPoolOption(
+                id=item.get("id", f"option-{i}"),
+                model=item.get("model", "sonnet"),
+                max_turns=item.get("max_turns", 10),
+            )
+            for i, item in enumerate(data)
+        ]
+    return None
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -355,6 +413,14 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     if step_type == "sub_workflow" and not prompt:
         sw = data.get("sub_workflow", {})
         prompt = f"Sub-workflow: {sw.get('workflow', 'unknown')}"
+
+    # Parse SLO config
+    slo = _parse_slo_config(data.get("slo"))
+    model_pool = _parse_model_pool(data.get("model_pool"))
+
+    # If step has SLO but no model_pool, default to auto
+    if slo and not model_pool:
+        model_pool = _parse_model_pool("auto")
 
     return StepDefinition(
         id=data["id"],
@@ -372,6 +438,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         autopilot=_parse_autopilot_config(data.get("autopilot")),
         sub_workflow=_parse_sub_workflow_config(data.get("sub_workflow")),
         policies=_parse_step_policies(data.get("policies")),
+        slo=slo,
+        model_pool=model_pool,
     )
 
 
@@ -518,6 +586,15 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Sub-workflow step '{step.id}' must have sub_workflow.workflow"
                 )
+
+    # Check SLO configuration
+    for step in workflow.steps:
+        if step.slo and step.slo.optimize_for not in (
+            "cost", "quality", "latency", "balanced"
+        ):
+            errors.append(
+                f"Step '{step.id}' has invalid SLO optimize_for: '{step.slo.optimize_for}'"
+            )
 
     # Check for cycles
     cycle_errors = _detect_cycles(workflow.steps)

@@ -519,13 +519,56 @@ async def _execute_step_once(
     started_at = datetime.now(timezone.utc)
 
     try:
+        # SLO-based model selection (optimizer)
+        routing_decision = None
+        effective_model = step.model
+        effective_max_turns = step.max_turns
+        if hasattr(step, "slo") and step.slo and hasattr(step, "model_pool") and step.model_pool:
+            try:
+                from sandcastle.engine.optimizer import (
+                    SLO,
+                    CostLatencyOptimizer,
+                    ModelOption,
+                    calculate_budget_pressure,
+                )
+
+                slo = SLO(
+                    quality_min=step.slo.quality_min,
+                    cost_max_usd=step.slo.cost_max_usd,
+                    latency_max_seconds=step.slo.latency_max_seconds,
+                    optimize_for=step.slo.optimize_for,
+                )
+                pool = [
+                    ModelOption(id=m.id, model=m.model, max_turns=m.max_turns)
+                    for m in step.model_pool
+                ]
+                bp = calculate_budget_pressure(context.total_cost, context.max_cost_usd)
+
+                optimizer = CostLatencyOptimizer()
+                decision = await optimizer.select_model(
+                    step_id=step.id,
+                    workflow_name="",
+                    slo=slo,
+                    model_pool=pool,
+                    budget_pressure=bp,
+                )
+                routing_decision = decision
+                effective_model = decision.selected_option.model
+                effective_max_turns = decision.selected_option.max_turns
+                logger.info(
+                    f"Optimizer: step '{step.id}' -> {effective_model} "
+                    f"({decision.reason}, confidence={decision.confidence:.1%})"
+                )
+            except Exception as e:
+                logger.warning(f"Optimizer failed for step '{step.id}', using default: {e}")
+
         prompt = resolve_templates(step.prompt, context)
         prompt = await resolve_storage_refs(prompt, storage)
 
         request: dict[str, Any] = {
             "prompt": prompt,
-            "model": step.model,
-            "max_turns": step.max_turns,
+            "model": effective_model,
+            "max_turns": effective_max_turns,
             "timeout": step.timeout,
         }
         if step.output_schema:
@@ -535,8 +578,17 @@ async def _execute_step_once(
             }
 
         idx_str = f" [{parallel_index}]" if parallel_index is not None else ""
-        logger.info(f"Executing step '{step.id}'{idx_str} attempt {attempt} (model={step.model})")
+        logger.info(
+            f"Executing step '{step.id}'{idx_str} attempt {attempt} "
+            f"(model={effective_model})"
+        )
         result = await sandbox.query(request)
+
+        # Save routing decision to DB
+        if routing_decision:
+            await _save_routing_decision(
+                context.run_id, step.id, routing_decision, step.slo
+            )
 
         output = result.structured_output if result.structured_output else result.text
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
@@ -1345,6 +1397,54 @@ async def execute_workflow(
 
     finally:
         await sandbox.close()
+
+
+async def _save_routing_decision(
+    run_id: str,
+    step_id: str,
+    decision: Any,
+    slo_config: Any = None,
+) -> None:
+    """Save an optimizer routing decision to the database."""
+    try:
+        from sandcastle.models.db import RoutingDecision as DBRoutingDecision
+        from sandcastle.models.db import async_session
+
+        slo_data = None
+        if slo_config:
+            slo_data = {
+                "quality_min": slo_config.quality_min,
+                "cost_max_usd": slo_config.cost_max_usd,
+                "latency_max_seconds": slo_config.latency_max_seconds,
+                "optimize_for": slo_config.optimize_for,
+            }
+
+        alternatives_data = [
+            {
+                "id": a.id,
+                "model": a.model,
+                "avg_quality": a.avg_quality,
+                "avg_cost": a.avg_cost,
+            }
+            for a in decision.alternatives
+        ]
+
+        async with async_session() as session:
+            rd = DBRoutingDecision(
+                run_id=uuid.UUID(run_id),
+                step_id=step_id,
+                selected_model=decision.selected_option.model,
+                selected_variant_id=decision.selected_option.id,
+                reason=decision.reason,
+                budget_pressure=decision.budget_pressure,
+                confidence=decision.confidence,
+                alternatives=alternatives_data,
+                slo=slo_data,
+            )
+            session.add(rd)
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Could not save routing decision for {step_id}: {e}")
 
 
 async def _save_policy_violations(

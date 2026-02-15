@@ -320,5 +320,30 @@ class PolicyViolationStatsResponse(BaseModel):
     violations_by_day: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class RoutingDecisionResponse(BaseModel):
+    """A single optimizer routing decision."""
+
+    id: str
+    run_id: str
+    step_id: str
+    selected_model: str
+    selected_variant_id: str
+    reason: str | None = None
+    budget_pressure: float = 0.0
+    confidence: float = 0.1
+    alternatives: list[dict[str, Any]] | None = None
+    slo: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
+class OptimizerStatsResponse(BaseModel):
+    """Overview statistics for the optimizer."""
+
+    total_decisions_30d: int = 0
+    model_distribution: dict[str, float] = Field(default_factory=dict)
+    avg_confidence: float = 0.0
+    estimated_savings_30d_usd: float = 0.0
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()
