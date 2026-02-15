@@ -48,6 +48,7 @@ export function CostChart({ data }: CostChartProps) {
               borderRadius: "8px",
               fontSize: "12px",
             }}
+            cursor={{ fill: "var(--color-border)", opacity: 0.3 }}
             formatter={(value) => [`$${Number(value).toFixed(2)}`, "Cost"]}
           />
           <Bar dataKey="cost" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />

@@ -1,10 +1,26 @@
 import { useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/api/client";
 import { WorkflowBuilder } from "@/components/workflows/WorkflowBuilder";
 
+interface WorkflowState {
+  workflow?: {
+    name: string;
+    description: string;
+    steps_count: number;
+    file_name: string;
+    steps?: Array<{
+      id: string;
+      model?: string;
+      depends_on?: string[];
+    }>;
+  };
+}
+
 export default function WorkflowBuilderPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const state = location.state as WorkflowState | null;
 
   const handleSave = useCallback(
     async (yaml: string, name: string) => {
@@ -30,7 +46,11 @@ export default function WorkflowBuilderPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">Workflow Builder</h1>
-      <WorkflowBuilder onSave={handleSave} onRun={handleRun} />
+      <WorkflowBuilder
+        onSave={handleSave}
+        onRun={handleRun}
+        initialWorkflow={state?.workflow}
+      />
     </div>
   );
 }

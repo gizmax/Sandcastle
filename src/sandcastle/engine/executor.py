@@ -47,6 +47,7 @@ class RunContext:
     status: str = "running"
     error: str | None = None
     max_cost_usd: float | None = None
+    workflow_name: str = ""
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item."""
@@ -57,6 +58,7 @@ class RunContext:
             costs=self.costs,
             status=self.status,
             max_cost_usd=self.max_cost_usd,
+            workflow_name=self.workflow_name,
         )
 
     @property
@@ -338,7 +340,7 @@ async def execute_step_with_retry(
 
             if random.random() <= step.autopilot.sample_rate:
                 experiment = await get_or_create_experiment(
-                    workflow_name="",  # Set by caller context
+                    workflow_name=context.workflow_name,
                     step_id=step.id,
                     config=step.autopilot,
                 )
@@ -547,7 +549,7 @@ async def _execute_step_once(
                 optimizer = CostLatencyOptimizer()
                 decision = await optimizer.select_model(
                     step_id=step.id,
-                    workflow_name="",
+                    workflow_name=context.workflow_name,
                     slo=slo,
                     model_pool=pool,
                     budget_pressure=bp,
@@ -912,7 +914,15 @@ async def _execute_sub_workflow_step(
         if step.sub_workflow.output_mapping:
             mapped = {}
             for target, source in step.sub_workflow.output_mapping.items():
-                mapped[target] = outputs
+                parts = source.split(".")
+                extracted = []
+                for o in outputs:
+                    val = o
+                    for p in parts:
+                        if isinstance(val, dict):
+                            val = val.get(p)
+                    extracted.append(val)
+                mapped[target] = extracted
             output = mapped
 
         return StepResult(
@@ -1007,7 +1017,10 @@ async def execute_workflow(
         storage = LocalStorage()
 
     started_at = datetime.now(timezone.utc)
-    context = RunContext(run_id=run_id, input=input_data, max_cost_usd=max_cost_usd)
+    context = RunContext(
+        run_id=run_id, input=input_data, max_cost_usd=max_cost_usd,
+        workflow_name=workflow.name,
+    )
 
     # Restore context from checkpoint if doing replay/fork
     if initial_context:
@@ -1099,7 +1112,7 @@ async def execute_workflow(
             elif budget_status == "warning":
                 logger.warning(
                     f"Run {run_id} at 80%+ budget "
-                    f"(${cost:.4f} / ${limit:.4f})"
+                    f"(${context.total_cost:.4f} / ${context.max_cost_usd:.4f})"
                 )
 
             # Collect all tasks for this stage (parallel execution)

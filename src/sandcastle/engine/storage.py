@@ -28,7 +28,7 @@ class LocalStorage:
     def _safe_path(self, path: str) -> Path:
         """Resolve path and ensure it stays within base_dir."""
         resolved = (self.base_dir / path).resolve()
-        if not str(resolved).startswith(str(self.base_dir)):
+        if not resolved.is_relative_to(self.base_dir):
             raise ValueError(f"Path traversal denied: {path}")
         return resolved
 

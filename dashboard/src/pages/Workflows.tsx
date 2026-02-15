@@ -94,7 +94,7 @@ export default function Workflows() {
         <WorkflowList
           workflows={workflows}
           onRun={setRunModal}
-          onEdit={() => navigate("/workflows/builder")}
+          onEdit={(wf) => navigate("/workflows/builder", { state: { workflow: wf } })}
           onViewDag={setDagWorkflow}
         />
       )}

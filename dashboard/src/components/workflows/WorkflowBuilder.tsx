@@ -67,19 +67,68 @@ function generateYaml(
   return yaml;
 }
 
+interface InitialWorkflow {
+  name: string;
+  description: string;
+  steps_count: number;
+  file_name: string;
+  steps?: Array<{
+    id: string;
+    model?: string;
+    depends_on?: string[];
+  }>;
+}
+
 interface WorkflowBuilderProps {
   onSave?: (yaml: string, name: string) => void;
   onRun?: (yaml: string) => void;
+  initialWorkflow?: InitialWorkflow;
 }
 
-export function WorkflowBuilder({ onSave, onRun }: WorkflowBuilderProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [steps, setSteps] = useState<StepConfig[]>([]);
+function buildInitialState(wf: InitialWorkflow) {
+  const steps: StepConfig[] = (wf.steps || []).map((s) => ({
+    id: s.id,
+    prompt: "",
+    model: s.model || "sonnet",
+    maxTurns: 10,
+    timeout: 300,
+    parallelOver: "",
+    dependsOn: s.depends_on || [],
+  }));
+
+  const nodes: Node[] = steps.map((s, i) => ({
+    id: s.id,
+    type: "step" as const,
+    position: { x: 200 + (i % 3) * 220, y: 50 + Math.floor(i / 3) * 150 },
+    data: { label: s.id, model: s.model },
+  }));
+
+  const edges: Edge[] = [];
+  for (const s of steps) {
+    for (const dep of s.dependsOn) {
+      edges.push({
+        id: `${dep}-${s.id}`,
+        source: dep,
+        target: s.id,
+        style: { stroke: "var(--color-accent)", strokeWidth: 2 },
+      });
+    }
+  }
+
+  return { steps, nodes, edges };
+}
+
+export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuilderProps) {
+  const initial = initialWorkflow ? buildInitialState(initialWorkflow) : null;
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initial?.nodes || []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial?.edges || []);
+  const [steps, setSteps] = useState<StepConfig[]>(initial?.steps || []);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [workflowName, setWorkflowName] = useState("my-workflow");
+  const [workflowName, setWorkflowName] = useState(
+    initialWorkflow?.file_name.replace(".yaml", "") || "my-workflow"
+  );
   const [yamlOpen, setYamlOpen] = useState(false);
-  const [counter, setCounter] = useState(1);
+  const [counter, setCounter] = useState(initial ? initial.steps.length + 1 : 1);
 
   const onConnect = useCallback(
     (connection: Connection) => {

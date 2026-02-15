@@ -16,24 +16,24 @@ const h = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * 3600000).toI
 const d = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86400000).toISOString().slice(0, 10);
 
 const MOCK_RUNS = [
-  { run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 0.12, started_at: h(0.5), completed_at: h(0.45) },
-  { run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", status: "running", total_cost_usd: 0.04, started_at: h(0.1), completed_at: null },
-  { run_id: "a1b2c3d4-3333-4000-8000-000000000003", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.08, started_at: h(2), completed_at: h(1.9) },
-  { run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", status: "failed", total_cost_usd: 0.03, started_at: h(5), completed_at: h(4.95) },
-  { run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 0.11, started_at: h(8), completed_at: h(7.9) },
-  { run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", status: "completed", total_cost_usd: 0.09, started_at: h(12), completed_at: h(11.8) },
-  { run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.07, started_at: h(18), completed_at: h(17.9) },
-  { run_id: "a1b2c3d4-8888-4000-8000-000000000008", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 0.14, started_at: h(24), completed_at: h(23.8) },
-  { run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", status: "failed", total_cost_usd: 0.02, started_at: h(30), completed_at: h(29.9) },
-  { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.06, started_at: h(36), completed_at: h(35.8) },
-  { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 0.10, started_at: h(48), completed_at: h(47.5) },
-  { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 0.13, started_at: h(60), completed_at: h(59.8) },
+  { run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.84, started_at: h(0.5), completed_at: h(0.45) },
+  { run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", status: "running", total_cost_usd: 0.67, started_at: h(0.1), completed_at: null },
+  { run_id: "a1b2c3d4-3333-4000-8000-000000000003", workflow_name: "seo-audit", status: "completed", total_cost_usd: 1.23, started_at: h(2), completed_at: h(1.9) },
+  { run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", status: "failed", total_cost_usd: 0.41, started_at: h(5), completed_at: h(4.95) },
+  { run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.72, started_at: h(8), completed_at: h(7.9) },
+  { run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", status: "completed", total_cost_usd: 1.35, started_at: h(12), completed_at: h(11.8) },
+  { run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.98, started_at: h(18), completed_at: h(17.9) },
+  { run_id: "a1b2c3d4-8888-4000-8000-000000000008", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 2.16, started_at: h(24), completed_at: h(23.8) },
+  { run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", status: "failed", total_cost_usd: 0.29, started_at: h(30), completed_at: h(29.9) },
+  { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.87, started_at: h(36), completed_at: h(35.8) },
+  { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.54, started_at: h(48), completed_at: h(47.5) },
+  { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.97, started_at: h(60), completed_at: h(59.8) },
 ];
 
 const MOCK_STEPS: MockStep[] = [
-  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.04, duration_seconds: 12.3, attempt: 1, error: null },
-  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.05, duration_seconds: 18.7, attempt: 1, error: null },
-  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.03, duration_seconds: 8.2, attempt: 1, error: null },
+  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null },
+  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null },
+  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null },
 ];
 
 const MOCK_STEPS_RUNNING: MockStep[] = [
@@ -57,7 +57,7 @@ function getRunDetail(runId: string) {
   if (run.status === "failed") steps = MOCK_STEPS_FAILED;
 
   // Add budget for the first run to demo the BudgetBar
-  const maxCost = runId === "a1b2c3d4-1111-4000-8000-000000000001" ? 0.15 : null;
+  const maxCost = runId === "a1b2c3d4-1111-4000-8000-000000000001" ? 2.50 : null;
   // Demo parent_run_id for the third run (replay)
   const parentRunId = runId === "a1b2c3d4-3333-4000-8000-000000000003"
     ? "a1b2c3d4-1111-4000-8000-000000000001"
@@ -80,7 +80,7 @@ function getRunDetail(runId: string) {
 const MOCK_STATS = {
   total_runs_today: 8,
   success_rate: 0.875,
-  total_cost_today: 0.56,
+  total_cost_today: 7.82,
   avg_duration_seconds: 42.3,
   runs_by_day: Array.from({ length: 30 }, (_, i) => {
     const completed = Math.floor(Math.random() * 12) + 2;
@@ -88,9 +88,9 @@ const MOCK_STATS = {
     return { date: d(29 - i), completed, failed, total: completed + failed };
   }),
   cost_by_workflow: [
-    { workflow: "lead-enrichment", cost: 2.34 },
-    { workflow: "competitor-monitor", cost: 1.12 },
-    { workflow: "seo-audit", cost: 0.67 },
+    { workflow: "lead-enrichment", cost: 14.58 },
+    { workflow: "competitor-monitor", cost: 8.34 },
+    { workflow: "seo-audit", cost: 4.72 },
   ],
 };
 

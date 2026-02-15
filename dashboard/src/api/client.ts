@@ -143,14 +143,11 @@ class ApiClient {
     }
   }
 
-  sseUrl(path: string): string {
-    const base = `${this.baseUrl}${path}`;
-    // EventSource cannot send custom headers, so pass the API key as a query param
-    if (this.apiKey) {
-      const sep = base.includes("?") ? "&" : "?";
-      return `${base}${sep}token=${encodeURIComponent(this.apiKey)}`;
-    }
-    return base;
+  sseConnect(path: string): { url: string; headers: HeadersInit } {
+    return {
+      url: `${this.baseUrl}${path}`,
+      headers: this.headers(),
+    };
   }
 }
 
