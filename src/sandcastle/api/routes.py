@@ -30,6 +30,8 @@ from sandcastle.api.schemas import (
     ForkRequest,
     HealthResponse,
     PaginationMeta,
+    PolicyViolationResponse,
+    PolicyViolationStatsResponse,
     ReplayRequest,
     RunListItem,
     RunStatusResponse,
@@ -55,6 +57,7 @@ from sandcastle.models.db import (
     AutoPilotSample,
     DeadLetterItem,
     ExperimentStatus,
+    PolicyViolation,
     Run,
     RunCheckpoint,
     RunStatus,
@@ -2263,6 +2266,200 @@ async def list_api_keys(
         data=data,
         meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
     )
+
+
+# --- Policy Violations ---
+
+
+@router.get("/runs/{run_id}/violations")
+async def get_run_violations(
+    run_id: str,
+    request: Request,
+    severity: str | None = Query(None, description="Filter by severity"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List policy violations for a specific run."""
+    tenant_id = get_tenant_id(request)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        # Verify run exists and belongs to tenant
+        run_check = select(Run.id).where(Run.id == run_uuid)
+        run_check = _apply_tenant_filter(run_check, tenant_id, Run.tenant_id)
+        if not await session.scalar(run_check):
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        base = select(PolicyViolation).where(PolicyViolation.run_id == run_uuid)
+        count_base = select(func.count(PolicyViolation.id)).where(
+            PolicyViolation.run_id == run_uuid
+        )
+
+        if severity:
+            base = base.where(PolicyViolation.severity == severity)
+            count_base = count_base.where(PolicyViolation.severity == severity)
+
+        total = await session.scalar(count_base)
+        stmt = base.order_by(PolicyViolation.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+    data = [
+        PolicyViolationResponse(
+            id=str(v.id),
+            run_id=str(v.run_id),
+            step_id=v.step_id,
+            policy_id=v.policy_id,
+            severity=v.severity,
+            trigger_details=v.trigger_details,
+            action_taken=v.action_taken,
+            output_modified=v.output_modified,
+            created_at=v.created_at,
+        )
+        for v in items
+    ]
+
+    return ApiResponse(
+        data=data,
+        meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+@router.get("/violations")
+async def list_violations(
+    request: Request,
+    severity: str | None = Query(None, description="Filter by severity"),
+    policy_id: str | None = Query(None, description="Filter by policy ID"),
+    since: datetime | None = Query(None, description="Filter violations after this datetime"),
+    until: datetime | None = Query(None, description="Filter violations before this datetime"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List all policy violations with filters."""
+    tenant_id = get_tenant_id(request)
+
+    async with async_session() as session:
+        base = select(PolicyViolation)
+        count_base = select(func.count(PolicyViolation.id))
+
+        # Tenant isolation via join on parent Run
+        if settings.auth_required and tenant_id is not None:
+            join_cond = PolicyViolation.run_id == Run.id
+            base = base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
+            count_base = count_base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
+
+        if severity:
+            base = base.where(PolicyViolation.severity == severity)
+            count_base = count_base.where(PolicyViolation.severity == severity)
+        if policy_id:
+            base = base.where(PolicyViolation.policy_id == policy_id)
+            count_base = count_base.where(PolicyViolation.policy_id == policy_id)
+        if since:
+            base = base.where(PolicyViolation.created_at >= since)
+            count_base = count_base.where(PolicyViolation.created_at >= since)
+        if until:
+            base = base.where(PolicyViolation.created_at <= until)
+            count_base = count_base.where(PolicyViolation.created_at <= until)
+
+        total = await session.scalar(count_base)
+        stmt = base.order_by(PolicyViolation.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+    data = [
+        PolicyViolationResponse(
+            id=str(v.id),
+            run_id=str(v.run_id),
+            step_id=v.step_id,
+            policy_id=v.policy_id,
+            severity=v.severity,
+            trigger_details=v.trigger_details,
+            action_taken=v.action_taken,
+            output_modified=v.output_modified,
+            created_at=v.created_at,
+        )
+        for v in items
+    ]
+
+    return ApiResponse(
+        data=data,
+        meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+@router.get("/violations/stats")
+async def violations_stats(request: Request) -> ApiResponse:
+    """Get aggregated policy violation statistics."""
+    tenant_id = get_tenant_id(request)
+    now = datetime.now(timezone.utc)
+    thirty_days_ago = now - timedelta(days=30)
+
+    async with async_session() as session:
+        # Base query with tenant filter
+        def _base_filter(stmt):
+            stmt = stmt.where(PolicyViolation.created_at >= thirty_days_ago)
+            if settings.auth_required and tenant_id is not None:
+                stmt = stmt.join(Run, PolicyViolation.run_id == Run.id).where(
+                    Run.tenant_id == tenant_id
+                )
+            return stmt
+
+        # Total violations
+        total_q = _base_filter(select(func.count(PolicyViolation.id)))
+        total = await session.scalar(total_q)
+
+        # By severity
+        sev_q = _base_filter(
+            select(PolicyViolation.severity, func.count(PolicyViolation.id).label("count"))
+        ).group_by(PolicyViolation.severity)
+        sev_rows = (await session.execute(sev_q)).all()
+        by_severity = {row.severity: row.count for row in sev_rows}
+
+        # By policy
+        pol_q = _base_filter(
+            select(PolicyViolation.policy_id, func.count(PolicyViolation.id).label("count"))
+        ).group_by(PolicyViolation.policy_id)
+        pol_rows = (await session.execute(pol_q)).all()
+        by_policy = {row.policy_id: row.count for row in pol_rows}
+
+        # By day (last 30 days)
+        day_q = _base_filter(
+            select(
+                func.date_trunc("day", PolicyViolation.created_at).label("day"),
+                func.count(PolicyViolation.id).label("count"),
+            )
+        ).group_by("day").order_by("day")
+        day_rows = (await session.execute(day_q)).all()
+        by_day = [
+            {"date": row.day.strftime("%Y-%m-%d") if row.day else "unknown", "count": row.count}
+            for row in day_rows
+        ]
+
+    return ApiResponse(
+        data=PolicyViolationStatsResponse(
+            total_violations_30d=total or 0,
+            violations_by_severity=by_severity,
+            violations_by_policy=by_policy,
+            violations_by_day=by_day,
+        )
+    )
+
+
+# --- API Keys ---
 
 
 @router.delete("/api-keys/{key_id}")

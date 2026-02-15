@@ -128,6 +128,8 @@ class RunStep(Base):
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sub_run_ids: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    policy_violations_count: Mapped[int] = mapped_column(Integer, default=0)
+    policy_actions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -289,6 +291,30 @@ class ApprovalRequest(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped[Run] = relationship(foreign_keys=[run_id])
+
+
+class PolicyViolation(Base):
+    """Record of a policy violation during workflow execution."""
+
+    __tablename__ = "policy_violations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    policy_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    severity: Mapped[str] = mapped_column(String(50), nullable=False, default="medium")
+    trigger_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_taken: Mapped[str] = mapped_column(String(50), nullable=False)
+    output_modified: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
     run: Mapped[Run] = relationship(foreign_keys=[run_id])
 

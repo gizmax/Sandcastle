@@ -541,6 +541,87 @@ async def _execute_step_once(
         output = result.structured_output if result.structured_output else result.text
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
 
+        # Policy evaluation
+        if hasattr(step, "policies") and step.policies is not None:
+            try:
+                from sandcastle.engine.policy import PolicyEngine, resolve_step_policies
+
+                applicable = resolve_step_policies(step.policies, [])
+                if applicable:
+                    engine = PolicyEngine(applicable)
+                    eval_result = await engine.evaluate(
+                        step_id=step.id,
+                        output=output,
+                        context={
+                            "step_id": step.id,
+                            "run_id": context.run_id,
+                            "total_cost_usd": context.total_cost,
+                            "input": context.input,
+                        },
+                        step_cost_usd=result.total_cost_usd,
+                    )
+                    if eval_result.violations:
+                        await _save_policy_violations(
+                            context.run_id, step.id, eval_result.violations
+                        )
+
+                    if eval_result.should_block:
+                        raise StepBlocked(
+                            step_id=step.id,
+                            reason=eval_result.block_reason or "Policy blocked",
+                        )
+
+                    if eval_result.should_inject_approval:
+                        # Reuse approval gate mechanism
+                        from sandcastle.models.db import (
+                            ApprovalRequest,
+                            ApprovalStatus,
+                            Run,
+                            RunStatus,
+                        )
+                        from sandcastle.models.db import (
+                            async_session as db_session,
+                        )
+                        config = eval_result.approval_config or {}
+                        async with db_session() as session:
+                            approval = ApprovalRequest(
+                                run_id=uuid.UUID(context.run_id),
+                                step_id=step.id,
+                                status=ApprovalStatus.PENDING,
+                                request_data=(
+                                    output if isinstance(output, dict)
+                                    else {"result": output}
+                                ),
+                                message=config.get(
+                                    "message", "Policy requires approval"
+                                ),
+                                timeout_at=None,
+                                on_timeout=config.get("on_timeout", "abort"),
+                                allow_edit=False,
+                            )
+                            if config.get("timeout_hours"):
+                                from datetime import timedelta
+                                approval.timeout_at = datetime.now(
+                                    timezone.utc
+                                ) + timedelta(hours=config["timeout_hours"])
+                            session.add(approval)
+                            run = await session.get(Run, uuid.UUID(context.run_id))
+                            if run:
+                                run.status = RunStatus.AWAITING_APPROVAL
+                            await session.commit()
+                            await session.refresh(approval)
+                            approval_id = str(approval.id)
+                        raise WorkflowPaused(
+                            approval_id=approval_id, run_id=context.run_id
+                        )
+
+                    # Use modified output (after redactions)
+                    output = eval_result.modified_output
+            except (StepBlocked, WorkflowPaused):
+                raise
+            except Exception as e:
+                logger.warning(f"Policy evaluation failed for step '{step.id}': {e}")
+
         return StepResult(
             step_id=step.id,
             parallel_index=parallel_index,
@@ -550,6 +631,9 @@ async def _execute_step_once(
             status="completed",
             attempt=attempt,
         )
+
+    except (StepBlocked, WorkflowPaused):
+        raise
 
     except (SandstormError, Exception) as e:
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
@@ -878,6 +962,50 @@ async def execute_workflow(
         context.step_outputs = initial_context.get("step_outputs", {})
         context.costs = initial_context.get("costs", [])
 
+    # Resolve global policies from workflow definition
+    global_policies = []
+    if hasattr(workflow, "policies") and workflow.policies:
+        try:
+            from sandcastle.engine.policy import (
+                PolicyAction as PEPolicyAction,
+            )
+            from sandcastle.engine.policy import (
+                PolicyDefinition as PEPolicyDefinition,
+            )
+            from sandcastle.engine.policy import (
+                PolicyPattern as PEPolicyPattern,
+            )
+            from sandcastle.engine.policy import (
+                PolicyTrigger as PEPolicyTrigger,
+            )
+            for gp in workflow.policies:
+                # Convert DAG dataclasses to policy engine dataclasses
+                pe_trigger = PEPolicyTrigger(
+                    type=gp.trigger.type,
+                    patterns=[
+                        PEPolicyPattern(type=p.type, pattern=p.pattern)
+                        for p in (gp.trigger.patterns or [])
+                    ] if gp.trigger.patterns else None,
+                    expression=gp.trigger.expression,
+                )
+                pe_action = PEPolicyAction(
+                    type=gp.action.type,
+                    replacement=gp.action.replacement,
+                    apply_to=gp.action.apply_to,
+                    approval_config=gp.action.approval_config,
+                    message=gp.action.message,
+                    notify=gp.action.notify,
+                )
+                global_policies.append(PEPolicyDefinition(
+                    id=gp.id,
+                    trigger=pe_trigger,
+                    action=pe_action,
+                    description=gp.description,
+                    severity=gp.severity,
+                ))
+        except Exception as e:
+            logger.warning(f"Could not load global policies: {e}")
+
     sandbox = SandstormClient(
         base_url=workflow.sandstorm_url or settings.sandstorm_url,
         anthropic_api_key=settings.anthropic_api_key,
@@ -934,6 +1062,51 @@ async def execute_workflow(
 
                 step = workflow.get_step(step_id)
                 overrides = (step_overrides or {}).get(step_id)
+
+                # Resolve policies: step-level overrides or global policies
+                if global_policies and step.policies is None:
+                    # No step-level override -> apply all global policies
+                    step = StepDefinition(
+                        id=step.id,
+                        prompt=step.prompt,
+                        depends_on=step.depends_on,
+                        model=step.model,
+                        max_turns=step.max_turns,
+                        timeout=step.timeout,
+                        parallel_over=step.parallel_over,
+                        output_schema=step.output_schema,
+                        retry=step.retry,
+                        fallback=step.fallback,
+                        type=step.type,
+                        approval_config=step.approval_config,
+                        autopilot=step.autopilot,
+                        sub_workflow=step.sub_workflow,
+                        policies=global_policies,
+                    )
+                elif global_policies and step.policies:
+                    # Step has explicit policy list -> resolve refs against globals
+                    try:
+                        from sandcastle.engine.policy import resolve_step_policies
+                        resolved = resolve_step_policies(step.policies, global_policies)
+                        step = StepDefinition(
+                            id=step.id,
+                            prompt=step.prompt,
+                            depends_on=step.depends_on,
+                            model=step.model,
+                            max_turns=step.max_turns,
+                            timeout=step.timeout,
+                            parallel_over=step.parallel_over,
+                            output_schema=step.output_schema,
+                            retry=step.retry,
+                            fallback=step.fallback,
+                            type=step.type,
+                            approval_config=step.approval_config,
+                            autopilot=step.autopilot,
+                            sub_workflow=step.sub_workflow,
+                            policies=resolved,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not resolve step policies: {e}")
 
                 # Handle approval gate steps
                 if step.type == "approval":
@@ -1133,6 +1306,18 @@ async def execute_workflow(
             completed_at=None,
         )
 
+    except StepBlocked as e:
+        completed_at = datetime.now(timezone.utc)
+        return WorkflowResult(
+            run_id=run_id,
+            outputs=context.step_outputs,
+            total_cost_usd=context.total_cost,
+            status="failed",
+            error=f"Policy blocked: {e}",
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+
     except StepExecutionError as e:
         completed_at = datetime.now(timezone.utc)
         return WorkflowResult(
@@ -1160,6 +1345,33 @@ async def execute_workflow(
 
     finally:
         await sandbox.close()
+
+
+async def _save_policy_violations(
+    run_id: str,
+    step_id: str,
+    violations: list,
+) -> None:
+    """Save policy violations to the database."""
+    try:
+        from sandcastle.models.db import PolicyViolation as DBPolicyViolation
+        from sandcastle.models.db import async_session
+
+        async with async_session() as session:
+            for v in violations:
+                pv = DBPolicyViolation(
+                    run_id=uuid.UUID(run_id),
+                    step_id=step_id,
+                    policy_id=v.policy_id,
+                    severity=v.severity,
+                    trigger_details=v.trigger_details,
+                    action_taken=v.action_taken,
+                    output_modified=v.output_modified,
+                )
+                session.add(pv)
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Could not save policy violations for {step_id}: {e}")
 
 
 async def _send_to_dead_letter(
@@ -1192,6 +1404,15 @@ async def _send_to_dead_letter(
 
 class StepExecutionError(Exception):
     """A step failed and the workflow should abort."""
+
+
+class StepBlocked(Exception):
+    """A step was blocked by a policy."""
+
+    def __init__(self, step_id: str, reason: str):
+        self.step_id = step_id
+        self.reason = reason
+        super().__init__(f"Step '{step_id}' blocked: {reason}")
 
 
 class WorkflowPaused(Exception):

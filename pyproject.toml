@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "aioboto3>=13",
     "python-dotenv>=1.0",
+    "simpleeval>=1.0",
 ]
 
 [project.optional-dependencies]

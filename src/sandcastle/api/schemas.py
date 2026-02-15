@@ -297,5 +297,28 @@ class ApprovalResponse(BaseModel):
     resolved_at: datetime | None = None
 
 
+class PolicyViolationResponse(BaseModel):
+    """A single policy violation record."""
+
+    id: str
+    run_id: str
+    step_id: str
+    policy_id: str
+    severity: str = "medium"
+    trigger_details: str | None = None
+    action_taken: str
+    output_modified: bool = False
+    created_at: datetime | None = None
+
+
+class PolicyViolationStatsResponse(BaseModel):
+    """Aggregated policy violation statistics."""
+
+    total_violations_30d: int = 0
+    violations_by_severity: dict[str, int] = Field(default_factory=dict)
+    violations_by_policy: dict[str, int] = Field(default_factory=dict)
+    violations_by_day: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()

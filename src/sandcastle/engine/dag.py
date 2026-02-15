@@ -99,6 +99,46 @@ class SubWorkflowConfig:
 
 
 @dataclass
+class PolicyPattern:
+    """A pattern to match in step output."""
+
+    type: str  # "email", "phone", "ssn", "credit_card", "regex"
+    pattern: str | None = None
+
+
+@dataclass
+class PolicyTrigger:
+    """When to evaluate a policy."""
+
+    type: str  # "output_contains", "condition"
+    patterns: list[PolicyPattern] | None = None
+    expression: str | None = None
+
+
+@dataclass
+class PolicyAction:
+    """What to do when a policy triggers."""
+
+    type: str  # "redact", "inject_approval", "alert", "block", "log"
+    replacement: str | None = None
+    apply_to: list[str] | None = None
+    approval_config: dict | None = None
+    message: str | None = None
+    notify: list[str] | None = None
+
+
+@dataclass
+class PolicyDefinition:
+    """A declarative policy rule."""
+
+    id: str
+    trigger: PolicyTrigger
+    action: PolicyAction
+    description: str | None = None
+    severity: str = "medium"
+
+
+@dataclass
 class StepDefinition:
     """Definition of a single workflow step."""
 
@@ -116,6 +156,7 @@ class StepDefinition:
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
+    policies: list[str | PolicyDefinition] | None = None  # Policy refs or inline defs
 
 
 @dataclass
@@ -132,6 +173,7 @@ class WorkflowDefinition:
     on_complete: CompletionConfig | None = None
     on_failure: FailureConfig | None = None
     schedule: str | None = None
+    policies: list[PolicyDefinition] = field(default_factory=list)
 
     def get_step(self, step_id: str) -> StepDefinition:
         """Get a step by its ID."""
@@ -239,6 +281,68 @@ def _parse_sub_workflow_config(data: dict | None) -> SubWorkflowConfig | None:
     )
 
 
+def _parse_policy_pattern(data: dict) -> PolicyPattern:
+    """Parse a single policy pattern from YAML data."""
+    return PolicyPattern(
+        type=data.get("type", "regex"),
+        pattern=data.get("pattern"),
+    )
+
+
+def _parse_policy_trigger(data: dict) -> PolicyTrigger:
+    """Parse a policy trigger from YAML data."""
+    patterns = None
+    if "patterns" in data:
+        patterns = [_parse_policy_pattern(p) for p in data["patterns"]]
+    return PolicyTrigger(
+        type=data.get("type", "condition"),
+        patterns=patterns,
+        expression=data.get("expression"),
+    )
+
+
+def _parse_policy_action(data: dict) -> PolicyAction:
+    """Parse a policy action from YAML data."""
+    return PolicyAction(
+        type=data.get("type", "log"),
+        replacement=data.get("replacement"),
+        apply_to=data.get("apply_to"),
+        approval_config=data.get("approval_config"),
+        message=data.get("message"),
+        notify=data.get("notify"),
+    )
+
+
+def _parse_policy(data: dict) -> PolicyDefinition:
+    """Parse a single policy definition from YAML data."""
+    return PolicyDefinition(
+        id=data["id"],
+        trigger=_parse_policy_trigger(data.get("trigger", {})),
+        action=_parse_policy_action(data.get("action", {})),
+        description=data.get("description"),
+        severity=data.get("severity", "medium"),
+    )
+
+
+def _parse_step_policies(
+    data: list | None,
+) -> list[str | PolicyDefinition] | None:
+    """Parse step-level policies (can be references or inline definitions)."""
+    if data is None:
+        return None
+    result: list[str | PolicyDefinition] = []
+    for item in data:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict) and "id" in item:
+            result.append(_parse_policy(item))
+        elif isinstance(item, dict):
+            # Inline policy without explicit id
+            item.setdefault("id", f"inline-{len(result)}")
+            result.append(_parse_policy(item))
+    return result
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -267,6 +371,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         approval_config=_parse_approval_config(data.get("approval_config")),
         autopilot=_parse_autopilot_config(data.get("autopilot")),
         sub_workflow=_parse_sub_workflow_config(data.get("sub_workflow")),
+        policies=_parse_step_policies(data.get("policies")),
     )
 
 
@@ -307,6 +412,9 @@ def parse(yaml_path: str) -> WorkflowDefinition:
 
     schedule = data.get("schedule")
 
+    # Parse global policies
+    global_policies = [_parse_policy(p) for p in data.get("policies", [])]
+
     return WorkflowDefinition(
         name=data["name"],
         description=data.get("description", ""),
@@ -318,6 +426,7 @@ def parse(yaml_path: str) -> WorkflowDefinition:
         on_complete=on_complete,
         on_failure=on_failure,
         schedule=schedule,
+        policies=global_policies,
     )
 
 
@@ -354,6 +463,9 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
             webhook=_resolve_env_vars(of["webhook"]) if of.get("webhook") else None,
         )
 
+    # Parse global policies
+    global_policies = [_parse_policy(p) for p in data.get("policies", [])]
+
     return WorkflowDefinition(
         name=data["name"],
         description=data.get("description", ""),
@@ -365,6 +477,7 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
         on_complete=on_complete,
         on_failure=on_failure,
         schedule=data.get("schedule"),
+        policies=global_policies,
     )
 
 
