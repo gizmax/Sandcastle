@@ -1,6 +1,6 @@
 [project]
 name = "sandcastle"
-version = "0.2.0"
+version = "0.3.0"
 description = "Production-ready workflow orchestrator built on Sandstorm"
 requires-python = ">=3.11"
 license = "MIT"
