@@ -5,7 +5,7 @@
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-164%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -17,80 +17,6 @@
 <p align="center">
   <a href="https://gizmax.github.io/Sandcastle/"><strong>Try the Live Demo (no backend needed)</strong></a>
 </p>
-
----
-
-## What's New in v0.2.0
-
-### Human Approval Gates
-Pause any workflow at a critical step and wait for human review before continuing. Define approval steps in YAML, set timeouts with auto-actions (skip or abort), and approve/reject/skip via API or dashboard. Reviewers can edit the request data before approving. Webhook notifications fire when approval is needed.
-
-```yaml
-steps:
-  - id: "generate-report"
-    prompt: "Generate quarterly report..."
-
-  - id: "review"
-    type: approval
-    depends_on: ["generate-report"]
-    approval_config:
-      message: "Review the generated report before sending to client"
-      timeout_hours: 24
-      on_timeout: abort
-      allow_edit: true
-
-  - id: "send"
-    depends_on: ["review"]
-    prompt: "Send the approved report to {input.client_email}"
-```
-
-### Self-Optimizing Workflows (AutoPilot)
-A/B test different models, prompts, and configurations for any step. Sandcastle automatically runs variants, evaluates quality (via LLM judge or schema completeness), tracks cost and latency, and picks the best-performing variant. Supports quality, cost, latency, and pareto optimization targets.
-
-```yaml
-steps:
-  - id: "enrich"
-    prompt: "Enrich this lead: {input.company}"
-    autopilot:
-      enabled: true
-      optimize_for: quality
-      min_samples: 20
-      auto_deploy: true
-      variants:
-        - id: fast
-          model: haiku
-        - id: quality
-          model: opus
-          prompt: "Thoroughly research and enrich: {input.company}"
-      evaluation:
-        method: llm_judge
-        criteria: "Rate completeness, accuracy, and depth 1-10"
-```
-
-### Hierarchical Workflows (Workflow-as-Step)
-Call one workflow from another. Parent workflows can pass data to children via input mapping, collect results via output mapping, and fan out over lists with configurable concurrency. Depth limiting prevents runaway recursion.
-
-```yaml
-steps:
-  - id: "find-leads"
-    prompt: "Find 10 leads in {input.industry}"
-
-  - id: "enrich-each"
-    type: sub_workflow
-    depends_on: ["find-leads"]
-    sub_workflow:
-      workflow: lead-enrichment
-      input_mapping:
-        company: steps.find-leads.output.company
-      output_mapping:
-        result: enriched_data
-      max_concurrent: 5
-      timeout: 600
-
-  - id: "summarize"
-    depends_on: ["enrich-each"]
-    prompt: "Summarize enrichment results: {steps.enrich-each.output}"
-```
 
 ---
 
@@ -141,6 +67,283 @@ Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everythin
 | **Human approval gates** | - | Yes |
 | **Self-optimizing workflows (AutoPilot)** | - | Yes |
 | **Hierarchical workflows (workflow-as-step)** | - | Yes |
+| **Policy engine (PII redaction, secret guard)** | - | Yes |
+| **Cost-latency optimizer (SLO-based routing)** | - | Yes |
+
+---
+
+## Workflow Engine
+
+Define multi-step agent pipelines as YAML. Each step can run in parallel, depend on previous steps, pass data forward, and use different models.
+
+### Example: lead-enrichment.yaml
+
+```yaml
+name: "Lead Enrichment"
+description: "Scrape, enrich, and score leads for sales outreach."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "scrape"
+    prompt: |
+      Visit {input.target_url} and extract:
+      company name, employee count, main product, contact info.
+      Return as structured JSON.
+    output_schema:
+      type: object
+      properties:
+        company_name: { type: string }
+        employees: { type: integer }
+        product: { type: string }
+        contact_email: { type: string }
+
+  - id: "enrich"
+    depends_on: ["scrape"]
+    prompt: |
+      Given this company data: {steps.scrape.output}
+      Research: revenue, industry, key decision makers, recent news.
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: "score"
+    depends_on: ["enrich"]
+    prompt: |
+      Score this lead 1-100 for B2B SaaS potential.
+      Based on: {steps.enrich.output}
+    model: haiku
+
+on_complete:
+  storage_path: "leads/{run_id}/result.json"
+```
+
+### Parallel Execution
+
+Steps at the same DAG layer run concurrently. Use `parallel_over` to fan out over a list:
+
+```yaml
+steps:
+  - id: "fetch-competitors"
+    prompt: "Identify top 3 competitors for {input.company_url}."
+
+  - id: "analyze"
+    depends_on: ["fetch-competitors"]
+    parallel_over: "steps.fetch-competitors.output.competitors"
+    prompt: "Analyze {input._item} for pricing and feature changes."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "summarize"
+    depends_on: ["analyze"]
+    prompt: "Create executive summary from: {steps.analyze.output}"
+```
+
+---
+
+## Human Approval Gates
+
+Pause any workflow at a critical step and wait for human review before continuing. Define approval steps in YAML, set timeouts with auto-actions (skip or abort), and approve/reject/skip via API or dashboard. Reviewers can edit the request data before approving. Webhook notifications fire when approval is needed.
+
+```yaml
+steps:
+  - id: "generate-report"
+    prompt: "Generate quarterly report..."
+
+  - id: "review"
+    type: approval
+    depends_on: ["generate-report"]
+    approval_config:
+      message: "Review the generated report before sending to client"
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  - id: "send"
+    depends_on: ["review"]
+    prompt: "Send the approved report to {input.client_email}"
+```
+
+---
+
+## Self-Optimizing Workflows (AutoPilot)
+
+A/B test different models, prompts, and configurations for any step. Sandcastle automatically runs variants, evaluates quality (via LLM judge or schema completeness), tracks cost and latency, and picks the best-performing variant. Supports quality, cost, latency, and pareto optimization targets.
+
+```yaml
+steps:
+  - id: "enrich"
+    prompt: "Enrich this lead: {input.company}"
+    autopilot:
+      enabled: true
+      optimize_for: quality
+      min_samples: 20
+      auto_deploy: true
+      variants:
+        - id: fast
+          model: haiku
+        - id: quality
+          model: opus
+          prompt: "Thoroughly research and enrich: {input.company}"
+      evaluation:
+        method: llm_judge
+        criteria: "Rate completeness, accuracy, and depth 1-10"
+```
+
+---
+
+## Hierarchical Workflows (Workflow-as-Step)
+
+Call one workflow from another. Parent workflows can pass data to children via input mapping, collect results via output mapping, and fan out over lists with configurable concurrency. Depth limiting prevents runaway recursion.
+
+```yaml
+steps:
+  - id: "find-leads"
+    prompt: "Find 10 leads in {input.industry}"
+
+  - id: "enrich-each"
+    type: sub_workflow
+    depends_on: ["find-leads"]
+    sub_workflow:
+      workflow: lead-enrichment
+      input_mapping:
+        company: steps.find-leads.output.company
+      output_mapping:
+        result: enriched_data
+      max_concurrent: 5
+      timeout: 600
+
+  - id: "summarize"
+    depends_on: ["enrich-each"]
+    prompt: "Summarize enrichment results: {steps.enrich-each.output}"
+```
+
+---
+
+## Policy Engine
+
+Declarative rules evaluated against every step output. Detect PII, block secrets, inject dynamic approval gates, or alert on suspicious patterns - all defined in YAML. Policies can be global (apply to all steps) or scoped per step.
+
+```yaml
+policies:
+  - id: pii-redact
+    description: "Redact personal data from outputs"
+    severity: high
+    trigger:
+      type: pattern
+      patterns:
+        - type: builtin
+          name: email
+        - type: builtin
+          name: phone
+        - type: builtin
+          name: ssn
+    action:
+      type: redact
+
+  - id: cost-guard
+    description: "Block steps that are too expensive"
+    severity: critical
+    trigger:
+      type: condition
+      expression: "step_cost > 2.0"
+    action:
+      type: block
+      message: "Step exceeded $2 cost limit"
+
+steps:
+  - id: "research"
+    prompt: "Research {input.company}"
+    policies: ["pii-redact", "cost-guard"]
+
+  - id: "internal-only"
+    prompt: "Prepare internal report..."
+    policies: []  # skip all policies for this step
+```
+
+Built-in patterns for email, phone, SSN, and credit card numbers. Custom regex patterns supported. Condition triggers use safe expression evaluation - no arbitrary code execution.
+
+---
+
+## Cost-Latency Optimizer
+
+SLO-based dynamic model routing. Define quality, cost, and latency constraints per step, and Sandcastle automatically selects the best model from a pool based on historical performance data. Budget pressure detection forces cheaper models when spending approaches limits.
+
+```yaml
+steps:
+  - id: "enrich"
+    prompt: "Enrich data for {input.company}"
+    slo:
+      quality_min: 0.7
+      cost_max_usd: 0.15
+      latency_max_seconds: 60
+      optimize_for: cost
+    model_pool:
+      - id: fast-cheap
+        model: haiku
+        max_turns: 5
+      - id: balanced
+        model: sonnet
+        max_turns: 10
+      - id: thorough
+        model: opus
+        max_turns: 20
+
+  - id: "classify"
+    prompt: "Classify the enriched data"
+    slo:
+      quality_min: 0.8
+      optimize_for: quality
+    # No model_pool - auto-generates haiku/sonnet/opus pool
+```
+
+The optimizer scores each model option across multiple objectives, filters out options that violate SLO constraints, and tracks confidence based on sample count. Cold starts default to a balanced middle option until enough data is collected.
+
+---
+
+## Run Time Machine
+
+Every completed step saves a checkpoint. When something goes wrong - or you just want to try a different approach - you don't have to start over.
+
+**Replay** - Re-run from any step. Sandcastle loads the checkpoint from just before that step and continues execution. All prior steps are skipped, their outputs restored from the checkpoint. Costs only what's re-executed.
+
+**Fork** - Same as replay, but you change something first. Swap the model from Haiku to Opus. Rewrite the prompt. Adjust max_turns. The new run branches off with your changes and Sandcastle tracks the full lineage.
+
+```bash
+# Replay from the "enrich" step
+curl -X POST http://localhost:8080/runs/{run_id}/replay \
+  -H "Content-Type: application/json" \
+  -d '{ "from_step": "enrich" }'
+
+# Fork with a different model
+curl -X POST http://localhost:8080/runs/{run_id}/fork \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_step": "score",
+    "changes": { "model": "opus", "prompt": "Score more conservatively..." }
+  }'
+```
+
+---
+
+## Budget Guardrails
+
+Set a spending limit per run, per tenant, or as a global default. Sandcastle checks the budget after every step:
+
+- **80%** - Warning logged, execution continues
+- **100%** - Hard stop, status = `budget_exceeded`
+
+Budget resolution order: request `max_cost_usd` > tenant API key limit > `DEFAULT_MAX_COST_USD` env var.
+
+```bash
+curl -X POST http://localhost:8080/workflows/run \
+  -d '{ "workflow": "enrichment", "input": {...}, "max_cost_usd": 0.50 }'
+```
 
 ---
 
@@ -235,9 +438,9 @@ Failed steps that exhausted all retries land here. Retry triggers a full re-run.
   <img src="docs/screenshots/dead-letter.png" alt="Dead Letter Queue" width="720" />
 </p>
 
-### Approval Gates (v0.2.0)
+### Approval Gates
 
-**New in v0.2.0.** Any workflow step can pause execution and wait for human review before continuing. The approvals page shows all pending, approved, rejected, and skipped gates with filterable tabs. Each pending approval has Approve, Reject, and Skip buttons. Configurable timeouts auto-resolve approvals if nobody responds. Webhook notifications fire when approval is needed.
+Any workflow step can pause execution and wait for human review before continuing. The approvals page shows all pending, approved, rejected, and skipped gates with filterable tabs. Each pending approval has Approve, Reject, and Skip buttons. Configurable timeouts auto-resolve approvals if nobody responds. Webhook notifications fire when approval is needed.
 
 <p align="center">
   <img src="docs/screenshots/approvals.png" alt="Approval Gates" width="720" />
@@ -253,9 +456,9 @@ Click any approval to expand it and see the full request data the agent produced
 </p>
 </details>
 
-### AutoPilot - Self-Optimizing Workflows (v0.2.0)
+### AutoPilot - Self-Optimizing Workflows
 
-**New in v0.2.0.** A/B test different models, prompts, and configurations on any workflow step. Sandcastle automatically runs variants, evaluates quality (LLM judge or schema completeness), and tracks cost vs latency vs quality. Stats cards show active experiments, total samples collected, average quality improvement, and total cost savings. Once enough samples are collected, the best-performing variant is auto-deployed.
+A/B test different models, prompts, and configurations on any workflow step. Sandcastle automatically runs variants, evaluates quality (LLM judge or schema completeness), and tracks cost vs latency vs quality. Stats cards show active experiments, total samples collected, average quality improvement, and total cost savings. Once enough samples are collected, the best-performing variant is auto-deployed.
 
 <p align="center">
   <img src="docs/screenshots/autopilot.png" alt="AutoPilot Experiments" width="720" />
@@ -270,188 +473,6 @@ Expand an experiment to see the variant comparison table. Each variant shows sam
   <img src="docs/screenshots/autopilot-detail.png" alt="AutoPilot Variant Comparison" width="720" />
 </p>
 </details>
-
----
-
-## Run Time Machine
-
-The killer feature. Every completed step saves a checkpoint. When something goes wrong - or you just want to try a different approach - you don't have to start over.
-
-**Replay** - Re-run from any step. Sandcastle loads the checkpoint from just before that step and continues execution. All prior steps are skipped, their outputs restored from the checkpoint. Costs only what's re-executed.
-
-**Fork** - Same as replay, but you change something first. Swap the model from Haiku to Opus. Rewrite the prompt. Adjust max_turns. The new run branches off with your changes and Sandcastle tracks the full lineage.
-
-```bash
-# Replay from the "enrich" step
-curl -X POST http://localhost:8080/runs/{run_id}/replay \
-  -H "Content-Type: application/json" \
-  -d '{ "from_step": "enrich" }'
-
-# Fork with a different model
-curl -X POST http://localhost:8080/runs/{run_id}/fork \
-  -H "Content-Type: application/json" \
-  -d '{
-    "from_step": "score",
-    "changes": { "model": "opus", "prompt": "Score more conservatively..." }
-  }'
-```
-
----
-
-## Budget Guardrails
-
-Set a spending limit per run, per tenant, or as a global default. Sandcastle checks the budget after every step:
-
-- **80%** - Warning logged, execution continues
-- **100%** - Hard stop, status = `budget_exceeded`
-
-Budget resolution order: request `max_cost_usd` > tenant API key limit > `DEFAULT_MAX_COST_USD` env var.
-
-```bash
-curl -X POST http://localhost:8080/workflows/run \
-  -d '{ "workflow": "enrichment", "input": {...}, "max_cost_usd": 0.50 }'
-```
-
----
-
-## Quickstart
-
-### Prerequisites
-
-Everything Sandstorm needs, plus:
-- **Redis** - job queue and scheduling
-- **PostgreSQL** - run history, API keys, dead letter queue
-- **S3-compatible storage** - persistent agent data (MinIO for local dev)
-
-### Setup
-
-```bash
-git clone https://github.com/gizmax/Sandcastle.git
-cd Sandcastle
-
-cp .env.example .env   # configure your keys
-
-# Install dependencies
-uv sync
-
-# Start infrastructure
-docker-compose up -d redis postgres minio
-
-# Run database migrations
-uv run alembic upgrade head
-
-# Start the API server
-uv run python -m sandcastle serve
-
-# Start the async worker (separate terminal)
-uv run python -m sandcastle worker
-
-# Start the dashboard (separate terminal)
-cd dashboard && npm install && npm run dev
-```
-
-### Your First Workflow
-
-```bash
-# Run a workflow asynchronously
-curl -X POST http://localhost:8080/workflows/run \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow": "lead-enrichment",
-    "input": {
-      "target_url": "https://example.com",
-      "max_depth": 3
-    },
-    "callback_url": "https://your-app.com/api/done"
-  }'
-
-# Response: { "data": { "run_id": "a1b2c3d4-...", "status": "queued" } }
-```
-
-Or run synchronously and wait for the result:
-
-```bash
-curl -X POST http://localhost:8080/workflows/run/sync \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow": "lead-enrichment",
-    "input": { "target_url": "https://example.com" }
-  }'
-```
-
----
-
-## Workflow Engine
-
-Define multi-step agent pipelines as YAML. Each step can run in parallel, depend on previous steps, pass data forward, and use different models.
-
-### Example: lead-enrichment.yaml
-
-```yaml
-name: "Lead Enrichment"
-description: "Scrape, enrich, and score leads for sales outreach."
-sandstorm_url: "${SANDSTORM_URL}"
-default_model: sonnet
-default_max_turns: 10
-default_timeout: 300
-
-steps:
-  - id: "scrape"
-    prompt: |
-      Visit {input.target_url} and extract:
-      company name, employee count, main product, contact info.
-      Return as structured JSON.
-    output_schema:
-      type: object
-      properties:
-        company_name: { type: string }
-        employees: { type: integer }
-        product: { type: string }
-        contact_email: { type: string }
-
-  - id: "enrich"
-    depends_on: ["scrape"]
-    prompt: |
-      Given this company data: {steps.scrape.output}
-      Research: revenue, industry, key decision makers, recent news.
-    retry:
-      max_attempts: 3
-      backoff: exponential
-      on_failure: abort
-
-  - id: "score"
-    depends_on: ["enrich"]
-    prompt: |
-      Score this lead 1-100 for B2B SaaS potential.
-      Based on: {steps.enrich.output}
-    model: haiku
-
-on_complete:
-  storage_path: "leads/{run_id}/result.json"
-```
-
-### Parallel Execution
-
-Steps at the same DAG layer run concurrently. Use `parallel_over` to fan out over a list:
-
-```yaml
-steps:
-  - id: "fetch-competitors"
-    prompt: "Identify top 3 competitors for {input.company_url}."
-
-  - id: "analyze"
-    depends_on: ["fetch-competitors"]
-    parallel_over: "steps.fetch-competitors.output.competitors"
-    prompt: "Analyze {input._item} for pricing and feature changes."
-    retry:
-      max_attempts: 2
-      backoff: exponential
-      on_failure: skip
-
-  - id: "summarize"
-    depends_on: ["analyze"]
-    prompt: "Create executive summary from: {steps.analyze.output}"
-```
 
 ---
 
@@ -498,7 +519,7 @@ steps:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/approvals` | List pending approvals (filterable by status) |
+| `GET` | `/approvals` | List approvals (filterable by status) |
 | `GET` | `/approvals/{id}` | Get approval detail with request data |
 | `POST` | `/approvals/{id}/approve` | Approve (optional edit + comment) |
 | `POST` | `/approvals/{id}/reject` | Reject and fail the run |
@@ -513,6 +534,22 @@ steps:
 | `POST` | `/autopilot/experiments/{id}/deploy` | Manually deploy a winning variant |
 | `POST` | `/autopilot/experiments/{id}/reset` | Reset experiment |
 | `GET` | `/autopilot/stats` | Savings and quality overview |
+
+### Policy Engine
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/violations` | List policy violations (filterable) |
+| `GET` | `/violations/stats` | Violation stats by severity, policy, day |
+| `GET` | `/runs/{id}/violations` | Violations for a specific run |
+
+### Optimizer
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/optimizer/decisions` | List routing decisions |
+| `GET` | `/optimizer/decisions/{run_id}` | Decisions for a specific run |
+| `GET` | `/optimizer/stats` | Model distribution, confidence, savings |
 
 ### API Keys
 
@@ -602,6 +639,13 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
      Approve/          |                        |
      Reject/     Evaluate quality               |
      Skip              |                        |
+                 [Policy Engine]                 |
+                 PII redact /                    |
+                 block / alert                   |
+                       |                        |
+                 [SLO Optimizer]                |
+                 Route to best                  |
+                 model by SLO                   |
                        +-----------+------------+
                                    |
                   +----------------+-----------------+
@@ -610,6 +654,8 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
            (runs, keys,       (job queue,       (persistent
             approvals,        cancel flags,      storage)
             experiments,      scheduling)
+            violations,
+            routing,
             checkpoints)
                                    |
                            +-------+--------+
@@ -631,6 +677,73 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react |
 | Charts | Recharts |
+
+---
+
+## Quickstart
+
+### Prerequisites
+
+Everything Sandstorm needs, plus:
+- **Redis** - job queue and scheduling
+- **PostgreSQL** - run history, API keys, dead letter queue
+- **S3-compatible storage** - persistent agent data (MinIO for local dev)
+
+### Setup
+
+```bash
+git clone https://github.com/gizmax/Sandcastle.git
+cd Sandcastle
+
+cp .env.example .env   # configure your keys
+
+# Install dependencies
+uv sync
+
+# Start infrastructure
+docker-compose up -d redis postgres minio
+
+# Run database migrations
+uv run alembic upgrade head
+
+# Start the API server
+uv run python -m sandcastle serve
+
+# Start the async worker (separate terminal)
+uv run python -m sandcastle worker
+
+# Start the dashboard (separate terminal)
+cd dashboard && npm install && npm run dev
+```
+
+### Your First Workflow
+
+```bash
+# Run a workflow asynchronously
+curl -X POST http://localhost:8080/workflows/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "lead-enrichment",
+    "input": {
+      "target_url": "https://example.com",
+      "max_depth": 3
+    },
+    "callback_url": "https://your-app.com/api/done"
+  }'
+
+# Response: { "data": { "run_id": "a1b2c3d4-...", "status": "queued" } }
+```
+
+Or run synchronously and wait for the result:
+
+```bash
+curl -X POST http://localhost:8080/workflows/run/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "lead-enrichment",
+    "input": { "target_url": "https://example.com" }
+  }'
+```
 
 ---
 
@@ -674,7 +787,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (120 passing)
+# Run tests (164 passing)
 uv run pytest
 
 # Type check backend
