@@ -127,12 +127,12 @@ Grid of workflow cards with step count, descriptions, and quick-action buttons. 
   <img src="docs/screenshots/workflows.png" alt="Workflows" width="720" />
 </p>
 
-### Visual Workflow Builder
+### Visual DAG Preview
 
-Drag-and-drop workflow editor with a live YAML preview. Add steps, configure prompts, models, retries, and connect them visually. Export as YAML or run directly.
+Click "DAG" on any workflow card to expand an interactive graph of all steps, their dependencies, and assigned models. Powered by React Flow.
 
 <p align="center">
-  <img src="docs/screenshots/workflow-builder.png" alt="Workflow Builder" width="720" />
+  <img src="docs/screenshots/dag-preview.png" alt="DAG Preview" width="720" />
 </p>
 
 ### Schedules
