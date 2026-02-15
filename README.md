@@ -422,6 +422,14 @@ Click "DAG" on any workflow card to expand an interactive graph of all steps, th
   <img src="docs/screenshots/dag-preview.png" alt="DAG Preview" width="720" />
 </p>
 
+### Workflow Builder
+
+Visual drag-and-drop editor for building workflows. Add steps, connect dependencies, configure models and timeouts, then preview the generated YAML. Editing an existing workflow loads its steps and edges into the canvas.
+
+<p align="center">
+  <img src="docs/screenshots/workflow-builder.png" alt="Workflow Builder" width="720" />
+</p>
+
 ### Schedules
 
 Cron-based scheduling with human-readable descriptions, enable/disable toggle, and links to the last triggered run.
@@ -471,6 +479,42 @@ Expand an experiment to see the variant comparison table. Each variant shows sam
 
 <p align="center">
   <img src="docs/screenshots/autopilot-detail.png" alt="AutoPilot Variant Comparison" width="720" />
+</p>
+</details>
+
+### Policy Violations
+
+Every policy trigger is logged with severity, action taken, and full context. Stats cards show 30-day totals, critical and high counts, and the most-triggered policy. Filter by severity (Critical, High, Medium, Low). Color-coded badges show what action was taken - blocked, redacted, flagged, or logged. Green checkmark indicates the output was automatically modified.
+
+<p align="center">
+  <img src="docs/screenshots/violations.png" alt="Policy Violations" width="720" />
+</p>
+
+<details>
+<summary>Expanded with trigger details</summary>
+
+Click any violation to expand and see the full trigger details - what pattern matched, what was detected, and what action was taken. Includes links to the originating run and step for quick investigation.
+
+<p align="center">
+  <img src="docs/screenshots/violations-detail.png" alt="Violation Detail" width="720" />
+</p>
+</details>
+
+### Cost-Latency Optimizer
+
+Real-time view of the optimizer's model routing decisions. Stats cards show total decisions, average confidence, top model with distribution percentage, and estimated savings. Each decision shows the selected model as a color-coded badge, a confidence bar, and the reasoning. Budget pressure indicators pulse red when spending approaches limits.
+
+<p align="center">
+  <img src="docs/screenshots/optimizer.png" alt="Cost-Latency Optimizer" width="720" />
+</p>
+
+<details>
+<summary>Expanded with alternatives and SLO config</summary>
+
+Expand a decision to see the full alternatives table with scores, and the SLO configuration that drove the selection. The "SELECTED" badge highlights which model won.
+
+<p align="center">
+  <img src="docs/screenshots/optimizer-detail.png" alt="Optimizer Decision Detail" width="720" />
 </p>
 </details>
 
