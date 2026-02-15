@@ -3,7 +3,7 @@
 
 ## OVERVIEW
 
-Sandcastle is a workflow orchestrator for AI agents. It uses Sandstorm
+Sandcastle is a workflow orchestrator for autonomous agents. It uses Sandstorm
 (https://github.com/tomascupr/sandstorm) as the execution engine -every
 agent step is a Sandstorm API call. Sandcastle adds: DAG-based workflow
 orchestration, persistent storage between runs, webhook callbacks,

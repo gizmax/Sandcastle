@@ -1,6 +1,6 @@
 # 🏰 Sandcastle
 
-**Production-ready AI agent workflows. Built on the shoulders of [Sandstorm](https://github.com/tomascupr/sandstorm).**
+**Production-ready workflow orchestrator. Built on the shoulders of [Sandstorm](https://github.com/tomascupr/sandstorm).**
 
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -10,7 +10,7 @@
 
 ## Why Sandcastle?
 
-[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full AI agent, completely sandboxed. It nails the core problem: giving AI agents full system access without worrying about what they do with it. We love it. We use it. You should too.
+[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full agent, completely sandboxed. It nails the core problem: giving agents full system access without worrying about what they do with it. We love it. We use it. You should too.
 
 But sometimes you need to **build something lasting from the storm.**
 
@@ -318,7 +318,7 @@ Your App ──POST /workflows/run──▶ Sandcastle API
 
 ## Acknowledgements
 
-Sandcastle would not exist without [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr). Sandstorm is the core engine that powers every agent run in Sandcastle - we didn't reinvent it, we built on it. If you haven't already, go star the repo. It's one of the cleanest abstractions for sandboxed AI agent execution out there.
+Sandcastle would not exist without [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr). Sandstorm is the core engine that powers every agent run in Sandcastle - we didn't reinvent it, we built on it. If you haven't already, go star the repo. It's one of the cleanest abstractions for sandboxed agent execution out there.
 
 Created by [**Tomas Pflanzer**](https://github.com/gizmax) ([@gizmax](https://github.com/gizmax)).
 

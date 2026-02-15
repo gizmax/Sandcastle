@@ -1,7 +1,7 @@
 [project]
 name = "sandcastle"
 version = "0.1.0"
-description = "Production-ready AI agent workflow orchestrator built on Sandstorm"
+description = "Production-ready workflow orchestrator built on Sandstorm"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
