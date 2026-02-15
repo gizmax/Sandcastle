@@ -118,7 +118,7 @@ class TestResolveTemplates:
         result = resolve_templates(
             "Company: {input.name}, Data: {steps.scrape.output}", ctx
         )
-        assert result == 'Company: Acme, Data: "scraped data"'
+        assert result == "Company: Acme, Data: scraped data"
 
     def test_dict_replacement(self):
         ctx = make_context(step_outputs={"step1": {"key": "value"}})
@@ -246,7 +246,7 @@ steps:
 
         with (
             patch("sandcastle.engine.executor.SandstormClient") as MockClient,
-            patch("sandcastle.engine.executor.LocalStorage") as MockStorage,
+            patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.return_value = mock_result
@@ -286,7 +286,7 @@ steps:
 
         with (
             patch("sandcastle.engine.executor.SandstormClient") as MockClient,
-            patch("sandcastle.engine.executor.LocalStorage") as MockStorage,
+            patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.side_effect = results
@@ -319,7 +319,7 @@ steps:
 
         with (
             patch("sandcastle.engine.executor.SandstormClient") as MockClient,
-            patch("sandcastle.engine.executor.LocalStorage") as MockStorage,
+            patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.side_effect = Exception("Sandstorm error")
