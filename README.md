@@ -9,7 +9,13 @@
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
-  <img src="docs/screenshots/overview-dark.png" alt="Sandcastle Dashboard" width="720" />
+  <a href="https://gizmax.github.io/Sandcastle/">
+    <img src="docs/screenshots/overview-dark.png" alt="Sandcastle Dashboard" width="720" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://gizmax.github.io/Sandcastle/"><strong>Try the Live Demo (no backend needed)</strong></a>
 </p>
 
 ---
