@@ -132,6 +132,7 @@ class Schedule(Base):
     input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     notify: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )

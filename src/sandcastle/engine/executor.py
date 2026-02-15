@@ -696,6 +696,31 @@ async def execute_workflow(
             last_step_in_stage = stage[-1] if stage else "unknown"
             await _save_checkpoint(run_id, last_step_in_stage, stage_idx, context)
 
+        # Post-loop checks: cancel and budget after final stage
+        if await _check_cancel(run_id):
+            logger.info(f"Run {run_id} cancelled after final stage")
+            return WorkflowResult(
+                run_id=run_id,
+                outputs=context.step_outputs,
+                total_cost_usd=context.total_cost,
+                status="cancelled",
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+            )
+
+        budget_status = _check_budget(context)
+        if budget_status == "exceeded":
+            logger.warning(f"Run {run_id} budget exceeded after final stage (${context.total_cost:.4f} / ${context.max_cost_usd:.4f})")
+            return WorkflowResult(
+                run_id=run_id,
+                outputs=context.step_outputs,
+                total_cost_usd=context.total_cost,
+                status="budget_exceeded",
+                error=f"Budget exceeded: ${context.total_cost:.4f} >= ${context.max_cost_usd:.4f}",
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+            )
+
         completed_at = datetime.now(timezone.utc)
 
         # Store results if configured

@@ -57,12 +57,14 @@ async def auth_middleware(request: Request, call_next):
     if request.url.path.startswith("/dashboard"):
         return await call_next(request)
 
-    # Extract API key
+    # Extract API key from header or query parameter (for SSE/EventSource)
     api_key = request.headers.get("X-API-Key")
     if not api_key:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             api_key = auth_header[7:]
+    if not api_key:
+        api_key = request.query_params.get("token")
 
     if not api_key:
         return _error_response(401, "UNAUTHORIZED", "API key required")

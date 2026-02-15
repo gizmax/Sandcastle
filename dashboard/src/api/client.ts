@@ -43,9 +43,17 @@ class ApiClient {
         });
       }
       const res = await fetch(url.toString(), { headers: this.headers() });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Return structured error for HTTP errors - do NOT fall back to mock
+        try {
+          return await res.json();
+        } catch {
+          return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
+        }
+      }
       return res.json();
     } catch {
+      // Only fall back to mock on actual network errors (backend unreachable)
       console.info(`[Sandcastle] Backend unavailable, using demo data`);
       this.useMock = true;
       return this.mock<T>(path, params);
@@ -106,7 +114,13 @@ class ApiClient {
   }
 
   sseUrl(path: string): string {
-    return `${this.baseUrl}${path}`;
+    const base = `${this.baseUrl}${path}`;
+    // EventSource cannot send custom headers, so pass the API key as a query param
+    if (this.apiKey) {
+      const sep = base.includes("?") ? "&" : "?";
+      return `${base}${sep}token=${encodeURIComponent(this.apiKey)}`;
+    }
+    return base;
   }
 }
 

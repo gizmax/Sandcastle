@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -116,6 +116,8 @@ steps: []
         ):
             # Mock the DB session context manager
             mock_session = AsyncMock()
+            # session.add() is sync in SQLAlchemy - use MagicMock to avoid unawaited coroutine
+            mock_session.add = MagicMock()
             mock_session_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 

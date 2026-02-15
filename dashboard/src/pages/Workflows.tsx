@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { GitBranch, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
@@ -43,12 +44,16 @@ export default function Workflows() {
   const handleRun = useCallback(
     async (input: Record<string, unknown>, callbackUrl?: string) => {
       if (!runModal) return;
-      await api.post("/workflows/run", {
+      const res = await api.post("/workflows/run", {
         workflow_name: runModal.file_name.replace(".yaml", ""),
         input,
         callback_url: callbackUrl,
       });
       setRunModal(null);
+      if (res.error) {
+        toast.error(`Run failed: ${res.error.message}`);
+        return;
+      }
       navigate("/runs");
     },
     [runModal, navigate]

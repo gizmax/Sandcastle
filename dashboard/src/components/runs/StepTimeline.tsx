@@ -27,7 +27,7 @@ export function StepTimeline({ steps, onReplay, onFork }: StepTimelineProps) {
   return (
     <div className="space-y-0">
       {steps.map((step, i) => (
-        <div key={`${step.step_id}-${step.parallel_index ?? 0}`} className="relative flex gap-4">
+        <div key={`${step.step_id}-${step.parallel_index ?? 0}-${i}`} className="relative flex gap-4">
           {/* Timeline line */}
           <div className="flex flex-col items-center">
             <div

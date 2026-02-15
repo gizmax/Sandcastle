@@ -404,13 +404,13 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         if tenant_budget:
             budget = tenant_budget
 
-    # Idempotency check
+    # Idempotency check (scoped to tenant)
     run_id = str(uuid.uuid4())
     if request.idempotency_key:
         async with async_session() as session:
-            existing = await session.scalar(
-                select(Run.id).where(Run.idempotency_key == request.idempotency_key)
-            )
+            idemp_stmt = select(Run.id).where(Run.idempotency_key == request.idempotency_key)
+            idemp_stmt = _apply_tenant_filter(idemp_stmt, tenant_id, Run.tenant_id)
+            existing = await session.scalar(idemp_stmt)
             if existing:
                 return ApiResponse(
                     data={"run_id": str(existing), "status": "existing", "idempotent": True},
@@ -525,12 +525,12 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
         if tenant_budget:
             budget = tenant_budget
 
-    # Idempotency check
+    # Idempotency check (scoped to tenant)
     if request.idempotency_key:
         async with async_session() as session:
-            existing = await session.scalar(
-                select(Run.id).where(Run.idempotency_key == request.idempotency_key)
-            )
+            idemp_stmt = select(Run.id).where(Run.idempotency_key == request.idempotency_key)
+            idemp_stmt = _apply_tenant_filter(idemp_stmt, tenant_id, Run.tenant_id)
+            existing = await session.scalar(idemp_stmt)
             if existing:
                 return ApiResponse(
                     data={"run_id": str(existing), "status": "existing", "idempotent": True},
@@ -656,12 +656,21 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
 
 
 @router.get("/runs/{run_id}/stream")
-async def stream_run(run_id: str) -> StreamingResponse:
+async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     """Stream live progress of a run via SSE."""
+    tenant_id = get_tenant_id(request)
+
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid run ID format")
+
+    # Verify the run belongs to the tenant before starting the stream
+    async with async_session() as session:
+        check_stmt = select(Run.id).where(Run.id == run_uuid)
+        check_stmt = _apply_tenant_filter(check_stmt, tenant_id, Run.tenant_id)
+        if not await session.scalar(check_stmt):
+            raise HTTPException(status_code=404, detail="Run not found")
 
     async def event_generator():
         """Poll the database and emit SSE events as status changes."""
@@ -897,29 +906,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
-    # Find the checkpoint before the requested step
-    async with async_session() as session:
-        checkpoint_stmt = (
-            select(RunCheckpoint)
-            .where(RunCheckpoint.run_id == run_uuid)
-            .order_by(RunCheckpoint.stage_index.desc())
-        )
-        result = await session.execute(checkpoint_stmt)
-        checkpoints = result.scalars().all()
-
-    # Find the checkpoint just before from_step
-    target_checkpoint = None
-    for cp in checkpoints:
-        snapshot = cp.context_snapshot
-        if request.from_step not in snapshot.get("step_outputs", {}):
-            target_checkpoint = cp
-            break
-
-    if not target_checkpoint and checkpoints:
-        # Use the earliest checkpoint (step 0)
-        target_checkpoint = checkpoints[-1]
-
-    # Load workflow YAML
+    # Load workflow YAML and validate from_step
     try:
         yaml_content = _load_workflow_yaml(original_run.workflow_name)
     except FileNotFoundError:
@@ -933,9 +920,47 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
-    # Determine which steps to skip
+    # Validate from_step exists in the workflow
+    try:
+        wf_def = parse_yaml_string(yaml_content)
+        valid_step_ids = {s.id for s in wf_def.steps}
+    except Exception:
+        valid_step_ids = set()
+    if valid_step_ids and request.from_step not in valid_step_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_STEP",
+                    message=f"Step '{request.from_step}' not found in workflow '{original_run.workflow_name}'",
+                )
+            ).model_dump(),
+        )
+
+    # Find the checkpoint before the requested step
+    async with async_session() as session:
+        checkpoint_stmt = (
+            select(RunCheckpoint)
+            .where(RunCheckpoint.run_id == run_uuid)
+            .order_by(RunCheckpoint.stage_index.desc())
+        )
+        result = await session.execute(checkpoint_stmt)
+        checkpoints = result.scalars().all()
+
+    # Find the newest checkpoint where from_step is NOT yet in step_outputs.
+    # If no such checkpoint exists (from_step is the first step), use empty
+    # context so the entire workflow replays from the beginning.
+    target_checkpoint = None
+    for cp in checkpoints:
+        snapshot = cp.context_snapshot
+        if request.from_step not in snapshot.get("step_outputs", {}):
+            target_checkpoint = cp
+            break
+
     initial_context = target_checkpoint.context_snapshot if target_checkpoint else None
     skip_steps = set(initial_context["step_outputs"].keys()) if initial_context else set()
+    # Safety: never skip the step we're replaying from
+    skip_steps.discard(request.from_step)
 
     # Create new run
     new_run_id = str(uuid.uuid4())
@@ -1019,27 +1044,7 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             ).model_dump(),
         )
 
-    # Find the checkpoint before the requested step
-    async with async_session() as session:
-        checkpoint_stmt = (
-            select(RunCheckpoint)
-            .where(RunCheckpoint.run_id == run_uuid)
-            .order_by(RunCheckpoint.stage_index.desc())
-        )
-        result = await session.execute(checkpoint_stmt)
-        checkpoints = result.scalars().all()
-
-    target_checkpoint = None
-    for cp in checkpoints:
-        snapshot = cp.context_snapshot
-        if request.from_step not in snapshot.get("step_outputs", {}):
-            target_checkpoint = cp
-            break
-
-    if not target_checkpoint and checkpoints:
-        target_checkpoint = checkpoints[-1]
-
-    # Load workflow YAML
+    # Load workflow YAML and validate from_step
     try:
         yaml_content = _load_workflow_yaml(original_run.workflow_name)
     except FileNotFoundError:
@@ -1053,8 +1058,45 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             ).model_dump(),
         )
 
+    # Validate from_step exists in the workflow
+    try:
+        wf_def = parse_yaml_string(yaml_content)
+        valid_step_ids = {s.id for s in wf_def.steps}
+    except Exception:
+        valid_step_ids = set()
+    if valid_step_ids and request.from_step not in valid_step_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_STEP",
+                    message=f"Step '{request.from_step}' not found in workflow '{original_run.workflow_name}'",
+                )
+            ).model_dump(),
+        )
+
+    # Find the checkpoint before the requested step
+    async with async_session() as session:
+        checkpoint_stmt = (
+            select(RunCheckpoint)
+            .where(RunCheckpoint.run_id == run_uuid)
+            .order_by(RunCheckpoint.stage_index.desc())
+        )
+        result = await session.execute(checkpoint_stmt)
+        checkpoints = result.scalars().all()
+
+    # Find the newest checkpoint where from_step is NOT yet in step_outputs
+    target_checkpoint = None
+    for cp in checkpoints:
+        snapshot = cp.context_snapshot
+        if request.from_step not in snapshot.get("step_outputs", {}):
+            target_checkpoint = cp
+            break
+
     initial_context = target_checkpoint.context_snapshot if target_checkpoint else None
     skip_steps = set(initial_context["step_outputs"].keys()) if initial_context else set()
+    # Safety: never skip the step we're forking from
+    skip_steps.discard(request.from_step)
 
     # Create new run with fork metadata
     new_run_id = str(uuid.uuid4())
@@ -1117,8 +1159,10 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
 
 
 @router.post("/schedules")
-async def create_schedule(request: ScheduleCreateRequest) -> ApiResponse:
+async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiResponse:
     """Create a scheduled workflow execution."""
+    tenant_id = get_tenant_id(req)
+
     # Validate that the workflow exists
     try:
         _load_workflow_yaml(request.workflow_name)
@@ -1144,6 +1188,7 @@ async def create_schedule(request: ScheduleCreateRequest) -> ApiResponse:
                 input_data=request.input_data,
                 notify=request.notify,
                 enabled=request.enabled,
+                tenant_id=tenant_id,
             )
             session.add(db_schedule)
             await session.commit()
@@ -1180,14 +1225,20 @@ async def create_schedule(request: ScheduleCreateRequest) -> ApiResponse:
 
 @router.get("/schedules")
 async def list_schedules(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List all workflow schedules."""
+    tenant_id = get_tenant_id(request)
+
     async with async_session() as session:
-        total = await session.scalar(select(func.count(Schedule.id)))
+        count_stmt = select(func.count(Schedule.id))
+        count_stmt = _apply_tenant_filter(count_stmt, tenant_id, Schedule.tenant_id)
+        total = await session.scalar(count_stmt)
 
         stmt = select(Schedule).order_by(Schedule.created_at.desc()).offset(offset).limit(limit)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Schedule.tenant_id)
         result = await session.execute(stmt)
         schedules = result.scalars().all()
 
@@ -1211,8 +1262,10 @@ async def list_schedules(
 
 
 @router.patch("/schedules/{schedule_id}")
-async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest) -> ApiResponse:
+async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest, req: Request) -> ApiResponse:
     """Enable or disable a schedule."""
+    tenant_id = get_tenant_id(req)
+
     try:
         schedule_uuid = uuid.UUID(schedule_id)
     except ValueError:
@@ -1224,7 +1277,10 @@ async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest) -> A
         )
 
     async with async_session() as session:
-        schedule = await session.get(Schedule, schedule_uuid)
+        stmt = select(Schedule).where(Schedule.id == schedule_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Schedule.tenant_id)
+        result = await session.execute(stmt)
+        schedule = result.scalar_one_or_none()
         if not schedule:
             raise HTTPException(
                 status_code=404,
@@ -1266,8 +1322,10 @@ async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest) -> A
 
 
 @router.delete("/schedules/{schedule_id}")
-async def delete_schedule(schedule_id: str) -> ApiResponse:
+async def delete_schedule(schedule_id: str, request: Request) -> ApiResponse:
     """Delete a workflow schedule."""
+    tenant_id = get_tenant_id(request)
+
     try:
         schedule_uuid = uuid.UUID(schedule_id)
     except ValueError:
@@ -1279,7 +1337,10 @@ async def delete_schedule(schedule_id: str) -> ApiResponse:
         )
 
     async with async_session() as session:
-        schedule = await session.get(Schedule, schedule_uuid)
+        stmt = select(Schedule).where(Schedule.id == schedule_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Schedule.tenant_id)
+        result = await session.execute(stmt)
+        schedule = result.scalar_one_or_none()
         if not schedule:
             raise HTTPException(
                 status_code=404,
@@ -1303,14 +1364,22 @@ async def delete_schedule(schedule_id: str) -> ApiResponse:
 
 @router.get("/dead-letter")
 async def list_dead_letter(
+    request: Request,
     resolved: bool = Query(False, description="Include resolved items"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List dead letter queue items."""
+    tenant_id = get_tenant_id(request)
+
     async with async_session() as session:
         base = select(DeadLetterItem)
         count_base = select(func.count(DeadLetterItem.id))
+
+        # Tenant isolation via join on parent Run
+        if settings.auth_required and tenant_id is not None:
+            base = base.join(Run, DeadLetterItem.run_id == Run.id).where(Run.tenant_id == tenant_id)
+            count_base = count_base.join(Run, DeadLetterItem.run_id == Run.id).where(Run.tenant_id == tenant_id)
 
         if not resolved:
             base = base.where(DeadLetterItem.resolved_at.is_(None))
@@ -1345,8 +1414,10 @@ async def list_dead_letter(
 
 
 @router.post("/dead-letter/{item_id}/retry")
-async def retry_dead_letter(item_id: str) -> ApiResponse:
+async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
     """Retry a failed step by re-running its parent workflow."""
+    tenant_id = get_tenant_id(request)
+
     try:
         item_uuid = uuid.UUID(item_id)
     except ValueError:
@@ -1358,7 +1429,12 @@ async def retry_dead_letter(item_id: str) -> ApiResponse:
         )
 
     async with async_session() as session:
-        item = await session.get(DeadLetterItem, item_uuid)
+        # Load DLQ item with tenant check via parent Run
+        stmt = select(DeadLetterItem).where(DeadLetterItem.id == item_uuid)
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.join(Run, DeadLetterItem.run_id == Run.id).where(Run.tenant_id == tenant_id)
+        result = await session.execute(stmt)
+        item = result.scalar_one_or_none()
         if not item:
             raise HTTPException(
                 status_code=404,
@@ -1434,8 +1510,10 @@ async def retry_dead_letter(item_id: str) -> ApiResponse:
 
 
 @router.post("/dead-letter/{item_id}/resolve")
-async def resolve_dead_letter(item_id: str, request: DeadLetterResolveRequest | None = None) -> ApiResponse:
+async def resolve_dead_letter(item_id: str, req: Request, request: DeadLetterResolveRequest | None = None) -> ApiResponse:
     """Manually resolve a dead letter queue item."""
+    tenant_id = get_tenant_id(req)
+
     try:
         item_uuid = uuid.UUID(item_id)
     except ValueError:
@@ -1447,7 +1525,11 @@ async def resolve_dead_letter(item_id: str, request: DeadLetterResolveRequest | 
         )
 
     async with async_session() as session:
-        item = await session.get(DeadLetterItem, item_uuid)
+        stmt = select(DeadLetterItem).where(DeadLetterItem.id == item_uuid)
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.join(Run, DeadLetterItem.run_id == Run.id).where(Run.tenant_id == tenant_id)
+        result = await session.execute(stmt)
+        item = result.scalar_one_or_none()
         if not item:
             raise HTTPException(
                 status_code=404,
@@ -1488,8 +1570,19 @@ async def resolve_dead_letter(item_id: str, request: DeadLetterResolveRequest | 
 
 
 @router.post("/api-keys")
-async def create_api_key(request: ApiKeyCreateRequest) -> ApiResponse:
+async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiResponse:
     """Create a new API key. Returns the plaintext key ONCE."""
+    auth_tenant = get_tenant_id(req)
+
+    # When auth is enabled, enforce tenant scoping: can only create keys for own tenant
+    if settings.auth_required and auth_tenant is not None and request.tenant_id != auth_tenant:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(code="FORBIDDEN", message="Cannot create API keys for a different tenant")
+            ).model_dump(),
+        )
+
     plaintext_key = generate_api_key()
     key_hash_value = hash_key(plaintext_key)
     key_prefix = plaintext_key[:8]
@@ -1569,8 +1662,10 @@ async def list_api_keys(
 
 
 @router.delete("/api-keys/{key_id}")
-async def deactivate_api_key(key_id: str) -> ApiResponse:
+async def deactivate_api_key(key_id: str, request: Request) -> ApiResponse:
     """Deactivate an API key (soft delete)."""
+    tenant_id = get_tenant_id(request)
+
     try:
         key_uuid = uuid.UUID(key_id)
     except ValueError:
@@ -1582,7 +1677,10 @@ async def deactivate_api_key(key_id: str) -> ApiResponse:
         )
 
     async with async_session() as session:
-        db_key = await session.get(ApiKey, key_uuid)
+        stmt = select(ApiKey).where(ApiKey.id == key_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, ApiKey.tenant_id)
+        result = await session.execute(stmt)
+        db_key = result.scalar_one_or_none()
         if not db_key:
             raise HTTPException(
                 status_code=404,
