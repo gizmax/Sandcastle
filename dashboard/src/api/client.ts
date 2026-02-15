@@ -51,8 +51,13 @@ class ApiClient {
     return h;
   }
 
-  private mock<T>(path: string, params?: Record<string, string>): ApiResponse<T> {
-    return mockFetch(path, params) as ApiResponse<T>;
+  private mock<T>(
+    path: string,
+    params?: Record<string, string>,
+    method?: string,
+    body?: unknown
+  ): ApiResponse<T> {
+    return mockFetch(path, params, method, body) as ApiResponse<T>;
   }
 
   async get<T>(path: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
@@ -90,7 +95,7 @@ class ApiClient {
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {
-      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+      return this.mock<T>(path, undefined, "POST", body);
     }
 
     try {

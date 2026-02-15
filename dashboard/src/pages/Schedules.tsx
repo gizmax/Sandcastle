@@ -3,6 +3,7 @@ import { Calendar, Plus } from "lucide-react";
 import { api } from "@/api/client";
 import { ScheduleTable } from "@/components/schedules/ScheduleTable";
 import { CreateScheduleModal } from "@/components/schedules/CreateScheduleModal";
+import { EditScheduleModal } from "@/components/schedules/EditScheduleModal";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ export default function Schedules() {
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
 
   const fetchSchedules = useCallback(async () => {
     const res = await api.get<ScheduleItem[]>("/schedules");
@@ -54,6 +56,17 @@ export default function Schedules() {
       fetchSchedules();
     },
     [fetchSchedules]
+  );
+
+  const handleEdit = useCallback(
+    async (id: string, data: { cron_expression: string; enabled: boolean }) => {
+      await api.patch(`/schedules/${id}`, data);
+      setSchedules((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, ...data } : s))
+      );
+      setEditSchedule(null);
+    },
+    []
   );
 
   if (loading) {
@@ -93,6 +106,7 @@ export default function Schedules() {
           schedules={schedules}
           onToggle={handleToggle}
           onDelete={handleDelete}
+          onEdit={setEditSchedule}
         />
       )}
 
@@ -101,6 +115,15 @@ export default function Schedules() {
         onClose={() => setModalOpen(false)}
         onSubmit={handleCreate}
       />
+
+      {editSchedule && (
+        <EditScheduleModal
+          open={true}
+          schedule={editSchedule}
+          onClose={() => setEditSchedule(null)}
+          onSubmit={handleEdit}
+        />
+      )}
     </div>
   );
 }

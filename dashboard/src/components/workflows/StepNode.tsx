@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Cpu } from "lucide-react";
+import { Cpu, Gauge, RefreshCw, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
@@ -8,6 +8,9 @@ type StepNodeData = {
   label: string;
   model?: string;
   status?: string;
+  hasRetry?: boolean;
+  hasApproval?: boolean;
+  hasSlo?: boolean;
 };
 
 type StepNodeType = Node<StepNodeData, "step">;
@@ -15,6 +18,7 @@ type StepNodeType = Node<StepNodeData, "step">;
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const status = data.status || "pending";
   const dotColor = STATUS_DOT_COLORS[status] || "bg-muted";
+  const showBadges = data.hasRetry || data.hasApproval || data.hasSlo;
 
   return (
     <div
@@ -41,6 +45,20 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           <span className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
             {data.model}
           </span>
+        </div>
+      )}
+
+      {showBadges && (
+        <div className="mt-1.5 flex items-center gap-1.5">
+          {data.hasRetry && (
+            <RefreshCw className="h-3 w-3 text-running" />
+          )}
+          {data.hasApproval && (
+            <ShieldCheck className="h-3 w-3 text-warning" />
+          )}
+          {data.hasSlo && (
+            <Gauge className="h-3 w-3 text-success" />
+          )}
         </div>
       )}
 

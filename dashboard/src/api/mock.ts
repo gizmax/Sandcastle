@@ -137,6 +137,12 @@ const MOCK_SCHEDULES = [
   { id: "sch-003", workflow_name: "seo-audit", cron_expression: "0 0 * * 0", enabled: false, last_run_id: null, created_at: h(48) },
 ];
 
+const MOCK_API_KEYS = [
+  { id: "key-001", key_prefix: "sc_live_abc1", tenant_id: "acme-corp", name: "Production API", created_at: h(720), last_used_at: h(0.3) },
+  { id: "key-002", key_prefix: "sc_live_def2", tenant_id: "acme-corp", name: "Staging API", created_at: h(480), last_used_at: h(12) },
+  { id: "key-003", key_prefix: "sc_test_ghi3", tenant_id: "beta-inc", name: "Development", created_at: h(168), last_used_at: null },
+];
+
 const MOCK_DLQ = [
   { id: "dlq-001", run_id: "a1b2c3d4-4444-4000-8000-000000000004", step_id: "enrich", error: "Timeout after 300s - external API unreachable", attempts: 3, created_at: h(5), resolved_at: null, resolved_by: null },
   { id: "dlq-002", run_id: "a1b2c3d4-9999-4000-8000-000000000009", step_id: "analyze", error: "Rate limit exceeded (429) - retry after 60s", attempts: 3, created_at: h(30), resolved_at: null, resolved_by: null },
@@ -579,29 +585,58 @@ const routes: MockRoute[] = [
     match: /^\/optimizer\/stats$/,
     handler: () => MOCK_OPTIMIZER_STATS,
   },
+  {
+    match: /^\/api-keys$/,
+    method: "GET",
+    handler: () => MOCK_API_KEYS,
+  },
+  {
+    match: /^\/api-keys$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { name?: string; tenant_id?: string } | undefined;
+      return {
+        id: `key-${Date.now()}`,
+        key: `sc_live_${Math.random().toString(36).slice(2, 14)}${Math.random().toString(36).slice(2, 14)}`,
+        key_prefix: `sc_live_${Math.random().toString(36).slice(2, 6)}`,
+        tenant_id: b?.tenant_id || "default",
+        name: b?.name || "Untitled",
+        created_at: new Date().toISOString(),
+        last_used_at: null,
+      };
+    },
+  },
 ];
 
-export function mockFetch(path: string, params?: Record<string, string>): ApiResponse {
+export function mockFetch(
+  path: string,
+  params?: Record<string, string>,
+  method?: string,
+  body?: unknown
+): ApiResponse {
   const mergedParams = params || {};
+  const reqMethod = (method || "GET").toUpperCase();
 
   for (const route of routes) {
     const m = path.match(route.match);
-    if (m) {
-      const extractedParams: Record<string, string> = { ...mergedParams };
-      m.slice(1).forEach((val, i) => {
-        extractedParams[`_${i + 1}`] = val;
-      });
+    if (!m) continue;
+    // Check method if specified on route
+    if (route.method && route.method.toUpperCase() !== reqMethod) continue;
 
-      const result = route.handler(extractedParams);
+    const extractedParams: Record<string, string> = { ...mergedParams };
+    m.slice(1).forEach((val, i) => {
+      extractedParams[`_${i + 1}`] = val;
+    });
 
-      // Handle routes that return _data/_meta separately
-      if (result && typeof result === "object" && "_data" in (result as Record<string, unknown>)) {
-        const r = result as { _data: unknown; _meta: unknown };
-        return { data: r._data, error: null, meta: r._meta as ApiResponse["meta"] };
-      }
+    const result = route.handler(extractedParams, body);
 
-      return { data: result, error: null };
+    // Handle routes that return _data/_meta separately
+    if (result && typeof result === "object" && "_data" in (result as Record<string, unknown>)) {
+      const r = result as { _data: unknown; _meta: unknown };
+      return { data: r._data, error: null, meta: r._meta as ApiResponse["meta"] };
     }
+
+    return { data: result, error: null };
   }
 
   return { data: null, error: { code: "NOT_FOUND", message: `Mock: ${path} not found` } };

@@ -22,6 +22,10 @@ const nodeTypes: NodeTypes = {
   step: StepNode,
 };
 
+const DEFAULT_RETRY = { enabled: false, maxAttempts: 3, backoff: "exponential" as const, onFailure: "abort" as const };
+const DEFAULT_APPROVAL = { enabled: false, message: "", timeoutHours: 24, onTimeout: "abort" as const, allowEdit: false };
+const DEFAULT_SLO = { enabled: false, qualityMin: 0.7, costMaxUsd: 0.10, latencyMaxSeconds: 30, optimizeFor: "balanced" as const };
+
 function generateYaml(
   workflowName: string,
   steps: StepConfig[],
@@ -42,14 +46,25 @@ function generateYaml(
   yaml += `steps:\n`;
 
   for (const step of steps) {
-    yaml += `  - id: "${step.id}"\n`;
-    yaml += `    prompt: |\n`;
-    step.prompt.split("\n").forEach((line) => {
-      yaml += `      ${line}\n`;
-    });
-    if (step.model !== "sonnet") yaml += `    model: ${step.model}\n`;
-    if (step.maxTurns !== 10) yaml += `    max_turns: ${step.maxTurns}\n`;
-    if (step.timeout !== 300) yaml += `    timeout: ${step.timeout}\n`;
+    // Approval gate steps have a different type
+    if (step.approval.enabled) {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: approval\n`;
+      yaml += `    approval_config:\n`;
+      yaml += `      message: "${step.approval.message}"\n`;
+      yaml += `      timeout_hours: ${step.approval.timeoutHours}\n`;
+      yaml += `      on_timeout: ${step.approval.onTimeout}\n`;
+      yaml += `      allow_edit: ${step.approval.allowEdit}\n`;
+    } else {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    prompt: |\n`;
+      step.prompt.split("\n").forEach((line) => {
+        yaml += `      ${line}\n`;
+      });
+      if (step.model !== "sonnet") yaml += `    model: ${step.model}\n`;
+      if (step.maxTurns !== 10) yaml += `    max_turns: ${step.maxTurns}\n`;
+      if (step.timeout !== 300) yaml += `    timeout: ${step.timeout}\n`;
+    }
 
     const deps = depMap.get(step.id) || step.dependsOn;
     if (deps && deps.length > 0) {
@@ -61,6 +76,33 @@ function generateYaml(
     if (step.parallelOver) {
       yaml += `    parallel_over: "${step.parallelOver}"\n`;
     }
+
+    // Retry config
+    if (step.retry.enabled) {
+      yaml += `    retry:\n`;
+      yaml += `      max_attempts: ${step.retry.maxAttempts}\n`;
+      yaml += `      backoff: ${step.retry.backoff}\n`;
+      yaml += `      on_failure: ${step.retry.onFailure}\n`;
+    }
+
+    // Policies
+    if (step.policies.length > 0) {
+      yaml += `    policies:\n`;
+      step.policies.forEach((p) => {
+        yaml += `      - "${p}"\n`;
+      });
+    }
+
+    // SLO config
+    if (step.slo.enabled) {
+      yaml += `    slo:\n`;
+      yaml += `      min_quality: ${step.slo.qualityMin}\n`;
+      yaml += `      max_cost_usd: ${step.slo.costMaxUsd}\n`;
+      yaml += `      max_latency_seconds: ${step.slo.latencyMaxSeconds}\n`;
+      yaml += `      optimize_for: ${step.slo.optimizeFor}\n`;
+      yaml += `      model_pool: auto\n`;
+    }
+
     yaml += `\n`;
   }
 
@@ -94,6 +136,10 @@ function buildInitialState(wf: InitialWorkflow) {
     timeout: 300,
     parallelOver: "",
     dependsOn: s.depends_on || [],
+    retry: { ...DEFAULT_RETRY },
+    approval: { ...DEFAULT_APPROVAL },
+    policies: [],
+    slo: { ...DEFAULT_SLO },
   }));
 
   const nodes: Node[] = steps.map((s, i) => ({
@@ -149,6 +195,10 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       timeout: 300,
       parallelOver: "",
       dependsOn: [],
+      retry: { ...DEFAULT_RETRY },
+      approval: { ...DEFAULT_APPROVAL },
+      policies: [],
+      slo: { ...DEFAULT_SLO },
     };
 
     const newNode: Node = {
@@ -168,11 +218,22 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       setSteps((prev) =>
         prev.map((s) => (s.id === selectedStepId ? updated : s))
       );
-      // Update node label
+      // Update node label and feature badges
       setNodes((prev) =>
         prev.map((n) =>
           n.id === selectedStepId
-            ? { ...n, id: updated.id, data: { ...n.data, label: updated.id, model: updated.model } }
+            ? {
+                ...n,
+                id: updated.id,
+                data: {
+                  ...n.data,
+                  label: updated.id,
+                  model: updated.model,
+                  hasRetry: updated.retry.enabled,
+                  hasApproval: updated.approval.enabled,
+                  hasSlo: updated.slo.enabled,
+                },
+              }
             : n
         )
       );

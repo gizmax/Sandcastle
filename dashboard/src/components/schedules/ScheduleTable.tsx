@@ -14,9 +14,10 @@ interface ScheduleTableProps {
   schedules: ScheduleItem[];
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
+  onEdit: (schedule: ScheduleItem) => void;
 }
 
-export function ScheduleTable({ schedules, onToggle, onDelete }: ScheduleTableProps) {
+export function ScheduleTable({ schedules, onToggle, onDelete, onEdit }: ScheduleTableProps) {
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
@@ -59,12 +60,20 @@ export function ScheduleTable({ schedules, onToggle, onDelete }: ScheduleTablePr
                   </button>
                 </td>
                 <td className="px-5 py-3 text-right">
-                  <button
-                    onClick={() => onDelete(schedule.id)}
-                    className="text-xs text-error/70 hover:text-error transition-colors"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex items-center justify-end gap-3">
+                    <button
+                      onClick={() => onEdit(schedule)}
+                      className="text-xs text-accent/70 hover:text-accent transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => onDelete(schedule.id)}
+                      className="text-xs text-error/70 hover:text-error transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

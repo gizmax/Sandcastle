@@ -6,6 +6,7 @@ import {
   Gauge,
   GitBranch,
   Inbox,
+  Key,
   LayoutDashboard,
   PlayCircle,
   ShieldAlert,
@@ -31,6 +32,7 @@ const navItems = [
   { to: "/optimizer", icon: Gauge, label: "Optimizer" },
   { to: "/schedules", icon: Calendar, label: "Schedules" },
   { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" as const },
+  { to: "/api-keys", icon: Key, label: "API Keys" },
 ];
 
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
