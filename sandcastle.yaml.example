@@ -1,0 +1,96 @@
+name: lead-enrichment
+description: Enrich companies with firmographic data
+
+# Global settings
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: scrape
+    prompt: |
+      Scrape the website {input.website} for company {input.name}.
+      Extract: company description, approximate team size,
+      tech stack, pricing model, headquarters location.
+      Return ONLY valid JSON matching the output schema.
+    model: sonnet
+    max_turns: 10
+    timeout: 120
+    parallel_over: input.companies
+    output_schema:
+      type: object
+      properties:
+        description: { type: string }
+        employee_estimate: { type: string }
+        tech_stack: { type: array, items: { type: string } }
+        pricing_model: { type: string }
+        hq_location: { type: string }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  - id: enrich
+    depends_on: [scrape]
+    prompt: |
+      Company: {input.name} ({input.website})
+      Scraped data: {steps.scrape.output}
+      Find additional information using web search:
+      - Total funding and last funding round
+      - Key contacts: CEO, CTO, VP Sales with LinkedIn URLs
+      - Recent news from the last 6 months
+      Return ONLY valid JSON.
+    model: sonnet
+    max_turns: 15
+    output_schema:
+      type: object
+      properties:
+        funding_total_usd: { type: number }
+        last_round: { type: string }
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              title: { type: string }
+              linkedin_url: { type: string }
+        recent_news:
+          type: array
+          items:
+            type: object
+            properties:
+              headline: { type: string }
+              date: { type: string }
+              url: { type: string }
+
+  - id: score
+    depends_on: [scrape, enrich]
+    prompt: |
+      Score this lead 1-100 for a B2B SaaS sales team.
+      Company: {input.name}
+      Scrape data: {steps.scrape.output}
+      Enrichment data: {steps.enrich.output}
+      Consider: company size, funding stage, tech stack sophistication, growth signals.
+      Return JSON with score and reasoning.
+    model: haiku
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        score: { type: integer }
+        reasoning: { type: string }
+        signals:
+          type: array
+          items: { type: string }
+
+on_complete:
+  webhook: ${CALLBACK_URL}
+  storage_path: enrichments/{run_id}/results.json
+
+on_failure:
+  dead_letter: true
+  webhook: ${FAILURE_WEBHOOK_URL}
+
+schedule: null
