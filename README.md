@@ -1,26 +1,31 @@
-# 🏰 Sandcastle
+# Sandcastle
 
-**Production-ready workflow orchestrator. Built on the shoulders of [Sandstorm](https://github.com/tomascupr/sandstorm).**
+**Production-ready workflow orchestrator for AI agents. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).**
 
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-51%20passing-brightgreen?style=flat-square)]()
+
+<p align="center">
+  <img src="docs/screenshots/overview.png" alt="Sandcastle Dashboard" width="720" />
+</p>
 
 ---
 
 ## Why Sandcastle?
 
-[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full agent, completely sandboxed. It nails the core problem: giving agents full system access without worrying about what they do with it. We love it. We use it. You should too.
+[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full agent, completely sandboxed. It nails the core problem: giving agents full system access without worrying about what they do with it.
 
 But sometimes you need to **build something lasting from the storm.**
 
-Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result, sandbox destroyed. That's perfect for a lot of things. But when we started building real products on top of it, we kept hitting the same walls:
+Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result, sandbox destroyed. That's perfect for a lot of things. But when you start building real products on top of it, you keep hitting the same walls:
 
-- **"I need this agent to remember what it found yesterday."** → No persistence between runs.
-- **"Agent A should feed its results into Agent B."** → No workflow orchestration.
-- **"Bill the customer per enrichment, track costs per run."** → No usage metering.
-- **"Alert me if the agent fails, retry automatically."** → No production error handling.
-- **"Run this every 6 hours and notify me on Slack."** → No scheduling, no webhooks.
+- **"I need this agent to remember what it found yesterday."** - No persistence between runs.
+- **"Agent A should feed its results into Agent B."** - No workflow orchestration.
+- **"Bill the customer per enrichment, track costs per run."** - No usage metering.
+- **"Alert me if the agent fails, retry automatically."** - No production error handling.
+- **"Run this every 6 hours and notify me on Slack."** - No scheduling, no webhooks.
 
 Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everything you need to ship agent-powered products to real customers.
 
@@ -29,23 +34,80 @@ Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everythin
 
 ---
 
-## What Sandcastle Adds
+## Features
 
 | Capability | Sandstorm | Sandcastle |
 |---|---|---|
-| Isolated agent execution | ✅ | ✅ (via Sandstorm) |
-| Structured output | ✅ | ✅ |
-| Subagents | ✅ | ✅ |
-| MCP servers | ✅ | ✅ |
-| File uploads | ✅ | ✅ |
-| **DAG workflow orchestration** | - | ✅ |
-| **Persistent storage between runs** | - | ✅ |
-| **Webhook callbacks** | - | ✅ |
-| **Scheduled / cron agents** | - | ✅ |
-| **Retry logic & dead letter queue** | - | ✅ |
-| **Per-run cost tracking** | - | ✅ |
-| **Multi-tenant API keys & billing** | - | ✅ |
-| **Dashboard & run history** | - | ✅ |
+| Isolated agent execution | Yes | Yes (via Sandstorm) |
+| Structured output & subagents | Yes | Yes |
+| MCP servers & file uploads | Yes | Yes |
+| **DAG workflow orchestration** | - | Yes |
+| **Parallel step execution** | - | Yes |
+| **Persistent storage (S3/MinIO)** | - | Yes |
+| **Webhook callbacks (HMAC-signed)** | - | Yes |
+| **Scheduled / cron agents** | - | Yes |
+| **Retry logic with exponential backoff** | - | Yes |
+| **Dead letter queue** | - | Yes |
+| **Per-run cost tracking** | - | Yes |
+| **SSE live streaming** | - | Yes |
+| **Multi-tenant API keys** | - | Yes |
+| **Dashboard with real-time monitoring** | - | Yes |
+
+---
+
+## Dashboard
+
+Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS.
+
+### Overview - KPI cards, run trends, cost breakdown per workflow
+
+<p align="center">
+  <img src="docs/screenshots/overview.png" alt="Overview" width="720" />
+</p>
+
+### Dark Mode
+
+<p align="center">
+  <img src="docs/screenshots/overview-dark.png" alt="Overview Dark" width="720" />
+</p>
+
+### Runs - Filterable run history with status, duration, and cost
+
+<p align="center">
+  <img src="docs/screenshots/runs.png" alt="Runs" width="720" />
+</p>
+
+### Run Detail - Step timeline with expandable output, live SSE stream for running agents
+
+<p align="center">
+  <img src="docs/screenshots/run-detail.png" alt="Run Detail" width="720" />
+  <br/>
+  <img src="docs/screenshots/run-detail-running.png" alt="Running Run with Parallel Steps" width="720" />
+</p>
+
+### Workflows - Manage workflows, preview DAG, trigger runs
+
+<p align="center">
+  <img src="docs/screenshots/workflows.png" alt="Workflows" width="720" />
+</p>
+
+### DAG Preview - Interactive visualization of step dependencies with model badges
+
+<p align="center">
+  <img src="docs/screenshots/dag-preview.png" alt="DAG Preview" width="720" />
+</p>
+
+### Schedules - Cron-based scheduling with enable/disable toggle
+
+<p align="center">
+  <img src="docs/screenshots/schedules.png" alt="Schedules" width="720" />
+</p>
+
+### Dead Letter Queue - Failed steps with retry and manual resolve actions
+
+<p align="center">
+  <img src="docs/screenshots/dead-letter.png" alt="Dead Letter Queue" width="720" />
+</p>
 
 ---
 
@@ -54,9 +116,9 @@ Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everythin
 ### Prerequisites
 
 Everything Sandstorm needs, plus:
-- Redis (for job queue & scheduling)
-- PostgreSQL (for run history, billing, storage)
-- S3-compatible storage (for persistent agent data)
+- **Redis** - job queue and scheduling
+- **PostgreSQL** - run history, API keys, dead letter queue
+- **S3-compatible storage** - persistent agent data (MinIO for local dev)
 
 ### Setup
 
@@ -69,30 +131,48 @@ cp .env.example .env   # configure your keys
 # Install dependencies
 uv sync
 
-# Start services
+# Start infrastructure
 docker-compose up -d redis postgres minio
 
-# Run migrations
-uv run python -m sandcastle db migrate
+# Run database migrations
+uv run alembic upgrade head
 
-# Start the server
+# Start the API server
 uv run python -m sandcastle serve
+
+# Start the async worker (separate terminal)
+uv run python -m sandcastle worker
+
+# Start the dashboard (separate terminal)
+cd dashboard && npm install && npm run dev
 ```
 
 ### Your First Workflow
 
 ```bash
-curl -N -X POST http://localhost:8000/workflows/run \
+# Run a workflow asynchronously
+curl -X POST http://localhost:8000/workflows/run \
   -H "Content-Type: application/json" \
   -d '{
-    "workflow": "enrichment",
+    "workflow": "lead-enrichment",
     "input": {
-      "companies": [
-        {"name": "Stripe", "website": "stripe.com"},
-        {"name": "Vercel", "website": "vercel.com"}
-      ]
+      "target_url": "https://example.com",
+      "max_depth": 3
     },
     "callback_url": "https://your-app.com/api/done"
+  }'
+
+# Response: { "run_id": "a1b2c3d4-...", "status": "queued" }
+```
+
+Or run synchronously and wait for the result:
+
+```bash
+curl -N -X POST http://localhost:8000/workflows/run/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "lead-enrichment",
+    "input": { "target_url": "https://example.com" }
   }'
 ```
 
@@ -100,218 +180,309 @@ curl -N -X POST http://localhost:8000/workflows/run \
 
 ## Workflow Engine
 
-Define multi-step agent pipelines where each step can run in parallel, depend on previous steps, and pass data forward.
+Define multi-step agent pipelines as YAML. Each step can run in parallel, depend on previous steps, pass data forward, and use different models.
 
-### sandcastle.yaml
+### Example: lead-enrichment.yaml
 
 ```yaml
-name: lead-enrichment
-description: Enrich a list of companies with firmographic data
+name: "Lead Enrichment"
+description: "Scrape, enrich, and score leads for sales outreach."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
 
 steps:
-  - id: scrape
+  - id: "scrape"
     prompt: |
-      Scrape {company.website} and extract:
-      company description, team size, tech stack, pricing model.
-      Return structured JSON.
-    parallel_over: input.companies
-    model: sonnet
-    max_turns: 10
+      Visit {input.target_url} and extract:
+      company name, employee count, main product, contact info.
+      Return as structured JSON.
     output_schema:
       type: object
       properties:
-        description: { type: string }
-        employee_estimate: { type: string }
-        tech_stack: { type: array, items: { type: string } }
-        pricing_model: { type: string }
+        company_name: { type: string }
+        employees: { type: integer }
+        product: { type: string }
+        contact_email: { type: string }
 
-  - id: enrich
-    depends_on: [scrape]
+  - id: "enrich"
+    depends_on: ["scrape"]
     prompt: |
       Given this company data: {steps.scrape.output}
-      Find additional info: funding rounds, key contacts (CEO, CTO),
-      LinkedIn URLs, recent news. Return structured JSON.
-    model: sonnet
-    max_turns: 15
-    output_schema:
-      type: object
-      properties:
-        funding_total_usd: { type: number }
-        last_round: { type: string }
-        contacts: { type: array }
-        recent_news: { type: array }
+      Research: revenue, industry, key decision makers, recent news.
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
 
-  - id: score
-    depends_on: [scrape, enrich]
+  - id: "score"
+    depends_on: ["enrich"]
     prompt: |
-      Score this lead from 1-100 based on:
-      {steps.scrape.output} and {steps.enrich.output}
-      Consider: company size, funding, tech stack fit.
+      Score this lead 1-100 for B2B SaaS potential.
+      Based on: {steps.enrich.output}
     model: haiku
-    max_turns: 3
 
 on_complete:
-  webhook: ${CALLBACK_URL}
-  storage: s3://sandcastle-data/enrichments/{run_id}/
-
-schedule: null  # or "0 */6 * * *" for every 6 hours
+  storage_path: "leads/{run_id}/result.json"
 ```
 
----
+### Parallel Execution
 
-## Persistence
-
-Agents can read and write to shared storage that survives between runs:
+Steps at the same DAG layer run concurrently. Use `parallel_over` to fan out over a list:
 
 ```yaml
 steps:
-  - id: compare
-    prompt: |
-      Load yesterday's prices from {storage.prices/latest.json}.
-      Scrape current prices. Compare and report changes.
-      Save current prices to {storage.prices/latest.json}.
-    storage:
-      read: [prices/latest.json]
-      write: [prices/latest.json, reports/diff-{date}.json]
-```
+  - id: "fetch-competitors"
+    prompt: "Identify top 3 competitors for {input.company_url}."
 
-Storage backends: S3, R2 (Cloudflare), MinIO (local), or PostgreSQL for small data.
+  - id: "analyze"
+    depends_on: ["fetch-competitors"]
+    parallel_over: "steps.fetch-competitors.output.competitors"
+    prompt: "Analyze {input._item} for pricing and feature changes."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "summarize"
+    depends_on: ["analyze"]
+    prompt: "Create executive summary from: {steps.analyze.output}"
+```
 
 ---
 
-## Webhooks & Callbacks
+## API Reference
 
-Don't hold a connection open. Fire and forget:
+### Workflows
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/workflows` | List available workflows |
+| `POST` | `/workflows` | Save new workflow YAML |
+| `POST` | `/workflows/run` | Run workflow async (returns run_id) |
+| `POST` | `/workflows/run/sync` | Run workflow sync (blocks until done) |
+
+### Runs
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/runs` | List runs (filterable by status, workflow, date, tenant) |
+| `GET` | `/runs/{run_id}` | Get run detail with step statuses |
+| `GET` | `/runs/{run_id}/stream` | SSE stream of live progress |
+
+### Schedules
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/schedules` | Create cron schedule |
+| `GET` | `/schedules` | List all schedules |
+| `PATCH` | `/schedules/{id}` | Enable/disable schedule |
+| `DELETE` | `/schedules/{id}` | Delete schedule |
+
+### Dead Letter Queue
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/dead-letter` | List failed items |
+| `POST` | `/dead-letter/{id}/retry` | Retry failed step |
+| `POST` | `/dead-letter/{id}/resolve` | Mark as resolved |
+
+### API Keys
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api-keys` | Create API key (returns plaintext once) |
+| `GET` | `/api-keys` | List active keys |
+| `DELETE` | `/api-keys/{id}` | Deactivate key |
+
+### Other
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check (Sandstorm, DB, Redis) |
+| `GET` | `/stats` | Aggregated stats and cost trends |
+
+---
+
+## Webhooks
+
+Sandcastle signs all webhook payloads with HMAC-SHA256 so you can verify they're authentic:
 
 ```bash
 curl -X POST http://localhost:8000/workflows/run \
   -d '{
     "workflow": "enrichment",
-    "input": { ... },
-    "callback_url": "https://your-app.com/api/enrichment-done",
-    "callback_headers": { "Authorization": "Bearer your-token" }
+    "input": { "target_url": "https://example.com" },
+    "callback_url": "https://your-app.com/api/done"
   }'
-
-# Response: { "run_id": "run_abc123", "status": "queued" }
-# When done, Sandcastle POSTs results to your callback_url
 ```
+
+Your callback receives:
+
+```json
+{
+  "run_id": "a1b2c3d4-...",
+  "status": "completed",
+  "outputs": { "lead_score": 87, "tier": "A" },
+  "total_cost_usd": 0.12
+}
+```
+
+With the header `X-Sandcastle-Signature` for HMAC verification.
 
 ---
 
 ## Scheduling
 
-Run agents on a cron schedule:
+Run workflows on a cron schedule via API or dashboard:
 
-```yaml
-# sandcastle.yaml
-schedule: "0 8 * * 1-5"  # Every weekday at 8am
-
-# or via API:
+```bash
 curl -X POST http://localhost:8000/schedules \
+  -H "Content-Type: application/json" \
   -d '{
-    "workflow": "competitor-monitor",
-    "cron": "0 */6 * * *",
-    "notify": { "slack_webhook": "https://hooks.slack.com/..." }
+    "workflow_name": "competitor-monitor",
+    "cron_expression": "0 */6 * * *",
+    "input_data": { "company_url": "https://example.com" }
   }'
 ```
 
+Powered by APScheduler with Redis-backed job storage.
+
 ---
 
-## Cost Tracking & Billing
+## Cost Tracking
 
-Every run tracks costs automatically:
+Every run automatically tracks Sandstorm execution costs per step:
 
 ```json
 {
-  "run_id": "run_abc123",
-  "workflow": "enrichment",
-  "costs": {
-    "e2b_sandbox_seconds": 145,
-    "e2b_cost_usd": 0.02,
-    "anthropic_input_tokens": 12500,
-    "anthropic_output_tokens": 3200,
-    "anthropic_cost_usd": 0.08,
-    "total_cost_usd": 0.10
-  },
-  "tenant_id": "customer_xyz",
-  "billed": true
+  "run_id": "a1b2c3d4-...",
+  "workflow_name": "lead-enrichment",
+  "total_cost_usd": 0.12,
+  "steps": [
+    { "step_id": "scrape", "cost_usd": 0.04, "duration_seconds": 12.3 },
+    { "step_id": "enrich", "cost_usd": 0.05, "duration_seconds": 18.7 },
+    { "step_id": "score", "cost_usd": 0.03, "duration_seconds": 8.2 }
+  ]
 }
 ```
 
-Use this to build usage-based billing for your customers.
+The dashboard aggregates costs by workflow and shows daily trends.
 
 ---
 
 ## Error Handling
 
 ```yaml
-# Per-step retry configuration
 steps:
   - id: scrape
     prompt: "..."
     retry:
       max_attempts: 3
-      backoff: exponential  # 1s, 2s, 4s
-      on_failure: skip      # skip | abort | fallback
-
-    fallback:
-      prompt: "Web scraping failed. Use web search to find basic info about {company.name}."
-
-# Global: failed runs go to dead letter queue
-on_failure:
-  dead_letter: true
-  notify:
-    slack_webhook: ${SLACK_WEBHOOK}
-    email: ops@yourcompany.com
+      backoff: exponential    # 1s, 2s, 4s
+      on_failure: skip        # skip | abort | fallback
 ```
 
----
-
-## Dashboard
-
-```
-http://localhost:8000/dashboard
-```
-
-- Run history with status, duration, cost
-- Live streaming of active agents
-- Error logs and retry history
-- Cost breakdown per workflow, per tenant
-- Schedule management
+Failed steps (after all retry attempts) land in the **Dead Letter Queue** where you can inspect the error, retry, or manually resolve them via the dashboard or API.
 
 ---
 
 ## Architecture
 
 ```
-Your App ──POST /workflows/run──▶ Sandcastle API
-                                      │
-                              ┌───────┴────────┐
-                              │  Workflow Engine │
-                              │  (DAG executor) │
-                              └───────┬────────┘
-                                      │
-                    ┌─────────┬───────┴───────┬──────────┐
-                    ▼         ▼               ▼          ▼
-               Sandstorm  Sandstorm      Sandstorm   Sandstorm
-               Agent A    Agent B        Agent C     Agent D
-               (scrape)   (scrape)       (enrich)    (report)
-                    │         │               │          │
-                    ▼         ▼               ▼          ▼
-                 E2B VM    E2B VM          E2B VM     E2B VM
-                    │         │               │          │
-                    └─────────┴───────┬───────┴──────────┘
-                                      │
-                              ┌───────┴────────┐
-                              │   PostgreSQL    │ ◀── run history, billing
-                              │   Redis         │ ◀── job queue, scheduling
-                              │   S3 / R2       │ ◀── persistent storage
-                              └────────────────┘
-                                      │
-                              ┌───────┴────────┐
-                              │  Webhook POST   │──▶ Your App
-                              │  or Dashboard   │──▶ Browser
-                              └────────────────┘
+Your App ──POST /workflows/run──> Sandcastle API (FastAPI)
+                                       |
+                               ┌───────┴────────┐
+                               │  Workflow Engine │
+                               │  (DAG executor) │
+                               └───────┬────────┘
+                                       |
+                     ┌─────────┬───────┴───────┬──────────┐
+                     v         v               v          v
+                Sandstorm  Sandstorm      Sandstorm   Sandstorm
+                Agent A    Agent B        Agent C     Agent D
+                (scrape)   (scrape)       (enrich)    (report)
+                     |         |               |          |
+                     v         v               v          v
+                  E2B VM    E2B VM          E2B VM     E2B VM
+                     |         |               |          |
+                     └─────────┴───────┬───────┴──────────┘
+                                       |
+                     ┌─────────────────┼─────────────────┐
+                     v                 v                  v
+                PostgreSQL          Redis             S3 / MinIO
+              (runs, keys,       (job queue,       (persistent
+               dead letter)      scheduling)        storage)
+                                       |
+                               ┌───────┴────────┐
+                               │  Webhook POST   │──> Your App
+                               │  SSE Stream     │──> Dashboard
+                               └────────────────┘
+```
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| API Server | Python 3.12, FastAPI, Uvicorn |
+| Database | PostgreSQL 16 with SQLAlchemy async + Alembic |
+| Job Queue | Redis 7 with arq |
+| Scheduler | APScheduler with Redis store |
+| Storage | S3 / MinIO |
+| Agent Runtime | Sandstorm (E2B sandboxed) |
+| Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 |
+| DAG Visualization | @xyflow/react |
+| Charts | Recharts |
+
+---
+
+## Configuration
+
+All configuration via environment variables or `.env` file:
+
+```bash
+# Sandstorm connection
+SANDSTORM_URL=http://localhost:8000
+ANTHROPIC_API_KEY=sk-ant-...
+E2B_API_KEY=e2b_...
+
+# Database
+DATABASE_URL=postgresql+asyncpg://sandcastle:sandcastle@localhost:5432/sandcastle
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# Storage
+STORAGE_BACKEND=s3
+STORAGE_BUCKET=sandcastle-data
+STORAGE_ENDPOINT=http://localhost:9000
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+
+# Security
+WEBHOOK_SECRET=your-webhook-signing-secret
+AUTH_REQUIRED=false
+
+# Dashboard
+DASHBOARD_ORIGIN=http://localhost:5173
+WORKFLOWS_DIR=./workflows
+LOG_LEVEL=info
+```
+
+---
+
+## Development
+
+```bash
+# Run tests (51 passing)
+uv run pytest
+
+# Type check
+cd dashboard && npx tsc --noEmit
+
+# Dashboard dev server
+cd dashboard && npm run dev
 ```
 
 ---
