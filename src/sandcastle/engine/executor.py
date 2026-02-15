@@ -11,7 +11,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from sandcastle.engine.dag import ExecutionPlan, StepDefinition, WorkflowDefinition
+from sandcastle.engine.dag import (
+    ExecutionPlan,
+    FailureConfig,
+    StepDefinition,
+    WorkflowDefinition,
+)
 from sandcastle.engine.sandbox import SandstormClient, SandstormError
 from sandcastle.engine.storage import StorageBackend
 
@@ -329,18 +334,31 @@ async def execute_workflow(
 
                 context.costs.append(result.cost_usd)
 
+                # Check if workflow has dead_letter enabled
+                use_dead_letter = (
+                    workflow.on_failure
+                    and workflow.on_failure.dead_letter
+                )
+
                 if meta["fan_out"]:
                     if step_id not in fan_out_results:
                         fan_out_results[step_id] = []
 
                     if result.status == "failed":
                         on_failure = step.retry.on_failure if step.retry else "abort"
-                        if on_failure == "abort":
+                        if use_dead_letter:
+                            await _send_to_dead_letter(
+                                run_id=run_id,
+                                step_id=step_id,
+                                error=result.error,
+                                input_data={"_item_index": meta["index"]},
+                                attempts=result.attempt,
+                            )
+                            fan_out_results[step_id].append(None)
+                        elif on_failure == "abort":
                             raise StepExecutionError(
                                 f"Step '{step_id}' item {meta['index']} failed: {result.error}"
                             )
-                        elif on_failure == "skip":
-                            fan_out_results[step_id].append(None)
                         else:
                             fan_out_results[step_id].append(None)
                     else:
@@ -348,11 +366,21 @@ async def execute_workflow(
                 else:
                     if result.status == "failed":
                         on_failure = step.retry.on_failure if step.retry else "abort"
-                        if on_failure == "abort":
+                        if use_dead_letter:
+                            await _send_to_dead_letter(
+                                run_id=run_id,
+                                step_id=step_id,
+                                error=result.error,
+                                input_data=context.input,
+                                attempts=result.attempt,
+                            )
+                            context.step_outputs[step_id] = None
+                        elif on_failure == "abort":
                             raise StepExecutionError(
                                 f"Step '{step_id}' failed: {result.error}"
                             )
-                        context.step_outputs[step_id] = None
+                        else:
+                            context.step_outputs[step_id] = None
                     else:
                         context.step_outputs[step_id] = result.output
 
@@ -403,6 +431,34 @@ async def execute_workflow(
 
     finally:
         await sandbox.close()
+
+
+async def _send_to_dead_letter(
+    run_id: str,
+    step_id: str,
+    error: str | None,
+    input_data: dict | None,
+    attempts: int,
+) -> None:
+    """Insert a failed step into the dead letter queue."""
+    try:
+        from sandcastle.models.db import DeadLetterItem, async_session
+
+        async with async_session() as session:
+            import uuid as _uuid
+
+            dlq_item = DeadLetterItem(
+                run_id=_uuid.UUID(run_id),
+                step_id=step_id,
+                error=error,
+                input_data=input_data,
+                attempts=attempts,
+            )
+            session.add(dlq_item)
+            await session.commit()
+        logger.info(f"Step '{step_id}' sent to dead letter queue")
+    except Exception as e:
+        logger.error(f"Failed to insert into dead letter queue: {e}")
 
 
 class StepExecutionError(Exception):

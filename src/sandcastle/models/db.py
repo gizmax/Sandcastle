@@ -123,6 +123,46 @@ class Schedule(Base):
     )
 
 
+class ApiKey(Base):
+    """API key for multi-tenant authentication."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeadLetterItem(Base):
+    """Failed step stored in the dead letter queue for retry/resolution."""
+
+    __tablename__ = "dead_letter_queue"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
 # Database engine and session factory
 
 engine = create_async_engine(settings.database_url, echo=False)

@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     # Webhooks
     webhook_secret: str = "your-webhook-signing-secret"
 
+    # Auth
+    auth_required: bool = False  # Set to True to enforce API key auth
+    dashboard_origin: str = "http://localhost:5173"
+
+    # Workflows directory
+    workflows_dir: str = "./workflows"
+
     # Logging
     log_level: str = "info"
 

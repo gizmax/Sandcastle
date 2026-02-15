@@ -6,7 +6,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
 from sandcastle.config import settings
 
@@ -23,9 +26,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
     logger.info("Sandcastle starting up")
-    # DB engine is created on import; nothing else needed for startup
     yield
-    # Shutdown: dispose engine
     from sandcastle.models.db import engine
 
     await engine.dispose()
@@ -38,6 +39,18 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.dashboard_origin, "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Auth
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
 app.include_router(router)
 
