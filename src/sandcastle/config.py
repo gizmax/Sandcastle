@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Workflows directory
     workflows_dir: str = "./workflows"
 
+    # Hierarchical workflows
+    max_workflow_depth: int = 5
+
     # Logging
     log_level: str = "info"
 

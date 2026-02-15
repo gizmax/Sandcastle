@@ -659,6 +659,172 @@ async def _execute_approval_step(
     raise WorkflowPaused(approval_id=approval_id, run_id=context.run_id)
 
 
+async def _execute_sub_workflow_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+    depth: int = 0,
+) -> StepResult:
+    """Execute a sub-workflow step, with optional fan-out."""
+    from sandcastle.config import settings
+    from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
+
+    started_at = datetime.now(timezone.utc)
+
+    if not step.sub_workflow or not step.sub_workflow.workflow:
+        return StepResult(
+            step_id=step.id, status="failed", error="Missing sub_workflow config"
+        )
+
+    # Depth check
+    max_depth = settings.max_workflow_depth
+    if depth >= max_depth:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Max workflow depth ({max_depth}) exceeded",
+        )
+
+    # Load and parse sub-workflow
+    try:
+        from pathlib import Path
+
+        workflows_dir = Path(settings.workflows_dir)
+        wf_name = step.sub_workflow.workflow
+        yaml_path = None
+        for candidate in [
+            workflows_dir / f"{wf_name}.yaml",
+            workflows_dir / wf_name,
+        ]:
+            if candidate.exists() and candidate.is_file():
+                yaml_path = candidate
+                break
+
+        if yaml_path is None:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Sub-workflow '{wf_name}' not found",
+            )
+
+        yaml_content = yaml_path.read_text()
+        sub_workflow = parse_yaml_string(yaml_content)
+
+        errors = validate(sub_workflow)
+        if errors:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Sub-workflow validation: {'; '.join(errors)}",
+            )
+
+        sub_plan = build_plan(sub_workflow)
+
+    except Exception as e:
+        return StepResult(
+            step_id=step.id, status="failed", error=f"Sub-workflow load error: {e}"
+        )
+
+    # Resolve input mapping
+    sub_input = {}
+    for target_key, source_path in step.sub_workflow.input_mapping.items():
+        sub_input[target_key] = resolve_variable(source_path, context)
+
+    # Fan-out if parallel_over is configured
+    if step.sub_workflow.parallel_over:
+        items = resolve_variable(step.sub_workflow.parallel_over, context)
+        if not isinstance(items, list):
+            items = [items]
+
+        semaphore = asyncio.Semaphore(step.sub_workflow.max_concurrent)
+
+        async def run_sub(item: Any, index: int) -> WorkflowResult:
+            async with semaphore:
+                item_input = {**sub_input, "_item": item, "_index": index}
+                sub_run_id = str(uuid.uuid4())
+                return await execute_workflow(
+                    workflow=sub_workflow,
+                    plan=sub_plan,
+                    input_data=item_input,
+                    run_id=sub_run_id,
+                    storage=storage,
+                    depth=depth + 1,
+                )
+
+        tasks = [
+            asyncio.create_task(run_sub(item, i))
+            for i, item in enumerate(items)
+        ]
+        sub_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Aggregate outputs
+        outputs = []
+        total_cost = 0.0
+        sub_run_ids = []
+        for r in sub_results:
+            if isinstance(r, Exception):
+                outputs.append(None)
+            else:
+                outputs.append(r.outputs)
+                total_cost += r.total_cost_usd
+                sub_run_ids.append(r.run_id)
+
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+
+        # Apply output mapping if configured
+        output = outputs
+        if step.sub_workflow.output_mapping:
+            mapped = {}
+            for target, source in step.sub_workflow.output_mapping.items():
+                mapped[target] = outputs
+            output = mapped
+
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+
+    else:
+        # Single sub-workflow execution
+        sub_run_id = str(uuid.uuid4())
+        sub_result = await execute_workflow(
+            workflow=sub_workflow,
+            plan=sub_plan,
+            input_data=sub_input,
+            run_id=sub_run_id,
+            storage=storage,
+            depth=depth + 1,
+        )
+
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+
+        # Apply output mapping
+        output = sub_result.outputs
+        if step.sub_workflow.output_mapping:
+            mapped = {}
+            for target, source in step.sub_workflow.output_mapping.items():
+                parts = source.split(".")
+                val = sub_result.outputs
+                for p in parts:
+                    if isinstance(val, dict):
+                        val = val.get(p)
+                mapped[target] = val
+            output = mapped
+
+        status = "completed" if sub_result.status == "completed" else "failed"
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=sub_result.total_cost_usd,
+            duration_seconds=duration,
+            status=status,
+            error=sub_result.error,
+        )
+
+
 async def execute_workflow(
     workflow: WorkflowDefinition,
     plan: ExecutionPlan,
@@ -669,6 +835,7 @@ async def execute_workflow(
     initial_context: dict | None = None,
     skip_steps: set[str] | None = None,
     step_overrides: dict[str, dict] | None = None,
+    depth: int = 0,
 ) -> WorkflowResult:
     """Execute a full workflow with parallel stages and retry logic.
 
@@ -682,9 +849,20 @@ async def execute_workflow(
         initial_context: Pre-loaded context for replay/fork (skip_steps outputs).
         skip_steps: Set of step IDs to skip (already completed in replay).
         step_overrides: Per-step overrides for fork (e.g. {"score": {"model": "opus"}}).
+        depth: Current nesting depth for hierarchical workflows.
     """
     from sandcastle.config import settings
     from sandcastle.engine.storage import LocalStorage
+
+    # Depth check for hierarchical workflows
+    if depth > settings.max_workflow_depth:
+        return WorkflowResult(
+            run_id=run_id or str(uuid.uuid4()),
+            outputs={},
+            total_cost_usd=0.0,
+            status="failed",
+            error=f"Max workflow depth ({settings.max_workflow_depth}) exceeded",
+        )
 
     if run_id is None:
         run_id = str(uuid.uuid4())
@@ -761,6 +939,28 @@ async def execute_workflow(
                 if step.type == "approval":
                     await _execute_approval_step(step, context, stage_idx)
                     continue  # Won't reach here - WorkflowPaused is raised
+
+                # Handle sub-workflow steps
+                if step.type == "sub_workflow":
+                    sub_result = await _execute_sub_workflow_step(
+                        step, context, storage, depth=depth,
+                    )
+                    context.costs.append(sub_result.cost_usd)
+                    if sub_result.status == "completed":
+                        context.step_outputs[step_id] = sub_result.output
+                        await _save_run_step(
+                            run_id=context.run_id,
+                            step_id=step.id,
+                            status="completed",
+                            output=sub_result.output,
+                            cost_usd=sub_result.cost_usd,
+                            duration_seconds=sub_result.duration_seconds,
+                        )
+                    else:
+                        raise StepExecutionError(
+                            f"Sub-workflow step '{step_id}' failed: {sub_result.error}"
+                        )
+                    continue
 
                 if step.parallel_over:
                     # Fan-out: one task per item

@@ -606,7 +606,11 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
         )
 
     async with async_session() as session:
-        stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
+        stmt = (
+            select(Run)
+            .options(selectinload(Run.steps), selectinload(Run.children))
+            .where(Run.id == run_uuid)
+        )
         stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
@@ -649,6 +653,17 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             parent_run_id=str(run.parent_run_id) if run.parent_run_id else None,
             replay_from_step=run.replay_from_step,
             fork_changes=run.fork_changes,
+            depth=run.depth,
+            sub_workflow_of_step=run.sub_workflow_of_step,
+            sub_runs=[
+                {
+                    "run_id": str(c.id),
+                    "workflow_name": c.workflow_name,
+                    "status": c.status.value if hasattr(c.status, "value") else c.status,
+                    "sub_workflow_of_step": c.sub_workflow_of_step,
+                }
+                for c in run.children
+            ] if run.children else None,
         )
     )
 

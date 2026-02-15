@@ -87,6 +87,18 @@ class AutoPilotConfig:
 
 
 @dataclass
+class SubWorkflowConfig:
+    """Configuration for a sub-workflow (workflow-as-step)."""
+
+    workflow: str = ""  # Workflow file name
+    input_mapping: dict[str, str] = field(default_factory=dict)
+    output_mapping: dict[str, str] = field(default_factory=dict)
+    parallel_over: str | None = None  # Fan-out over this variable
+    max_concurrent: int = 5
+    timeout: int = 600
+
+
+@dataclass
 class StepDefinition:
     """Definition of a single workflow step."""
 
@@ -103,6 +115,7 @@ class StepDefinition:
     type: str = "standard"  # "standard" | "approval" | "sub_workflow"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
+    sub_workflow: SubWorkflowConfig | None = None
 
 
 @dataclass
@@ -212,6 +225,20 @@ def _parse_autopilot_config(data: dict | None) -> AutoPilotConfig | None:
     )
 
 
+def _parse_sub_workflow_config(data: dict | None) -> SubWorkflowConfig | None:
+    """Parse sub-workflow configuration from YAML data."""
+    if data is None:
+        return None
+    return SubWorkflowConfig(
+        workflow=data.get("workflow", ""),
+        input_mapping=data.get("input_mapping", {}),
+        output_mapping=data.get("output_mapping", {}),
+        parallel_over=data.get("parallel_over"),
+        max_concurrent=data.get("max_concurrent", 5),
+        timeout=data.get("timeout", 600),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -220,6 +247,10 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     if step_type == "approval" and not prompt:
         ac = data.get("approval_config", {})
         prompt = ac.get("message", "Approval required")
+    # Sub-workflow steps don't require a prompt
+    if step_type == "sub_workflow" and not prompt:
+        sw = data.get("sub_workflow", {})
+        prompt = f"Sub-workflow: {sw.get('workflow', 'unknown')}"
 
     return StepDefinition(
         id=data["id"],
@@ -235,6 +266,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         type=step_type,
         approval_config=_parse_approval_config(data.get("approval_config")),
         autopilot=_parse_autopilot_config(data.get("autopilot")),
+        sub_workflow=_parse_sub_workflow_config(data.get("sub_workflow")),
     )
 
 
@@ -367,6 +399,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
             if not step.approval_config or not step.approval_config.message:
                 errors.append(
                     f"Approval step '{step.id}' must have approval_config with a message"
+                )
+        if step.type == "sub_workflow":
+            if not step.sub_workflow or not step.sub_workflow.workflow:
+                errors.append(
+                    f"Sub-workflow step '{step.id}' must have sub_workflow.workflow"
                 )
 
     # Check for cycles

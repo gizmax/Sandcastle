@@ -129,6 +129,9 @@ class RunStatusResponse(BaseModel):
     parent_run_id: str | None = None
     replay_from_step: str | None = None
     fork_changes: dict[str, Any] | None = None
+    depth: int = 0
+    sub_workflow_of_step: str | None = None
+    sub_runs: list[dict[str, Any]] | None = None
 
 
 class StepStatusResponse(BaseModel):

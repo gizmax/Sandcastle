@@ -88,6 +88,8 @@ class Run(Base):
     )
     replay_from_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fork_changes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -125,6 +127,7 @@ class RunStep(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sub_run_ids: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
