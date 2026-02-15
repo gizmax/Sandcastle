@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-background: #FAFAF9;
+  --color-surface: #FFFFFF;
+  --color-border: #E7E5E4;
+  --color-foreground: #1C1917;
+  --color-muted: #78716C;
+  --color-muted-foreground: #A8A29E;
+  --color-accent: #F59E0B;
+  --color-accent-hover: #D97706;
+  --color-accent-foreground: #FFFFFF;
+  --color-success: #22C55E;
+  --color-error: #EF4444;
+  --color-warning: #F59E0B;
+  --color-running: #3B82F6;
+  --color-queued: #A78BFA;
+  --color-input: #E7E5E4;
+  --color-ring: #F59E0B;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+.dark {
+  --color-background: #1C1917;
+  --color-surface: #292524;
+  --color-border: #44403C;
+  --color-foreground: #FAFAF9;
+  --color-muted: #A8A29E;
+  --color-muted-foreground: #78716C;
+  --color-accent: #FBBF24;
+  --color-accent-hover: #F59E0B;
+  --color-accent-foreground: #1C1917;
+  --color-input: #44403C;
+  --color-ring: #FBBF24;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
