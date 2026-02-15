@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/lib/constants";
+import { mockFetch } from "@/api/mock";
 
 interface ApiResponse<T = unknown> {
   data: T | null;
@@ -9,6 +10,7 @@ interface ApiResponse<T = unknown> {
 class ApiClient {
   private baseUrl: string;
   private apiKey: string | null = null;
+  private useMock = false;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -26,41 +28,81 @@ class ApiClient {
     return h;
   }
 
+  private mock<T>(path: string, params?: Record<string, string>): ApiResponse<T> {
+    return mockFetch(path, params) as ApiResponse<T>;
+  }
+
   async get<T>(path: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
-      });
+    if (this.useMock) return this.mock<T>(path, params);
+
+    try {
+      const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+        });
+      }
+      const res = await fetch(url.toString(), { headers: this.headers() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch {
+      console.info(`[Sandcastle] Backend unavailable, using demo data`);
+      this.useMock = true;
+      return this.mock<T>(path, params);
     }
-    const res = await fetch(url.toString(), { headers: this.headers() });
-    return res.json();
   }
 
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: this.headers(),
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    return res.json();
+    if (this.useMock) {
+      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+    }
+
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: this.headers(),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return res.json();
+    } catch {
+      this.useMock = true;
+      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+    }
   }
 
   async patch<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method: "PATCH",
-      headers: this.headers(),
-      body: JSON.stringify(body),
-    });
-    return res.json();
+    if (this.useMock) {
+      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+    }
+
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: "PATCH",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+      });
+      return res.json();
+    } catch {
+      this.useMock = true;
+      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+    }
   }
 
   async delete<T>(path: string): Promise<ApiResponse<T>> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method: "DELETE",
-      headers: this.headers(),
-    });
-    return res.json();
+    if (this.useMock) {
+      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+    }
+
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: "DELETE",
+        headers: this.headers(),
+      });
+      return res.json();
+    } catch {
+      this.useMock = true;
+      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+    }
   }
 
   sseUrl(path: string): string {

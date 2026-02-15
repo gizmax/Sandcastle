@@ -1,0 +1,57 @@
+name: "Lead Enrichment"
+description: "Scrape target websites, enrich with company data, and score leads for sales outreach priority."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "scrape"
+    prompt: |
+      Visit {input.target_url} and extract:
+      - Company name
+      - Number of employees (estimate)
+      - Main product/service
+      - Contact information
+      Return as structured JSON.
+    output_schema:
+      type: object
+      properties:
+        company_name: { type: string }
+        employees: { type: integer }
+        product: { type: string }
+        contact_email: { type: string }
+
+  - id: "enrich"
+    prompt: |
+      Given this company data: {steps.scrape.output}
+      Research and enrich with:
+      - Estimated annual revenue
+      - Industry classification
+      - Key decision makers (names and roles)
+      - Recent news or funding rounds
+    depends_on:
+      - "scrape"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: "score"
+    prompt: |
+      Based on this enriched lead data: {steps.enrich.output}
+      Score this lead from 1-100 for B2B SaaS sales potential.
+      Consider company size, industry fit, and growth signals.
+      Assign a tier (A/B/C) and provide a one-sentence recommendation.
+    depends_on:
+      - "enrich"
+    model: haiku
+    output_schema:
+      type: object
+      properties:
+        lead_score: { type: integer }
+        tier: { type: string }
+        recommendation: { type: string }
+
+on_complete:
+  storage_path: "leads/{run_id}/result.json"

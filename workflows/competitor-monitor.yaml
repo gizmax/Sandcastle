@@ -1,0 +1,57 @@
+name: "Competitor Monitor"
+description: "Track competitor websites for changes, analyze differences, and generate a summary report."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "fetch-competitors"
+    prompt: |
+      For the company at {input.company_url}, identify their top 3 competitors.
+      Return a JSON array of competitor URLs.
+    output_schema:
+      type: object
+      properties:
+        competitors:
+          type: array
+          items: { type: string }
+
+  - id: "analyze"
+    prompt: |
+      Visit {input._item} and analyze:
+      - Current pricing structure
+      - New features or product changes
+      - Marketing messaging changes
+      Compare to previous known state if available.
+    depends_on:
+      - "fetch-competitors"
+    parallel_over: "steps.fetch-competitors.output.competitors"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "summarize"
+    prompt: |
+      Given these competitor analyses: {steps.analyze.output}
+      Create a concise executive summary highlighting:
+      - Key competitive movements
+      - Pricing changes
+      - New threats or opportunities
+      - Recommended actions
+    depends_on:
+      - "analyze"
+
+  - id: "format-report"
+    prompt: |
+      Format this competitive intelligence into a professional report:
+      {steps.summarize.output}
+      Use markdown formatting with sections and bullet points.
+    depends_on:
+      - "summarize"
+    model: haiku
+
+on_complete:
+  storage_path: "reports/{run_id}/competitor-report.md"
+  webhook: "${WEBHOOK_URL}"

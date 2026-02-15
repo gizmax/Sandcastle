@@ -1,0 +1,51 @@
+name: "SEO Audit"
+description: "Crawl a website, analyze on-page SEO factors, and produce actionable recommendations."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 15
+default_timeout: 600
+
+steps:
+  - id: "crawl"
+    prompt: |
+      Crawl {input.target_url} (max depth: {input.max_depth}).
+      For each page, extract:
+      - URL, title tag, meta description
+      - H1/H2 headings
+      - Internal/external link count
+      - Image alt text coverage
+      Return as structured JSON array.
+    timeout: 600
+
+  - id: "analyze-technical"
+    prompt: |
+      Analyze this crawl data for technical SEO issues:
+      {steps.crawl.output}
+      Check for:
+      - Missing/duplicate title tags
+      - Missing meta descriptions
+      - Broken heading hierarchy
+      - Missing alt text
+      - Internal linking opportunities
+    depends_on:
+      - "crawl"
+
+  - id: "recommendations"
+    prompt: |
+      Based on this SEO analysis: {steps.analyze-technical.output}
+      Produce a prioritized list of SEO recommendations.
+      Group by: Critical, High, Medium, Low priority.
+      Include estimated impact and implementation difficulty.
+    depends_on:
+      - "analyze-technical"
+    model: haiku
+    output_schema:
+      type: object
+      properties:
+        critical: { type: array, items: { type: string } }
+        high: { type: array, items: { type: string } }
+        medium: { type: array, items: { type: string } }
+        low: { type: array, items: { type: string } }
+
+on_complete:
+  storage_path: "audits/{run_id}/seo-report.json"
