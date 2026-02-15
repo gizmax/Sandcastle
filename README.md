@@ -34,7 +34,7 @@ Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result,
 - **"Alert me if the agent fails, retry automatically."** - No production error handling.
 - **"Run this every 6 hours and notify me on Slack."** - No scheduling, no webhooks.
 
-Sandcastle takes Sandstorm's sandboxed agent execution and wraps it in everything you need to ship agent-powered products to real customers.
+Sandcastle takes Sandstorm's sandboxed agent execution and adds the orchestration, persistence, and guardrails needed for production.
 
 > **Sandstorm** = the engine.
 > **Sandcastle** = the product you build with it.
