@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     auth_required: bool = False  # Set to True to enforce API key auth
     dashboard_origin: str = "http://localhost:5173"
 
+    # Budget
+    default_max_cost_usd: float = 0.0  # 0 = no limit
+
     # Workflows directory
     workflows_dir: str = "./workflows"
 

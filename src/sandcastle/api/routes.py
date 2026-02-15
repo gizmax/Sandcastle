@@ -24,8 +24,10 @@ from sandcastle.api.schemas import (
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
     ErrorResponse,
+    ForkRequest,
     HealthResponse,
     PaginationMeta,
+    ReplayRequest,
     RunListItem,
     RunStatusResponse,
     ScheduleCreateRequest,
@@ -46,6 +48,7 @@ from sandcastle.models.db import (
     ApiKey,
     DeadLetterItem,
     Run,
+    RunCheckpoint,
     RunStatus,
     RunStep,
     Schedule,
@@ -93,6 +96,37 @@ def _apply_tenant_filter(stmt, tenant_id: str | None, column):
     if settings.auth_required and tenant_id is not None:
         return stmt.where(column == tenant_id)
     return stmt
+
+
+def _resolve_budget(request_budget: float | None, tenant_id: str | None) -> float | None:
+    """Resolve max_cost_usd: request > tenant api_key > env default.
+
+    Returns None if no budget is set (unlimited).
+    """
+    # Request-level budget takes priority
+    if request_budget is not None and request_budget > 0:
+        return request_budget
+    # Env-level default
+    if settings.default_max_cost_usd > 0:
+        return settings.default_max_cost_usd
+    return None
+
+
+async def _resolve_tenant_budget(tenant_id: str | None) -> float | None:
+    """Look up the tenant's API key budget limit."""
+    if not tenant_id or not settings.auth_required:
+        return None
+    try:
+        async with async_session() as session:
+            stmt = select(ApiKey.max_cost_per_run_usd).where(
+                ApiKey.tenant_id == tenant_id, ApiKey.is_active == True
+            ).limit(1)
+            result = await session.scalar(stmt)
+            if result and result > 0:
+                return result
+    except Exception:
+        pass
+    return None
 
 
 # --- Health ---
@@ -363,7 +397,25 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             ).model_dump(),
         )
 
+    # Resolve budget
+    budget = _resolve_budget(request.max_cost_usd, tenant_id)
+    if budget is None:
+        tenant_budget = await _resolve_tenant_budget(tenant_id)
+        if tenant_budget:
+            budget = tenant_budget
+
+    # Idempotency check
     run_id = str(uuid.uuid4())
+    if request.idempotency_key:
+        async with async_session() as session:
+            existing = await session.scalar(
+                select(Run.id).where(Run.idempotency_key == request.idempotency_key)
+            )
+            if existing:
+                return ApiResponse(
+                    data={"run_id": str(existing), "status": "existing", "idempotent": True},
+                )
+
     storage = LocalStorage()
 
     # Create DB record
@@ -376,6 +428,8 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 input_data=request.input,
                 callback_url=request.callback_url,
                 tenant_id=tenant_id,
+                idempotency_key=request.idempotency_key,
+                max_cost_usd=budget,
                 started_at=datetime.now(timezone.utc),
             )
             session.add(db_run)
@@ -389,16 +443,23 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         input_data=request.input,
         run_id=run_id,
         storage=storage,
+        max_cost_usd=budget,
     )
+
+    # Map result status to RunStatus
+    status_map = {
+        "completed": RunStatus.COMPLETED,
+        "failed": RunStatus.FAILED,
+        "cancelled": RunStatus.CANCELLED,
+        "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
+    }
 
     # Update DB record
     try:
         async with async_session() as session:
             db_run = await session.get(Run, uuid.UUID(run_id))
             if db_run:
-                db_run.status = (
-                    RunStatus.COMPLETED if result.status == "completed" else RunStatus.FAILED
-                )
+                db_run.status = status_map.get(result.status, RunStatus.FAILED)
                 db_run.output_data = result.outputs
                 db_run.total_cost_usd = result.total_cost_usd
                 db_run.completed_at = result.completed_at
@@ -415,6 +476,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             input_data=request.input,
             outputs=result.outputs,
             total_cost_usd=result.total_cost_usd,
+            max_cost_usd=budget,
             started_at=result.started_at,
             completed_at=result.completed_at,
             error=result.error,
@@ -456,6 +518,24 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
+    # Resolve budget
+    budget = _resolve_budget(request.max_cost_usd, tenant_id)
+    if budget is None:
+        tenant_budget = await _resolve_tenant_budget(tenant_id)
+        if tenant_budget:
+            budget = tenant_budget
+
+    # Idempotency check
+    if request.idempotency_key:
+        async with async_session() as session:
+            existing = await session.scalar(
+                select(Run.id).where(Run.idempotency_key == request.idempotency_key)
+            )
+            if existing:
+                return ApiResponse(
+                    data={"run_id": str(existing), "status": "existing", "idempotent": True},
+                )
+
     run_id = str(uuid.uuid4())
 
     # Create DB record with QUEUED status
@@ -468,6 +548,8 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 input_data=request.input,
                 callback_url=request.callback_url,
                 tenant_id=tenant_id,
+                idempotency_key=request.idempotency_key,
+                max_cost_usd=budget,
             )
             session.add(db_run)
             await session.commit()
@@ -561,10 +643,14 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             input_data=run.input_data,
             outputs=run.output_data,
             total_cost_usd=run.total_cost_usd,
+            max_cost_usd=run.max_cost_usd,
             started_at=run.started_at,
             completed_at=run.completed_at,
             error=run.error,
             steps=steps,
+            parent_run_id=str(run.parent_run_id) if run.parent_run_id else None,
+            replay_from_step=run.replay_from_step,
+            fork_changes=run.fork_changes,
         )
     )
 
@@ -621,7 +707,7 @@ async def stream_run(run_id: str) -> StreamingResponse:
                 last_step_count = len(run.steps)
 
             # Terminal states - emit final result and stop
-            if current_status in ("completed", "failed", "partial"):
+            if current_status in ("completed", "failed", "partial", "cancelled", "budget_exceeded"):
                 yield _sse_event("result", {
                     "run_id": str(run.id),
                     "status": current_status,
@@ -699,6 +785,7 @@ async def list_runs(
             total_cost_usd=r.total_cost_usd,
             started_at=r.started_at,
             completed_at=r.completed_at,
+            parent_run_id=str(r.parent_run_id) if r.parent_run_id else None,
         )
         for r in runs
     ]
@@ -706,6 +793,323 @@ async def list_runs(
     return ApiResponse(
         data=items,
         meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+# --- Cancel ---
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str, req: Request) -> ApiResponse:
+    """Cancel a running workflow. Sets a Redis flag checked by the executor."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+            ).model_dump(),
+        )
+
+    run_status = run.status.value if hasattr(run.status, "value") else run.status
+    if run_status not in ("queued", "running"):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_STATUS",
+                    message=f"Cannot cancel run with status '{run_status}'",
+                )
+            ).model_dump(),
+        )
+
+    # Set Redis cancel flag
+    try:
+        import redis.asyncio as aioredis
+
+        r = aioredis.from_url(settings.redis_url)
+        await r.set(f"cancel:{run_id}", "1", ex=3600)  # 1h TTL
+        await r.aclose()
+    except Exception as e:
+        logger.error(f"Could not set cancel flag in Redis: {e}")
+
+    # Update DB status
+    async with async_session() as session:
+        db_run = await session.get(Run, run_uuid)
+        if db_run:
+            db_run.status = RunStatus.CANCELLED
+            db_run.completed_at = datetime.now(timezone.utc)
+            db_run.error = "Cancelled by user"
+            await session.commit()
+
+    return ApiResponse(
+        data={"cancelled": True, "run_id": run_id},
+    )
+
+
+# --- Replay / Fork (Time Machine) ---
+
+
+@router.post("/runs/{run_id}/replay")
+async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiResponse:
+    """Replay a run from a specific step using saved checkpoints."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    # Load the original run
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        original_run = result.scalar_one_or_none()
+
+    if not original_run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+            ).model_dump(),
+        )
+
+    # Find the checkpoint before the requested step
+    async with async_session() as session:
+        checkpoint_stmt = (
+            select(RunCheckpoint)
+            .where(RunCheckpoint.run_id == run_uuid)
+            .order_by(RunCheckpoint.stage_index.desc())
+        )
+        result = await session.execute(checkpoint_stmt)
+        checkpoints = result.scalars().all()
+
+    # Find the checkpoint just before from_step
+    target_checkpoint = None
+    for cp in checkpoints:
+        snapshot = cp.context_snapshot
+        if request.from_step not in snapshot.get("step_outputs", {}):
+            target_checkpoint = cp
+            break
+
+    if not target_checkpoint and checkpoints:
+        # Use the earliest checkpoint (step 0)
+        target_checkpoint = checkpoints[-1]
+
+    # Load workflow YAML
+    try:
+        yaml_content = _load_workflow_yaml(original_run.workflow_name)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="WORKFLOW_NOT_FOUND",
+                    message=f"Workflow '{original_run.workflow_name}' not found on disk",
+                )
+            ).model_dump(),
+        )
+
+    # Determine which steps to skip
+    initial_context = target_checkpoint.context_snapshot if target_checkpoint else None
+    skip_steps = set(initial_context["step_outputs"].keys()) if initial_context else set()
+
+    # Create new run
+    new_run_id = str(uuid.uuid4())
+    async with async_session() as session:
+        new_run = Run(
+            id=uuid.UUID(new_run_id),
+            workflow_name=original_run.workflow_name,
+            status=RunStatus.QUEUED,
+            input_data=original_run.input_data,
+            callback_url=original_run.callback_url,
+            tenant_id=tenant_id,
+            parent_run_id=run_uuid,
+            replay_from_step=request.from_step,
+            max_cost_usd=original_run.max_cost_usd,
+        )
+        session.add(new_run)
+        await session.commit()
+
+    # Enqueue with replay context
+    try:
+        await enqueue_workflow(
+            yaml_content,
+            original_run.input_data or {},
+            new_run_id,
+            max_cost_usd=original_run.max_cost_usd,
+            initial_context=initial_context,
+            skip_steps=list(skip_steps),
+        )
+    except Exception as e:
+        async with async_session() as session:
+            db_run = await session.get(Run, uuid.UUID(new_run_id))
+            if db_run:
+                db_run.status = RunStatus.FAILED
+                db_run.error = f"Failed to enqueue replay: {e}"
+                db_run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue replay: {e}")
+            ).model_dump(),
+        )
+
+    return ApiResponse(
+        data={
+            "new_run_id": new_run_id,
+            "parent_run_id": run_id,
+            "replay_from_step": request.from_step,
+            "status": "queued",
+        },
+    )
+
+
+@router.post("/runs/{run_id}/fork")
+async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiResponse:
+    """Fork a run from a specific step with overrides (prompt, model, etc.)."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    # Load the original run
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        original_run = result.scalar_one_or_none()
+
+    if not original_run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+            ).model_dump(),
+        )
+
+    # Find the checkpoint before the requested step
+    async with async_session() as session:
+        checkpoint_stmt = (
+            select(RunCheckpoint)
+            .where(RunCheckpoint.run_id == run_uuid)
+            .order_by(RunCheckpoint.stage_index.desc())
+        )
+        result = await session.execute(checkpoint_stmt)
+        checkpoints = result.scalars().all()
+
+    target_checkpoint = None
+    for cp in checkpoints:
+        snapshot = cp.context_snapshot
+        if request.from_step not in snapshot.get("step_outputs", {}):
+            target_checkpoint = cp
+            break
+
+    if not target_checkpoint and checkpoints:
+        target_checkpoint = checkpoints[-1]
+
+    # Load workflow YAML
+    try:
+        yaml_content = _load_workflow_yaml(original_run.workflow_name)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="WORKFLOW_NOT_FOUND",
+                    message=f"Workflow '{original_run.workflow_name}' not found on disk",
+                )
+            ).model_dump(),
+        )
+
+    initial_context = target_checkpoint.context_snapshot if target_checkpoint else None
+    skip_steps = set(initial_context["step_outputs"].keys()) if initial_context else set()
+
+    # Create new run with fork metadata
+    new_run_id = str(uuid.uuid4())
+    async with async_session() as session:
+        new_run = Run(
+            id=uuid.UUID(new_run_id),
+            workflow_name=original_run.workflow_name,
+            status=RunStatus.QUEUED,
+            input_data=original_run.input_data,
+            callback_url=original_run.callback_url,
+            tenant_id=tenant_id,
+            parent_run_id=run_uuid,
+            replay_from_step=request.from_step,
+            fork_changes=request.changes,
+            max_cost_usd=original_run.max_cost_usd,
+        )
+        session.add(new_run)
+        await session.commit()
+
+    # Step overrides for the fork target step
+    step_overrides = {request.from_step: request.changes} if request.changes else None
+
+    try:
+        await enqueue_workflow(
+            yaml_content,
+            original_run.input_data or {},
+            new_run_id,
+            max_cost_usd=original_run.max_cost_usd,
+            initial_context=initial_context,
+            skip_steps=list(skip_steps),
+            step_overrides=step_overrides,
+        )
+    except Exception as e:
+        async with async_session() as session:
+            db_run = await session.get(Run, uuid.UUID(new_run_id))
+            if db_run:
+                db_run.status = RunStatus.FAILED
+                db_run.error = f"Failed to enqueue fork: {e}"
+                db_run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue fork: {e}")
+            ).model_dump(),
+        )
+
+    return ApiResponse(
+        data={
+            "new_run_id": new_run_id,
+            "parent_run_id": run_id,
+            "fork_from_step": request.from_step,
+            "changes": request.changes,
+            "status": "queued",
+        },
     )
 
 
@@ -923,6 +1327,7 @@ async def list_dead_letter(
             id=str(item.id),
             run_id=str(item.run_id),
             step_id=item.step_id,
+            parallel_index=item.parallel_index,
             error=item.error,
             input_data=item.input_data,
             attempts=item.attempts,
@@ -986,6 +1391,7 @@ async def retry_dead_letter(item_id: str) -> ApiResponse:
         # Mark DLQ item as resolved by retry
         item.resolved_at = datetime.now(timezone.utc)
         item.resolved_by = "retry"
+        item.attempts += 1
         await session.commit()
 
     # Re-enqueue the workflow
@@ -1001,6 +1407,7 @@ async def retry_dead_letter(item_id: str) -> ApiResponse:
                 input_data=original_run.input_data,
                 callback_url=original_run.callback_url,
                 tenant_id=original_run.tenant_id,
+                parent_run_id=original_run.id,
             )
             session.add(new_run)
             await session.commit()
@@ -1066,6 +1473,7 @@ async def resolve_dead_letter(item_id: str, request: DeadLetterResolveRequest | 
             id=str(item.id),
             run_id=str(item.run_id),
             step_id=item.step_id,
+            parallel_index=item.parallel_index,
             error=item.error,
             input_data=item.input_data,
             attempts=item.attempts,
@@ -1084,13 +1492,16 @@ async def create_api_key(request: ApiKeyCreateRequest) -> ApiResponse:
     """Create a new API key. Returns the plaintext key ONCE."""
     plaintext_key = generate_api_key()
     key_hash_value = hash_key(plaintext_key)
+    key_prefix = plaintext_key[:8]
 
     try:
         async with async_session() as session:
             db_key = ApiKey(
                 key_hash=key_hash_value,
+                key_prefix=key_prefix,
                 tenant_id=request.tenant_id,
                 name=request.name,
+                max_cost_per_run_usd=request.max_cost_per_run_usd,
             )
             session.add(db_key)
             await session.commit()
@@ -1099,6 +1510,7 @@ async def create_api_key(request: ApiKeyCreateRequest) -> ApiResponse:
             return ApiResponse(
                 data=ApiKeyCreatedResponse(
                     id=str(db_key.id),
+                    key_prefix=key_prefix,
                     tenant_id=db_key.tenant_id,
                     name=db_key.name,
                     key=plaintext_key,
@@ -1139,9 +1551,11 @@ async def list_api_keys(
     data = [
         ApiKeyResponse(
             id=str(k.id),
+            key_prefix=k.key_prefix,
             tenant_id=k.tenant_id,
             name=k.name,
             is_active=k.is_active,
+            max_cost_per_run_usd=k.max_cost_per_run_usd,
             created_at=k.created_at,
             last_used_at=k.last_used_at,
         )

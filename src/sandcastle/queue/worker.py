@@ -27,10 +27,20 @@ def _parse_redis_url(url: str) -> RedisSettings:
     )
 
 
-async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_id: str) -> dict:
+async def run_workflow_job(
+    ctx: dict,
+    workflow_yaml: str,
+    input_data: dict,
+    run_id: str,
+    max_cost_usd: float | None = None,
+    initial_context: dict | None = None,
+    skip_steps: list[str] | None = None,
+    step_overrides: dict | None = None,
+) -> dict:
     """Arq job: execute a workflow asynchronously.
 
     Updates the database with progress and results. Dispatches webhooks.
+    Supports budget limits, replay (initial_context + skip_steps), and fork (step_overrides).
     """
     from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
     from sandcastle.engine.executor import execute_workflow
@@ -48,6 +58,9 @@ async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_
             run.status = RunStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)
             callback_url = run.callback_url
+            # Use budget from DB if not passed explicitly
+            if max_cost_usd is None and run.max_cost_usd:
+                max_cost_usd = run.max_cost_usd
             await session.commit()
 
     try:
@@ -65,15 +78,25 @@ async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_
             input_data=input_data,
             run_id=run_id,
             storage=storage,
+            max_cost_usd=max_cost_usd,
+            initial_context=initial_context,
+            skip_steps=set(skip_steps) if skip_steps else None,
+            step_overrides=step_overrides,
         )
+
+        # Map result status to RunStatus
+        status_map = {
+            "completed": RunStatus.COMPLETED,
+            "failed": RunStatus.FAILED,
+            "cancelled": RunStatus.CANCELLED,
+            "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
+        }
 
         # Update DB with result
         async with async_session() as session:
             run = await session.get(Run, uuid.UUID(run_id))
             if run:
-                run.status = (
-                    RunStatus.COMPLETED if result.status == "completed" else RunStatus.FAILED
-                )
+                run.status = status_map.get(result.status, RunStatus.FAILED)
                 run.output_data = result.outputs
                 run.total_cost_usd = result.total_cost_usd
                 run.completed_at = datetime.now(timezone.utc)
@@ -171,6 +194,10 @@ async def enqueue_workflow(
     workflow_yaml: str,
     input_data: dict,
     run_id: str,
+    max_cost_usd: float | None = None,
+    initial_context: dict | None = None,
+    skip_steps: list[str] | None = None,
+    step_overrides: dict | None = None,
 ) -> None:
     """Enqueue a workflow job into the Redis queue."""
     redis = await create_pool(_parse_redis_url(settings.redis_url))
@@ -179,5 +206,9 @@ async def enqueue_workflow(
         workflow_yaml,
         input_data,
         run_id,
+        max_cost_usd=max_cost_usd,
+        initial_context=initial_context,
+        skip_steps=skip_steps,
+        step_overrides=step_overrides,
     )
     await redis.close()

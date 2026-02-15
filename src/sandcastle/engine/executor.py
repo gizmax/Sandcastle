@@ -1,4 +1,4 @@
-"""Workflow executor - parallel execution with retries and cost tracking."""
+"""Workflow executor - parallel execution with retries, cost tracking, budget, cancel."""
 
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ class RunContext:
     costs: list[float] = field(default_factory=list)
     status: str = "running"
     error: str | None = None
+    max_cost_usd: float | None = None
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item."""
@@ -56,7 +57,22 @@ class RunContext:
             step_outputs=dict(self.step_outputs),
             costs=self.costs,
             status=self.status,
+            max_cost_usd=self.max_cost_usd,
         )
+
+    @property
+    def total_cost(self) -> float:
+        return sum(self.costs)
+
+    def snapshot(self) -> dict:
+        """Create a serializable snapshot of the context for checkpointing."""
+        return {
+            "run_id": self.run_id,
+            "input": self.input,
+            "step_outputs": self.step_outputs,
+            "costs": self.costs,
+            "total_cost": self.total_cost,
+        }
 
 
 @dataclass
@@ -204,14 +220,96 @@ async def _save_run_step(
         logger.warning(f"Could not save RunStep for {step_id}: {e}")
 
 
+async def _save_checkpoint(
+    run_id: str,
+    step_id: str,
+    stage_index: int,
+    context: RunContext,
+) -> None:
+    """Save a checkpoint after completing a stage for replay/fork support."""
+    try:
+        from sandcastle.models.db import RunCheckpoint, async_session
+
+        async with async_session() as session:
+            checkpoint = RunCheckpoint(
+                run_id=uuid.UUID(run_id),
+                step_id=step_id,
+                stage_index=stage_index,
+                context_snapshot=context.snapshot(),
+            )
+            session.add(checkpoint)
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Could not save checkpoint for step {step_id}: {e}")
+
+
+async def _check_cancel(run_id: str) -> bool:
+    """Check if a run has been cancelled via Redis flag."""
+    try:
+        import redis.asyncio as aioredis
+        from sandcastle.config import settings
+
+        r = aioredis.from_url(settings.redis_url)
+        result = await r.get(f"cancel:{run_id}")
+        await r.aclose()
+        return result is not None
+    except Exception:
+        return False
+
+
+def _check_budget(context: RunContext) -> str | None:
+    """Check if the run has exceeded its budget.
+
+    Returns None if OK, "warning" at 80%, "exceeded" at 100%.
+    """
+    if context.max_cost_usd is None or context.max_cost_usd <= 0:
+        return None
+    ratio = context.total_cost / context.max_cost_usd
+    if ratio >= 1.0:
+        return "exceeded"
+    if ratio >= 0.8:
+        return "warning"
+    return None
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
     sandbox: SandstormClient,
     storage: StorageBackend,
     parallel_index: int | None = None,
+    step_overrides: dict | None = None,
 ) -> StepResult:
     """Execute a step with retry logic and exponential backoff."""
+    # Apply step overrides for fork
+    if step_overrides:
+        if "prompt" in step_overrides:
+            step = StepDefinition(
+                id=step.id,
+                prompt=step_overrides["prompt"],
+                depends_on=step.depends_on,
+                model=step_overrides.get("model", step.model),
+                max_turns=step_overrides.get("max_turns", step.max_turns),
+                timeout=step_overrides.get("timeout", step.timeout),
+                parallel_over=step.parallel_over,
+                output_schema=step.output_schema,
+                retry=step.retry,
+                fallback=step.fallback,
+            )
+        elif "model" in step_overrides:
+            step = StepDefinition(
+                id=step.id,
+                prompt=step.prompt,
+                depends_on=step.depends_on,
+                model=step_overrides["model"],
+                max_turns=step_overrides.get("max_turns", step.max_turns),
+                timeout=step_overrides.get("timeout", step.timeout),
+                parallel_over=step.parallel_over,
+                output_schema=step.output_schema,
+                retry=step.retry,
+                fallback=step.fallback,
+            )
+
     max_attempts = step.retry.max_attempts if step.retry else 1
     backoff = step.retry.backoff if step.retry else "exponential"
 
@@ -403,8 +501,24 @@ async def execute_workflow(
     input_data: dict,
     run_id: str | None = None,
     storage: StorageBackend | None = None,
+    max_cost_usd: float | None = None,
+    initial_context: dict | None = None,
+    skip_steps: set[str] | None = None,
+    step_overrides: dict[str, dict] | None = None,
 ) -> WorkflowResult:
-    """Execute a full workflow with parallel stages and retry logic."""
+    """Execute a full workflow with parallel stages and retry logic.
+
+    Args:
+        workflow: Parsed workflow definition.
+        plan: Execution plan with topologically sorted stages.
+        input_data: Input data for the workflow.
+        run_id: Optional run UUID (generated if not provided).
+        storage: Storage backend for file references.
+        max_cost_usd: Budget limit - hard stop at 100%.
+        initial_context: Pre-loaded context for replay/fork (skip_steps outputs).
+        skip_steps: Set of step IDs to skip (already completed in replay).
+        step_overrides: Per-step overrides for fork (e.g. {"score": {"model": "opus"}}).
+    """
     from sandcastle.config import settings
     from sandcastle.engine.storage import LocalStorage
 
@@ -415,7 +529,12 @@ async def execute_workflow(
         storage = LocalStorage()
 
     started_at = datetime.now(timezone.utc)
-    context = RunContext(run_id=run_id, input=input_data)
+    context = RunContext(run_id=run_id, input=input_data, max_cost_usd=max_cost_usd)
+
+    # Restore context from checkpoint if doing replay/fork
+    if initial_context:
+        context.step_outputs = initial_context.get("step_outputs", {})
+        context.costs = initial_context.get("costs", [])
 
     sandbox = SandstormClient(
         base_url=workflow.sandstorm_url or settings.sandstorm_url,
@@ -424,13 +543,47 @@ async def execute_workflow(
     )
 
     try:
-        for stage in plan.stages:
+        for stage_idx, stage in enumerate(plan.stages):
+            # Check cancellation before each stage
+            if await _check_cancel(run_id):
+                logger.info(f"Run {run_id} cancelled before stage {stage_idx}")
+                return WorkflowResult(
+                    run_id=run_id,
+                    outputs=context.step_outputs,
+                    total_cost_usd=context.total_cost,
+                    status="cancelled",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                )
+
+            # Check budget before each stage
+            budget_status = _check_budget(context)
+            if budget_status == "exceeded":
+                logger.warning(f"Run {run_id} budget exceeded (${context.total_cost:.4f} / ${context.max_cost_usd:.4f})")
+                return WorkflowResult(
+                    run_id=run_id,
+                    outputs=context.step_outputs,
+                    total_cost_usd=context.total_cost,
+                    status="budget_exceeded",
+                    error=f"Budget exceeded: ${context.total_cost:.4f} >= ${context.max_cost_usd:.4f}",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            elif budget_status == "warning":
+                logger.warning(f"Run {run_id} at 80%+ budget (${context.total_cost:.4f} / ${context.max_cost_usd:.4f})")
+
             # Collect all tasks for this stage (parallel execution)
             tasks: list[asyncio.Task] = []
             task_meta: list[dict] = []  # Track which step/item each task is for
 
             for step_id in stage:
+                # Skip steps that are already completed (replay/fork)
+                if skip_steps and step_id in skip_steps:
+                    logger.info(f"Skipping step '{step_id}' (replay/fork)")
+                    continue
+
                 step = workflow.get_step(step_id)
+                overrides = (step_overrides or {}).get(step_id)
 
                 if step.parallel_over:
                     # Fan-out: one task per item
@@ -442,7 +595,8 @@ async def execute_workflow(
                         item_context = context.with_item(item, i)
                         task = asyncio.create_task(
                             execute_step_with_retry(
-                                step, item_context, sandbox, storage, parallel_index=i
+                                step, item_context, sandbox, storage,
+                                parallel_index=i, step_overrides=overrides,
                             )
                         )
                         tasks.append(task)
@@ -453,10 +607,16 @@ async def execute_workflow(
                         })
                 else:
                     task = asyncio.create_task(
-                        execute_step_with_retry(step, context, sandbox, storage)
+                        execute_step_with_retry(
+                            step, context, sandbox, storage,
+                            step_overrides=overrides,
+                        )
                     )
                     tasks.append(task)
                     task_meta.append({"step_id": step_id, "fan_out": False})
+
+            if not tasks:
+                continue
 
             # Await all tasks in the stage concurrently
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -496,6 +656,7 @@ async def execute_workflow(
                                 error=result.error,
                                 input_data={"_item_index": meta["index"]},
                                 attempts=result.attempt,
+                                parallel_index=meta["index"],
                             )
                             fan_out_results[step_id].append(None)
                         elif on_failure == "abort":
@@ -531,6 +692,10 @@ async def execute_workflow(
             for step_id, items in fan_out_results.items():
                 context.step_outputs[step_id] = items
 
+            # Save checkpoint after each completed stage
+            last_step_in_stage = stage[-1] if stage else "unknown"
+            await _save_checkpoint(run_id, last_step_in_stage, stage_idx, context)
+
         completed_at = datetime.now(timezone.utc)
 
         # Store results if configured
@@ -541,7 +706,7 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
-            total_cost_usd=sum(context.costs),
+            total_cost_usd=context.total_cost,
             status="completed",
             started_at=started_at,
             completed_at=completed_at,
@@ -552,7 +717,7 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
-            total_cost_usd=sum(context.costs),
+            total_cost_usd=context.total_cost,
             status="failed",
             error=str(e),
             started_at=started_at,
@@ -565,7 +730,7 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
-            total_cost_usd=sum(context.costs),
+            total_cost_usd=context.total_cost,
             status="failed",
             error=str(e),
             started_at=started_at,
@@ -582,6 +747,7 @@ async def _send_to_dead_letter(
     error: str | None,
     input_data: dict | None,
     attempts: int,
+    parallel_index: int | None = None,
 ) -> None:
     """Insert a failed step into the dead letter queue."""
     try:
@@ -591,6 +757,7 @@ async def _send_to_dead_letter(
             dlq_item = DeadLetterItem(
                 run_id=uuid.UUID(run_id),
                 step_id=step_id,
+                parallel_index=parallel_index,
                 error=error,
                 input_data=input_data,
                 attempts=attempts,

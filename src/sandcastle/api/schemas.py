@@ -21,6 +21,24 @@ class WorkflowRunRequest(BaseModel):
     workflow_name: str | None = Field(None, description="Name of a saved workflow file to run")
     input: dict[str, Any] = Field(default_factory=dict, description="Input data for the workflow")
     callback_url: str | None = Field(None, description="Webhook URL for completion notification")
+    idempotency_key: str | None = Field(None, description="Unique key to prevent duplicate runs")
+    max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run")
+
+
+class ReplayRequest(BaseModel):
+    """Request to replay a run from a specific step."""
+
+    from_step: str = Field(..., description="Step ID to replay from")
+
+
+class ForkRequest(BaseModel):
+    """Request to fork a run from a specific step with overrides."""
+
+    from_step: str = Field(..., description="Step ID to fork from")
+    changes: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Step overrides (e.g. prompt, model, max_turns)",
+    )
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -51,6 +69,7 @@ class ApiKeyCreateRequest(BaseModel):
 
     tenant_id: str
     name: str = Field(..., description="Description for the key")
+    max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run")
 
 
 class DeadLetterResolveRequest(BaseModel):
@@ -94,10 +113,14 @@ class RunStatusResponse(BaseModel):
     input_data: dict[str, Any] | None = None
     outputs: dict[str, Any] | None = None
     total_cost_usd: float = 0.0
+    max_cost_usd: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
     steps: list[StepStatusResponse] | None = None
+    parent_run_id: str | None = None
+    replay_from_step: str | None = None
+    fork_changes: dict[str, Any] | None = None
 
 
 class StepStatusResponse(BaseModel):
@@ -131,6 +154,7 @@ class RunListItem(BaseModel):
     total_cost_usd: float = 0.0
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    parent_run_id: str | None = None
 
 
 class ScheduleResponse(BaseModel):
@@ -169,9 +193,11 @@ class ApiKeyResponse(BaseModel):
     """API key information (no plaintext)."""
 
     id: str
+    key_prefix: str = ""
     tenant_id: str
     name: str
     is_active: bool
+    max_cost_per_run_usd: float | None = None
     created_at: datetime | None = None
     last_used_at: datetime | None = None
 
@@ -180,6 +206,7 @@ class ApiKeyCreatedResponse(BaseModel):
     """Response after creating a new API key - includes plaintext ONCE."""
 
     id: str
+    key_prefix: str
     tenant_id: str
     name: str
     key: str = Field(..., description="Plaintext API key - shown only once")
@@ -191,6 +218,7 @@ class DeadLetterItemResponse(BaseModel):
     id: str
     run_id: str
     step_id: str
+    parallel_index: int | None = None
     error: str | None = None
     input_data: dict[str, Any] | None = None
     attempts: int = 1

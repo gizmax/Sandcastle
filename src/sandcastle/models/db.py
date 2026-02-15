@@ -35,6 +35,8 @@ class RunStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PARTIAL = "partial"
+    CANCELLED = "cancelled"
+    BUDGET_EXCEEDED = "budget_exceeded"
 
 
 class StepStatus(str, enum.Enum):
@@ -67,11 +69,26 @@ class Run(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     callback_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    max_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    replay_from_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fork_changes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    steps: Mapped[list[RunStep]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    steps: Mapped[list[RunStep]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", foreign_keys="RunStep.run_id"
+    )
+    children: Mapped[list[Run]] = relationship(
+        back_populates="parent", foreign_keys="Run.parent_run_id"
+    )
+    parent: Mapped[Run | None] = relationship(
+        back_populates="children", remote_side="Run.id", foreign_keys="Run.parent_run_id"
+    )
 
 
 class RunStep(Base):
@@ -132,9 +149,11 @@ class ApiKey(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(String(8), nullable=False, default="")
     tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_cost_per_run_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -153,6 +172,7 @@ class DeadLetterItem(Base):
         UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=1)
@@ -161,6 +181,25 @@ class DeadLetterItem(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class RunCheckpoint(Base):
+    """Snapshot of run context after each completed stage for replay/fork."""
+
+    __tablename__ = "run_checkpoints"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    stage_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    context_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 # Database engine and session factory
