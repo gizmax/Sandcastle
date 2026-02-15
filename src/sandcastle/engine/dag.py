@@ -55,6 +55,38 @@ class ApprovalConfig:
 
 
 @dataclass
+class VariantConfig:
+    """Configuration for an AutoPilot experiment variant."""
+
+    id: str = ""
+    model: str | None = None
+    prompt: str | None = None
+    max_turns: int | None = None
+
+
+@dataclass
+class EvaluationConfig:
+    """How to evaluate AutoPilot experiment results."""
+
+    method: str = "llm_judge"  # "llm_judge" | "schema_completeness" | "custom"
+    criteria: str = ""
+
+
+@dataclass
+class AutoPilotConfig:
+    """Configuration for self-optimizing step experiments."""
+
+    enabled: bool = False
+    optimize_for: str = "quality"  # "quality" | "cost" | "latency" | "pareto"
+    variants: list[VariantConfig] = field(default_factory=list)
+    evaluation: EvaluationConfig | None = None
+    sample_rate: float = 1.0  # 0.0-1.0 fraction of runs to sample
+    min_samples: int = 10
+    auto_deploy: bool = True
+    quality_threshold: float = 0.7  # Minimum quality score to consider
+
+
+@dataclass
 class StepDefinition:
     """Definition of a single workflow step."""
 
@@ -68,8 +100,9 @@ class StepDefinition:
     output_schema: dict | None = None
     retry: RetryConfig | None = None
     fallback: FallbackConfig | None = None
-    type: str = "standard"  # "standard" | "approval"
+    type: str = "standard"  # "standard" | "approval" | "sub_workflow"
     approval_config: ApprovalConfig | None = None
+    autopilot: AutoPilotConfig | None = None
 
 
 @dataclass
@@ -146,6 +179,39 @@ def _parse_approval_config(data: dict | None) -> ApprovalConfig | None:
     )
 
 
+def _parse_autopilot_config(data: dict | None) -> AutoPilotConfig | None:
+    """Parse autopilot configuration from YAML data."""
+    if data is None:
+        return None
+    variants = []
+    for v in data.get("variants", []):
+        variants.append(VariantConfig(
+            id=v.get("id", ""),
+            model=v.get("model"),
+            prompt=v.get("prompt"),
+            max_turns=v.get("max_turns"),
+        ))
+
+    eval_data = data.get("evaluation")
+    evaluation = None
+    if eval_data:
+        evaluation = EvaluationConfig(
+            method=eval_data.get("method", "llm_judge"),
+            criteria=eval_data.get("criteria", ""),
+        )
+
+    return AutoPilotConfig(
+        enabled=data.get("enabled", False),
+        optimize_for=data.get("optimize_for", "quality"),
+        variants=variants,
+        evaluation=evaluation,
+        sample_rate=data.get("sample_rate", 1.0),
+        min_samples=data.get("min_samples", 10),
+        auto_deploy=data.get("auto_deploy", True),
+        quality_threshold=data.get("quality_threshold", 0.7),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -168,6 +234,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         fallback=_parse_fallback(data.get("fallback")),
         type=step_type,
         approval_config=_parse_approval_config(data.get("approval_config")),
+        autopilot=_parse_autopilot_config(data.get("autopilot")),
     )
 
 

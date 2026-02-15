@@ -22,9 +22,11 @@ from sandcastle.api.schemas import (
     ApiResponse,
     ApprovalRespondRequest,
     ApprovalResponse,
+    AutoPilotStatsResponse,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
     ErrorResponse,
+    ExperimentResponse,
     ForkRequest,
     HealthResponse,
     PaginationMeta,
@@ -49,7 +51,10 @@ from sandcastle.models.db import (
     ApiKey,
     ApprovalRequest,
     ApprovalStatus,
+    AutoPilotExperiment,
+    AutoPilotSample,
     DeadLetterItem,
+    ExperimentStatus,
     Run,
     RunCheckpoint,
     RunStatus,
@@ -1582,6 +1587,234 @@ async def resolve_dead_letter(
             created_at=item.created_at,
             resolved_at=item.resolved_at,
             resolved_by=item.resolved_by,
+        )
+    )
+
+
+# --- AutoPilot ---
+
+
+@router.get("/autopilot/experiments")
+async def list_experiments(
+    request: Request,
+    status: str | None = Query(None, description="Filter by status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List AutoPilot experiments."""
+    async with async_session() as session:
+        base = select(AutoPilotExperiment)
+        count_base = select(func.count(AutoPilotExperiment.id))
+
+        if status:
+            base = base.where(AutoPilotExperiment.status == status)
+            count_base = count_base.where(AutoPilotExperiment.status == status)
+
+        total = await session.scalar(count_base)
+        stmt = base.order_by(AutoPilotExperiment.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+    data = [
+        ExperimentResponse(
+            id=str(e.id),
+            workflow_name=e.workflow_name,
+            step_id=e.step_id,
+            status=e.status.value if hasattr(e.status, "value") else e.status,
+            optimize_for=e.optimize_for,
+            config=e.config,
+            deployed_variant_id=e.deployed_variant_id,
+            created_at=e.created_at,
+            completed_at=e.completed_at,
+        )
+        for e in items
+    ]
+
+    return ApiResponse(
+        data=data,
+        meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+@router.get("/autopilot/experiments/{experiment_id}")
+async def get_experiment(experiment_id: str) -> ApiResponse:
+    """Get experiment details with samples and stats."""
+    try:
+        exp_uuid = uuid.UUID(experiment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid experiment ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = (
+            select(AutoPilotExperiment)
+            .options(selectinload(AutoPilotExperiment.samples))
+            .where(AutoPilotExperiment.id == exp_uuid)
+        )
+        result = await session.execute(stmt)
+        experiment = result.scalar_one_or_none()
+
+    if not experiment:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Experiment not found")
+            ).model_dump(),
+        )
+
+    samples = [
+        {
+            "id": str(s.id),
+            "variant_id": s.variant_id,
+            "quality_score": s.quality_score,
+            "cost_usd": s.cost_usd,
+            "duration_seconds": s.duration_seconds,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in experiment.samples
+    ]
+
+    return ApiResponse(
+        data=ExperimentResponse(
+            id=str(experiment.id),
+            workflow_name=experiment.workflow_name,
+            step_id=experiment.step_id,
+            status=(
+                experiment.status.value
+                if hasattr(experiment.status, "value")
+                else experiment.status
+            ),
+            optimize_for=experiment.optimize_for,
+            config=experiment.config,
+            deployed_variant_id=experiment.deployed_variant_id,
+            created_at=experiment.created_at,
+            completed_at=experiment.completed_at,
+            samples=samples,
+        )
+    )
+
+
+@router.post("/autopilot/experiments/{experiment_id}/deploy")
+async def deploy_experiment(experiment_id: str) -> ApiResponse:
+    """Manually deploy a specific variant from an experiment."""
+    try:
+        exp_uuid = uuid.UUID(experiment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid experiment ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        experiment = await session.get(AutoPilotExperiment, exp_uuid)
+        if not experiment:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="Experiment not found")
+                ).model_dump(),
+            )
+
+        # Find the best performing variant
+        from sandcastle.engine.autopilot import maybe_complete_experiment
+        from sandcastle.engine.dag import AutoPilotConfig
+
+        config = AutoPilotConfig(
+            optimize_for=experiment.optimize_for,
+            min_samples=0,  # Force completion
+            auto_deploy=True,
+            quality_threshold=0.0,
+        )
+        winner = await maybe_complete_experiment(exp_uuid, config)
+
+        if not winner:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NO_SAMPLES", message="No samples to deploy from"
+                    )
+                ).model_dump(),
+            )
+
+    return ApiResponse(
+        data={
+            "deployed": True,
+            "experiment_id": experiment_id,
+            "variant_id": winner["variant_id"],
+            "avg_quality": winner.get("avg_quality"),
+        },
+    )
+
+
+@router.post("/autopilot/experiments/{experiment_id}/reset")
+async def reset_experiment(experiment_id: str) -> ApiResponse:
+    """Reset an experiment by deleting all samples and restarting."""
+    try:
+        exp_uuid = uuid.UUID(experiment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid experiment ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        experiment = await session.get(AutoPilotExperiment, exp_uuid)
+        if not experiment:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="Experiment not found")
+                ).model_dump(),
+            )
+
+        # Delete all samples
+        from sqlalchemy import delete
+
+        await session.execute(
+            delete(AutoPilotSample).where(AutoPilotSample.experiment_id == exp_uuid)
+        )
+
+        # Reset experiment
+        experiment.status = ExperimentStatus.RUNNING
+        experiment.deployed_variant_id = None
+        experiment.completed_at = None
+        await session.commit()
+
+    return ApiResponse(data={"reset": True, "experiment_id": experiment_id})
+
+
+@router.get("/autopilot/stats")
+async def autopilot_stats() -> ApiResponse:
+    """Get overall AutoPilot savings and experiment statistics."""
+    async with async_session() as session:
+        total = await session.scalar(select(func.count(AutoPilotExperiment.id)))
+        active = await session.scalar(
+            select(func.count(AutoPilotExperiment.id)).where(
+                AutoPilotExperiment.status == ExperimentStatus.RUNNING
+            )
+        )
+        completed = await session.scalar(
+            select(func.count(AutoPilotExperiment.id)).where(
+                AutoPilotExperiment.status == ExperimentStatus.COMPLETED
+            )
+        )
+        total_samples = await session.scalar(select(func.count(AutoPilotSample.id)))
+
+    return ApiResponse(
+        data=AutoPilotStatsResponse(
+            total_experiments=total or 0,
+            active_experiments=active or 0,
+            completed_experiments=completed or 0,
+            total_samples=total_samples or 0,
         )
     )
 

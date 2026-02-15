@@ -235,6 +235,46 @@ class DeadLetterItemResponse(BaseModel):
     resolved_by: str | None = None
 
 
+class ExperimentResponse(BaseModel):
+    """AutoPilot experiment details."""
+
+    id: str
+    workflow_name: str
+    step_id: str
+    status: str
+    optimize_for: str = "quality"
+    config: dict[str, Any] | None = None
+    deployed_variant_id: str | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    samples: list[dict[str, Any]] | None = None
+
+
+class SampleResponse(BaseModel):
+    """AutoPilot experiment sample."""
+
+    id: str
+    experiment_id: str
+    run_id: str | None = None
+    variant_id: str
+    variant_config: dict[str, Any] | None = None
+    quality_score: float | None = None
+    cost_usd: float = 0.0
+    duration_seconds: float = 0.0
+    created_at: datetime | None = None
+
+
+class AutoPilotStatsResponse(BaseModel):
+    """Overview statistics for AutoPilot experiments."""
+
+    total_experiments: int = 0
+    active_experiments: int = 0
+    completed_experiments: int = 0
+    total_samples: int = 0
+    avg_quality_improvement: float = 0.0
+    total_cost_savings_usd: float = 0.0
+
+
 class ApprovalResponse(BaseModel):
     """Approval request details."""
 

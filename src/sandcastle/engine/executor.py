@@ -321,6 +321,38 @@ async def execute_step_with_retry(
                 fallback=step.fallback,
             )
 
+    # AutoPilot: pick variant if configured
+    autopilot_experiment = None
+    autopilot_variant = None
+    original_step = step
+
+    if step.autopilot and step.autopilot.enabled and step.autopilot.variants:
+        try:
+            import random
+
+            from sandcastle.engine.autopilot import (
+                apply_variant,
+                get_or_create_experiment,
+                pick_variant,
+            )
+
+            if random.random() <= step.autopilot.sample_rate:
+                experiment = await get_or_create_experiment(
+                    workflow_name="",  # Set by caller context
+                    step_id=step.id,
+                    config=step.autopilot,
+                )
+                autopilot_experiment = experiment
+                variant = await pick_variant(experiment.id, step.autopilot.variants)
+                if variant:
+                    autopilot_variant = variant
+                    step = apply_variant(step, variant)
+                    logger.info(
+                        f"AutoPilot: step '{step.id}' using variant '{variant.id}'"
+                    )
+        except Exception as e:
+            logger.warning(f"AutoPilot variant selection failed, using baseline: {e}")
+
     max_attempts = step.retry.max_attempts if step.retry else 1
     backoff = step.retry.backoff if step.retry else "exponential"
 
@@ -338,6 +370,33 @@ async def execute_step_with_retry(
         )
 
         if result.status == "completed":
+            # AutoPilot: evaluate and save sample
+            if autopilot_experiment and autopilot_variant:
+                try:
+                    from sandcastle.engine.autopilot import (
+                        evaluate_result,
+                        maybe_complete_experiment,
+                        save_sample,
+                    )
+
+                    score = await evaluate_result(
+                        original_step.autopilot, original_step, result.output
+                    )
+                    await save_sample(
+                        experiment_id=autopilot_experiment.id,
+                        run_id=context.run_id,
+                        variant=autopilot_variant,
+                        output=result.output,
+                        quality_score=score,
+                        cost_usd=result.cost_usd,
+                        duration_seconds=result.duration_seconds,
+                    )
+                    await maybe_complete_experiment(
+                        autopilot_experiment.id, original_step.autopilot
+                    )
+                except Exception as e:
+                    logger.warning(f"AutoPilot sample recording failed: {e}")
+
             # Record step completion
             await _save_run_step(
                 run_id=context.run_id,

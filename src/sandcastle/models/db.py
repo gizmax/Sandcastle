@@ -196,6 +196,69 @@ class DeadLetterItem(Base):
     resolved_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
+class ExperimentStatus(str, enum.Enum):
+    """Possible statuses for an AutoPilot experiment."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class AutoPilotExperiment(Base):
+    """An AutoPilot A/B experiment for a workflow step."""
+
+    __tablename__ = "autopilot_experiments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[ExperimentStatus] = mapped_column(
+        Enum(ExperimentStatus), nullable=False, default=ExperimentStatus.RUNNING
+    )
+    optimize_for: Mapped[str] = mapped_column(String(50), nullable=False, default="quality")
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    deployed_variant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    samples: Mapped[list[AutoPilotSample]] = relationship(
+        back_populates="experiment", cascade="all, delete-orphan"
+    )
+
+
+class AutoPilotSample(Base):
+    """A single sample from an AutoPilot experiment run."""
+
+    __tablename__ = "autopilot_samples"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    experiment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("autopilot_experiments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    variant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    variant_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    experiment: Mapped[AutoPilotExperiment] = relationship(back_populates="samples")
+
+
 class ApprovalRequest(Base):
     """Human approval gate for a workflow step."""
 
