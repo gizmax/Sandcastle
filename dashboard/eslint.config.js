@@ -19,5 +19,11 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Data fetching in useEffect is intentional and standard pattern
+      'react-hooks/set-state-in-effect': 'off',
+      // Date.now() in render is needed for elapsed time display on running tasks
+      'react-hooks/purity': 'off',
+    },
   },
 ])

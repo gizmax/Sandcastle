@@ -29,7 +29,7 @@ export default function DeadLetterPage() {
   }, []);
 
   useEffect(() => {
-    fetchItems();
+    void fetchItems();
   }, [fetchItems]);
 
   const handleRetry = useCallback(

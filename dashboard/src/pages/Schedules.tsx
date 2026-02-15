@@ -28,7 +28,7 @@ export default function Schedules() {
   }, []);
 
   useEffect(() => {
-    fetchSchedules();
+    void fetchSchedules();
   }, [fetchSchedules]);
 
   const handleToggle = useCallback(async (id: string, enabled: boolean) => {

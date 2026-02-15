@@ -23,7 +23,6 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
   const navigate = useNavigate();
   const totalPages = Math.ceil(total / limit);
   const currentPage = Math.floor(offset / limit) + 1;
-
   function getDuration(run: RunItem): string {
     if (!run.started_at) return "-";
     const start = new Date(run.started_at).getTime();

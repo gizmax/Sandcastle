@@ -37,15 +37,14 @@ export default function Workflows() {
   }, []);
 
   useEffect(() => {
-    fetchWorkflows();
+    void fetchWorkflows();
   }, [fetchWorkflows]);
 
   const handleRun = useCallback(
     async (input: Record<string, unknown>, callbackUrl?: string) => {
       if (!runModal) return;
-      // Read the workflow file content - for now use the name
       await api.post("/workflows/run", {
-        workflow: `name: "${runModal.name}"`,
+        workflow_name: runModal.file_name.replace(".yaml", ""),
         input,
         callback_url: callbackUrl,
       });

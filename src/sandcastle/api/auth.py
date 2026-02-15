@@ -1,4 +1,4 @@
-"""API key authentication middleware."""
+"""API key authentication middleware and tenant helpers."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from sqlalchemy import select
+from starlette.responses import JSONResponse
 
 from sandcastle.config import settings
 from sandcastle.models.db import ApiKey, async_session
@@ -29,10 +30,23 @@ def generate_api_key() -> str:
     return f"sc_{secrets.token_urlsafe(32)}"
 
 
+def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
+    """Return a JSON error response matching the ApiResponse schema."""
+    return JSONResponse(
+        status_code=status_code,
+        content={"data": None, "error": {"code": code, "message": message}},
+    )
+
+
 async def auth_middleware(request: Request, call_next):
-    """Authenticate requests via X-API-Key or Authorization header."""
+    """Authenticate requests via X-API-Key or Authorization header.
+
+    Returns JSONResponse directly instead of raising HTTPException,
+    since BaseHTTPMiddleware swallows HTTPException as 500.
+    """
     # Skip auth if not required
     if not settings.auth_required:
+        request.state.tenant_id = None
         return await call_next(request)
 
     # Skip auth for public paths
@@ -51,26 +65,41 @@ async def auth_middleware(request: Request, call_next):
             api_key = auth_header[7:]
 
     if not api_key:
-        raise HTTPException(status_code=401, detail="API key required")
+        return _error_response(401, "UNAUTHORIZED", "API key required")
 
     # Verify key
     key_hash = hash_key(api_key)
-    async with async_session() as session:
-        stmt = select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True)
-        result = await session.execute(stmt)
-        db_key = result.scalar_one_or_none()
+    try:
+        async with async_session() as session:
+            stmt = select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True)
+            result = await session.execute(stmt)
+            db_key = result.scalar_one_or_none()
+    except Exception as e:
+        logger.error(f"Auth DB error: {e}")
+        return _error_response(503, "SERVICE_UNAVAILABLE", "Authentication service unavailable")
 
     if not db_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        return _error_response(401, "UNAUTHORIZED", "Invalid API key")
 
     # Set tenant context on request
     request.state.tenant_id = db_key.tenant_id
 
     # Update last_used_at
-    async with async_session() as session:
-        db_key_update = await session.get(ApiKey, db_key.id)
-        if db_key_update:
-            db_key_update.last_used_at = datetime.now(timezone.utc)
-            await session.commit()
+    try:
+        async with async_session() as session:
+            db_key_update = await session.get(ApiKey, db_key.id)
+            if db_key_update:
+                db_key_update.last_used_at = datetime.now(timezone.utc)
+                await session.commit()
+    except Exception:
+        pass  # Non-critical
 
     return await call_next(request)
+
+
+def get_tenant_id(request: Request) -> str | None:
+    """Extract tenant_id from request state (set by auth middleware).
+
+    When auth is enabled, all tenant-scoped queries must use this to filter data.
+    """
+    return getattr(request.state, "tenant_id", None)

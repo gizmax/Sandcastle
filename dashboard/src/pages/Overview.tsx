@@ -45,7 +45,7 @@ export default function Overview() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, [fetchData]);
 
   if (loading) {

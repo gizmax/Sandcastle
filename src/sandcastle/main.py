@@ -26,9 +26,20 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
     logger.info("Sandcastle starting up")
+
+    # Start the cron scheduler
+    from sandcastle.queue.scheduler import start_scheduler, restore_schedules
+
+    await start_scheduler()
+    await restore_schedules()
+
     yield
+
+    # Shutdown
+    from sandcastle.queue.scheduler import stop_scheduler
     from sandcastle.models.db import engine
 
+    await stop_scheduler()
     await engine.dispose()
     logger.info("Sandcastle shut down")
 

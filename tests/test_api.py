@@ -168,7 +168,8 @@ class TestRequestValidation:
             "/workflows/run/sync",
             json={"input": {"name": "test"}},
         )
-        assert response.status_code == 422  # Pydantic validation error
+        # Both workflow and workflow_name are optional, but one must be provided
+        assert response.status_code == 400
 
     def test_workflow_with_cycle(self):
         cycle_yaml = """

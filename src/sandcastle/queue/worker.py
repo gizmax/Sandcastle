@@ -80,12 +80,19 @@ async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_
                 run.error = result.error
                 await session.commit()
 
-        # Dispatch completion webhook
-        webhook_url = callback_url
-        if not webhook_url and workflow.on_complete and workflow.on_complete.webhook:
-            webhook_url = workflow.on_complete.webhook
+        # Dispatch webhook - on_complete or on_failure depending on status
+        webhook_urls = []
+        if callback_url:
+            webhook_urls.append(callback_url)
 
-        if webhook_url:
+        if result.status == "completed":
+            if not callback_url and workflow.on_complete and workflow.on_complete.webhook:
+                webhook_urls.append(workflow.on_complete.webhook)
+        else:
+            if workflow.on_failure and workflow.on_failure.webhook:
+                webhook_urls.append(workflow.on_failure.webhook)
+
+        for webhook_url in webhook_urls:
             duration = 0.0
             if result.started_at and result.completed_at:
                 duration = (result.completed_at - result.started_at).total_seconds()
@@ -115,10 +122,20 @@ async def run_workflow_job(ctx: dict, workflow_yaml: str, input_data: dict, run_
                 run.error = str(e)
                 await session.commit()
 
-        # Dispatch failure webhook
+        # Dispatch failure webhook - try callback_url, then on_failure.webhook
+        failure_urls = []
         if callback_url:
+            failure_urls.append(callback_url)
+        try:
+            wf = parse_yaml_string(workflow_yaml)
+            if wf.on_failure and wf.on_failure.webhook:
+                failure_urls.append(wf.on_failure.webhook)
+        except Exception:
+            pass
+
+        for url in failure_urls:
             await dispatch_webhook(
-                url=callback_url,
+                url=url,
                 event="workflow.failed",
                 run_id=run_id,
                 workflow="unknown",

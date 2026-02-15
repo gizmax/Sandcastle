@@ -76,11 +76,11 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
     """Resolve a dotted variable path against the run context.
 
     Supports:
-    - input.X → from context.input
-    - steps.STEP_ID.output → from context.step_outputs
-    - steps.STEP_ID.output.FIELD → specific field
-    - run_id → current run UUID
-    - date → current ISO date
+    - input.X -> from context.input
+    - steps.STEP_ID.output -> from context.step_outputs
+    - steps.STEP_ID.output.FIELD -> specific field
+    - run_id -> current run UUID
+    - date -> current ISO date
     """
     parts = var_path.split(".")
 
@@ -161,6 +161,49 @@ def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
     return 2.0  # Fixed 2s delay
 
 
+async def _save_run_step(
+    run_id: str,
+    step_id: str,
+    status: str,
+    parallel_index: int | None = None,
+    output: Any = None,
+    cost_usd: float = 0.0,
+    duration_seconds: float = 0.0,
+    attempt: int = 1,
+    error: str | None = None,
+) -> None:
+    """Create or update a RunStep record in the database."""
+    try:
+        from sandcastle.models.db import RunStep, StepStatus, async_session
+
+        status_map = {
+            "pending": StepStatus.PENDING,
+            "running": StepStatus.RUNNING,
+            "completed": StepStatus.COMPLETED,
+            "failed": StepStatus.FAILED,
+            "skipped": StepStatus.SKIPPED,
+        }
+
+        async with async_session() as session:
+            step = RunStep(
+                run_id=uuid.UUID(run_id),
+                step_id=step_id,
+                parallel_index=parallel_index,
+                status=status_map.get(status, StepStatus.PENDING),
+                output_data=output if isinstance(output, dict) else {"result": output} if output else None,
+                cost_usd=cost_usd,
+                duration_seconds=duration_seconds,
+                attempt=attempt,
+                error=error,
+                started_at=datetime.now(timezone.utc) if status == "running" else None,
+                completed_at=datetime.now(timezone.utc) if status in ("completed", "failed", "skipped") else None,
+            )
+            session.add(step)
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Could not save RunStep for {step_id}: {e}")
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -172,18 +215,69 @@ async def execute_step_with_retry(
     max_attempts = step.retry.max_attempts if step.retry else 1
     backoff = step.retry.backoff if step.retry else "exponential"
 
+    # Record step as running
+    await _save_run_step(
+        run_id=context.run_id,
+        step_id=step.id,
+        status="running",
+        parallel_index=parallel_index,
+    )
+
     for attempt in range(1, max_attempts + 1):
         result = await _execute_step_once(
             step, context, sandbox, storage, parallel_index, attempt
         )
 
         if result.status == "completed":
+            # Record step completion
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                parallel_index=parallel_index,
+                output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                attempt=attempt,
+            )
             return result
 
-        # Last attempt - no more retries
+        # Last attempt - check for fallback
         if attempt >= max_attempts:
+            on_failure = step.retry.on_failure if step.retry else "abort"
+
+            # Try fallback prompt if configured
+            if on_failure == "fallback" and step.fallback and step.fallback.prompt:
+                logger.info(f"Step '{step.id}' failed, trying fallback prompt")
+                fallback_result = await _execute_fallback(
+                    step, context, sandbox, storage, parallel_index, attempt
+                )
+                if fallback_result.status == "completed":
+                    await _save_run_step(
+                        run_id=context.run_id,
+                        step_id=step.id,
+                        status="completed",
+                        parallel_index=parallel_index,
+                        output=fallback_result.output,
+                        cost_usd=result.cost_usd + fallback_result.cost_usd,
+                        duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
+                        attempt=attempt,
+                    )
+                    return fallback_result
+
             logger.warning(
                 f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}"
+            )
+            # Record step failure
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="failed",
+                parallel_index=parallel_index,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                attempt=attempt,
+                error=result.error,
             )
             return result
 
@@ -194,6 +288,55 @@ async def execute_step_with_retry(
         await asyncio.sleep(delay)
 
     return result  # Should not reach here
+
+
+async def _execute_fallback(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: SandstormClient,
+    storage: StorageBackend,
+    parallel_index: int | None = None,
+    attempt: int = 1,
+) -> StepResult:
+    """Execute the fallback prompt for a step."""
+    started_at = datetime.now(timezone.utc)
+    try:
+        prompt = resolve_templates(step.fallback.prompt, context)
+        prompt = await resolve_storage_refs(prompt, storage)
+
+        request: dict[str, Any] = {
+            "prompt": prompt,
+            "model": step.fallback.model,
+            "max_turns": step.max_turns,
+            "timeout": step.timeout,
+        }
+
+        logger.info(f"Executing fallback for step '{step.id}' (model={step.fallback.model})")
+        result = await sandbox.query(request)
+        output = result.structured_output if result.structured_output else result.text
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+
+        return StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            output=output,
+            cost_usd=result.total_cost_usd,
+            duration_seconds=duration,
+            status="completed",
+            attempt=attempt,
+        )
+    except Exception as e:
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+        logger.error(f"Fallback for step '{step.id}' also failed: {e}")
+        return StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="failed",
+            error=f"Fallback failed: {e}",
+            attempt=attempt,
+        )
 
 
 async def _execute_step_once(
@@ -445,10 +588,8 @@ async def _send_to_dead_letter(
         from sandcastle.models.db import DeadLetterItem, async_session
 
         async with async_session() as session:
-            import uuid as _uuid
-
             dlq_item = DeadLetterItem(
-                run_id=_uuid.UUID(run_id),
+                run_id=uuid.UUID(run_id),
                 step_id=step_id,
                 error=error,
                 input_data=input_data,

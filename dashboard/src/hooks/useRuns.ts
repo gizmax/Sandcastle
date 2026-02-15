@@ -42,7 +42,7 @@ export function useRuns(options: UseRunsOptions = {}) {
   }, [status, workflow, limit, offset]);
 
   useEffect(() => {
-    fetchRuns();
+    void fetchRuns();
   }, [fetchRuns]);
 
   useEffect(() => {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -41,10 +42,48 @@ async def stop_scheduler() -> None:
         logger.info("Scheduler stopped")
 
 
+async def restore_schedules() -> None:
+    """Restore enabled schedules from the database on startup."""
+    try:
+        from sandcastle.models.db import Schedule, async_session
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            stmt = select(Schedule).where(Schedule.enabled == True)
+            result = await session.execute(stmt)
+            schedules = result.scalars().all()
+
+        for schedule in schedules:
+            try:
+                add_schedule(
+                    schedule_id=str(schedule.id),
+                    cron_expression=schedule.cron_expression,
+                    workflow_name=schedule.workflow_name,
+                    input_data=schedule.input_data,
+                )
+            except Exception as e:
+                logger.warning(f"Could not restore schedule {schedule.id}: {e}")
+
+        logger.info(f"Restored {len(schedules)} schedule(s) from database")
+    except Exception as e:
+        logger.warning(f"Could not restore schedules from database: {e}")
+
+
+def _load_workflow_yaml(workflow_name: str) -> str:
+    """Load workflow YAML content from the workflows directory by name."""
+    workflows_dir = Path(settings.workflows_dir)
+    for candidate in [
+        workflows_dir / f"{workflow_name}.yaml",
+        workflows_dir / workflow_name,
+    ]:
+        if candidate.exists() and candidate.is_file():
+            return candidate.read_text()
+    raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
+
+
 async def _run_scheduled_workflow(
     schedule_id: str,
     workflow_name: str,
-    workflow_yaml: str,
     input_data: dict,
 ) -> None:
     """Job function: enqueue a workflow run from a schedule trigger."""
@@ -55,6 +94,9 @@ async def _run_scheduled_workflow(
     logger.info(f"Schedule '{schedule_id}' triggered: creating run {run_id}")
 
     try:
+        # Load fresh workflow YAML from disk
+        workflow_yaml = _load_workflow_yaml(workflow_name)
+
         # Create the run record
         async with async_session() as session:
             db_run = Run(
@@ -84,20 +126,18 @@ def add_schedule(
     schedule_id: str,
     cron_expression: str,
     workflow_name: str,
-    workflow_yaml: str,
     input_data: dict | None = None,
 ) -> None:
     """Register a cron job for a workflow schedule."""
     scheduler = get_scheduler()
 
-    # Parse cron expression (minute hour day month day_of_week)
     trigger = CronTrigger.from_crontab(cron_expression)
 
     scheduler.add_job(
         _run_scheduled_workflow,
         trigger=trigger,
         id=schedule_id,
-        args=[schedule_id, workflow_name, workflow_yaml, input_data or {}],
+        args=[schedule_id, workflow_name, input_data or {}],
         replace_existing=True,
         misfire_grace_time=60,
     )

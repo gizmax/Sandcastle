@@ -9,12 +9,13 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from sandcastle.api.auth import get_tenant_id
 from sandcastle.api.schemas import (
     ApiKeyCreateRequest,
     ApiKeyCreatedResponse,
@@ -49,7 +50,6 @@ from sandcastle.models.db import (
     RunStep,
     Schedule,
     async_session,
-    get_session,
 )
 from sandcastle.api.auth import generate_api_key, hash_key
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
@@ -58,6 +58,44 @@ from sandcastle.queue.worker import enqueue_workflow
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# --- Helpers ---
+
+
+def _load_workflow_yaml(workflow_name: str) -> str:
+    """Load workflow YAML content from the workflows directory by name."""
+    workflows_dir = Path(settings.workflows_dir)
+    # Try exact match first, then with .yaml extension
+    for candidate in [
+        workflows_dir / f"{workflow_name}.yaml",
+        workflows_dir / workflow_name,
+    ]:
+        if candidate.exists() and candidate.is_file():
+            return candidate.read_text()
+    raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
+
+
+def _resolve_workflow_request(request: WorkflowRunRequest) -> str:
+    """Resolve a WorkflowRunRequest to YAML content.
+
+    Supports both raw YAML via `workflow` field and file reference via `workflow_name`.
+    """
+    if request.workflow:
+        return request.workflow
+    if request.workflow_name:
+        return _load_workflow_yaml(request.workflow_name)
+    raise ValueError("Either 'workflow' or 'workflow_name' must be provided")
+
+
+def _apply_tenant_filter(stmt, tenant_id: str | None, column):
+    """Apply tenant_id filter to a query when auth is enabled."""
+    if settings.auth_required and tenant_id is not None:
+        return stmt.where(column == tenant_id)
+    return stmt
+
+
+# --- Health ---
 
 
 @router.get("/health")
@@ -106,55 +144,55 @@ async def health_check() -> ApiResponse:
 
 
 @router.get("/stats")
-async def get_stats() -> ApiResponse:
+async def get_stats(request: Request) -> ApiResponse:
     """Get aggregated statistics for the overview dashboard."""
+    tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     async with async_session() as session:
-        # Total runs today
-        total_today = await session.scalar(
-            select(func.count(Run.id)).where(Run.created_at >= today_start)
-        )
+        # Base filters
+        base = select(func.count(Run.id)).where(Run.created_at >= today_start)
+        base = _apply_tenant_filter(base, tenant_id, Run.tenant_id)
 
-        # Success rate (completed / total non-queued runs today)
-        completed_today = await session.scalar(
-            select(func.count(Run.id)).where(
-                Run.created_at >= today_start,
-                Run.status == RunStatus.COMPLETED,
-            )
+        total_today = await session.scalar(base)
+
+        completed_q = select(func.count(Run.id)).where(
+            Run.created_at >= today_start,
+            Run.status == RunStatus.COMPLETED,
         )
-        finished_today = await session.scalar(
-            select(func.count(Run.id)).where(
-                Run.created_at >= today_start,
-                Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]),
-            )
+        completed_q = _apply_tenant_filter(completed_q, tenant_id, Run.tenant_id)
+        completed_today = await session.scalar(completed_q)
+
+        finished_q = select(func.count(Run.id)).where(
+            Run.created_at >= today_start,
+            Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]),
         )
+        finished_q = _apply_tenant_filter(finished_q, tenant_id, Run.tenant_id)
+        finished_today = await session.scalar(finished_q)
         success_rate = (completed_today / finished_today) if finished_today else 0.0
 
-        # Total cost today
-        total_cost = await session.scalar(
-            select(func.coalesce(func.sum(Run.total_cost_usd), 0.0)).where(
-                Run.created_at >= today_start
-            )
+        cost_q = select(func.coalesce(func.sum(Run.total_cost_usd), 0.0)).where(
+            Run.created_at >= today_start
         )
+        cost_q = _apply_tenant_filter(cost_q, tenant_id, Run.tenant_id)
+        total_cost = await session.scalar(cost_q)
 
-        # Average duration (completed runs today)
-        avg_duration = await session.scalar(
-            select(
-                func.avg(
-                    func.extract("epoch", Run.completed_at) - func.extract("epoch", Run.started_at)
-                )
-            ).where(
-                Run.created_at >= today_start,
-                Run.completed_at.isnot(None),
-                Run.started_at.isnot(None),
+        dur_q = select(
+            func.avg(
+                func.extract("epoch", Run.completed_at) - func.extract("epoch", Run.started_at)
             )
+        ).where(
+            Run.created_at >= today_start,
+            Run.completed_at.isnot(None),
+            Run.started_at.isnot(None),
         )
+        dur_q = _apply_tenant_filter(dur_q, tenant_id, Run.tenant_id)
+        avg_duration = await session.scalar(dur_q)
 
         # Runs by day (last 30 days)
         thirty_days_ago = now - timedelta(days=30)
-        runs_by_day_query = await session.execute(
+        rbd_q = (
             select(
                 func.date_trunc("day", Run.created_at).label("day"),
                 Run.status,
@@ -164,9 +202,9 @@ async def get_stats() -> ApiResponse:
             .group_by("day", Run.status)
             .order_by("day")
         )
-        runs_by_day_raw = runs_by_day_query.all()
+        rbd_q = _apply_tenant_filter(rbd_q, tenant_id, Run.tenant_id)
+        runs_by_day_raw = (await session.execute(rbd_q)).all()
 
-        # Aggregate by day
         day_map: dict[str, dict] = {}
         for row in runs_by_day_raw:
             day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
@@ -183,7 +221,7 @@ async def get_stats() -> ApiResponse:
 
         # Cost by workflow (last 7 days)
         seven_days_ago = now - timedelta(days=7)
-        cost_query = await session.execute(
+        cost_wf_q = (
             select(
                 Run.workflow_name,
                 func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
@@ -192,9 +230,10 @@ async def get_stats() -> ApiResponse:
             .group_by(Run.workflow_name)
             .order_by(func.sum(Run.total_cost_usd).desc())
         )
+        cost_wf_q = _apply_tenant_filter(cost_wf_q, tenant_id, Run.tenant_id)
         cost_by_workflow = [
             {"workflow": row.workflow_name, "cost": float(row.cost)}
-            for row in cost_query.all()
+            for row in (await session.execute(cost_wf_q)).all()
         ]
 
     return ApiResponse(
@@ -241,7 +280,6 @@ async def list_workflows() -> ApiResponse:
 @router.post("/workflows")
 async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
     """Save a workflow YAML file to the workflows directory."""
-    # Validate the YAML content
     try:
         workflow = parse_yaml_string(request.content)
     except Exception as e:
@@ -261,7 +299,6 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Save to disk
     workflows_dir = Path(settings.workflows_dir)
     workflows_dir.mkdir(parents=True, exist_ok=True)
 
@@ -283,10 +320,22 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
 
 
 @router.post("/workflows/run/sync")
-async def run_workflow_sync(request: WorkflowRunRequest) -> ApiResponse:
+async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow synchronously. Blocks until complete."""
+    tenant_id = get_tenant_id(req)
+
     try:
-        workflow = parse_yaml_string(request.workflow)
+        yaml_content = _resolve_workflow_request(request)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW", message=str(e))
+            ).model_dump(),
+        )
+
+    try:
+        workflow = parse_yaml_string(yaml_content)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -326,7 +375,7 @@ async def run_workflow_sync(request: WorkflowRunRequest) -> ApiResponse:
                 status=RunStatus.RUNNING,
                 input_data=request.input,
                 callback_url=request.callback_url,
-                tenant_id=request.tenant_id,
+                tenant_id=tenant_id,
                 started_at=datetime.now(timezone.utc),
             )
             session.add(db_run)
@@ -374,10 +423,22 @@ async def run_workflow_sync(request: WorkflowRunRequest) -> ApiResponse:
 
 
 @router.post("/workflows/run")
-async def run_workflow_async(request: WorkflowRunRequest) -> ApiResponse:
+async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow asynchronously. Returns immediately with run_id."""
+    tenant_id = get_tenant_id(req)
+
     try:
-        workflow = parse_yaml_string(request.workflow)
+        yaml_content = _resolve_workflow_request(request)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW", message=str(e))
+            ).model_dump(),
+        )
+
+    try:
+        workflow = parse_yaml_string(yaml_content)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -406,7 +467,7 @@ async def run_workflow_async(request: WorkflowRunRequest) -> ApiResponse:
                 status=RunStatus.QUEUED,
                 input_data=request.input,
                 callback_url=request.callback_url,
-                tenant_id=request.tenant_id,
+                tenant_id=tenant_id,
             )
             session.add(db_run)
             await session.commit()
@@ -418,10 +479,22 @@ async def run_workflow_async(request: WorkflowRunRequest) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Enqueue the job
+    # Enqueue the job - clean up orphan run on failure
     try:
-        await enqueue_workflow(request.workflow, request.input, run_id)
+        await enqueue_workflow(yaml_content, request.input, run_id)
     except Exception as e:
+        # Mark the run as failed so it doesn't stay stuck as "queued"
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = RunStatus.FAILED
+                    db_run.error = f"Failed to enqueue: {e}"
+                    db_run.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            logger.error(f"Could not clean up orphan run {run_id}")
+
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
@@ -438,8 +511,10 @@ async def run_workflow_async(request: WorkflowRunRequest) -> ApiResponse:
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str) -> ApiResponse:
+async def get_run(run_id: str, req: Request) -> ApiResponse:
     """Get the status and details of a specific run."""
+    tenant_id = get_tenant_id(req)
+
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
@@ -452,6 +527,7 @@ async def get_run(run_id: str) -> ApiResponse:
 
     async with async_session() as session:
         stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
 
@@ -577,19 +653,24 @@ def _sse_event(event: str, data: dict) -> str:
 
 @router.get("/runs")
 async def list_runs(
+    request: Request,
     status: str | None = Query(None, description="Filter by status"),
     workflow: str | None = Query(None, description="Filter by workflow name"),
     since: datetime | None = Query(None, description="Filter runs created after this datetime"),
     until: datetime | None = Query(None, description="Filter runs created before this datetime"),
-    tenant_id: str | None = Query(None, description="Filter by tenant ID"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List workflow runs with filters and pagination."""
+    tenant_id = get_tenant_id(request)
+
     async with async_session() as session:
-        # Base query for filtering
         base_filter = select(Run)
         count_filter = select(func.count(Run.id))
+
+        # Always apply tenant filter when auth is enabled
+        base_filter = _apply_tenant_filter(base_filter, tenant_id, Run.tenant_id)
+        count_filter = _apply_tenant_filter(count_filter, tenant_id, Run.tenant_id)
 
         if status:
             base_filter = base_filter.where(Run.status == status)
@@ -603,14 +684,9 @@ async def list_runs(
         if until:
             base_filter = base_filter.where(Run.created_at <= until)
             count_filter = count_filter.where(Run.created_at <= until)
-        if tenant_id:
-            base_filter = base_filter.where(Run.tenant_id == tenant_id)
-            count_filter = count_filter.where(Run.tenant_id == tenant_id)
 
-        # Get total count
         total = await session.scalar(count_filter)
 
-        # Get paginated results
         stmt = base_filter.order_by(Run.created_at.desc()).offset(offset).limit(limit)
         result = await session.execute(stmt)
         runs = result.scalars().all()
@@ -639,6 +715,20 @@ async def list_runs(
 @router.post("/schedules")
 async def create_schedule(request: ScheduleCreateRequest) -> ApiResponse:
     """Create a scheduled workflow execution."""
+    # Validate that the workflow exists
+    try:
+        _load_workflow_yaml(request.workflow_name)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_WORKFLOW",
+                    message=f"Workflow '{request.workflow_name}' not found",
+                )
+            ).model_dump(),
+        )
+
     schedule_id = str(uuid.uuid4())
 
     try:
@@ -668,7 +758,6 @@ async def create_schedule(request: ScheduleCreateRequest) -> ApiResponse:
                 schedule_id=schedule_id,
                 cron_expression=request.cron_expression,
                 workflow_name=request.workflow_name,
-                workflow_yaml="",  # Will need to be loaded at execution time
                 input_data=request.input_data,
             )
         except Exception as e:
@@ -752,7 +841,6 @@ async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest) -> A
                 schedule_id=schedule_id,
                 cron_expression=schedule.cron_expression,
                 workflow_name=schedule.workflow_name,
-                workflow_yaml="",
                 input_data=schedule.input_data,
             )
         except Exception as e:
@@ -801,7 +889,6 @@ async def delete_schedule(schedule_id: str) -> ApiResponse:
         await session.delete(schedule)
         await session.commit()
 
-    # Remove from APScheduler
     remove_schedule(schedule_id)
 
     return ApiResponse(data={"deleted": True, "id": schedule_id})
@@ -854,7 +941,7 @@ async def list_dead_letter(
 
 @router.post("/dead-letter/{item_id}/retry")
 async def retry_dead_letter(item_id: str) -> ApiResponse:
-    """Retry a failed step from the dead letter queue."""
+    """Retry a failed step by re-running its parent workflow."""
     try:
         item_uuid = uuid.UUID(item_id)
     except ValueError:
@@ -883,26 +970,59 @@ async def retry_dead_letter(item_id: str) -> ApiResponse:
                 ).model_dump(),
             )
 
-        # Mark as resolved by retry
+        # Load the original run to get workflow name and input
+        original_run = await session.get(Run, item.run_id)
+        if not original_run:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="RUN_NOT_FOUND",
+                        message="Original run not found, cannot retry",
+                    )
+                ).model_dump(),
+            )
+
+        # Mark DLQ item as resolved by retry
         item.resolved_at = datetime.now(timezone.utc)
         item.resolved_by = "retry"
         await session.commit()
 
-    # TODO: Re-enqueue the step for execution with the original input_data
-    # For now, mark as resolved - full re-execution requires workflow context
+    # Re-enqueue the workflow
+    try:
+        yaml_content = _load_workflow_yaml(original_run.workflow_name)
+        new_run_id = str(uuid.uuid4())
+
+        async with async_session() as session:
+            new_run = Run(
+                id=uuid.UUID(new_run_id),
+                workflow_name=original_run.workflow_name,
+                status=RunStatus.QUEUED,
+                input_data=original_run.input_data,
+                callback_url=original_run.callback_url,
+                tenant_id=original_run.tenant_id,
+            )
+            session.add(new_run)
+            await session.commit()
+
+        await enqueue_workflow(yaml_content, original_run.input_data or {}, new_run_id)
+        logger.info(f"DLQ retry: created new run {new_run_id} for item {item_id}")
+
+    except Exception as e:
+        logger.error(f"DLQ retry failed for item {item_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="RETRY_ERROR", message=f"Could not retry: {e}")
+            ).model_dump(),
+        )
 
     return ApiResponse(
-        data=DeadLetterItemResponse(
-            id=str(item.id),
-            run_id=str(item.run_id),
-            step_id=item.step_id,
-            error=item.error,
-            input_data=item.input_data,
-            attempts=item.attempts,
-            created_at=item.created_at,
-            resolved_at=item.resolved_at,
-            resolved_by=item.resolved_by,
-        )
+        data={
+            "retried": True,
+            "dlq_item_id": item_id,
+            "new_run_id": new_run_id,
+        },
     )
 
 
@@ -995,18 +1115,20 @@ async def create_api_key(request: ApiKeyCreateRequest) -> ApiResponse:
 
 @router.get("/api-keys")
 async def list_api_keys(
-    tenant_id: str | None = Query(None, description="Filter by tenant ID"),
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
-    """List API keys (without plaintext)."""
+    """List API keys (without plaintext). Scoped to tenant when auth is enabled."""
+    tenant_id = get_tenant_id(request)
+
     async with async_session() as session:
         base = select(ApiKey).where(ApiKey.is_active == True)
         count_base = select(func.count(ApiKey.id)).where(ApiKey.is_active == True)
 
-        if tenant_id:
-            base = base.where(ApiKey.tenant_id == tenant_id)
-            count_base = count_base.where(ApiKey.tenant_id == tenant_id)
+        # Tenant isolation - only see own keys
+        base = _apply_tenant_filter(base, tenant_id, ApiKey.tenant_id)
+        count_base = _apply_tenant_filter(count_base, tenant_id, ApiKey.tenant_id)
 
         total = await session.scalar(count_base)
 

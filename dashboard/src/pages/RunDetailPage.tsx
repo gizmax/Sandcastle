@@ -47,7 +47,7 @@ export default function RunDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    fetchRun();
+    void fetchRun();
   }, [fetchRun]);
 
   // Poll while running

@@ -12,12 +12,15 @@ from pydantic import BaseModel, Field
 
 
 class WorkflowRunRequest(BaseModel):
-    """Request to run a workflow."""
+    """Request to run a workflow.
 
-    workflow: str = Field(..., description="Workflow YAML content or file path")
+    Provide either `workflow` (raw YAML) or `workflow_name` (file reference).
+    """
+
+    workflow: str | None = Field(None, description="Workflow YAML content")
+    workflow_name: str | None = Field(None, description="Name of a saved workflow file to run")
     input: dict[str, Any] = Field(default_factory=dict, description="Input data for the workflow")
     callback_url: str | None = Field(None, description="Webhook URL for completion notification")
-    tenant_id: str | None = Field(None, description="Tenant identifier for multi-tenancy")
 
 
 class ScheduleCreateRequest(BaseModel):
