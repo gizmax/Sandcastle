@@ -39,5 +39,22 @@ for (const p of pages) {
   await context.close();
 }
 
+// DAG view - click the DAG button on first workflow card
+{
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+    colorScheme: "light",
+  });
+  const page = await context.newPage();
+  await page.goto(BASE + "/workflows");
+  await page.waitForTimeout(800);
+  await page.locator("button", { hasText: "DAG" }).first().click();
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: `${OUT}/dag-preview.png`, fullPage: true });
+  console.log("  captured: dag-preview.png");
+  await context.close();
+}
+
 await browser.close();
 console.log("Done - all screenshots saved to docs/screenshots/");
