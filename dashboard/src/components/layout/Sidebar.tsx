@@ -3,10 +3,12 @@ import {
   Calendar,
   Castle,
   FlaskConical,
+  Gauge,
   GitBranch,
   Inbox,
   LayoutDashboard,
   PlayCircle,
+  ShieldAlert,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -25,6 +27,8 @@ const navItems = [
   { to: "/workflows", icon: GitBranch, label: "Workflows" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" as const },
   { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
+  { to: "/violations", icon: ShieldAlert, label: "Violations" },
+  { to: "/optimizer", icon: Gauge, label: "Optimizer" },
   { to: "/schedules", icon: Calendar, label: "Schedules" },
   { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" as const },
 ];
@@ -96,7 +100,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </nav>
 
         <div className="border-t border-border px-5 py-4">
-          <p className="text-xs text-muted-foreground">Sandcastle v0.2.0</p>
+          <p className="text-xs text-muted-foreground">Sandcastle v0.3.0</p>
         </div>
       </aside>
     </>

@@ -7,6 +7,8 @@ import Workflows from "@/pages/Workflows";
 import WorkflowBuilderPage from "@/pages/WorkflowBuilderPage";
 import ApprovalsPage from "@/pages/ApprovalsPage";
 import AutoPilotPage from "@/pages/AutoPilotPage";
+import ViolationsPage from "@/pages/ViolationsPage";
+import OptimizerPage from "@/pages/OptimizerPage";
 import Schedules from "@/pages/Schedules";
 import DeadLetterPage from "@/pages/DeadLetterPage";
 import Onboarding from "@/pages/Onboarding";
@@ -23,6 +25,8 @@ export default function App() {
           <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/autopilot" element={<AutoPilotPage />} />
+          <Route path="/violations" element={<ViolationsPage />} />
+          <Route path="/optimizer" element={<OptimizerPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/dead-letter" element={<DeadLetterPage />} />
           <Route path="/onboarding" element={<Onboarding />} />

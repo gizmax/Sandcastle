@@ -316,6 +316,173 @@ const MOCK_AUTOPILOT_STATS = {
   total_cost_savings_usd: 1.24,
 };
 
+const MOCK_VIOLATIONS = [
+  {
+    id: "vio-001",
+    run_id: "a1b2c3d4-1111-4000-8000-000000000001",
+    step_id: "enrich",
+    policy_id: "pii-redact",
+    severity: "critical",
+    action_taken: "redacted",
+    trigger_details: "PII detected in output: email address john.doe@example.com and SSN 123-45-6789 found in enrichment response. Content was automatically redacted before passing to next step.",
+    output_modified: true,
+    created_at: h(1),
+  },
+  {
+    id: "vio-002",
+    run_id: "a1b2c3d4-2222-4000-8000-000000000002",
+    step_id: "analyze",
+    policy_id: "cost-guard",
+    severity: "high",
+    action_taken: "blocked",
+    trigger_details: "Step cost $0.18 exceeds per-step budget limit of $0.10. Execution blocked to prevent budget overrun.",
+    output_modified: false,
+    created_at: h(3),
+  },
+  {
+    id: "vio-003",
+    run_id: "a1b2c3d4-3333-4000-8000-000000000003",
+    step_id: "score",
+    policy_id: "secret-block",
+    severity: "critical",
+    action_taken: "blocked",
+    trigger_details: "Potential API key detected in prompt: sk-proj-abc...xyz. Step execution blocked. Remove secrets from workflow input before retrying.",
+    output_modified: false,
+    created_at: h(6),
+  },
+  {
+    id: "vio-004",
+    run_id: "a1b2c3d4-5555-4000-8000-000000000005",
+    step_id: "enrich",
+    policy_id: "pii-redact",
+    severity: "medium",
+    action_taken: "redacted",
+    trigger_details: "Phone number +1-555-0123 detected in output field 'contact_info'. Number was replaced with [REDACTED].",
+    output_modified: true,
+    created_at: h(12),
+  },
+  {
+    id: "vio-005",
+    run_id: "a1b2c3d4-6666-4000-8000-000000000006",
+    step_id: "summarize",
+    policy_id: "length-limit",
+    severity: "low",
+    action_taken: "flagged",
+    trigger_details: "Output length 4,200 tokens exceeds soft limit of 4,000 tokens. Flagged for review but execution continued.",
+    output_modified: false,
+    created_at: h(24),
+  },
+  {
+    id: "vio-006",
+    run_id: "a1b2c3d4-8888-4000-8000-000000000008",
+    step_id: "analyze",
+    policy_id: "cost-guard",
+    severity: "high",
+    action_taken: "blocked",
+    trigger_details: "Cumulative run cost $0.42 exceeds max_cost_usd budget of $0.30. Remaining steps skipped.",
+    output_modified: false,
+    created_at: h(36),
+  },
+];
+
+const MOCK_VIOLATION_STATS = {
+  total_violations_30d: 23,
+  violations_by_severity: { critical: 2, high: 8, medium: 10, low: 3 },
+  violations_by_policy: { "pii-redact": 12, "cost-guard": 6, "secret-block": 3, "length-limit": 2 },
+  violations_by_day: Array.from({ length: 30 }, (_, i) => ({
+    date: d(29 - i),
+    count: Math.floor(Math.random() * 4),
+  })),
+};
+
+const MOCK_OPTIMIZER_DECISIONS = [
+  {
+    id: "opt-001",
+    run_id: "a1b2c3d4-1111-4000-8000-000000000001",
+    step_id: "enrich",
+    selected_model: "sonnet",
+    confidence: 0.92,
+    reason: "High complexity step with structured output requirements. Sonnet provides best quality-cost ratio for data enrichment tasks.",
+    budget_pressure: 0.3,
+    alternatives: [
+      { model: "sonnet", score: 0.92 },
+      { model: "haiku", score: 0.61 },
+      { model: "opus", score: 0.88 },
+    ],
+    slo_config: { max_latency_ms: 30000, min_quality: 0.7, budget_per_step_usd: 0.10 },
+    created_at: h(0.5),
+  },
+  {
+    id: "opt-002",
+    run_id: "a1b2c3d4-2222-4000-8000-000000000002",
+    step_id: "fetch-competitors",
+    selected_model: "haiku",
+    confidence: 0.88,
+    reason: "Simple data retrieval step. Haiku sufficient for structured extraction with minimal reasoning.",
+    budget_pressure: 0.1,
+    alternatives: [
+      { model: "haiku", score: 0.88 },
+      { model: "sonnet", score: 0.72 },
+    ],
+    slo_config: { max_latency_ms: 15000, min_quality: 0.5, budget_per_step_usd: 0.05 },
+    created_at: h(2),
+  },
+  {
+    id: "opt-003",
+    run_id: "a1b2c3d4-3333-4000-8000-000000000003",
+    step_id: "recommendations",
+    selected_model: "opus",
+    confidence: 0.45,
+    reason: "Complex reasoning required for actionable SEO recommendations. Low confidence due to limited historical data for this step type.",
+    budget_pressure: 0.92,
+    alternatives: [
+      { model: "opus", score: 0.45 },
+      { model: "sonnet", score: 0.42 },
+      { model: "haiku", score: 0.18 },
+    ],
+    slo_config: { max_latency_ms: 60000, min_quality: 0.8, budget_per_step_usd: 0.20 },
+    created_at: h(5),
+  },
+  {
+    id: "opt-004",
+    run_id: "a1b2c3d4-5555-4000-8000-000000000005",
+    step_id: "score",
+    selected_model: "haiku",
+    confidence: 0.78,
+    reason: "Lead scoring uses a fixed rubric. Haiku handles structured scoring well within quality SLO.",
+    budget_pressure: null,
+    alternatives: [
+      { model: "haiku", score: 0.78 },
+      { model: "sonnet", score: 0.65 },
+    ],
+    slo_config: { max_latency_ms: 10000, min_quality: 0.6, budget_per_step_usd: 0.03 },
+    created_at: h(8),
+  },
+  {
+    id: "opt-005",
+    run_id: "a1b2c3d4-6666-4000-8000-000000000006",
+    step_id: "analyze",
+    selected_model: "sonnet",
+    confidence: 0.85,
+    reason: "Competitor analysis requires nuanced comparison. Sonnet selected as best balance under current budget pressure.",
+    budget_pressure: 0.75,
+    alternatives: [
+      { model: "sonnet", score: 0.85 },
+      { model: "opus", score: 0.82 },
+      { model: "haiku", score: 0.39 },
+    ],
+    slo_config: { max_latency_ms: 45000, min_quality: 0.7, budget_per_step_usd: 0.08 },
+    created_at: h(12),
+  },
+];
+
+const MOCK_OPTIMIZER_STATS = {
+  total_decisions_30d: 156,
+  model_distribution: { haiku: 0.45, sonnet: 0.40, opus: 0.15 },
+  avg_confidence: 0.72,
+  estimated_savings_30d_usd: 3.45,
+};
+
 // Route matcher
 type MockRoute = {
   match: RegExp;
@@ -389,6 +556,28 @@ const routes: MockRoute[] = [
   {
     match: /^\/autopilot\/stats$/,
     handler: () => MOCK_AUTOPILOT_STATS,
+  },
+  {
+    match: /^\/violations$/,
+    handler: (params) => {
+      let filtered = MOCK_VIOLATIONS;
+      if (params.severity && params.severity !== "all") {
+        filtered = filtered.filter((v) => v.severity === params.severity);
+      }
+      return filtered;
+    },
+  },
+  {
+    match: /^\/violations\/stats$/,
+    handler: () => MOCK_VIOLATION_STATS,
+  },
+  {
+    match: /^\/optimizer\/decisions$/,
+    handler: () => MOCK_OPTIMIZER_DECISIONS,
+  },
+  {
+    match: /^\/optimizer\/stats$/,
+    handler: () => MOCK_OPTIMIZER_STATS,
   },
 ];
 
