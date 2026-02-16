@@ -2,6 +2,7 @@
 
 **Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).
 
+[![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -187,10 +188,10 @@ curl -X POST http://localhost:8080/workflows/run/sync \
 
 ### Python SDK
 
-Install Sandcastle and use it programmatically from any Python app:
+Install from PyPI and use Sandcastle programmatically from any Python app:
 
 ```bash
-pip install .   # or: uv pip install .
+pip install sandcastle-ai
 ```
 
 ```python
