@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "dashboard/**"
+      - "site/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -33,7 +34,7 @@ jobs:
         working-directory: dashboard
         run: npm ci
 
-      - name: Build
+      - name: Build dashboard
         working-directory: dashboard
         env:
           GITHUB_PAGES: "true"
@@ -41,9 +42,15 @@ jobs:
           npm run build
           cp dist/index.html dist/404.html
 
+      - name: Assemble site
+        run: |
+          mkdir -p _site/app
+          cp -r dashboard/dist/* _site/app/
+          cp site/index.html _site/index.html
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dashboard/dist
+          path: _site
 
   deploy:
     needs: build
