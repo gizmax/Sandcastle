@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sandcastle",
     description="Production-ready workflow orchestrator built on Sandstorm",
-    version="0.3.0",
+    version="0.3.1",
     lifespan=lifespan,
 )
 
