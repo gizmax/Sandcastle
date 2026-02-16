@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import io
 import json
 import logging
-import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -349,8 +347,6 @@ def _write_csv_output(
     cfg = step.csv_output
     if cfg is None:
         return
-
-    from sandcastle.engine.dag import CsvOutputConfig  # noqa: F811
 
     directory = Path(cfg.directory).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
