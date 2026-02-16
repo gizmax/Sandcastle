@@ -8,7 +8,7 @@ readme = "README.md"
 authors = [
     { name = "Tomas Pflanzer", email = "tomas@gizmax.cz" },
 ]
-keywords = ["ai", "agents", "workflow", "orchestrator", "sandstorm", "llm", "pipeline"]
+keywords = ["ai", "agents", "workflow", "orchestrator", "sandstorm", "llm", "pipeline", "workflow-templates"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",

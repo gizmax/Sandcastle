@@ -6,7 +6,7 @@
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-174%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-231%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -295,6 +295,10 @@ Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCA
 | **CLI tool** | - | Yes |
 | **Docker one-command deploy** | - | Yes |
 | **Dashboard with real-time monitoring** | - | Yes |
+| **20 built-in workflow templates** | - | Yes |
+| **Real-time SSE event stream** | - | Yes |
+| **Settings management UI** | - | Yes |
+| **Dark mode** | - | Yes |
 | **Visual workflow builder** | - | Yes |
 | **Human approval gates** | - | Yes |
 | **Self-optimizing workflows (AutoPilot)** | - | Yes |
@@ -535,6 +539,54 @@ steps:
 ```
 
 The optimizer scores each model option across multiple objectives, filters out options that violate SLO constraints, and tracks confidence based on sample count. Cold starts default to a balanced middle option until enough data is collected.
+
+---
+
+## 20 Built-in Workflow Templates
+
+Sandcastle ships with production-ready workflow templates across 6 categories:
+
+| Category | Templates |
+|----------|-----------|
+| **Marketing** | Blog to Social, SEO Content, Email Campaign, Competitor Analysis, Ad Copy Generator |
+| **Sales** | Lead Enrichment, Proposal Generator, Meeting Recap |
+| **Support** | Ticket Classifier, Review Sentiment |
+| **HR** | Job Description, Resume Screener |
+| **Legal** | Contract Review |
+| **Product** | Release Notes, Data Extractor |
+
+Plus 5 foundational templates: Summarize, Translate, Research Agent, Chain of Thought, Review and Approve.
+
+```bash
+# List all available templates
+sandcastle templates
+
+# Use a template
+curl http://localhost:8080/templates
+```
+
+Each template includes parallel execution stages, structured output schemas, and human approval gates where appropriate. Use them directly or as starting points in the Workflow Builder.
+
+---
+
+## Real-time Event Stream
+
+Sandcastle provides a global SSE endpoint for real-time updates across the entire system:
+
+```bash
+# Connect to the global event stream
+curl -N http://localhost:8080/events
+```
+
+The dashboard uses this stream to power live indicators showing connection status, toast notifications for run completion and failure, and instant updates across all pages. Event types include:
+
+- `run.started` - A workflow run was queued and started executing
+- `run.completed` - A run finished successfully with outputs
+- `run.failed` - A run failed (all retries exhausted)
+- `step.started`, `step.completed`, `step.failed` - Per-step progress events
+- `dlq.new` - A new item landed in the dead letter queue
+
+No polling, no delays - every state change is pushed the moment it happens.
 
 ---
 
@@ -835,6 +887,19 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 | `GET` | `/optimizer/decisions/{run_id}` | Decisions for a specific run |
 | `GET` | `/optimizer/stats` | Model distribution, confidence, savings |
 
+### Templates
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/templates` | List all built-in workflow templates |
+| `GET` | `/templates/{id}` | Get template detail with YAML |
+
+### Events
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/events` | Global SSE stream (run, step, DLQ events) |
+
 ### API Keys
 
 | Method | Endpoint | Description |
@@ -849,6 +914,7 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 |--------|----------|-------------|
 | `GET` | `/health` | Health check (Sandstorm, DB, Redis) |
 | `GET` | `/runtime` | Current mode info (database, queue, storage) |
+| `GET` | `/events` | Global SSE event stream |
 | `GET` | `/stats` | Aggregated stats and cost trends |
 
 All responses follow the envelope format: `{ "data": ..., "error": null }` or `{ "data": null, "error": { "code": "...", "message": "..." } }`.
@@ -1013,7 +1079,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (174 passing)
+# Run tests (231 passing)
 uv run pytest
 
 # Type check backend

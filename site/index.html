@@ -626,6 +626,52 @@
       margin-top: 32px;
     }
 
+    /* ---- TEMPLATES ---- */
+    .templates-section {
+      border-top: 1px solid var(--border);
+    }
+
+    .templates-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 48px;
+    }
+
+    .template-category {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      transition: border-color 0.2s;
+    }
+
+    .template-category:hover {
+      border-color: var(--border-light);
+    }
+
+    .template-count {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .template-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .template-examples {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
     /* ---- TECH STACK ---- */
     .stack-section {
       border-top: 1px solid var(--border);
@@ -847,6 +893,10 @@
       .stack-grid {
         grid-template-columns: repeat(2, 1fr);
       }
+
+      .templates-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
     }
   </style>
 </head>
@@ -1018,6 +1068,16 @@
           <h3>Zero-Config Local Mode</h3>
           <p>Just <code>sandcastle serve</code>. Auto-detects local vs production - SQLite or PostgreSQL, in-process or Redis.</p>
         </div>
+        <div class="feature-card">
+          <span class="feature-icon">📋</span>
+          <h3>20 Built-in Templates</h3>
+          <p>Marketing, sales, support, HR, legal, and product templates ready to use. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">📡</span>
+          <h3>Real-time Updates</h3>
+          <p>Live SSE event stream. See runs complete, steps execute, and errors appear instantly. No page refresh needed.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -1111,6 +1171,52 @@
         <a href="https://gizmax.github.io/Sandcastle/" target="_blank" rel="noopener" class="btn btn-secondary">
           Try Live Demo - no backend needed
         </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Templates -->
+  <section class="templates-section">
+    <div class="container fade-in">
+      <span class="section-label">Templates</span>
+      <h2 class="section-title">20 workflows, ready to deploy</h2>
+      <p class="section-subtitle">Skip the blank page. Pick a template, tweak the prompts, and ship. Every category covers real production use cases.</p>
+      <div class="templates-grid">
+        <div class="template-category">
+          <span class="template-count">5</span>
+          <span class="template-name">Core</span>
+          <span class="template-examples">Hello World, Fan-out, Approval Gate, Retry Chain, Scheduled Digest</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">5</span>
+          <span class="template-name">Marketing</span>
+          <span class="template-examples">Blog to Social, SEO Audit, Newsletter Generator, Content Repurposer, Competitor Watch</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">3</span>
+          <span class="template-name">Sales</span>
+          <span class="template-examples">Lead Enrichment, Outbound Sequence, CRM Sync</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">2</span>
+          <span class="template-name">Support</span>
+          <span class="template-examples">Ticket Triage, Knowledge Base Updater</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">2</span>
+          <span class="template-name">HR</span>
+          <span class="template-examples">Resume Screener, Onboarding Checklist</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">1</span>
+          <span class="template-name">Legal</span>
+          <span class="template-examples">Contract Review</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">2</span>
+          <span class="template-name">Product</span>
+          <span class="template-examples">Feedback Analyzer, Release Notes Generator</span>
+        </div>
       </div>
     </div>
   </section>
