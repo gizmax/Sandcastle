@@ -3,6 +3,35 @@ import { ChevronDown, ChevronRight, RotateCcw, GitFork } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { cn, formatDuration, formatCost } from "@/lib/utils";
 
+function extractText(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    // Unwrap single-key objects like {"result": "..."}
+    const keys = Object.keys(obj);
+    if (keys.length === 1 && typeof obj[keys[0]] === "string") {
+      return obj[keys[0]] as string;
+    }
+  }
+  return null;
+}
+
+function OutputBlock({ value }: { value: unknown }) {
+  const text = extractText(value);
+  if (text) {
+    return (
+      <div className="max-h-96 overflow-auto rounded-md bg-background p-3 text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+        {text}
+      </div>
+    );
+  }
+  return (
+    <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap break-words">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
 interface StepCardProps {
   stepId: string;
   status: string;
@@ -72,9 +101,7 @@ export function StepCard({
           {output != null && (
             <div>
               <p className="mb-1 text-xs font-medium text-muted">Output</p>
-              <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono text-xs text-foreground">
-                {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
-              </pre>
+              <OutputBlock value={output} />
             </div>
           )}
 
