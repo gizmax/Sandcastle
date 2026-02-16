@@ -1366,6 +1366,23 @@ async def update_schedule(
                     )
                 ).model_dump(),
             )
+        # Validate cron before committing
+        if request.cron_expression is not None:
+            try:
+                from apscheduler.triggers.cron import CronTrigger
+
+                CronTrigger.from_crontab(request.cron_expression)
+            except (ValueError, KeyError) as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=ApiResponse(
+                        error=ErrorResponse(
+                            code="INVALID_CRON",
+                            message=f"Invalid cron expression: {exc}",
+                        )
+                    ).model_dump(),
+                ) from exc
+
         if request.enabled is not None:
             schedule.enabled = request.enabled
         if request.cron_expression is not None:

@@ -10,7 +10,6 @@ from typing import Any, Generator, Iterator, Optional
 
 import httpx
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -847,8 +846,6 @@ class AsyncSandcastleClient:
         Returns:
             Run object with run_id and status.
         """
-        import asyncio
-
         body: dict[str, Any] = {"workflow_name": workflow_name}
         if input is not None:
             body["input"] = input
@@ -891,8 +888,6 @@ class AsyncSandcastleClient:
         Returns:
             Run object with run_id and status.
         """
-        import asyncio
-
         body: dict[str, Any] = {"workflow": yaml_content}
         if input is not None:
             body["input"] = input

@@ -9,7 +9,6 @@ import sys
 import time
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # ANSI colors
 # ---------------------------------------------------------------------------
@@ -104,11 +103,18 @@ def _get_client(args: argparse.Namespace) -> Any:
     Imports the SDK lazily so that commands like 'serve' and 'db migrate'
     never touch the SDK module.
     """
-    from sandcastle.sdk import SandcastleClient  # noqa: WPS433 (lazy import)
+    from sandcastle.sdk import SandcastleClient  # lazy import
 
     url = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
     api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
     return SandcastleClient(base_url=url, api_key=api_key)
+
+
+def _attr(obj: Any, key: str, default: Any = None) -> Any:
+    """Get attribute from a dict or object."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
 # ---------------------------------------------------------------------------
@@ -166,15 +172,16 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
     terminal = {"completed", "failed", "cancelled", "error"}
     while True:
         run = client.get_run(run_id)
-        status = run.get("status", "unknown") if isinstance(run, dict) else getattr(run, "status", "unknown")
+        status = _attr(run, "status", "unknown")
         if status in terminal:
             # Clear spinner line
             sys.stdout.write("\r" + " " * 60 + "\r")
             sys.stdout.flush()
-            return run if isinstance(run, dict) else run.__dict__ if hasattr(run, "__dict__") else run
+            return _to_dict(run)
         # Show spinner
         frame = frames[idx % len(frames)]
-        msg = f"\r  {_color(frame, _C.CYAN)} Waiting for run {run_id[:12]}... [{_status_color(status)}]"
+        label = _status_color(status)
+        msg = f"\r  {_color(frame, _C.CYAN)} Waiting for {run_id[:12]}... [{label}]"
         sys.stdout.write(msg)
         sys.stdout.flush()
         idx += 1
@@ -219,12 +226,12 @@ def _cmd_run(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", str(run))
+    run_id = _attr(run, "run_id", str(run))
 
     if args.wait:
         result = _wait_for_run(client, run_id)
         _print_run_detail(result)
-        status = result.get("status") if isinstance(result, dict) else getattr(result, "status", "unknown")
+        status = _attr(result, "status", "unknown")
         if status == "failed":
             sys.exit(2)
     else:
@@ -260,8 +267,8 @@ def _cmd_logs(args: argparse.Namespace) -> None:
     client = _get_client(args)
     try:
         for event in client.stream(args.run_id):
-            event_type = event.get("event") if isinstance(event, dict) else getattr(event, "event", "message")
-            data = event.get("data") if isinstance(event, dict) else getattr(event, "data", event)
+            event_type = _attr(event, "event", "message")
+            data = _attr(event, "data", event)
             ts = time.strftime("%H:%M:%S")
             print(f"{_color(ts, _C.DIM)} [{_color(str(event_type), _C.CYAN)}] {data}")
 
@@ -376,7 +383,7 @@ def _cmd_schedule_create(args: argparse.Namespace) -> None:
     input_data = _parse_input_pairs(args.input)
     try:
         schedule = client.create_schedule(args.workflow, args.cron, input=input_data)
-        sid = schedule.get("id") if isinstance(schedule, dict) else getattr(schedule, "id", str(schedule))
+        sid = _attr(schedule, "id", str(schedule))
         print(f"Schedule created: {sid}")
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -404,14 +411,14 @@ def _cmd_health(args: argparse.Namespace) -> None:
     client = _get_client(args)
     try:
         h = client.health()
-        data = h if isinstance(h, dict) else h.__dict__ if hasattr(h, "__dict__") else {"status": str(h)}
+        data = _to_dict(h)
         status = data.get("status", "unknown")
         print(f"Status:    {_status_color(status)}")
         print(f"Sandstorm: {'ok' if data.get('sandstorm') else 'unreachable'}")
         if data.get("redis") is not None:
             print(f"Redis:     {'ok' if data.get('redis') else 'unreachable'}")
         print(f"Database:  {'ok' if data.get('database') else 'unreachable'}")
-        if status != "healthy":
+        if status not in ("ok", "healthy"):
             sys.exit(1)
     except Exception as exc:
         print(f"Error: cannot reach API - {exc}", file=sys.stderr)
