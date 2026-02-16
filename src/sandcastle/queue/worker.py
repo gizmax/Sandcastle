@@ -97,7 +97,7 @@ async def run_workflow_job(
 
         # Update DB with result
         async with async_session() as session:
-            run = await session.get(Run, run_id)
+            run = await session.get(Run, run_uuid)
             if run:
                 run.status = status_map.get(result.status, RunStatus.FAILED)
                 run.output_data = result.outputs
@@ -143,7 +143,7 @@ async def run_workflow_job(
     except Exception as e:
         logger.error(f"Run {run_id} failed: {e}")
         async with async_session() as session:
-            run = await session.get(Run, run_id)
+            run = await session.get(Run, run_uuid)
             if run:
                 run.status = RunStatus.FAILED
                 run.completed_at = datetime.now(timezone.utc)
