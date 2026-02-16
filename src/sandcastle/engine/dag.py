@@ -212,11 +212,15 @@ class ExecutionPlan:
 
 
 def _resolve_env_vars(value: str) -> str:
-    """Replace ${ENV_VAR} patterns with environment variable values."""
+    """Replace ${ENV_VAR} patterns with environment variable values.
+
+    Returns empty string if any variable is unresolved, so callers
+    can fall back to config defaults via `resolved or fallback`.
+    """
 
     def _replace(match: re.Match) -> str:
         var_name = match.group(1)
-        return os.environ.get(var_name, match.group(0))
+        return os.environ.get(var_name, "")
 
     return re.sub(r"\$\{(\w+)\}", _replace, value)
 
