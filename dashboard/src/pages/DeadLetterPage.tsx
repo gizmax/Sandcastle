@@ -10,9 +10,12 @@ export default function DeadLetterPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchItems = useCallback(async () => {
-    const res = await api.get<DLQItem[]>("/dead-letter");
-    if (res.data) setItems(res.data);
-    setLoading(false);
+    try {
+      const res = await api.get<DLQItem[]>("/dead-letter");
+      if (res.data) setItems(res.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

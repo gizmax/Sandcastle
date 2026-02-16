@@ -15,9 +15,12 @@ export default function ApiKeysPage() {
   const [revealKey, setRevealKey] = useState<string | null>(null);
 
   const fetchKeys = useCallback(async () => {
-    const res = await api.get<ApiKeyItem[]>("/api-keys");
-    if (res.data) setKeys(res.data);
-    setLoading(false);
+    try {
+      const res = await api.get<ApiKeyItem[]>("/api-keys");
+      if (res.data) setKeys(res.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

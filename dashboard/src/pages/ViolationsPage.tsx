@@ -47,15 +47,18 @@ export default function ViolationsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const params: Record<string, string> = {};
-    if (filter !== "all") params.severity = filter;
-    const [itemsRes, statsRes] = await Promise.all([
-      api.get<Violation[]>("/violations", params),
-      api.get<ViolationStats>("/violations/stats"),
-    ]);
-    if (itemsRes.data) setItems(itemsRes.data);
-    if (statsRes.data) setStats(statsRes.data);
-    setLoading(false);
+    try {
+      const params: Record<string, string> = {};
+      if (filter !== "all") params.severity = filter;
+      const [itemsRes, statsRes] = await Promise.all([
+        api.get<Violation[]>("/violations", params),
+        api.get<ViolationStats>("/violations/stats"),
+      ]);
+      if (itemsRes.data) setItems(itemsRes.data);
+      if (statsRes.data) setStats(statsRes.data);
+    } finally {
+      setLoading(false);
+    }
   }, [filter]);
 
   useEffect(() => {

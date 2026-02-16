@@ -45,9 +45,12 @@ export default function Workflows() {
   const [dagWorkflow, setDagWorkflow] = useState<WorkflowInfo | null>(null);
 
   const fetchWorkflows = useCallback(async () => {
-    const res = await api.get<WorkflowInfo[]>("/workflows");
-    if (res.data) setWorkflows(res.data);
-    setLoading(false);
+    try {
+      const res = await api.get<WorkflowInfo[]>("/workflows");
+      if (res.data) setWorkflows(res.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

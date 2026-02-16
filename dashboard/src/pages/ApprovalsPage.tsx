@@ -37,11 +37,14 @@ export default function ApprovalsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
-    const params: Record<string, string> = {};
-    if (filter !== "all") params.status = filter;
-    const res = await api.get<ApprovalItem[]>("/approvals", params);
-    if (res.data) setItems(res.data);
-    setLoading(false);
+    try {
+      const params: Record<string, string> = {};
+      if (filter !== "all") params.status = filter;
+      const res = await api.get<ApprovalItem[]>("/approvals", params);
+      if (res.data) setItems(res.data);
+    } finally {
+      setLoading(false);
+    }
   }, [filter]);
 
   useEffect(() => {

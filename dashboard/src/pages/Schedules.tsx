@@ -24,9 +24,12 @@ export default function Schedules() {
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
 
   const fetchSchedules = useCallback(async () => {
-    const res = await api.get<ScheduleItem[]>("/schedules");
-    if (res.data) setSchedules(res.data);
-    setLoading(false);
+    try {
+      const res = await api.get<ScheduleItem[]>("/schedules");
+      if (res.data) setSchedules(res.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

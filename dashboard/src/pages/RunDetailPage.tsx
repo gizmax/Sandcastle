@@ -54,9 +54,12 @@ export default function RunDetailPage() {
 
   const fetchRun = useCallback(async () => {
     if (!id) return;
-    const res = await api.get<RunDetail>(`/runs/${id}`);
-    if (res.data) setRun(res.data);
-    setLoading(false);
+    try {
+      const res = await api.get<RunDetail>(`/runs/${id}`);
+      if (res.data) setRun(res.data);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useEffect(() => {

@@ -66,13 +66,16 @@ export default function OptimizerPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const [decRes, statsRes] = await Promise.all([
-      api.get<OptimizerDecision[]>("/optimizer/decisions"),
-      api.get<OptimizerStats>("/optimizer/stats"),
-    ]);
-    if (decRes.data) setDecisions(decRes.data);
-    if (statsRes.data) setStats(statsRes.data);
-    setLoading(false);
+    try {
+      const [decRes, statsRes] = await Promise.all([
+        api.get<OptimizerDecision[]>("/optimizer/decisions"),
+        api.get<OptimizerStats>("/optimizer/stats"),
+      ]);
+      if (decRes.data) setDecisions(decRes.data);
+      if (statsRes.data) setStats(statsRes.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

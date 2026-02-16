@@ -7,6 +7,8 @@ interface ApiResponse<T = unknown> {
   meta?: { total: number; limit: number; offset: number } | null;
 }
 
+const REQUEST_TIMEOUT = 15_000; // 15 seconds
+
 class ApiClient {
   private baseUrl: string;
   private apiKey: string | null = null;
@@ -72,7 +74,10 @@ class ApiClient {
           if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
         });
       }
-      const res = await fetch(url.toString(), { headers: this.headers() });
+      const res = await fetch(url.toString(), {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+      });
       return this.handleResponse<T>(res);
     } catch {
       // Only fall back to mock on actual network errors (backend unreachable)
@@ -104,6 +109,7 @@ class ApiClient {
         method: "POST",
         headers: this.headers(),
         body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
       });
       return this.handleResponse<T>(res);
     } catch {
@@ -123,6 +129,7 @@ class ApiClient {
         method: "PATCH",
         headers: this.headers(),
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
       });
       return this.handleResponse<T>(res);
     } catch {
@@ -141,6 +148,7 @@ class ApiClient {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: "DELETE",
         headers: this.headers(),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
       });
       return this.handleResponse<T>(res);
     } catch {

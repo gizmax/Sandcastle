@@ -70,13 +70,16 @@ export default function AutoPilotPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const [expRes, statsRes] = await Promise.all([
-      api.get<Experiment[]>("/autopilot/experiments"),
-      api.get<AutoPilotStats>("/autopilot/stats"),
-    ]);
-    if (expRes.data) setExperiments(expRes.data);
-    if (statsRes.data) setStats(statsRes.data);
-    setLoading(false);
+    try {
+      const [expRes, statsRes] = await Promise.all([
+        api.get<Experiment[]>("/autopilot/experiments"),
+        api.get<AutoPilotStats>("/autopilot/stats"),
+      ]);
+      if (expRes.data) setExperiments(expRes.data);
+      if (statsRes.data) setStats(statsRes.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

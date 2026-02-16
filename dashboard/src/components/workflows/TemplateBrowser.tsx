@@ -50,8 +50,7 @@ export function TemplateBrowser({ open, onClose, onSelect }: TemplateBrowserProp
     setSelectedName(null);
     api.get<Template[]>("/templates").then((res) => {
       setTemplates(res.data || []);
-      setLoading(false);
-    });
+    }).finally(() => setLoading(false));
   }, [open]);
 
   const handleUseTemplate = useCallback(async () => {
