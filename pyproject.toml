@@ -1,6 +1,6 @@
 [project]
 name = "sandcastle-ai"
-version = "0.5.0"
+version = "0.6.0"
 description = "Production-ready workflow orchestrator for AI agents. Define pipelines in YAML, run locally with zero config, scale to production."
 requires-python = ">=3.11"
 license = "MIT"
