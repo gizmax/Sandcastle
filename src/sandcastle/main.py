@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     async with async_session() as session:
         # Count first, then update
         count_result = await session.execute(
-            select(func.count()).select_from(Run).where(
+            sa_select(func.count()).select_from(Run).where(
                 Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING])
             )
         )
