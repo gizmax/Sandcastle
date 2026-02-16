@@ -1110,8 +1110,13 @@ async def execute_workflow(
         except Exception as e:
             logger.warning(f"Could not load global policies: {e}")
 
+    effective_url = workflow.sandstorm_url or settings.sandstorm_url
+    logger.info(
+        f"Sandstorm connection: url={effective_url!r} "
+        f"(workflow={workflow.sandstorm_url!r}, settings={settings.sandstorm_url!r})"
+    )
     sandbox = SandstormClient(
-        base_url=workflow.sandstorm_url or settings.sandstorm_url,
+        base_url=effective_url,
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
     )

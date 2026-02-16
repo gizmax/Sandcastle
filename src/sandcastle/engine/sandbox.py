@@ -69,13 +69,14 @@ class SandstormClient:
 
         async for event in self.query_stream(request):
             result.events.append(event)
+            evt_type = event.data.get("type", event.event)
 
-            if event.event == "result":
-                result.text = event.data.get("text", "")
+            if evt_type == "result":
+                result.text = event.data.get("result", "") or event.data.get("text", "")
                 result.structured_output = event.data.get("structured_output")
                 result.total_cost_usd = event.data.get("total_cost_usd", 0.0)
                 result.num_turns = event.data.get("num_turns", 0)
-            elif event.event == "error":
+            elif evt_type == "error":
                 error_msg = event.data.get("error", "Unknown Sandstorm error")
                 raise SandstormError(error_msg)
 
