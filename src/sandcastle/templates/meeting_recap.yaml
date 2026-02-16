@@ -1,0 +1,48 @@
+# name: Meeting Recap
+# description: Transform meeting transcript into summary, action items, and follow-up email
+# tags: [Sales, Productivity, Communication]
+
+name: meeting-recap
+description: Transform meeting transcript into summary, action items, and follow-up email
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: summarize
+    prompt: >
+      Create a structured meeting summary from the following transcript.
+      Include the meeting date, attendees, key discussion points, decisions
+      made, and any open questions. Organize by topic and highlight the
+      most important outcomes clearly.
+      Transcript: {input.transcript}
+      Meeting title: {input.meeting_title}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: action-items
+    depends_on: [summarize]
+    prompt: >
+      Extract all action items from the meeting summary. For each item,
+      specify the owner (who is responsible), a clear description of the
+      task, the agreed deadline or timeframe, and the priority level.
+      Format as a structured checklist that can be imported into a task
+      tracker.
+      Meeting summary: {steps.summarize.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: follow-up-email
+    depends_on: [summarize, action-items]
+    prompt: >
+      Draft a professional follow-up email to send to all meeting attendees.
+      Include a brief recap of key decisions, the full list of action items
+      with owners and deadlines, and proposed next steps or next meeting date.
+      Keep the tone friendly but professional, and make it easy to scan quickly.
+      Meeting summary: {steps.summarize.output}
+      Action items: {steps.action-items.output}
+      Sender name: {input.sender_name}
+    model: claude-sonnet-4-20250514
+    max_turns: 8

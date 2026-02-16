@@ -538,6 +538,96 @@ const MOCK_TEMPLATES = [
     tags: ["Human-in-loop", "Content"],
     step_count: 3,
   },
+  {
+    name: "blog_to_social",
+    description: "Transform a blog post into platform-specific social media content",
+    tags: ["Marketing", "Content", "Social"],
+    step_count: 5,
+  },
+  {
+    name: "seo_content",
+    description: "Research keywords and create SEO-optimized article with meta tags",
+    tags: ["Marketing", "SEO", "Content"],
+    step_count: 4,
+  },
+  {
+    name: "email_campaign",
+    description: "Generate email campaign with subject line variants and A/B copy",
+    tags: ["Marketing", "Email", "Campaign"],
+    step_count: 5,
+  },
+  {
+    name: "competitor_analysis",
+    description: "Analyze competitor positioning, strengths, weaknesses, and opportunities",
+    tags: ["Marketing", "Strategy", "Research"],
+    step_count: 4,
+  },
+  {
+    name: "ad_copy_generator",
+    description: "Generate ad copy variants for Google Ads and Meta Ads campaigns",
+    tags: ["Marketing", "Advertising", "Copywriting"],
+    step_count: 4,
+  },
+  {
+    name: "lead_enrichment",
+    description: "Research and enrich lead data with company info, scoring, and outreach angles",
+    tags: ["Sales", "Research", "Lead-Gen"],
+    step_count: 5,
+  },
+  {
+    name: "proposal_generator",
+    description: "Generate a customized business proposal from meeting notes and product info",
+    tags: ["Sales", "Document", "Proposal"],
+    step_count: 4,
+  },
+  {
+    name: "meeting_recap",
+    description: "Transform meeting transcript into summary, action items, and follow-up email",
+    tags: ["Sales", "Productivity", "Communication"],
+    step_count: 3,
+  },
+  {
+    name: "ticket_classifier",
+    description: "Classify support ticket, assign priority, and draft response",
+    tags: ["Support", "Classification", "Automation"],
+    step_count: 4,
+  },
+  {
+    name: "review_sentiment",
+    description: "Analyze customer reviews to extract sentiment trends and actionable insights",
+    tags: ["Support", "Analytics", "Sentiment"],
+    step_count: 4,
+  },
+  {
+    name: "job_description",
+    description: "Generate inclusive job description with requirements, benefits, and interview plan",
+    tags: ["HR", "Recruiting", "Content"],
+    step_count: 4,
+  },
+  {
+    name: "resume_screener",
+    description: "Screen resume against job description with match scoring and interview recommendations",
+    tags: ["HR", "Recruiting", "Screening"],
+    step_count: 4,
+  },
+  {
+    name: "contract_review",
+    description: "Review contract for key terms, risks, and generate plain-language summary",
+    tags: ["Legal", "Compliance", "Document"],
+    step_count: 4,
+  },
+  {
+    name: "release_notes",
+    description: "Generate user-facing release notes and internal changelog from commit history",
+    tags: ["Product", "Engineering", "Documentation"],
+    step_count: 4,
+  },
+  {
+    name: "data_extractor",
+    description: "Extract structured data from documents with validation and error handling",
+    tags: ["Product", "Data", "Automation"],
+    step_count: 4,
+  },
 ];
 
 const TEMPLATE_YAMLS: Record<string, string> = {
@@ -705,7 +795,8 @@ function getTemplateDetail(name: string) {
   if (!template) return null;
   return {
     ...template,
-    yaml: TEMPLATE_YAMLS[name] || `name: "${name}"\nsteps: []`,
+    file_name: `${name}.yaml`,
+    content: TEMPLATE_YAMLS[name] || `name: "${name}"\nsteps: []`,
   };
 }
 

@@ -1,0 +1,58 @@
+# name: Competitor Analysis
+# description: Analyze competitor positioning, strengths, weaknesses, and opportunities
+# tags: [Marketing, Strategy, Research]
+
+name: competitor-analysis
+description: Analyze competitor positioning, strengths, weaknesses, and opportunities
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: gather-info
+    prompt: >
+      Research the following competitor thoroughly. Gather information about
+      their product offerings, pricing model, key messaging and positioning,
+      target market segments, and overall market share. Identify their
+      marketing channels and recent strategic moves.
+      Competitor: {input.competitor}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: analyze-strengths
+    depends_on: [gather-info]
+    prompt: >
+      Based on the competitor research below, identify and analyze their key
+      strengths. Focus on what they do well in product quality, brand
+      perception, customer experience, market positioning, and technical
+      capabilities. Rank each strength by impact on their market position.
+      Research: {steps.gather-info.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: analyze-weaknesses
+    depends_on: [gather-info]
+    prompt: >
+      Based on the competitor research below, identify gaps, weaknesses,
+      and areas of customer dissatisfaction. Look for common complaints,
+      missing features, pricing concerns, poor support experiences, and
+      strategic blind spots. Highlight areas that represent opportunities
+      for differentiation.
+      Research: {steps.gather-info.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: swot-report
+    depends_on: [analyze-strengths, analyze-weaknesses]
+    prompt: >
+      Compile a comprehensive SWOT analysis report combining the strengths
+      and weaknesses analysis. Add an Opportunities section identifying how
+      to capitalize on competitor weaknesses, and a Threats section covering
+      risks from their strengths. End with 3-5 actionable recommendations
+      for competitive positioning.
+      Strengths: {steps.analyze-strengths.output}
+      Weaknesses: {steps.analyze-weaknesses.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10

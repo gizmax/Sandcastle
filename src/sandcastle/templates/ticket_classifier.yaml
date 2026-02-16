@@ -1,0 +1,76 @@
+# name: Ticket Classifier
+# description: Classify support ticket, assign priority, and draft response
+# tags: [Support, Classification, Automation]
+
+name: ticket-classifier
+description: Classify support ticket, assign priority, and draft response
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: classify
+    prompt: >
+      Analyze the following support ticket and classify it into one of these
+      categories: bug, feature_request, billing, how_to, or account. Also
+      detect the customer sentiment (positive, neutral, frustrated, angry)
+      and identify the core topic or product area involved.
+      Ticket subject: {input.subject}
+      Ticket body: {input.body}
+      Customer tier: {input.customer_tier}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        category:
+          type: string
+          enum: [bug, feature_request, billing, how_to, account]
+        sentiment:
+          type: string
+          enum: [positive, neutral, frustrated, angry]
+        topic:
+          type: string
+      required: [category, sentiment, topic]
+
+  - id: prioritize
+    depends_on: [classify]
+    prompt: >
+      Assign a priority level (P1-P4) to this support ticket based on
+      the classification, customer sentiment, potential business impact,
+      and customer tier. P1 is critical and needs immediate attention,
+      P4 is low priority. Provide a brief justification for the priority.
+      Classification: {steps.classify.output}
+      Customer tier: {input.customer_tier}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: draft-response
+    depends_on: [classify, prioritize]
+    prompt: >
+      Draft a helpful and empathetic support response addressing the
+      customer's issue. Match the tone to the detected sentiment - be
+      extra empathetic for frustrated or angry customers. Include specific
+      troubleshooting steps for bugs, clear explanations for how-to questions,
+      and appropriate escalation language for billing or account issues.
+      Original ticket: {input.body}
+      Classification: {steps.classify.output}
+      Priority: {steps.prioritize.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: suggest-routing
+    depends_on: [classify, prioritize]
+    prompt: >
+      Based on the ticket classification and priority, suggest the best
+      internal team to route this ticket to. Choose from: engineering
+      (for bugs and technical issues), billing (for payment and subscription),
+      success (for account management and feature requests), or support
+      (for how-to and general inquiries). Include a brief handoff note
+      for the receiving team.
+      Classification: {steps.classify.output}
+      Priority: {steps.prioritize.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5

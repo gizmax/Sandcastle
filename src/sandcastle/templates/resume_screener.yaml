@@ -1,0 +1,91 @@
+# name: Resume Screener
+# description: Screen resume against job description with match scoring and interview recommendations
+# tags: [HR, Recruiting, Screening]
+
+name: resume-screener
+description: Screen resume against job description with match scoring and interview recommendations
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: parse-resume
+    prompt: >
+      Extract structured data from the following resume. Identify and organize: work
+      experience (company, role, duration, achievements), technical and soft skills,
+      education and certifications, notable projects, and any quantified accomplishments.
+      Resume: {input.resume_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        candidate_name:
+          type: string
+        experience:
+          type: array
+          items:
+            type: object
+            properties:
+              company:
+                type: string
+              role:
+                type: string
+              duration:
+                type: string
+              achievements:
+                type: array
+                items:
+                  type: string
+        skills:
+          type: array
+          items:
+            type: string
+        education:
+          type: array
+          items:
+            type: object
+            properties:
+              institution:
+                type: string
+              degree:
+                type: string
+              year:
+                type: string
+        total_years_experience:
+          type: number
+
+  - id: match-analysis
+    depends_on: [parse-resume]
+    prompt: >
+      Compare the parsed resume data against the job description requirements. Score the
+      overall match from 0-100, break down scoring by category (skills, experience, education),
+      identify specific gaps, and highlight standout qualifications that exceed requirements.
+      Parsed resume: {steps.parse-resume.output}
+      Job description: {input.job_description}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: interview-questions
+    depends_on: [parse-resume, match-analysis]
+    prompt: >
+      Generate targeted interview questions based on the candidate's profile and identified
+      gaps. Include questions to verify claimed experience, probe skill gaps, explore
+      career motivations, and assess cultural fit. Prioritize questions by importance.
+      Parsed resume: {steps.parse-resume.output}
+      Match analysis: {steps.match-analysis.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: summary-card
+    depends_on: [match-analysis, interview-questions]
+    prompt: >
+      Create a concise candidate summary card with a clear recommendation (proceed, hold,
+      or reject). Include the match score, top 3 strengths, top 3 concerns, recommended
+      interview focus areas, and a brief justification for the recommendation.
+      Match analysis: {steps.match-analysis.output}
+      Interview questions: {steps.interview-questions.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3

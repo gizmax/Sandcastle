@@ -1,0 +1,59 @@
+# name: Proposal Generator
+# description: Generate a customized business proposal from meeting notes and product info
+# tags: [Sales, Document, Proposal]
+
+name: proposal-generator
+description: Generate a customized business proposal from meeting notes and product info
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: extract-requirements
+    prompt: >
+      Analyze the following meeting notes and extract all client requirements,
+      pain points, budget signals, timeline expectations, and any technical
+      constraints mentioned. Organize findings by priority and flag any
+      ambiguous or missing information that should be clarified.
+      Meeting notes: {input.meeting_notes}
+      Client name: {input.client_name}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: match-solutions
+    depends_on: [extract-requirements]
+    prompt: >
+      Map each identified client need to our product features and solutions.
+      For each pain point, explain how our offering addresses it, include
+      relevant case studies or metrics where applicable, and note any gaps
+      where custom work or integrations may be needed.
+      Client requirements: {steps.extract-requirements.output}
+      Product catalog: {input.product_info}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: write-proposal
+    depends_on: [match-solutions]
+    prompt: >
+      Write a complete business proposal document with the following sections:
+      Executive Summary, Understanding of Needs, Proposed Solution, Implementation
+      Timeline, Pricing and Investment, and Next Steps. Use a professional tone,
+      reference specific client pain points, and highlight ROI where possible.
+      Solution mapping: {steps.match-solutions.output}
+      Client name: {input.client_name}
+      Pricing tier: {input.pricing_tier}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: review-gate
+    depends_on: [write-proposal]
+    type: approval
+    prompt: Review the generated proposal before sending to client
+    approval_config:
+      message: "Review the generated proposal and approve for delivery to the client"
+      show_data: steps.write-proposal.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true

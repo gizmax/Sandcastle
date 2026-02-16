@@ -1,0 +1,91 @@
+# name: Data Extractor
+# description: Extract structured data from documents with validation and error handling
+# tags: [Product, Data, Automation]
+
+name: data-extractor
+description: Extract structured data from documents with validation and error handling
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: analyze-document
+    prompt: >
+      Analyze the following document to detect its type (invoice, receipt, report, form,
+      letter, etc.) and structure. Identify all extractable fields, their expected data
+      types, and any repeating sections or tables. Note the document quality and any
+      areas that may be difficult to extract accurately. Document: {input.document_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: extract-data
+    depends_on: [analyze-document]
+    prompt: >
+      Extract all identified fields from the document into a structured JSON format.
+      For each field, include the extracted value, the source location in the document,
+      and a confidence score (0.0-1.0). Handle missing or ambiguous fields gracefully
+      by marking them as null with an explanation.
+      Document analysis: {steps.analyze-document.output}
+      Original document: {input.document_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        document_type:
+          type: string
+        fields:
+          type: array
+          items:
+            type: object
+            properties:
+              field_name:
+                type: string
+              value:
+                type: string
+              confidence:
+                type: number
+              source_location:
+                type: string
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              table_name:
+                type: string
+              headers:
+                type: array
+                items:
+                  type: string
+              rows:
+                type: array
+                items:
+                  type: array
+                  items:
+                    type: string
+
+  - id: validate
+    depends_on: [extract-data]
+    prompt: >
+      Validate the extracted data for completeness and correctness. Check that all required
+      fields are present, verify data format consistency (dates, numbers, currencies),
+      cross-reference related fields for logical consistency (e.g., line items sum to total),
+      and flag any values that appear anomalous or potentially incorrect.
+      Extracted data: {steps.extract-data.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: format-output
+    depends_on: [validate]
+    prompt: >
+      Format the validated data into the final output structure. Include per-field confidence
+      scores, validation status for each field, a summary of any issues found during
+      validation, and an overall extraction quality score. Present the data in a clean,
+      machine-readable JSON format ready for downstream processing.
+      Validated data: {steps.validate.output}
+      Original extraction: {steps.extract-data.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3

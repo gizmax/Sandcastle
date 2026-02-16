@@ -1,0 +1,60 @@
+# name: Review Sentiment
+# description: Analyze customer reviews to extract sentiment trends and actionable insights
+# tags: [Support, Analytics, Sentiment]
+
+name: review-sentiment
+description: Analyze customer reviews to extract sentiment trends and actionable insights
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: parse-reviews
+    prompt: >
+      Parse and normalize the following batch of customer reviews. Extract
+      each individual review text, the rating if available, the date, and
+      any product or feature mentioned. Clean up formatting issues and
+      standardize the data for downstream analysis.
+      Reviews data: {input.reviews}
+      Product name: {input.product_name}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: sentiment-analysis
+    depends_on: [parse-reviews]
+    prompt: >
+      Perform sentiment analysis on each parsed review. Score sentiment on
+      a scale from -1.0 (very negative) to 1.0 (very positive). Identify
+      recurring positive themes (e.g. ease of use, good support) and negative
+      themes (e.g. bugs, missing features, slow performance). Group reviews
+      by sentiment tier and highlight representative quotes.
+      Parsed reviews: {steps.parse-reviews.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: trend-detection
+    depends_on: [sentiment-analysis]
+    prompt: >
+      Analyze the sentiment results to detect trending topics and patterns.
+      Identify recurring complaints that may indicate systemic issues,
+      features receiving consistent praise, and any shifts in sentiment
+      over time. Flag urgent issues that appear in multiple negative reviews
+      and highlight opportunities from positive feedback patterns.
+      Sentiment results: {steps.sentiment-analysis.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: insights-report
+    depends_on: [trend-detection]
+    prompt: >
+      Generate an executive insights report summarizing the review analysis.
+      Include an overall sentiment score, descriptions of key charts (sentiment
+      distribution, topic frequency, trend over time), the top 5 issues to
+      address, top 5 strengths to promote, and specific actionable
+      recommendations for the product and support teams.
+      Trend analysis: {steps.trend-detection.output}
+      Product name: {input.product_name}
+    model: claude-sonnet-4-20250514
+    max_turns: 10

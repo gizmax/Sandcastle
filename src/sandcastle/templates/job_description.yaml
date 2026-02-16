@@ -1,0 +1,51 @@
+# name: Job Description Generator
+# description: Generate inclusive job description with requirements, benefits, and interview plan
+# tags: [HR, Recruiting, Content]
+
+name: job-description-generator
+description: Generate inclusive job description with requirements, benefits, and interview plan
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: analyze-role
+    prompt: >
+      Analyze the following role brief and extract the key details: core responsibilities,
+      required and preferred skills, seniority level, team context, and reporting structure.
+      Identify any implicit requirements and suggest a clear job title if not provided.
+      Role brief: {input.role_brief}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: write-jd
+    depends_on: [analyze-role]
+    prompt: >
+      Write a complete, polished job description using inclusive language based on the role
+      analysis. Include sections for About the Role, Responsibilities, Requirements (must-have
+      vs nice-to-have), Benefits, and Growth Opportunities. Avoid gendered pronouns and
+      unnecessary jargon. Role analysis: {steps.analyze-role.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: bias-check
+    depends_on: [write-jd]
+    prompt: >
+      Review the job description for potential bias issues. Check for gendered language,
+      age-coded terms, unnecessary degree requirements, culturally exclusive phrases, and
+      inflated experience requirements. Provide a corrected version with all issues fixed
+      and a summary of changes made. Job description: {steps.write-jd.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: interview-plan
+    depends_on: [analyze-role]
+    prompt: >
+      Create a structured interview plan aligned with the role requirements. Include
+      screening questions, technical assessment criteria, behavioral interview questions
+      mapped to key competencies, and a scoring rubric. Ensure questions are legal and
+      non-discriminatory. Role analysis: {steps.analyze-role.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5

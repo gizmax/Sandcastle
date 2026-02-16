@@ -1,0 +1,72 @@
+# name: Lead Enrichment
+# description: Research and enrich lead data with company info, scoring, and outreach angles
+# tags: [Sales, Research, Lead-Gen]
+
+name: lead-enrichment
+description: Research and enrich lead data with company info, scoring, and outreach angles
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: research-company
+    prompt: >
+      Research the following company thoroughly. Find their company size,
+      industry vertical, recent news and press releases, technology stack,
+      and any known funding rounds or financial milestones.
+      Company: {input.company_name}
+      Domain: {input.company_domain}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: research-contacts
+    depends_on: [research-company]
+    prompt: >
+      Based on the company research, identify key decision makers and
+      stakeholders who would be relevant for a B2B sales conversation.
+      Include their titles, responsibilities, and any public LinkedIn or
+      professional profile insights.
+      Company info: {steps.research-company.output}
+      Target persona: {input.target_persona}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: score-lead
+    depends_on: [research-company]
+    prompt: >
+      Score this lead on a scale of 1-100 based on how well it matches
+      our Ideal Customer Profile (ICP). Consider company size, industry fit,
+      technology compatibility, and growth signals. Provide a breakdown of
+      scoring factors with individual scores and reasoning.
+      Company info: {steps.research-company.output}
+      ICP criteria: {input.icp_criteria}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: outreach-angles
+    depends_on: [research-company, research-contacts]
+    prompt: >
+      Suggest 3 personalized outreach angles for engaging this lead.
+      Each angle should reference specific company details, recent events,
+      or contact-specific insights. Include a suggested subject line and
+      opening sentence for each approach.
+      Company info: {steps.research-company.output}
+      Key contacts: {steps.research-contacts.output}
+      Our value prop: {input.value_proposition}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: compile-profile
+    depends_on: [research-contacts, score-lead, outreach-angles]
+    prompt: >
+      Compile a complete lead profile document combining all research findings.
+      Structure it with sections for Company Overview, Key Contacts, Lead Score
+      with rationale, and Recommended Outreach Strategy. Format it cleanly
+      for the sales team to review and act on.
+      Contacts: {steps.research-contacts.output}
+      Lead score: {steps.score-lead.output}
+      Outreach angles: {steps.outreach-angles.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10

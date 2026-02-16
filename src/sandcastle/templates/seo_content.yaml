@@ -1,0 +1,57 @@
+# name: SEO Content Writer
+# description: Research keywords and create SEO-optimized article with meta tags
+# tags: [Marketing, SEO, Content]
+
+name: seo-content-writer
+description: Research keywords and create SEO-optimized article with meta tags
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: keyword-research
+    prompt: >
+      Analyze the following topic and perform keyword research. Identify a
+      primary keyword, 5-8 secondary keywords, and long-tail variations.
+      For each keyword, describe the likely search intent (informational,
+      transactional, navigational) and estimated competition level.
+      Topic: {input.topic}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: outline
+    depends_on: [keyword-research]
+    prompt: >
+      Create a detailed article outline optimized for the target keywords.
+      Structure it with a compelling H1 title, 4-6 H2 sections, and H3
+      subsections where appropriate. Include notes on where to naturally
+      place primary and secondary keywords. Plan for approximately 1500-2000
+      words total.
+      Keywords: {steps.keyword-research.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: write-article
+    depends_on: [outline]
+    prompt: >
+      Write the full SEO-optimized article following the outline provided.
+      Naturally incorporate the target keywords without stuffing. Use short
+      paragraphs, include transition sentences between sections, and write
+      in an authoritative yet accessible tone. Add a strong introduction
+      and a conclusion with a clear call-to-action.
+      Outline: {steps.outline.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: meta-tags
+    depends_on: [write-article]
+    prompt: >
+      Generate SEO meta tags for the article. Include a title tag (under 60
+      characters), meta description (under 155 characters), Open Graph title
+      and description, Twitter card tags, and a suggested URL slug. Ensure
+      the primary keyword appears in the title tag and meta description.
+      Article: {steps.write-article.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3

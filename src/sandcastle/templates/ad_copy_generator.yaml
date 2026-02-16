@@ -1,0 +1,59 @@
+# name: Ad Copy Generator
+# description: Generate ad copy variants for Google Ads and Meta Ads campaigns
+# tags: [Marketing, Advertising, Copywriting]
+
+name: ad-copy-generator
+description: Generate ad copy variants for Google Ads and Meta Ads campaigns
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 5
+default_timeout: 180
+
+steps:
+  - id: analyze-product
+    prompt: >
+      Analyze the following product brief and extract the unique selling
+      propositions, target audience segments, key benefits, and competitive
+      differentiators. Identify the primary emotional triggers and rational
+      arguments that would drive conversions.
+      Product brief: {input.product_brief}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: google-ads
+    depends_on: [analyze-product]
+    prompt: >
+      Generate 5 Google Ads variants based on the product analysis. Each
+      variant must include 3 headlines (max 30 characters each), 2
+      descriptions (max 90 characters each), and display URL paths. Use
+      different angles for each variant - feature-focused, benefit-focused,
+      urgency, social proof, and competitive comparison.
+      Product analysis: {steps.analyze-product.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: meta-ads
+    depends_on: [analyze-product]
+    prompt: >
+      Generate 5 Meta/Facebook ad variants based on the product analysis.
+      Each variant must include primary text (up to 125 characters for
+      optimal display), a headline (max 40 characters), a link description,
+      and a suggested CTA button type. Vary the creative approach across
+      variants - storytelling, testimonial-style, direct response, question
+      hook, and listicle format.
+      Product analysis: {steps.analyze-product.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: compile-report
+    depends_on: [google-ads, meta-ads]
+    prompt: >
+      Compile all ad variants into a structured report. For each variant,
+      add a recommendation score (1-10) based on predicted click-through
+      rate potential. Suggest which variants to A/B test first and provide
+      a recommended budget split across the top-performing variants.
+      Google Ads: {steps.google-ads.output}
+      Meta Ads: {steps.meta-ads.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3

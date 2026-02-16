@@ -1,0 +1,96 @@
+# name: Contract Review
+# description: Review contract for key terms, risks, and generate plain-language summary
+# tags: [Legal, Compliance, Document]
+
+name: contract-review
+description: Review contract for key terms, risks, and generate plain-language summary
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: extract-terms
+    prompt: >
+      Extract all key terms from the following contract document. Identify: parties involved,
+      effective and termination dates, core obligations for each party, payment terms and
+      schedule, liability caps, indemnification clauses, intellectual property provisions,
+      termination conditions, and governing law. Contract: {input.contract_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        parties:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              role:
+                type: string
+        effective_date:
+          type: string
+        termination_date:
+          type: string
+        obligations:
+          type: array
+          items:
+            type: object
+            properties:
+              party:
+                type: string
+              description:
+                type: string
+        payment_terms:
+          type: object
+          properties:
+            amount:
+              type: string
+            schedule:
+              type: string
+            conditions:
+              type: string
+        termination_clauses:
+          type: array
+          items:
+            type: string
+        governing_law:
+          type: string
+
+  - id: risk-analysis
+    depends_on: [extract-terms]
+    prompt: >
+      Analyze the extracted contract terms for potential risks. Identify unusual or
+      one-sided clauses, missing standard protections (limitation of liability, force
+      majeure, dispute resolution), auto-renewal traps, broad non-compete provisions,
+      and any terms that deviate from market standards. Rate each risk as low, medium,
+      or high severity. Extracted terms: {steps.extract-terms.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: compliance-check
+    depends_on: [extract-terms]
+    prompt: >
+      Check the contract terms against standard compliance requirements. Verify data
+      protection and privacy provisions, regulatory compliance references, required
+      insurance and bonding clauses, accessibility and non-discrimination language,
+      and record-keeping obligations. Flag any missing or insufficient provisions.
+      Extracted terms: {steps.extract-terms.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: plain-summary
+    depends_on: [extract-terms, risk-analysis, compliance-check]
+    prompt: >
+      Generate a plain-language summary of the contract suitable for non-legal stakeholders.
+      Include what each party is agreeing to, key dates and deadlines, financial obligations,
+      highlighted risks with severity levels, compliance concerns, and a prioritized list
+      of action items for negotiation or clarification.
+      Extracted terms: {steps.extract-terms.output}
+      Risk analysis: {steps.risk-analysis.output}
+      Compliance check: {steps.compliance-check.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10

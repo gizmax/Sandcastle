@@ -1,0 +1,54 @@
+# name: Release Notes Generator
+# description: Generate user-facing release notes and internal changelog from commit history
+# tags: [Product, Engineering, Documentation]
+
+name: release-notes-generator
+description: Generate user-facing release notes and internal changelog from commit history
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: parse-changes
+    prompt: >
+      Parse the following git diff or changelog and categorize each change into one of:
+      features (new capabilities), fixes (bug corrections), improvements (enhancements to
+      existing features), breaking changes (backwards-incompatible modifications), or
+      internal (refactoring, dependencies, CI). For each change, extract a short summary,
+      affected components, and severity. Changes: {input.changelog}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: user-release-notes
+    depends_on: [parse-changes]
+    prompt: >
+      Write user-facing release notes from the categorized changes. Use friendly, non-technical
+      language. Lead with the most impactful features, include before/after examples where
+      helpful, clearly call out breaking changes with migration steps, and close with a
+      thank-you note. Format with markdown headings and bullet points.
+      Categorized changes: {steps.parse-changes.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: internal-changelog
+    depends_on: [parse-changes]
+    prompt: >
+      Write a technical internal changelog for the engineering team. Include detailed
+      descriptions of each change with PR/commit references, migration notes for breaking
+      changes with code examples, infrastructure and dependency updates, performance
+      impact notes, and known issues or follow-up tasks.
+      Categorized changes: {steps.parse-changes.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: social-announcement
+    depends_on: [user-release-notes]
+    prompt: >
+      Draft a short, engaging social media announcement for this release. Highlight the
+      top 2-3 user-facing improvements, keep it under 280 characters for the main post,
+      include relevant hashtags, and suggest an optional longer thread format for platforms
+      that support it. Release notes: {steps.user-release-notes.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3

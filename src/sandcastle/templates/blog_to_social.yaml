@@ -1,0 +1,67 @@
+# name: Blog to Social Media
+# description: Transform a blog post into platform-specific social media content
+# tags: [Marketing, Content, Social]
+
+name: blog-to-social
+description: Transform a blog post into platform-specific social media content
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 5
+default_timeout: 180
+
+steps:
+  - id: analyze-post
+    prompt: >
+      Analyze the following blog post and extract the key points, overall tone,
+      target audience, and core message. Identify the most shareable insights
+      and any statistics or quotes worth highlighting.
+      Blog post: {input.blog_post}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: linkedin-post
+    depends_on: [analyze-post]
+    prompt: >
+      Using the blog analysis below, write a professional LinkedIn post that
+      drives engagement. Use a thought-leadership tone, include a compelling
+      hook in the first line, add relevant line breaks for readability, and
+      end with a call-to-action. Keep it under 1300 characters.
+      Analysis: {steps.analyze-post.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: twitter-thread
+    depends_on: [analyze-post]
+    prompt: >
+      Using the blog analysis below, write an X/Twitter thread of exactly
+      5 tweets. The first tweet should hook the reader with a bold claim or
+      question. Each tweet must be under 280 characters. Number them 1/5
+      through 5/5 and make the last tweet link back to the original post.
+      Analysis: {steps.analyze-post.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: instagram-caption
+    depends_on: [analyze-post]
+    prompt: >
+      Using the blog analysis below, write an engaging Instagram caption.
+      Start with an attention-grabbing first line, use short paragraphs,
+      include relevant emojis sparingly, and end with 15-20 relevant hashtags
+      grouped at the bottom. Keep the caption under 2200 characters.
+      Analysis: {steps.analyze-post.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+
+  - id: compile
+    depends_on: [linkedin-post, twitter-thread, instagram-caption]
+    prompt: >
+      Compile all the social media content variants into a single structured
+      output. Include sections for LinkedIn, X/Twitter, and Instagram. Add a
+      brief recommendation on optimal posting times and any platform-specific
+      tips for maximizing engagement.
+      LinkedIn: {steps.linkedin-post.output}
+      Twitter: {steps.twitter-thread.output}
+      Instagram: {steps.instagram-caption.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
