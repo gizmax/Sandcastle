@@ -46,9 +46,9 @@ from sandcastle.api.schemas import (
     StatsResponse,
     StepStatusResponse,
     WorkflowInfoResponse,
-    WorkflowStepInfo,
     WorkflowRunRequest,
     WorkflowSaveRequest,
+    WorkflowStepInfo,
 )
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -393,7 +393,10 @@ async def get_stats(request: Request) -> ApiResponse:
 
         day_map: dict[str, dict] = {}
         for row in runs_by_day_raw:
-            day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day) if row.day else "unknown"
+            if hasattr(row.day, "strftime"):
+                day_str = row.day.strftime("%Y-%m-%d")
+            else:
+                day_str = str(row.day) if row.day else "unknown"
             if day_str not in day_map:
                 day_map[day_str] = {"date": day_str, "completed": 0, "failed": 0, "total": 0}
             status_val = row.status.value if hasattr(row.status, "value") else row.status
@@ -2814,10 +2817,13 @@ async def violations_stats(request: Request) -> ApiResponse:
             )
         ).group_by("day").order_by("day")
         day_rows = (await session.execute(day_q)).all()
-        by_day = [
-            {"date": row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day) if row.day else "unknown", "count": row.count}
-            for row in day_rows
-        ]
+        by_day = []
+        for row in day_rows:
+            if hasattr(row.day, "strftime"):
+                d = row.day.strftime("%Y-%m-%d")
+            else:
+                d = str(row.day) if row.day else "unknown"
+            by_day.append({"date": d, "count": row.count})
 
     return ApiResponse(
         data=PolicyViolationStatsResponse(

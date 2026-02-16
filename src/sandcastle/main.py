@@ -43,7 +43,8 @@ async def lifespan(app: FastAPI):
         )
 
     # Load saved settings from DB
-    from sqlalchemy import func, select as sa_select
+    from sqlalchemy import func
+    from sqlalchemy import select as sa_select
 
     from sandcastle.models.db import Setting, async_session
 
