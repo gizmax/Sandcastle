@@ -73,8 +73,6 @@ Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No 
  Single process           Single process            API + Worker + Scheduler
 ```
 
-**How to upgrade:** set `DATABASE_URL` and `REDIS_URL` in `.env`, run `alembic upgrade head`, restart. That's it.
-
 | | Local Mode | Production Mode |
 |---|---|---|
 | **Database** | SQLite (auto-created in `./data/`) | PostgreSQL 16 |
@@ -84,6 +82,70 @@ Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No 
 | **Setup time** | 30 seconds | 5 minutes |
 | **Config needed** | Just API keys | API keys + connection strings |
 | **Best for** | Prototyping, solo devs, demos | Teams, production, multi-tenant |
+
+### Ready to scale?
+
+When local mode isn't enough anymore, upgrade one piece at a time. Each step is independent - do only what you need.
+
+**Step 1 - PostgreSQL** (concurrent users, data durability)
+
+```bash
+# Install and start PostgreSQL (macOS example)
+brew install postgresql@16
+brew services start postgresql@16
+
+# Create a database
+createdb sandcastle
+
+# Add to .env
+echo 'DATABASE_URL=postgresql+asyncpg://localhost/sandcastle' >> .env
+
+# Run migrations
+pip install sandcastle-ai  # if not installed yet
+alembic upgrade head
+
+# Restart
+sandcastle serve
+```
+
+Your SQLite data stays in `./data/`. Sandcastle starts fresh with PostgreSQL - existing local runs are not migrated.
+
+**Step 2 - Redis** (background workers, parallel runs)
+
+```bash
+# Install and start Redis (macOS example)
+brew install redis
+brew services start redis
+
+# Add to .env
+echo 'REDIS_URL=redis://localhost:6379' >> .env
+
+# Restart API + start a worker in a second terminal
+sandcastle serve
+sandcastle worker
+```
+
+With Redis, workflows run in background workers instead of in-process. You can run multiple workers for parallel execution.
+
+**Step 3 - S3 / MinIO** (artifact storage)
+
+```bash
+# Add to .env
+echo 'STORAGE_BACKEND=s3' >> .env
+echo 'S3_BUCKET=sandcastle-artifacts' >> .env
+echo 'AWS_ACCESS_KEY_ID=...' >> .env
+echo 'AWS_SECRET_ACCESS_KEY=...' >> .env
+# For MinIO, also set: S3_ENDPOINT_URL=http://localhost:9000
+
+# Restart
+sandcastle serve
+```
+
+**Or skip all that and use Docker:**
+
+```bash
+docker compose up -d   # PostgreSQL + Redis + API + Worker, all configured
+```
 
 ---
 
