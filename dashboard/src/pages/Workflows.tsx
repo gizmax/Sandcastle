@@ -68,18 +68,18 @@ export default function Workflows() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
         <button
           onClick={() => navigate("/workflows/builder")}
           className={cn(
-            "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
+            "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
             "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
           )}
         >
           <Plus className="h-4 w-4" />
-          New Workflow
+          <span className="hidden sm:inline">New Workflow</span>
         </button>
       </div>
 

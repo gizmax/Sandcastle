@@ -74,10 +74,10 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Approval Gates</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Approval Gates</h1>
           {pendingCount > 0 && (
             <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-warning px-2 text-xs font-semibold text-white">
               {pendingCount}
@@ -122,7 +122,7 @@ export default function ApprovalsPage() {
                 className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden"
               >
                 <div
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors"
+                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors"
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
                 >
                   {/* Status indicator */}

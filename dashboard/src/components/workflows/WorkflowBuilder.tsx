@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import { StepConfigPanel, type StepConfig } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
@@ -266,9 +266,15 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   const yaml = generateYaml(workflowName, steps, edges);
 
   return (
-    <div className="flex h-[calc(100vh-10rem)] gap-0 rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+    <div className="relative flex h-[calc(100vh-10rem)] gap-0 rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+      {/* Mobile notice */}
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-2 bg-warning/10 border-b border-warning/30 px-3 py-2 text-xs text-warning lg:hidden">
+        <Monitor className="h-4 w-4 shrink-0" />
+        <span>Best experience on desktop. Some features are limited on smaller screens.</span>
+      </div>
+
       {/* Left palette */}
-      <div className="w-48 shrink-0 border-r border-border bg-background/50 p-3">
+      <div className="hidden lg:block w-48 shrink-0 border-r border-border bg-background/50 p-3">
         <p className="mb-3 text-xs font-semibold text-muted">PALETTE</p>
         <button
           onClick={addStep}
@@ -295,8 +301,16 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         </div>
       </div>
 
+      {/* Mobile add step button */}
+      <button
+        onClick={addStep}
+        className="absolute left-3 top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface shadow-sm text-muted hover:text-accent hover:border-accent transition-colors lg:hidden"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+
       {/* Canvas */}
-      <div className="flex-1">
+      <div className="flex-1 pt-8 lg:pt-0">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -314,46 +328,52 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         </ReactFlow>
       </div>
 
-      {/* Right config panel */}
+      {/* Right config panel - sidebar on desktop, overlay on mobile */}
       {selectedStep && (
-        <div className="w-72 shrink-0 overflow-y-auto border-l border-border">
-          <StepConfigPanel
-            step={selectedStep}
-            allStepIds={steps.map((s) => s.id)}
-            onChange={updateStep}
-            onDelete={deleteStep}
+        <>
+          <div
+            className="fixed inset-0 z-20 bg-black/30 lg:hidden"
+            onClick={() => setSelectedStepId(null)}
           />
-        </div>
+          <div className="fixed inset-y-0 right-0 z-30 w-72 shrink-0 overflow-y-auto border-l border-border bg-surface lg:static lg:z-auto">
+            <StepConfigPanel
+              step={selectedStep}
+              allStepIds={steps.map((s) => s.id)}
+              onChange={updateStep}
+              onDelete={deleteStep}
+            />
+          </div>
+        </>
       )}
 
       {/* Bottom bar */}
-      <div className="absolute bottom-0 left-0 right-0 flex items-center justify-end gap-2 border-t border-border bg-surface/95 px-4 py-2 backdrop-blur-sm">
+      <div className="absolute bottom-0 left-0 right-0 flex items-center justify-end gap-2 border-t border-border bg-surface/95 px-3 sm:px-4 py-2 backdrop-blur-sm">
         <button
           onClick={() => setYamlOpen(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
         >
           <FileText className="h-3.5 w-3.5" />
-          Preview YAML
+          <span className="hidden sm:inline">Preview YAML</span>
         </button>
         {onSave && (
           <button
             onClick={() => onSave(yaml, workflowName)}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2 sm:px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
           >
             <Save className="h-3.5 w-3.5" />
-            Save
+            <span className="hidden sm:inline">Save</span>
           </button>
         )}
         {onRun && (
           <button
             onClick={() => onRun(yaml)}
             className={cn(
-              "flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
+              "flex items-center gap-1.5 rounded-lg bg-accent px-2 sm:px-3 py-1.5 text-xs font-medium text-accent-foreground",
               "hover:bg-accent-hover transition-all duration-200 shadow-sm"
             )}
           >
             <Play className="h-3.5 w-3.5" />
-            Run
+            <span className="hidden sm:inline">Run</span>
           </button>
         )}
       </div>

@@ -61,7 +61,7 @@ export function NotificationCenter({
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
             className={cn(
-              "absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-surface shadow-lg",
+              "absolute right-0 top-full z-50 mt-2 w-[calc(100vw-2rem)] sm:w-80 max-w-sm rounded-xl border border-border bg-surface shadow-lg",
               "overflow-hidden"
             )}
           >

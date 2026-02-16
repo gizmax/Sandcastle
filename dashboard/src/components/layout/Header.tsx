@@ -33,6 +33,7 @@ export function Header({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const search = useCallback(async (q: string) => {
@@ -110,7 +111,7 @@ export function Header({
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-surface/80 px-6 backdrop-blur-sm"
+        "sticky top-0 z-30 flex h-14 sm:h-16 items-center gap-2 sm:gap-4 border-b border-border bg-surface/80 px-3 sm:px-4 lg:px-6 backdrop-blur-sm"
       )}
     >
       <button
@@ -118,6 +119,14 @@ export function Header({
         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-border/50 hover:text-foreground lg:hidden"
       >
         <Menu className="h-5 w-5" />
+      </button>
+
+      {/* Mobile search toggle */}
+      <button
+        onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-border/50 hover:text-foreground sm:hidden"
+      >
+        <Search className="h-5 w-5" />
       </button>
 
       <div ref={wrapperRef} className="relative hidden flex-1 sm:block">
@@ -173,6 +182,56 @@ export function Header({
           onClickNotification={onClickNotification}
         />
       </div>
+
+      {/* Mobile search bar - full width below header */}
+      {mobileSearchOpen && (
+        <div ref={wrapperRef} className="absolute left-0 top-full z-50 w-full border-b border-border bg-surface p-3 shadow-md sm:hidden">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOpen(true);
+              }}
+              onFocus={() => { if (results.length > 0) setOpen(true); }}
+              placeholder="Search runs, workflows..."
+              autoFocus
+              className={cn(
+                "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
+                "placeholder:text-muted-foreground/50",
+                "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+              )}
+            />
+            {open && results.length > 0 && (
+              <div className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
+                {results.map((r, i) => (
+                  <button
+                    key={`${r.link}-${i}`}
+                    onClick={() => { handleSelect(r); setMobileSearchOpen(false); }}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-border/40 transition-colors"
+                  >
+                    {r.type === "run"
+                      ? <PlayCircle className="h-4 w-4 shrink-0 text-muted" />
+                      : <GitBranch className="h-4 w-4 shrink-0 text-muted" />
+                    }
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-foreground">{r.label}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">{r.sub}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {open && query.length >= 2 && results.length === 0 && (
+              <div className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg z-50 px-3 py-3">
+                <p className="text-xs text-muted-foreground">No results for "{query}"</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }

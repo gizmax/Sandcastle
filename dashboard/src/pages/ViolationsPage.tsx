@@ -79,25 +79,25 @@ export default function ViolationsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
       </div>
 
       {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Total Violations (30d)</p>
-            <p className="mt-1 text-2xl font-semibold text-foreground">{stats.total_violations_30d}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground">{stats.total_violations_30d}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Critical</p>
-            <p className="mt-1 text-2xl font-semibold text-error">{stats.violations_by_severity.critical || 0}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-error">{stats.violations_by_severity.critical || 0}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">High</p>
-            <p className="mt-1 text-2xl font-semibold text-warning">{stats.violations_by_severity.high || 0}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-warning">{stats.violations_by_severity.high || 0}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Top Policy</p>

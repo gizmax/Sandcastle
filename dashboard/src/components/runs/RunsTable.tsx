@@ -36,11 +36,11 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-background/50">
-              <th className="px-5 py-3 text-left font-medium text-muted">Workflow</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Status</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Started</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Duration</th>
-              <th className="px-5 py-3 text-right font-medium text-muted">Cost</th>
+              <th className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
+              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Status</th>
+              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Started</th>
+              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Duration</th>
+              <th className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Cost</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -50,15 +50,15 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
                 onClick={() => navigate(`/runs/${run.run_id}`)}
                 className="cursor-pointer transition-colors duration-150 hover:bg-border/20"
               >
-                <td className="px-5 py-3 font-medium text-foreground">{run.workflow_name}</td>
-                <td className="px-5 py-3">
+                <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-medium text-foreground">{run.workflow_name}</td>
+                <td className="px-3 sm:px-5 py-3">
                   <RunStatusBadge status={run.status} />
                 </td>
-                <td className="px-5 py-3 text-muted">
+                <td className="px-3 sm:px-5 py-3 text-muted">
                   {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
                 </td>
-                <td className="px-5 py-3 text-muted">{getDuration(run)}</td>
-                <td className="px-5 py-3 text-right font-mono text-muted">
+                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">{getDuration(run)}</td>
+                <td className="px-3 sm:px-5 py-3 text-right font-mono text-muted">
                   {formatCost(run.total_cost_usd)}
                 </td>
               </tr>
@@ -69,7 +69,7 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+        <div className="flex items-center justify-between border-t border-border px-3 sm:px-5 py-3">
           <p className="text-xs text-muted">
             Showing {offset + 1}-{Math.min(offset + limit, total)} of {total}
           </p>

@@ -145,7 +145,7 @@ export default function RunDetailPage() {
         : null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Back button */}
       <button
         onClick={() => navigate("/runs")}
@@ -156,8 +156,8 @@ export default function RunDetailPage() {
       </button>
 
       {/* Header */}
-      <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-foreground">
               {run.workflow_name}
@@ -189,7 +189,7 @@ export default function RunDetailPage() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-6 text-sm text-muted">
+        <div className="mt-4 flex flex-wrap gap-4 sm:gap-6 text-sm text-muted">
           {run.started_at && (
             <div>
               <span className="text-xs font-medium text-muted-foreground">Started</span>

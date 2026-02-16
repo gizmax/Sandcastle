@@ -28,17 +28,17 @@ export function DeadLetterTable({ items, onRetry, onResolve }: DeadLetterTablePr
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-background/50">
-              <th className="px-5 py-3 text-left font-medium text-muted">Step</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Error</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Attempts</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Created</th>
-              <th className="px-5 py-3 text-right font-medium text-muted">Actions</th>
+              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Step</th>
+              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Error</th>
+              <th className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Attempts</th>
+              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
+              <th className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {items.map((item) => (
               <tr key={item.id}>
-                <td className="px-5 py-3">
+                <td className="px-3 sm:px-5 py-3">
                   <button
                     onClick={() => navigate(`/runs/${item.run_id}`)}
                     className="font-medium text-accent hover:text-accent-hover transition-colors"
@@ -46,16 +46,16 @@ export function DeadLetterTable({ items, onRetry, onResolve }: DeadLetterTablePr
                     {item.step_id}
                   </button>
                 </td>
-                <td className="max-w-xs px-5 py-3">
+                <td className="max-w-xs px-3 sm:px-5 py-3">
                   <p className="truncate font-mono text-xs text-error">
                     {item.error || "-"}
                   </p>
                 </td>
-                <td className="px-5 py-3 text-muted">{item.attempts}</td>
-                <td className="px-5 py-3 text-muted">
+                <td className="hidden sm:table-cell px-3 sm:px-5 py-3 text-muted">{item.attempts}</td>
+                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">
                   {item.created_at ? formatRelativeTime(item.created_at) : "-"}
                 </td>
-                <td className="px-5 py-3 text-right">
+                <td className="px-3 sm:px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button
                       onClick={() => onRetry(item.id)}

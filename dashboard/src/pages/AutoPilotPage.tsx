@@ -108,32 +108,32 @@ export default function AutoPilotPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">AutoPilot</h1>
+    <div className="space-y-4 sm:space-y-6">
+      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">AutoPilot</h1>
 
       {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Active Experiments</p>
-            <p className="mt-1 text-2xl font-semibold text-foreground">{stats.active_experiments}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground">{stats.active_experiments}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Total Samples</p>
-            <p className="mt-1 text-2xl font-semibold text-foreground">{stats.total_samples}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground">{stats.total_samples}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Avg Quality Improvement</p>
             <div className="mt-1 flex items-center gap-1.5">
               <TrendingUp className="h-5 w-5 text-success" />
-              <p className="text-2xl font-semibold text-success">+{(stats.avg_quality_improvement * 100).toFixed(0)}%</p>
+              <p className="text-xl sm:text-2xl font-semibold text-success">+{(stats.avg_quality_improvement * 100).toFixed(0)}%</p>
             </div>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Cost Savings</p>
             <div className="mt-1 flex items-center gap-1.5">
               <TrendingDown className="h-5 w-5 text-accent" />
-              <p className="text-2xl font-semibold text-accent">{formatCost(stats.total_cost_savings_usd)}</p>
+              <p className="text-xl sm:text-2xl font-semibold text-accent">{formatCost(stats.total_cost_savings_usd)}</p>
             </div>
           </div>
         </div>

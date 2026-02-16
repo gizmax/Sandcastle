@@ -44,8 +44,8 @@ export default function WorkflowBuilderPage() {
   );
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">Workflow Builder</h1>
+    <div className="space-y-3 sm:space-y-4">
+      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Workflow Builder</h1>
       <WorkflowBuilder
         onSave={handleSave}
         onRun={handleRun}

@@ -92,26 +92,26 @@ export default function OptimizerPage() {
     : null;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
+    <div className="space-y-4 sm:space-y-6">
+      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
 
       {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Total Decisions (30d)</p>
-            <p className="mt-1 text-2xl font-semibold text-foreground">{stats.total_decisions_30d}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground">{stats.total_decisions_30d}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Avg Confidence</p>
-            <p className={cn("mt-1 text-2xl font-semibold", confidenceColor(stats.avg_confidence))}>
+            <p className={cn("mt-1 text-xl sm:text-2xl font-semibold", confidenceColor(stats.avg_confidence))}>
               {(stats.avg_confidence * 100).toFixed(0)}%
             </p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Top Model</p>
             <div className="mt-1 flex items-center gap-2">
-              <p className="text-2xl font-semibold text-foreground capitalize">{topModel?.[0] || "-"}</p>
+              <p className="text-xl sm:text-2xl font-semibold text-foreground capitalize">{topModel?.[0] || "-"}</p>
               {topModel && (
                 <span className="text-sm text-muted">{(topModel[1] * 100).toFixed(0)}%</span>
               )}
@@ -119,7 +119,7 @@ export default function OptimizerPage() {
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Estimated Savings</p>
-            <p className="mt-1 text-2xl font-semibold text-accent">{formatCost(stats.estimated_savings_30d_usd)}</p>
+            <p className="mt-1 text-xl sm:text-2xl font-semibold text-accent">{formatCost(stats.estimated_savings_30d_usd)}</p>
           </div>
         </div>
       )}
@@ -143,7 +143,7 @@ export default function OptimizerPage() {
                 className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden"
               >
                 <div
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors"
+                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors"
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
                 >
                   {/* Model badge */}
@@ -219,15 +219,15 @@ export default function OptimizerPage() {
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="border-b border-border bg-background/50">
-                              <th className="px-5 py-2.5 text-left font-medium text-muted">Model</th>
-                              <th className="px-5 py-2.5 text-right font-medium text-muted">Quality</th>
-                              <th className="px-5 py-2.5 text-right font-medium text-muted">Cost</th>
+                              <th className="px-3 sm:px-5 py-2.5 text-left font-medium text-muted">Model</th>
+                              <th className="px-3 sm:px-5 py-2.5 text-right font-medium text-muted">Quality</th>
+                              <th className="px-3 sm:px-5 py-2.5 text-right font-medium text-muted">Cost</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
                             {item.alternatives.map((alt) => (
                               <tr key={alt.id} className={cn(alt.model === item.selected_model && "bg-accent/5")}>
-                                <td className="px-5 py-3">
+                                <td className="px-3 sm:px-5 py-3">
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium text-foreground capitalize">{alt.model}</span>
                                     {alt.model === item.selected_model && (
@@ -237,8 +237,8 @@ export default function OptimizerPage() {
                                     )}
                                   </div>
                                 </td>
-                                <td className="px-5 py-3 text-right font-mono text-muted">{alt.avg_quality != null ? alt.avg_quality.toFixed(3) : "-"}</td>
-                                <td className="px-5 py-3 text-right font-mono text-muted">{alt.avg_cost != null ? formatCost(alt.avg_cost) : "-"}</td>
+                                <td className="px-3 sm:px-5 py-3 text-right font-mono text-muted">{alt.avg_quality != null ? alt.avg_quality.toFixed(3) : "-"}</td>
+                                <td className="px-3 sm:px-5 py-3 text-right font-mono text-muted">{alt.avg_cost != null ? formatCost(alt.avg_cost) : "-"}</td>
                               </tr>
                             ))}
                           </tbody>

@@ -24,26 +24,26 @@ export function ScheduleTable({ schedules, onToggle, onDelete, onEdit }: Schedul
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-background/50">
-              <th className="px-5 py-3 text-left font-medium text-muted">Workflow</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Schedule</th>
-              <th className="px-5 py-3 text-left font-medium text-muted">Created</th>
-              <th className="px-5 py-3 text-center font-medium text-muted">Enabled</th>
-              <th className="px-5 py-3 text-right font-medium text-muted">Actions</th>
+              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
+              <th className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Schedule</th>
+              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
+              <th className="px-3 sm:px-5 py-3 text-center font-medium text-muted">Enabled</th>
+              <th className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {schedules.map((schedule) => (
               <tr key={schedule.id}>
-                <td className="px-5 py-3 font-medium text-foreground">
+                <td className="px-3 sm:px-5 py-3 font-medium text-foreground">
                   {schedule.workflow_name}
                 </td>
-                <td className="px-5 py-3 font-mono text-xs text-muted">
+                <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-mono text-xs text-muted">
                   {schedule.cron_expression}
                 </td>
-                <td className="px-5 py-3 text-muted">
+                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">
                   {schedule.created_at ? formatRelativeTime(schedule.created_at) : "-"}
                 </td>
-                <td className="px-5 py-3 text-center">
+                <td className="px-3 sm:px-5 py-3 text-center">
                   <button
                     onClick={() => onToggle(schedule.id, !schedule.enabled)}
                     className={cn(
@@ -59,7 +59,7 @@ export function ScheduleTable({ schedules, onToggle, onDelete, onEdit }: Schedul
                     />
                   </button>
                 </td>
-                <td className="px-5 py-3 text-right">
+                <td className="px-3 sm:px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">
                     <button
                       onClick={() => onEdit(schedule)}
