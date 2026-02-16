@@ -101,7 +101,36 @@ You'll see:
 Sandcastle starting in local mode (SQLite + filesystem + in-process queue)
 ```
 
-### Production Mode (5 minutes)
+### Production Mode - Docker (recommended)
+
+One command. PostgreSQL, Redis, API server, and background worker - all configured.
+
+```bash
+git clone https://github.com/gizmax/Sandcastle.git
+cd Sandcastle
+
+# Add your API keys
+cat > .env << 'EOF'
+ANTHROPIC_API_KEY=sk-ant-...
+E2B_API_KEY=e2b_...
+SANDSTORM_URL=http://localhost:8000
+WEBHOOK_SECRET=your-signing-secret
+EOF
+
+docker compose up -d
+```
+
+That's it. Sandcastle is running at `http://localhost:8080` with PostgreSQL 16, Redis 7, auto-migrations, and an arq background worker.
+
+```bash
+docker compose ps       # check status
+docker compose logs -f  # tail logs
+docker compose down     # stop everything
+```
+
+### Production Mode - Manual
+
+If you prefer running without Docker:
 
 ```bash
 git clone https://github.com/gizmax/Sandcastle.git
@@ -111,8 +140,8 @@ cp .env.example .env   # configure all connection strings
 
 uv sync
 
-# Start infrastructure
-docker-compose up -d redis postgres minio
+# Start infrastructure (your own PostgreSQL + Redis)
+# Set DATABASE_URL and REDIS_URL in .env
 
 # Run database migrations
 uv run alembic upgrade head
@@ -156,6 +185,87 @@ curl -X POST http://localhost:8080/workflows/run/sync \
   }'
 ```
 
+### Python SDK
+
+Install Sandcastle and use it programmatically from any Python app:
+
+```bash
+pip install .   # or: uv pip install .
+```
+
+```python
+from sandcastle import SandcastleClient
+
+client = SandcastleClient(base_url="http://localhost:8080", api_key="sc_...")
+
+# Run a workflow and wait for completion
+run = client.run("lead-enrichment",
+    input={"target_url": "https://example.com"},
+    wait=True,
+)
+print(run.status)          # "completed"
+print(run.total_cost_usd)  # 0.12
+print(run.outputs)         # {"lead_score": 87, "tier": "A", ...}
+
+# List recent runs
+for r in client.list_runs(status="completed", limit=5).items:
+    print(f"{r.workflow_name}: {r.status}")
+
+# Stream live events from a running workflow
+for event in client.stream(run.run_id):
+    print(event)
+
+# Replay a failed step with a different model
+new_run = client.fork(run.run_id, from_step="score", changes={"model": "opus"})
+```
+
+Async variant available for asyncio apps:
+
+```python
+from sandcastle import AsyncSandcastleClient
+
+async with AsyncSandcastleClient() as client:
+    run = await client.run("lead-enrichment", input={...}, wait=True)
+```
+
+### CLI
+
+The `sandcastle` command gives you full control from the terminal:
+
+```bash
+# Start the server
+sandcastle serve
+
+# Run a workflow
+sandcastle run lead-enrichment -i target_url=https://example.com
+
+# Run and wait for result
+sandcastle run lead-enrichment -i target_url=https://example.com --wait
+
+# Check run status
+sandcastle status <run-id>
+
+# Stream live logs
+sandcastle logs <run-id> --follow
+
+# List runs, workflows, schedules
+sandcastle ls runs --status completed --limit 10
+sandcastle ls workflows
+sandcastle ls schedules
+
+# Manage schedules
+sandcastle schedule create lead-enrichment "0 9 * * *" -i target_url=https://example.com
+sandcastle schedule delete <schedule-id>
+
+# Cancel a running workflow
+sandcastle cancel <run-id>
+
+# Health check
+sandcastle health
+```
+
+Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCASTLE_URL` env var. Auth via `--api-key` or `SANDCASTLE_API_KEY`.
+
 ---
 
 ## Features
@@ -180,6 +290,9 @@ curl -X POST http://localhost:8080/workflows/run/sync \
 | **Per-run cost tracking** | - | Yes |
 | **SSE live streaming** | - | Yes |
 | **Multi-tenant API keys** | - | Yes |
+| **Python SDK + async client** | - | Yes |
+| **CLI tool** | - | Yes |
+| **Docker one-command deploy** | - | Yes |
 | **Dashboard with real-time monitoring** | - | Yes |
 | **Visual workflow builder** | - | Yes |
 | **Human approval gates** | - | Yes |
@@ -852,6 +965,9 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react | @xyflow/react |
 | Charts | Recharts | Recharts |
+| SDK | `SandcastleClient` (httpx, sync + async) | `SandcastleClient` (httpx, sync + async) |
+| CLI | argparse (zero deps) | argparse (zero deps) |
+| Deployment | `python -m sandcastle serve` | Docker + docker-compose |
 
 ---
 
@@ -907,6 +1023,12 @@ cd dashboard && npx tsc --noEmit
 
 # Dashboard dev server (starts with demo data when backend is offline)
 cd dashboard && npm run dev
+
+# Docker - local mode (SQLite, no PG/Redis needed)
+docker compose -f docker-compose.local.yml up
+
+# Docker - full stack (PostgreSQL + Redis + worker)
+docker compose up -d
 ```
 
 ---
