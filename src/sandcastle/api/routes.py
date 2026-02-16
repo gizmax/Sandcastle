@@ -1040,6 +1040,64 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
     )
 
 
+# --- Delete Run ---
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: str, req: Request) -> ApiResponse:
+    """Delete a run and its related data (steps, checkpoints)."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
+
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        run_status = run.status.value if hasattr(run.status, "value") else run.status
+        if run_status in ("queued", "running"):
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_STATUS",
+                        message="Cannot delete an active run. Cancel it first.",
+                    )
+                ).model_dump(),
+            )
+
+        # Delete related records then the run itself
+        from sqlalchemy import delete as sa_delete
+
+        from sandcastle.models.db import RunStep
+
+        for model in [RunStep, RunCheckpoint, DeadLetterItem]:
+            await session.execute(sa_delete(model).where(model.run_id == run_uuid))
+
+        await session.delete(run)
+        await session.commit()
+
+    return ApiResponse(data={"deleted": True, "run_id": run_id})
+
+
 # --- Replay / Fork (Time Machine) ---
 
 

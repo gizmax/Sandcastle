@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
         )
 
     # Load saved settings from DB
-    from sqlalchemy import select as sa_select
+    from sqlalchemy import func, select as sa_select
 
     from sandcastle.models.db import Setting, async_session
 
@@ -62,6 +62,35 @@ async def lifespan(app: FastAPI):
 
         if saved:
             logger.info(f"Loaded {len(saved)} saved settings from database")
+
+    # Clean up stale runs (queued/running) left from previous crash/restart
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update as sa_update
+
+    from sandcastle.models.db import Run, RunStatus
+
+    async with async_session() as session:
+        # Count first, then update
+        count_result = await session.execute(
+            select(func.count()).select_from(Run).where(
+                Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING])
+            )
+        )
+        orphan_count = count_result.scalar() or 0
+
+        if orphan_count:
+            await session.execute(
+                sa_update(Run)
+                .where(Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]))
+                .values(
+                    status=RunStatus.FAILED,
+                    error="Server restarted - run was orphaned",
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            await session.commit()
+            logger.info(f"Cleaned up {orphan_count} orphaned runs from previous session")
 
     # Start the cron scheduler
     from sandcastle.queue.scheduler import restore_schedules, start_scheduler
