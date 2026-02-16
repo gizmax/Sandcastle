@@ -11,7 +11,7 @@ interface Template {
 }
 
 interface TemplateDetail extends Template {
-  yaml: string;
+  content: string;
 }
 
 interface TemplateBrowserProps {

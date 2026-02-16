@@ -179,7 +179,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{
     name: string;
-    yaml: string;
+    content: string;
     steps: Array<{ id: string; model?: string; depends_on?: string[] }>;
   } | null>(null);
   const [counter, setCounter] = useState(initial ? initial.steps.length + 1 : 1);
@@ -298,7 +298,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
   // Apply a template to the canvas
   const applyTemplate = useCallback(
-    (templateData: { name: string; yaml: string; steps: Array<{ id: string; model?: string; depends_on?: string[] }> }) => {
+    (templateData: { name: string; content: string; steps: Array<{ id: string; model?: string; depends_on?: string[] }> }) => {
       const built = buildInitialState({
         name: templateData.name,
         description: "",
@@ -321,10 +321,10 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
   // Handle template selection from the browser
   const handleTemplateSelect = useCallback(
-    (template: { name: string; yaml: string; step_count: number }) => {
+    (template: { name: string; content: string; step_count: number }) => {
       setTemplateBrowserOpen(false);
-      const parsedSteps = parseTemplateSteps(template.yaml);
-      const templateData = { name: template.name, yaml: template.yaml, steps: parsedSteps };
+      const parsedSteps = parseTemplateSteps(template.content);
+      const templateData = { name: template.name, content: template.content, steps: parsedSteps };
 
       if (nodes.length > 0) {
         setPendingTemplate(templateData);

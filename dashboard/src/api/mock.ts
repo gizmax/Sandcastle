@@ -788,6 +788,1028 @@ steps:
     depends_on:
       - "review"
 `,
+  blog_to_social: `# name: Blog to Social Media
+# description: Transform a blog post into platform-specific social media content
+# tags: [Marketing, Content, Social]
+
+name: blog-to-social
+description: Transform a blog post into platform-specific social media content
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 5
+default_timeout: 180
+
+steps:
+  - id: analyze-post
+    prompt: >
+      Analyze the following blog post and extract the key points, overall tone,
+      target audience, and core message. Identify the most shareable insights
+      and any statistics or quotes worth highlighting.
+      Blog post: {input.blog_post}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: linkedin-post
+    depends_on: [analyze-post]
+    prompt: >
+      Using the blog analysis below, write a professional LinkedIn post that
+      drives engagement. Use a thought-leadership tone, include a compelling
+      hook in the first line, add relevant line breaks for readability, and
+      end with a call-to-action. Keep it under 1300 characters.
+      Analysis: {steps.analyze-post.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: twitter-thread
+    depends_on: [analyze-post]
+    prompt: >
+      Using the blog analysis below, write an X/Twitter thread of exactly
+      5 tweets. The first tweet should hook the reader with a bold claim or
+      question. Each tweet must be under 280 characters. Number them 1/5
+      through 5/5 and make the last tweet link back to the original post.
+      Analysis: {steps.analyze-post.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: instagram-caption
+    depends_on: [analyze-post]
+    prompt: >
+      Using the blog analysis below, write an engaging Instagram caption.
+      Start with an attention-grabbing first line, use short paragraphs,
+      include relevant emojis sparingly, and end with 15-20 relevant hashtags
+      grouped at the bottom. Keep the caption under 2200 characters.
+      Analysis: {steps.analyze-post.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+
+  - id: compile
+    depends_on: [linkedin-post, twitter-thread, instagram-caption]
+    prompt: >
+      Compile all the social media content variants into a single structured
+      output. Include sections for LinkedIn, X/Twitter, and Instagram. Add a
+      brief recommendation on optimal posting times and any platform-specific
+      tips for maximizing engagement.
+      LinkedIn: {steps.linkedin-post.output}
+      Twitter: {steps.twitter-thread.output}
+      Instagram: {steps.instagram-caption.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+`,
+  seo_content: `# name: SEO Content Writer
+# description: Research keywords and create SEO-optimized article with meta tags
+# tags: [Marketing, SEO, Content]
+
+name: seo-content-writer
+description: Research keywords and create SEO-optimized article with meta tags
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: keyword-research
+    prompt: >
+      Analyze the following topic and perform keyword research. Identify a
+      primary keyword, 5-8 secondary keywords, and long-tail variations.
+      For each keyword, describe the likely search intent (informational,
+      transactional, navigational) and estimated competition level.
+      Topic: {input.topic}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: outline
+    depends_on: [keyword-research]
+    prompt: >
+      Create a detailed article outline optimized for the target keywords.
+      Structure it with a compelling H1 title, 4-6 H2 sections, and H3
+      subsections where appropriate. Include notes on where to naturally
+      place primary and secondary keywords. Plan for approximately 1500-2000
+      words total.
+      Keywords: {steps.keyword-research.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: write-article
+    depends_on: [outline]
+    prompt: >
+      Write the full SEO-optimized article following the outline provided.
+      Naturally incorporate the target keywords without stuffing. Use short
+      paragraphs, include transition sentences between sections, and write
+      in an authoritative yet accessible tone. Add a strong introduction
+      and a conclusion with a clear call-to-action.
+      Outline: {steps.outline.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: meta-tags
+    depends_on: [write-article]
+    prompt: >
+      Generate SEO meta tags for the article. Include a title tag (under 60
+      characters), meta description (under 155 characters), Open Graph title
+      and description, Twitter card tags, and a suggested URL slug. Ensure
+      the primary keyword appears in the title tag and meta description.
+      Article: {steps.write-article.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+`,
+  email_campaign: `# name: Email Campaign Generator
+# description: Generate email campaign with subject line variants and A/B copy
+# tags: [Marketing, Email, Campaign]
+
+name: email-campaign-generator
+description: Generate email campaign with subject line variants and A/B copy
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 5
+default_timeout: 180
+
+steps:
+  - id: audience-brief
+    prompt: >
+      Analyze the target audience and campaign goal described below. Identify
+      the audience demographics, pain points, motivations, and the primary
+      action you want them to take. Define the tone of voice and any brand
+      guidelines to follow.
+      Campaign brief: {input.campaign_brief}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: subject-lines
+    depends_on: [audience-brief]
+    prompt: >
+      Generate 5 email subject line variants for this campaign. For each
+      variant, use a different persuasion technique (curiosity, urgency,
+      personalization, benefit-driven, social proof). Explain the reasoning
+      behind each and predict which audience segment it would resonate with most.
+      Audience brief: {steps.audience-brief.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: body-variant-a
+    depends_on: [audience-brief]
+    prompt: >
+      Write email body Variant A using a benefit-focused approach. Lead with
+      the key value proposition, use bullet points to highlight benefits,
+      include one testimonial placeholder, and end with a clear CTA button
+      text. Keep the email concise - under 200 words for the body copy.
+      Audience brief: {steps.audience-brief.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: body-variant-b
+    depends_on: [audience-brief]
+    prompt: >
+      Write email body Variant B using a story-focused approach. Open with
+      a relatable scenario or customer story, build emotional connection,
+      then transition to the product as the solution. End with a soft CTA
+      that feels like a natural next step. Keep it under 250 words.
+      Audience brief: {steps.audience-brief.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 3
+
+  - id: review
+    depends_on: [subject-lines, body-variant-a, body-variant-b]
+    type: approval
+    prompt: >
+      Review the complete email campaign package before sending. Verify
+      subject lines, both body variants, and overall brand alignment.
+    approval_config:
+      message: "Review the email campaign variants and approve for sending"
+      show_data: steps.body-variant-a.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+`,
+  competitor_analysis: `# name: Competitor Analysis
+# description: Analyze competitor positioning, strengths, weaknesses, and opportunities
+# tags: [Marketing, Strategy, Research]
+
+name: competitor-analysis
+description: Analyze competitor positioning, strengths, weaknesses, and opportunities
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: gather-info
+    prompt: >
+      Research the following competitor thoroughly. Gather information about
+      their product offerings, pricing model, key messaging and positioning,
+      target market segments, and overall market share. Identify their
+      marketing channels and recent strategic moves.
+      Competitor: {input.competitor}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: analyze-strengths
+    depends_on: [gather-info]
+    prompt: >
+      Based on the competitor research below, identify and analyze their key
+      strengths. Focus on what they do well in product quality, brand
+      perception, customer experience, market positioning, and technical
+      capabilities. Rank each strength by impact on their market position.
+      Research: {steps.gather-info.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: analyze-weaknesses
+    depends_on: [gather-info]
+    prompt: >
+      Based on the competitor research below, identify gaps, weaknesses,
+      and areas of customer dissatisfaction. Look for common complaints,
+      missing features, pricing concerns, poor support experiences, and
+      strategic blind spots. Highlight areas that represent opportunities
+      for differentiation.
+      Research: {steps.gather-info.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: swot-report
+    depends_on: [analyze-strengths, analyze-weaknesses]
+    prompt: >
+      Compile a comprehensive SWOT analysis report combining the strengths
+      and weaknesses analysis. Add an Opportunities section identifying how
+      to capitalize on competitor weaknesses, and a Threats section covering
+      risks from their strengths. End with 3-5 actionable recommendations
+      for competitive positioning.
+      Strengths: {steps.analyze-strengths.output}
+      Weaknesses: {steps.analyze-weaknesses.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+`,
+  ad_copy_generator: `# name: Ad Copy Generator
+# description: Generate ad copy variants for Google Ads and Meta Ads campaigns
+# tags: [Marketing, Advertising, Copywriting]
+
+name: ad-copy-generator
+description: Generate ad copy variants for Google Ads and Meta Ads campaigns
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: claude-sonnet-4-20250514
+default_max_turns: 5
+default_timeout: 180
+
+steps:
+  - id: analyze-product
+    prompt: >
+      Analyze the following product brief and extract the unique selling
+      propositions, target audience segments, key benefits, and competitive
+      differentiators. Identify the primary emotional triggers and rational
+      arguments that would drive conversions.
+      Product brief: {input.product_brief}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: google-ads
+    depends_on: [analyze-product]
+    prompt: >
+      Generate 5 Google Ads variants based on the product analysis. Each
+      variant must include 3 headlines (max 30 characters each), 2
+      descriptions (max 90 characters each), and display URL paths. Use
+      different angles for each variant - feature-focused, benefit-focused,
+      urgency, social proof, and competitive comparison.
+      Product analysis: {steps.analyze-product.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: meta-ads
+    depends_on: [analyze-product]
+    prompt: >
+      Generate 5 Meta/Facebook ad variants based on the product analysis.
+      Each variant must include primary text (up to 125 characters for
+      optimal display), a headline (max 40 characters), a link description,
+      and a suggested CTA button type. Vary the creative approach across
+      variants - storytelling, testimonial-style, direct response, question
+      hook, and listicle format.
+      Product analysis: {steps.analyze-product.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: compile-report
+    depends_on: [google-ads, meta-ads]
+    prompt: >
+      Compile all ad variants into a structured report. For each variant,
+      add a recommendation score (1-10) based on predicted click-through
+      rate potential. Suggest which variants to A/B test first and provide
+      a recommended budget split across the top-performing variants.
+      Google Ads: {steps.google-ads.output}
+      Meta Ads: {steps.meta-ads.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+`,
+  lead_enrichment: `# name: Lead Enrichment
+# description: Research and enrich lead data with company info, scoring, and outreach angles
+# tags: [Sales, Research, Lead-Gen]
+
+name: lead-enrichment
+description: Research and enrich lead data with company info, scoring, and outreach angles
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: research-company
+    prompt: >
+      Research the following company thoroughly. Find their company size,
+      industry vertical, recent news and press releases, technology stack,
+      and any known funding rounds or financial milestones.
+      Company: {input.company_name}
+      Domain: {input.company_domain}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: research-contacts
+    depends_on: [research-company]
+    prompt: >
+      Based on the company research, identify key decision makers and
+      stakeholders who would be relevant for a B2B sales conversation.
+      Include their titles, responsibilities, and any public LinkedIn or
+      professional profile insights.
+      Company info: {steps.research-company.output}
+      Target persona: {input.target_persona}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: score-lead
+    depends_on: [research-company]
+    prompt: >
+      Score this lead on a scale of 1-100 based on how well it matches
+      our Ideal Customer Profile (ICP). Consider company size, industry fit,
+      technology compatibility, and growth signals. Provide a breakdown of
+      scoring factors with individual scores and reasoning.
+      Company info: {steps.research-company.output}
+      ICP criteria: {input.icp_criteria}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: outreach-angles
+    depends_on: [research-company, research-contacts]
+    prompt: >
+      Suggest 3 personalized outreach angles for engaging this lead.
+      Each angle should reference specific company details, recent events,
+      or contact-specific insights. Include a suggested subject line and
+      opening sentence for each approach.
+      Company info: {steps.research-company.output}
+      Key contacts: {steps.research-contacts.output}
+      Our value prop: {input.value_proposition}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: compile-profile
+    depends_on: [research-contacts, score-lead, outreach-angles]
+    prompt: >
+      Compile a complete lead profile document combining all research findings.
+      Structure it with sections for Company Overview, Key Contacts, Lead Score
+      with rationale, and Recommended Outreach Strategy. Format it cleanly
+      for the sales team to review and act on.
+      Contacts: {steps.research-contacts.output}
+      Lead score: {steps.score-lead.output}
+      Outreach angles: {steps.outreach-angles.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+`,
+  proposal_generator: `# name: Proposal Generator
+# description: Generate a customized business proposal from meeting notes and product info
+# tags: [Sales, Document, Proposal]
+
+name: proposal-generator
+description: Generate a customized business proposal from meeting notes and product info
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: extract-requirements
+    prompt: >
+      Analyze the following meeting notes and extract all client requirements,
+      pain points, budget signals, timeline expectations, and any technical
+      constraints mentioned. Organize findings by priority and flag any
+      ambiguous or missing information that should be clarified.
+      Meeting notes: {input.meeting_notes}
+      Client name: {input.client_name}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: match-solutions
+    depends_on: [extract-requirements]
+    prompt: >
+      Map each identified client need to our product features and solutions.
+      For each pain point, explain how our offering addresses it, include
+      relevant case studies or metrics where applicable, and note any gaps
+      where custom work or integrations may be needed.
+      Client requirements: {steps.extract-requirements.output}
+      Product catalog: {input.product_info}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: write-proposal
+    depends_on: [match-solutions]
+    prompt: >
+      Write a complete business proposal document with the following sections:
+      Executive Summary, Understanding of Needs, Proposed Solution, Implementation
+      Timeline, Pricing and Investment, and Next Steps. Use a professional tone,
+      reference specific client pain points, and highlight ROI where possible.
+      Solution mapping: {steps.match-solutions.output}
+      Client name: {input.client_name}
+      Pricing tier: {input.pricing_tier}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: review-gate
+    depends_on: [write-proposal]
+    type: approval
+    prompt: Review the generated proposal before sending to client
+    approval_config:
+      message: "Review the generated proposal and approve for delivery to the client"
+      show_data: steps.write-proposal.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+`,
+  meeting_recap: `# name: Meeting Recap
+# description: Transform meeting transcript into summary, action items, and follow-up email
+# tags: [Sales, Productivity, Communication]
+
+name: meeting-recap
+description: Transform meeting transcript into summary, action items, and follow-up email
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: summarize
+    prompt: >
+      Create a structured meeting summary from the following transcript.
+      Include the meeting date, attendees, key discussion points, decisions
+      made, and any open questions. Organize by topic and highlight the
+      most important outcomes clearly.
+      Transcript: {input.transcript}
+      Meeting title: {input.meeting_title}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: action-items
+    depends_on: [summarize]
+    prompt: >
+      Extract all action items from the meeting summary. For each item,
+      specify the owner (who is responsible), a clear description of the
+      task, the agreed deadline or timeframe, and the priority level.
+      Format as a structured checklist that can be imported into a task
+      tracker.
+      Meeting summary: {steps.summarize.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: follow-up-email
+    depends_on: [summarize, action-items]
+    prompt: >
+      Draft a professional follow-up email to send to all meeting attendees.
+      Include a brief recap of key decisions, the full list of action items
+      with owners and deadlines, and proposed next steps or next meeting date.
+      Keep the tone friendly but professional, and make it easy to scan quickly.
+      Meeting summary: {steps.summarize.output}
+      Action items: {steps.action-items.output}
+      Sender name: {input.sender_name}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+`,
+  ticket_classifier: `# name: Ticket Classifier
+# description: Classify support ticket, assign priority, and draft response
+# tags: [Support, Classification, Automation]
+
+name: ticket-classifier
+description: Classify support ticket, assign priority, and draft response
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: classify
+    prompt: >
+      Analyze the following support ticket and classify it into one of these
+      categories: bug, feature_request, billing, how_to, or account. Also
+      detect the customer sentiment (positive, neutral, frustrated, angry)
+      and identify the core topic or product area involved.
+      Ticket subject: {input.subject}
+      Ticket body: {input.body}
+      Customer tier: {input.customer_tier}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        category:
+          type: string
+          enum: [bug, feature_request, billing, how_to, account]
+        sentiment:
+          type: string
+          enum: [positive, neutral, frustrated, angry]
+        topic:
+          type: string
+      required: [category, sentiment, topic]
+
+  - id: prioritize
+    depends_on: [classify]
+    prompt: >
+      Assign a priority level (P1-P4) to this support ticket based on
+      the classification, customer sentiment, potential business impact,
+      and customer tier. P1 is critical and needs immediate attention,
+      P4 is low priority. Provide a brief justification for the priority.
+      Classification: {steps.classify.output}
+      Customer tier: {input.customer_tier}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: draft-response
+    depends_on: [classify, prioritize]
+    prompt: >
+      Draft a helpful and empathetic support response addressing the
+      customer's issue. Match the tone to the detected sentiment - be
+      extra empathetic for frustrated or angry customers. Include specific
+      troubleshooting steps for bugs, clear explanations for how-to questions,
+      and appropriate escalation language for billing or account issues.
+      Original ticket: {input.body}
+      Classification: {steps.classify.output}
+      Priority: {steps.prioritize.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: suggest-routing
+    depends_on: [classify, prioritize]
+    prompt: >
+      Based on the ticket classification and priority, suggest the best
+      internal team to route this ticket to. Choose from: engineering
+      (for bugs and technical issues), billing (for payment and subscription),
+      success (for account management and feature requests), or support
+      (for how-to and general inquiries). Include a brief handoff note
+      for the receiving team.
+      Classification: {steps.classify.output}
+      Priority: {steps.prioritize.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+`,
+  review_sentiment: `# name: Review Sentiment
+# description: Analyze customer reviews to extract sentiment trends and actionable insights
+# tags: [Support, Analytics, Sentiment]
+
+name: review-sentiment
+description: Analyze customer reviews to extract sentiment trends and actionable insights
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: parse-reviews
+    prompt: >
+      Parse and normalize the following batch of customer reviews. Extract
+      each individual review text, the rating if available, the date, and
+      any product or feature mentioned. Clean up formatting issues and
+      standardize the data for downstream analysis.
+      Reviews data: {input.reviews}
+      Product name: {input.product_name}
+    model: claude-haiku-4-5-20251001
+    max_turns: 5
+
+  - id: sentiment-analysis
+    depends_on: [parse-reviews]
+    prompt: >
+      Perform sentiment analysis on each parsed review. Score sentiment on
+      a scale from -1.0 (very negative) to 1.0 (very positive). Identify
+      recurring positive themes (e.g. ease of use, good support) and negative
+      themes (e.g. bugs, missing features, slow performance). Group reviews
+      by sentiment tier and highlight representative quotes.
+      Parsed reviews: {steps.parse-reviews.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: trend-detection
+    depends_on: [sentiment-analysis]
+    prompt: >
+      Analyze the sentiment results to detect trending topics and patterns.
+      Identify recurring complaints that may indicate systemic issues,
+      features receiving consistent praise, and any shifts in sentiment
+      over time. Flag urgent issues that appear in multiple negative reviews
+      and highlight opportunities from positive feedback patterns.
+      Sentiment results: {steps.sentiment-analysis.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 8
+
+  - id: insights-report
+    depends_on: [trend-detection]
+    prompt: >
+      Generate an executive insights report summarizing the review analysis.
+      Include an overall sentiment score, descriptions of key charts (sentiment
+      distribution, topic frequency, trend over time), the top 5 issues to
+      address, top 5 strengths to promote, and specific actionable
+      recommendations for the product and support teams.
+      Trend analysis: {steps.trend-detection.output}
+      Product name: {input.product_name}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+`,
+  job_description: `# name: Job Description Generator
+# description: Generate inclusive job description with requirements, benefits, and interview plan
+# tags: [HR, Recruiting, Content]
+
+name: job-description-generator
+description: Generate inclusive job description with requirements, benefits, and interview plan
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: analyze-role
+    prompt: >
+      Analyze the following role brief and extract the key details: core responsibilities,
+      required and preferred skills, seniority level, team context, and reporting structure.
+      Identify any implicit requirements and suggest a clear job title if not provided.
+      Role brief: {input.role_brief}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: write-jd
+    depends_on: [analyze-role]
+    prompt: >
+      Write a complete, polished job description using inclusive language based on the role
+      analysis. Include sections for About the Role, Responsibilities, Requirements (must-have
+      vs nice-to-have), Benefits, and Growth Opportunities. Avoid gendered pronouns and
+      unnecessary jargon. Role analysis: {steps.analyze-role.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: bias-check
+    depends_on: [write-jd]
+    prompt: >
+      Review the job description for potential bias issues. Check for gendered language,
+      age-coded terms, unnecessary degree requirements, culturally exclusive phrases, and
+      inflated experience requirements. Provide a corrected version with all issues fixed
+      and a summary of changes made. Job description: {steps.write-jd.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: interview-plan
+    depends_on: [analyze-role]
+    prompt: >
+      Create a structured interview plan aligned with the role requirements. Include
+      screening questions, technical assessment criteria, behavioral interview questions
+      mapped to key competencies, and a scoring rubric. Ensure questions are legal and
+      non-discriminatory. Role analysis: {steps.analyze-role.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+`,
+  resume_screener: `# name: Resume Screener
+# description: Screen resume against job description with match scoring and interview recommendations
+# tags: [HR, Recruiting, Screening]
+
+name: resume-screener
+description: Screen resume against job description with match scoring and interview recommendations
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: parse-resume
+    prompt: >
+      Extract structured data from the following resume. Identify and organize: work
+      experience (company, role, duration, achievements), technical and soft skills,
+      education and certifications, notable projects, and any quantified accomplishments.
+      Resume: {input.resume_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        candidate_name:
+          type: string
+        experience:
+          type: array
+          items:
+            type: object
+            properties:
+              company:
+                type: string
+              role:
+                type: string
+              duration:
+                type: string
+              achievements:
+                type: array
+                items:
+                  type: string
+        skills:
+          type: array
+          items:
+            type: string
+        education:
+          type: array
+          items:
+            type: object
+            properties:
+              institution:
+                type: string
+              degree:
+                type: string
+              year:
+                type: string
+        total_years_experience:
+          type: number
+
+  - id: match-analysis
+    depends_on: [parse-resume]
+    prompt: >
+      Compare the parsed resume data against the job description requirements. Score the
+      overall match from 0-100, break down scoring by category (skills, experience, education),
+      identify specific gaps, and highlight standout qualifications that exceed requirements.
+      Parsed resume: {steps.parse-resume.output}
+      Job description: {input.job_description}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: interview-questions
+    depends_on: [parse-resume, match-analysis]
+    prompt: >
+      Generate targeted interview questions based on the candidate's profile and identified
+      gaps. Include questions to verify claimed experience, probe skill gaps, explore
+      career motivations, and assess cultural fit. Prioritize questions by importance.
+      Parsed resume: {steps.parse-resume.output}
+      Match analysis: {steps.match-analysis.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: summary-card
+    depends_on: [match-analysis, interview-questions]
+    prompt: >
+      Create a concise candidate summary card with a clear recommendation (proceed, hold,
+      or reject). Include the match score, top 3 strengths, top 3 concerns, recommended
+      interview focus areas, and a brief justification for the recommendation.
+      Match analysis: {steps.match-analysis.output}
+      Interview questions: {steps.interview-questions.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+`,
+  contract_review: `# name: Contract Review
+# description: Review contract for key terms, risks, and generate plain-language summary
+# tags: [Legal, Compliance, Document]
+
+name: contract-review
+description: Review contract for key terms, risks, and generate plain-language summary
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: extract-terms
+    prompt: >
+      Extract all key terms from the following contract document. Identify: parties involved,
+      effective and termination dates, core obligations for each party, payment terms and
+      schedule, liability caps, indemnification clauses, intellectual property provisions,
+      termination conditions, and governing law. Contract: {input.contract_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        parties:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              role:
+                type: string
+        effective_date:
+          type: string
+        termination_date:
+          type: string
+        obligations:
+          type: array
+          items:
+            type: object
+            properties:
+              party:
+                type: string
+              description:
+                type: string
+        payment_terms:
+          type: object
+          properties:
+            amount:
+              type: string
+            schedule:
+              type: string
+            conditions:
+              type: string
+        termination_clauses:
+          type: array
+          items:
+            type: string
+        governing_law:
+          type: string
+
+  - id: risk-analysis
+    depends_on: [extract-terms]
+    prompt: >
+      Analyze the extracted contract terms for potential risks. Identify unusual or
+      one-sided clauses, missing standard protections (limitation of liability, force
+      majeure, dispute resolution), auto-renewal traps, broad non-compete provisions,
+      and any terms that deviate from market standards. Rate each risk as low, medium,
+      or high severity. Extracted terms: {steps.extract-terms.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: compliance-check
+    depends_on: [extract-terms]
+    prompt: >
+      Check the contract terms against standard compliance requirements. Verify data
+      protection and privacy provisions, regulatory compliance references, required
+      insurance and bonding clauses, accessibility and non-discrimination language,
+      and record-keeping obligations. Flag any missing or insufficient provisions.
+      Extracted terms: {steps.extract-terms.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: plain-summary
+    depends_on: [extract-terms, risk-analysis, compliance-check]
+    prompt: >
+      Generate a plain-language summary of the contract suitable for non-legal stakeholders.
+      Include what each party is agreeing to, key dates and deadlines, financial obligations,
+      highlighted risks with severity levels, compliance concerns, and a prioritized list
+      of action items for negotiation or clarification.
+      Extracted terms: {steps.extract-terms.output}
+      Risk analysis: {steps.risk-analysis.output}
+      Compliance check: {steps.compliance-check.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+`,
+  release_notes: `# name: Release Notes Generator
+# description: Generate user-facing release notes and internal changelog from commit history
+# tags: [Product, Engineering, Documentation]
+
+name: release-notes-generator
+description: Generate user-facing release notes and internal changelog from commit history
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: parse-changes
+    prompt: >
+      Parse the following git diff or changelog and categorize each change into one of:
+      features (new capabilities), fixes (bug corrections), improvements (enhancements to
+      existing features), breaking changes (backwards-incompatible modifications), or
+      internal (refactoring, dependencies, CI). For each change, extract a short summary,
+      affected components, and severity. Changes: {input.changelog}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: user-release-notes
+    depends_on: [parse-changes]
+    prompt: >
+      Write user-facing release notes from the categorized changes. Use friendly, non-technical
+      language. Lead with the most impactful features, include before/after examples where
+      helpful, clearly call out breaking changes with migration steps, and close with a
+      thank-you note. Format with markdown headings and bullet points.
+      Categorized changes: {steps.parse-changes.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: internal-changelog
+    depends_on: [parse-changes]
+    prompt: >
+      Write a technical internal changelog for the engineering team. Include detailed
+      descriptions of each change with PR/commit references, migration notes for breaking
+      changes with code examples, infrastructure and dependency updates, performance
+      impact notes, and known issues or follow-up tasks.
+      Categorized changes: {steps.parse-changes.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+
+  - id: social-announcement
+    depends_on: [user-release-notes]
+    prompt: >
+      Draft a short, engaging social media announcement for this release. Highlight the
+      top 2-3 user-facing improvements, keep it under 280 characters for the main post,
+      include relevant hashtags, and suggest an optional longer thread format for platforms
+      that support it. Release notes: {steps.user-release-notes.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+`,
+  data_extractor: `# name: Data Extractor
+# description: Extract structured data from documents with validation and error handling
+# tags: [Product, Data, Automation]
+
+name: data-extractor
+description: Extract structured data from documents with validation and error handling
+
+sandstorm_url: \${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: analyze-document
+    prompt: >
+      Analyze the following document to detect its type (invoice, receipt, report, form,
+      letter, etc.) and structure. Identify all extractable fields, their expected data
+      types, and any repeating sections or tables. Note the document quality and any
+      areas that may be difficult to extract accurately. Document: {input.document_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: extract-data
+    depends_on: [analyze-document]
+    prompt: >
+      Extract all identified fields from the document into a structured JSON format.
+      For each field, include the extracted value, the source location in the document,
+      and a confidence score (0.0-1.0). Handle missing or ambiguous fields gracefully
+      by marking them as null with an explanation.
+      Document analysis: {steps.analyze-document.output}
+      Original document: {input.document_text}
+    model: claude-sonnet-4-20250514
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        document_type:
+          type: string
+        fields:
+          type: array
+          items:
+            type: object
+            properties:
+              field_name:
+                type: string
+              value:
+                type: string
+              confidence:
+                type: number
+              source_location:
+                type: string
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              table_name:
+                type: string
+              headers:
+                type: array
+                items:
+                  type: string
+              rows:
+                type: array
+                items:
+                  type: array
+                  items:
+                    type: string
+
+  - id: validate
+    depends_on: [extract-data]
+    prompt: >
+      Validate the extracted data for completeness and correctness. Check that all required
+      fields are present, verify data format consistency (dates, numbers, currencies),
+      cross-reference related fields for logical consistency (e.g., line items sum to total),
+      and flag any values that appear anomalous or potentially incorrect.
+      Extracted data: {steps.extract-data.output}
+    model: claude-sonnet-4-20250514
+    max_turns: 5
+
+  - id: format-output
+    depends_on: [validate]
+    prompt: >
+      Format the validated data into the final output structure. Include per-field confidence
+      scores, validation status for each field, a summary of any issues found during
+      validation, and an overall extraction quality score. Present the data in a clean,
+      machine-readable JSON format ready for downstream processing.
+      Validated data: {steps.validate.output}
+      Original extraction: {steps.extract-data.output}
+    model: claude-haiku-4-5-20251001
+    max_turns: 3
+`,
 };
 
 function getTemplateDetail(name: string) {
