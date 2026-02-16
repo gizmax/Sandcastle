@@ -48,14 +48,13 @@ Sandcastle is that glue. It wraps Sandstorm's agent execution with orchestration
 
 ## Start Local. Scale When Ready.
 
-No Docker, no database server, no Redis. Clone, run, done.
+No Docker, no database server, no Redis. Install, run, done.
 
 ```bash
-git clone https://github.com/gizmax/Sandcastle.git
-cd Sandcastle
-cp .env.example .env   # add your ANTHROPIC_API_KEY + E2B_API_KEY
-uv sync
-uv run python -m sandcastle serve
+pip install sandcastle-ai
+export ANTHROPIC_API_KEY=sk-ant-...
+export E2B_API_KEY=e2b_...
+sandcastle serve
 ```
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
@@ -85,22 +84,24 @@ Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No 
 
 ## Quickstart
 
-### Local Mode (30 seconds)
+### Install from PyPI (30 seconds)
 
 ```bash
-git clone https://github.com/gizmax/Sandcastle.git
-cd Sandcastle
+pip install sandcastle-ai
 
-cp .env.example .env   # add your ANTHROPIC_API_KEY + E2B_API_KEY
+# Set your API keys
+export ANTHROPIC_API_KEY=sk-ant-...
+export E2B_API_KEY=e2b_...
 
-uv sync
-uv run python -m sandcastle serve
+sandcastle serve
 ```
 
 You'll see:
 ```
 Sandcastle starting in local mode (SQLite + filesystem + in-process queue)
 ```
+
+That's it. Dashboard at `http://localhost:8080`, API ready, 20 templates included.
 
 ### Production Mode - Docker (recommended)
 
