@@ -26,19 +26,19 @@
 
 But sometimes you need to **build something lasting from the storm.**
 
-Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result, sandbox destroyed. That's perfect for a lot of things. But when you start building real products on top of it, you keep hitting the same walls:
+Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result, sandbox destroyed. That's exactly what it should do. But when you start building real products on top of it, the glue code piles up fast:
 
-- **"I need this agent to remember what it found yesterday."** - No persistence between runs.
-- **"Agent A should feed its results into Agent B."** - No workflow orchestration.
-- **"Bill the customer per enrichment, track costs per run."** - No usage metering.
-- **"Alert me if the agent fails, retry automatically."** - No production error handling.
-- **"Run this every 6 hours and notify me on Slack."** - No scheduling, no webhooks.
-- **"A human should review this before the agent continues."** - No approval gates.
-- **"Block the output if it contains PII or leaked secrets."** - No policy enforcement.
-- **"Pick the cheapest model that still meets quality SLOs."** - No cost-latency optimization.
-- **"Show me what's running, what failed, and what it cost."** - No dashboard or observability.
+- **"Step A scrapes, step B enriches, step C scores."** - You need workflow orchestration.
+- **"Fan out over 50 leads in parallel, then merge."** - You need a DAG engine.
+- **"Bill the customer per enrichment, track costs per run."** - You need usage metering.
+- **"Alert me if the agent fails, retry with backoff."** - You need production error handling.
+- **"Run this every 6 hours and POST results to Slack."** - You need scheduling and webhooks.
+- **"A human should review this before the agent continues."** - You need approval gates.
+- **"Block the output if it contains PII or leaked secrets."** - You need policy enforcement.
+- **"Pick the cheapest model that still meets quality SLOs."** - You need cost-latency optimization.
+- **"Show me what's running, what failed, and what it cost."** - You need a dashboard.
 
-Sandcastle takes Sandstorm's sandboxed agent execution and adds the orchestration, persistence, guardrails, and monitoring needed for production.
+Sandcastle is that glue. It wraps Sandstorm's agent execution with orchestration, guardrails, and monitoring so you can ship agent workflows to production.
 
 > **Sandstorm** = the engine.
 > **Sandcastle** = the product you build with it.
