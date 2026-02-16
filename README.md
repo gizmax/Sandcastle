@@ -738,20 +738,41 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
 
 ## Quickstart
 
-### Prerequisites
+### Quick Start (Local Mode)
 
-Everything Sandstorm needs, plus:
-- **Redis** - job queue and scheduling
-- **PostgreSQL** - run history, API keys, dead letter queue
-- **S3-compatible storage** - persistent agent data (MinIO for local dev)
-
-### Setup
+Zero-config setup - just clone and run. No PostgreSQL, Redis, or S3 needed.
 
 ```bash
 git clone https://github.com/gizmax/Sandcastle.git
 cd Sandcastle
 
-cp .env.example .env   # configure your keys
+cp .env.example .env   # add your ANTHROPIC_API_KEY + E2B_API_KEY
+
+uv sync
+uv run python -m sandcastle serve
+```
+
+That's it. Sandcastle auto-detects that `DATABASE_URL` and `REDIS_URL` are empty and starts in **local mode**:
+- **SQLite** database (auto-created in `./data/sandcastle.db`)
+- **In-process queue** (no separate worker needed)
+- **Filesystem storage** (local disk)
+
+You'll see in the log:
+```
+Sandcastle starting in local mode (SQLite + filesystem + in-process queue)
+```
+
+### Production Setup
+
+For teams and production workloads, use the full stack:
+
+**Prerequisites:** PostgreSQL, Redis, S3-compatible storage (MinIO for local dev)
+
+```bash
+git clone https://github.com/gizmax/Sandcastle.git
+cd Sandcastle
+
+cp .env.example .env   # configure all connection strings
 
 # Install dependencies
 uv sync
@@ -805,26 +826,34 @@ curl -X POST http://localhost:8080/workflows/run/sync \
 
 ## Configuration
 
-All configuration via environment variables or `.env` file:
+All configuration via environment variables or `.env` file. Mode is auto-detected:
+
+| Variable | Local Mode (default) | Production Mode |
+|---|---|---|
+| `DATABASE_URL` | *(empty)* - SQLite | `postgresql+asyncpg://...` |
+| `REDIS_URL` | *(empty)* - in-process | `redis://localhost:6379/0` |
+| `STORAGE_BACKEND` | `local` | `s3` |
+| `DATA_DIR` | `./data` | *(unused)* |
 
 ```bash
-# Sandstorm connection
+# Required
 SANDSTORM_URL=http://localhost:8000
 ANTHROPIC_API_KEY=sk-ant-...
 E2B_API_KEY=e2b_...
 
-# Database
-DATABASE_URL=postgresql+asyncpg://sandcastle:sandcastle@localhost:5432/sandcastle
+# Database (empty = SQLite local mode)
+DATABASE_URL=
 
-# Redis
-REDIS_URL=redis://localhost:6379/0
+# Redis (empty = in-process queue)
+REDIS_URL=
 
 # Storage
-STORAGE_BACKEND=s3
-STORAGE_BUCKET=sandcastle-data
-STORAGE_ENDPOINT=http://localhost:9000
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=minioadmin
+STORAGE_BACKEND=local          # "local" or "s3"
+DATA_DIR=./data                # SQLite + local storage base path
+# STORAGE_BUCKET=sandcastle-data  # S3 only
+# STORAGE_ENDPOINT=http://localhost:9000
+# AWS_ACCESS_KEY_ID=minioadmin
+# AWS_SECRET_ACCESS_KEY=minioadmin
 
 # Security
 WEBHOOK_SECRET=your-webhook-signing-secret

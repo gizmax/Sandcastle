@@ -24,12 +24,21 @@ def main() -> None:
         print(f"Unknown command: {' '.join(args)}")
         print("Usage:")
         print("  python -m sandcastle serve      - Start the API server")
-        print("  python -m sandcastle db migrate  - Run database migrations")
+        print("                                    Auto-detects local vs production mode:")
+        print("                                    - No DATABASE_URL/REDIS_URL -> local (SQLite + in-process)")
+        print("                                    - With DATABASE_URL/REDIS_URL -> production (PG + Redis)")
+        print("  python -m sandcastle db migrate  - Run database migrations (PostgreSQL only)")
         sys.exit(1)
 
 
 def _run_migrations() -> None:
-    """Run Alembic migrations."""
+    """Run Alembic migrations (PostgreSQL only)."""
+    from sandcastle.config import settings
+
+    if settings.is_local_mode:
+        print("Migrations are not needed in local mode (SQLite tables are created automatically).")
+        return
+
     try:
         from alembic.config import Config
 

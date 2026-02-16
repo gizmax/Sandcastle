@@ -25,7 +25,19 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
-    logger.info("Sandcastle starting up")
+    if settings.is_local_mode:
+        logger.info(
+            "Sandcastle starting in local mode (SQLite + filesystem + in-process queue)"
+        )
+        # Auto-create tables for SQLite (no Alembic needed)
+        from sandcastle.models.db import init_db
+
+        await init_db()
+        logger.info("Local database initialized")
+    else:
+        logger.info(
+            "Sandcastle starting in production mode (PostgreSQL + Redis + S3)"
+        )
 
     # Start the cron scheduler
     from sandcastle.queue.scheduler import restore_schedules, start_scheduler
@@ -47,7 +59,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sandcastle",
     description="Production-ready workflow orchestrator built on Sandstorm",
-    version="0.1.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 

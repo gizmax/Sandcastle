@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { CheckCircle, Loader2, Server } from "lucide-react";
+import { CheckCircle, Loader2, Server, Zap } from "lucide-react";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
+import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 
 interface StepConnectSandstormProps {
   onComplete: () => void;
@@ -10,6 +11,7 @@ interface StepConnectSandstormProps {
 export function StepConnectSandstorm({ onComplete }: StepConnectSandstormProps) {
   const [testing, setTesting] = useState(false);
   const [connected, setConnected] = useState(false);
+  const { info } = useRuntimeInfo();
 
   async function handleTest() {
     setTesting(true);
@@ -35,6 +37,24 @@ export function StepConnectSandstorm({ onComplete }: StepConnectSandstormProps) 
           Verify that your Sandstorm instance is running and accessible.
         </p>
       </div>
+
+      {info && (
+        <div className="mx-auto max-w-xs rounded-lg border border-border/50 bg-surface-secondary/50 p-3">
+          <div className="flex items-center justify-center gap-2 text-xs font-medium text-muted">
+            <Zap className="h-3.5 w-3.5" />
+            <span>
+              {info.mode === "local" ? "Local mode" : "Production mode"} detected
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-center justify-center gap-3 text-xs text-muted/70">
+            <span>{info.database}</span>
+            <span className="text-border">|</span>
+            <span>{info.queue}</span>
+            <span className="text-border">|</span>
+            <span>{info.storage}</span>
+          </div>
+        </div>
+      )}
 
       {connected ? (
         <div className="flex items-center justify-center gap-2 text-success">

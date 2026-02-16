@@ -152,8 +152,18 @@ class HealthResponse(BaseModel):
 
     status: str
     sandstorm: bool
-    redis: bool
+    redis: bool | None = None  # None when Redis is not configured (local mode)
     database: bool
+
+
+class RuntimeInfoResponse(BaseModel):
+    """Runtime mode information."""
+
+    mode: str  # "local" or "production"
+    database: str  # "sqlite" or "postgresql"
+    queue: str  # "in-process" or "redis"
+    storage: str  # "local" or "s3"
+    data_dir: str | None = None  # Only set in local mode
 
 
 class RunListItem(BaseModel):

@@ -37,6 +37,7 @@ from sandcastle.api.schemas import (
     RoutingDecisionResponse,
     RunListItem,
     RunStatusResponse,
+    RuntimeInfoResponse,
     ScheduleCreateRequest,
     ScheduleResponse,
     ScheduleUpdateRequest,
@@ -162,24 +163,52 @@ async def health_check() -> ApiResponse:
     except Exception:
         pass
 
-    # Check Redis
-    redis_ok = False
-    try:
-        import redis.asyncio as aioredis
+    # Check Redis (skip in local mode)
+    redis_ok: bool | None = None
+    if settings.redis_url:
+        redis_ok = False
+        try:
+            import redis.asyncio as aioredis
 
-        r = aioredis.from_url(settings.redis_url)
-        await r.ping()
-        redis_ok = True
-        await r.aclose()
-    except Exception:
-        pass
+            r = aioredis.from_url(settings.redis_url)
+            await r.ping()
+            redis_ok = True
+            await r.aclose()
+        except Exception:
+            pass
+
+    # In local mode, health is ok if sandstorm + db are fine (no Redis needed)
+    checks = [sandstorm_ok, db_ok]
+    if redis_ok is not None:
+        checks.append(redis_ok)
 
     return ApiResponse(
         data=HealthResponse(
-            status="ok" if all([sandstorm_ok, db_ok, redis_ok]) else "degraded",
+            status="ok" if all(checks) else "degraded",
             sandstorm=sandstorm_ok,
             redis=redis_ok,
             database=db_ok,
+        )
+    )
+
+
+@router.get("/runtime")
+async def runtime_info() -> ApiResponse:
+    """Return current runtime mode information."""
+    from sandcastle.models.db import _build_engine_url
+
+    engine_url = _build_engine_url()
+    db_type = "sqlite" if engine_url.startswith("sqlite") else "postgresql"
+    queue_type = "in-process" if not settings.redis_url else "redis"
+    storage_type = settings.storage_backend
+
+    return ApiResponse(
+        data=RuntimeInfoResponse(
+            mode="local" if settings.is_local_mode else "production",
+            database=db_type,
+            queue=queue_type,
+            storage=storage_type,
+            data_dir=settings.data_dir if settings.is_local_mode else None,
         )
     )
 
@@ -871,15 +900,20 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Set Redis cancel flag
-    try:
-        import redis.asyncio as aioredis
+    # Set cancel flag (Redis or in-memory)
+    if settings.redis_url:
+        try:
+            import redis.asyncio as aioredis
 
-        r = aioredis.from_url(settings.redis_url)
-        await r.set(f"cancel:{run_id}", "1", ex=3600)  # 1h TTL
-        await r.aclose()
-    except Exception as e:
-        logger.error(f"Could not set cancel flag in Redis: {e}")
+            r = aioredis.from_url(settings.redis_url)
+            await r.set(f"cancel:{run_id}", "1", ex=3600)  # 1h TTL
+            await r.aclose()
+        except Exception as e:
+            logger.error(f"Could not set cancel flag in Redis: {e}")
+    else:
+        from sandcastle.engine.executor import cancel_run_local
+
+        cancel_run_local(run_id)
 
     # Update DB status
     async with async_session() as session:

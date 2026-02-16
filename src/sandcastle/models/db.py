@@ -5,8 +5,10 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Enum,
@@ -15,8 +17,8 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Uuid,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -67,14 +69,14 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus), nullable=False, default=RunStatus.QUEUED
     )
-    input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -84,10 +86,10 @@ class Run(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     max_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     parent_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
     replay_from_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    fork_changes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    fork_changes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
@@ -111,10 +113,10 @@ class RunStep(Base):
     __tablename__ = "run_steps"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -122,14 +124,14 @@ class RunStep(Base):
         Enum(StepStatus), nullable=False, default=StepStatus.PENDING
     )
     input_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sub_run_ids: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sub_run_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     policy_violations_count: Mapped[int] = mapped_column(Integer, default=0)
-    policy_actions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    policy_actions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -142,16 +144,16 @@ class Schedule(Base):
     __tablename__ = "schedules"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     cron_expression: Mapped[str] = mapped_column(String(255), nullable=False)
-    input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    notify: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    notify: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -164,7 +166,7 @@ class ApiKey(Base):
     __tablename__ = "api_keys"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     key_prefix: Mapped[str] = mapped_column(String(8), nullable=False, default="")
@@ -184,15 +186,15 @@ class DeadLetterItem(Base):
     __tablename__ = "dead_letter_queue"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -215,7 +217,7 @@ class AutoPilotExperiment(Base):
     __tablename__ = "autopilot_experiments"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -223,7 +225,7 @@ class AutoPilotExperiment(Base):
         Enum(ExperimentStatus), nullable=False, default=ExperimentStatus.RUNNING
     )
     optimize_for: Mapped[str] = mapped_column(String(50), nullable=False, default="quality")
-    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     deployed_variant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -241,19 +243,19 @@ class AutoPilotSample(Base):
     __tablename__ = "autopilot_samples"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     experiment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("autopilot_experiments.id", ondelete="CASCADE"),
         nullable=False,
     )
     run_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
     variant_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    variant_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    variant_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
@@ -270,17 +272,17 @@ class ApprovalRequest(Base):
     __tablename__ = "approval_requests"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ApprovalStatus] = mapped_column(
         Enum(ApprovalStatus), nullable=False, default=ApprovalStatus.PENDING
     )
-    request_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    response_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    request_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    response_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     reviewer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reviewer_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -301,10 +303,10 @@ class RoutingDecision(Base):
     __tablename__ = "routing_decisions"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     selected_model: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -312,8 +314,8 @@ class RoutingDecision(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     budget_pressure: Mapped[float] = mapped_column(Float, default=0.0)
     confidence: Mapped[float] = mapped_column(Float, default=0.1)
-    alternatives: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    slo: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    alternatives: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    slo: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -327,10 +329,10 @@ class PolicyViolation(Base):
     __tablename__ = "policy_violations"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     policy_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -351,14 +353,14 @@ class RunCheckpoint(Base):
     __tablename__ = "run_checkpoints"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     stage_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    context_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    context_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -366,7 +368,26 @@ class RunCheckpoint(Base):
 
 # Database engine and session factory
 
-engine = create_async_engine(settings.database_url, echo=False)
+def _build_engine_url() -> str:
+    """Build the database URL, defaulting to SQLite in local mode."""
+    if settings.database_url:
+        return settings.database_url
+    # Local mode: SQLite in data_dir
+    data_path = Path(settings.data_dir).resolve()
+    data_path.mkdir(parents=True, exist_ok=True)
+    return f"sqlite+aiosqlite:///{data_path}/sandcastle.db"
+
+
+def _build_engine_kwargs() -> dict:
+    """Build engine kwargs based on database type."""
+    url = _build_engine_url()
+    kwargs: dict = {"echo": False}
+    if url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+    return kwargs
+
+
+engine = create_async_engine(_build_engine_url(), **_build_engine_kwargs())
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 

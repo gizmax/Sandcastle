@@ -255,12 +255,25 @@ async def _save_checkpoint(
         logger.warning(f"Could not save checkpoint for step {step_id}: {e}")
 
 
+# In-memory cancel flags for local mode (no Redis)
+_cancel_flags: set[str] = set()
+
+
+def cancel_run_local(run_id: str) -> None:
+    """Set cancel flag in-memory (local mode without Redis)."""
+    _cancel_flags.add(run_id)
+
+
 async def _check_cancel(run_id: str) -> bool:
-    """Check if a run has been cancelled via Redis flag."""
+    """Check if a run has been cancelled via Redis flag or in-memory set."""
+    from sandcastle.config import settings
+
+    if not settings.redis_url:
+        # Local mode: check in-memory set
+        return run_id in _cancel_flags
+
     try:
         import redis.asyncio as aioredis
-
-        from sandcastle.config import settings
 
         r = aioredis.from_url(settings.redis_url)
         result = await r.get(f"cancel:{run_id}")

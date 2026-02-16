@@ -499,7 +499,11 @@ type MockRoute = {
 const routes: MockRoute[] = [
   {
     match: /^\/health$/,
-    handler: () => ({ status: "ok", sandstorm: true, redis: true, database: true }),
+    handler: () => ({ status: "ok", sandstorm: true, redis: null, database: true }),
+  },
+  {
+    match: /^\/runtime$/,
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data" }),
   },
   {
     match: /^\/stats$/,

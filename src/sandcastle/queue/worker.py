@@ -1,22 +1,22 @@
-"""Redis queue worker using arq for async workflow execution."""
+"""Queue worker - arq (Redis) or in-process (asyncio) for local mode."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-
-from arq import create_pool
-from arq.connections import RedisSettings
 
 from sandcastle.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_redis_url(url: str) -> RedisSettings:
+def _parse_redis_url(url: str):
     """Parse a Redis URL into arq RedisSettings."""
     from urllib.parse import urlparse
+
+    from arq.connections import RedisSettings
 
     parsed = urlparse(url)
     return RedisSettings(
@@ -53,7 +53,7 @@ async def run_workflow_job(
     callback_url = None
 
     async with async_session() as session:
-        run = await session.get(Run, uuid.UUID(run_id))
+        run = await session.get(Run, run_id)
         if run:
             run.status = RunStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)
@@ -95,7 +95,7 @@ async def run_workflow_job(
 
         # Update DB with result
         async with async_session() as session:
-            run = await session.get(Run, uuid.UUID(run_id))
+            run = await session.get(Run, run_id)
             if run:
                 run.status = status_map.get(result.status, RunStatus.FAILED)
                 run.output_data = result.outputs
@@ -141,7 +141,7 @@ async def run_workflow_job(
     except Exception as e:
         logger.error(f"Run {run_id} failed: {e}")
         async with async_session() as session:
-            run = await session.get(Run, uuid.UUID(run_id))
+            run = await session.get(Run, run_id)
             if run:
                 run.status = RunStatus.FAILED
                 run.completed_at = datetime.now(timezone.utc)
@@ -183,14 +183,26 @@ async def shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    """Arq worker settings."""
+    """Arq worker settings (only used with Redis)."""
 
     functions = [run_workflow_job]
     on_startup = startup
     on_shutdown = shutdown
-    redis_settings = _parse_redis_url(settings.redis_url)
     max_jobs = 10
     job_timeout = 600
+
+    @classmethod
+    def get_redis_settings(cls):
+        if settings.redis_url:
+            return _parse_redis_url(settings.redis_url)
+        return None
+
+    redis_settings = property(get_redis_settings)
+
+
+# Lazy init: only set redis_settings when Redis is configured
+if settings.redis_url:
+    WorkerSettings.redis_settings = _parse_redis_url(settings.redis_url)
 
 
 async def enqueue_workflow(
@@ -202,16 +214,35 @@ async def enqueue_workflow(
     skip_steps: list[str] | None = None,
     step_overrides: dict | None = None,
 ) -> None:
-    """Enqueue a workflow job into the Redis queue."""
-    redis = await create_pool(_parse_redis_url(settings.redis_url))
-    await redis.enqueue_job(
-        "run_workflow_job",
-        workflow_yaml,
-        input_data,
-        run_id,
-        max_cost_usd=max_cost_usd,
-        initial_context=initial_context,
-        skip_steps=skip_steps,
-        step_overrides=step_overrides,
-    )
-    await redis.close()
+    """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task)."""
+    if settings.redis_url:
+        # Production mode: enqueue via arq/Redis
+        from arq import create_pool
+
+        redis = await create_pool(_parse_redis_url(settings.redis_url))
+        await redis.enqueue_job(
+            "run_workflow_job",
+            workflow_yaml,
+            input_data,
+            run_id,
+            max_cost_usd=max_cost_usd,
+            initial_context=initial_context,
+            skip_steps=skip_steps,
+            step_overrides=step_overrides,
+        )
+        await redis.close()
+    else:
+        # Local mode: run directly in-process
+        logger.info(f"Local mode: executing run {run_id} in-process")
+        asyncio.create_task(
+            run_workflow_job(
+                {},  # empty ctx for in-process
+                workflow_yaml,
+                input_data,
+                run_id,
+                max_cost_usd=max_cost_usd,
+                initial_context=initial_context,
+                skip_steps=skip_steps,
+                step_overrides=step_overrides,
+            )
+        )

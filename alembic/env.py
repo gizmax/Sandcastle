@@ -19,6 +19,13 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Guard: skip Alembic migrations for SQLite (tables are created via create_all)
+if settings.is_local_mode:
+    import sys
+
+    print("Skipping Alembic migrations in local mode (SQLite uses create_all).")
+    sys.exit(0)
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
