@@ -720,6 +720,64 @@
       color: var(--text-dim);
     }
 
+    /* ---- MORE PROJECTS ---- */
+    .projects-section {
+      border-top: 1px solid var(--border);
+    }
+
+    .projects-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 48px;
+    }
+
+    .project-card {
+      padding: 28px 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s, transform 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .project-card:hover {
+      border-color: var(--border-light);
+      transform: translateY(-2px);
+    }
+
+    .project-card .project-icon {
+      font-size: 32px;
+    }
+
+    .project-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .project-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      flex: 1;
+    }
+
+    .project-card .project-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--accent);
+      margin-top: 4px;
+    }
+
+    .project-card .project-link:hover {
+      color: var(--accent-hover);
+    }
+
     /* ---- FOOTER ---- */
     footer {
       border-top: 1px solid var(--border);
@@ -859,6 +917,10 @@
         grid-template-columns: 1fr;
         gap: 32px;
       }
+
+      .projects-grid {
+        grid-template-columns: 1fr 1fr;
+      }
     }
 
     @media (max-width: 600px) {
@@ -902,6 +964,10 @@
 
       .templates-grid {
         grid-template-columns: repeat(2, 1fr);
+      }
+
+      .projects-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -1321,6 +1387,35 @@
           <span class="support-pill">🐛 Faster bug fixes</span>
           <span class="support-pill">📖 Better documentation</span>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- More Projects -->
+  <section class="projects-section">
+    <div class="container fade-in">
+      <span class="section-label">More from @gizmax</span>
+      <h2 class="section-title">Check out my other projects</h2>
+      <p class="section-subtitle">Apps I built and shipped. Give them a try.</p>
+      <div class="projects-grid">
+        <a href="https://gizmax.cz/cardigo/" target="_blank" rel="noopener" class="project-card">
+          <span class="project-icon">💳</span>
+          <h3>Cardigo Wallet</h3>
+          <p>Your loyalty cards, digitized. Scan barcodes, snap photos, store everything locally. Works offline, no account needed.</p>
+          <span class="project-link">Try Cardigo &rarr;</span>
+        </a>
+        <a href="https://gizmax.cz/eyeon/" target="_blank" rel="noopener" class="project-card">
+          <span class="project-icon">👁️</span>
+          <h3>EYEON</h3>
+          <p>Scientifically-designed vision training exercises. Neuroplasticity-based workouts for eye health and post-surgery recovery.</p>
+          <span class="project-link">Try EYEON &rarr;</span>
+        </a>
+        <a href="https://gizmax.cz/hush/" target="_blank" rel="noopener" class="project-card">
+          <span class="project-icon">😴</span>
+          <h3>Hush</h3>
+          <p>Sleep timer for Mac. Set it and let your computer dream of electric sheep. Auto-sleep after movies or podcasts.</p>
+          <span class="project-link">Try Hush &rarr;</span>
+        </a>
       </div>
     </div>
   </section>
