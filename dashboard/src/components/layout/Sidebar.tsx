@@ -104,7 +104,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </nav>
 
         <div className="border-t border-border px-5 py-4">
-          <p className="text-xs text-muted-foreground">Sandcastle v0.3.0</p>
+          <p className="text-xs text-muted-foreground">Sandcastle v0.4.0</p>
         </div>
       </aside>
     </>
