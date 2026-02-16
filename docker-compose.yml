@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sandcastle
+      POSTGRES_PASSWORD: sandcastle
+      POSTGRES_DB: sandcastle
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandcastle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not exposed to host - only accessible within the Docker network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not exposed to host - only accessible within the Docker network
+
+  sandcastle:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
+      REDIS_URL: redis://redis:6379/0
+      AUTH_REQUIRED: "true"
+      STORAGE_BACKEND: local
+      DATA_DIR: /app/data
+      WORKFLOWS_DIR: /app/workflows
+      LOG_LEVEL: info
+      DASHBOARD_ORIGIN: "*"
+    volumes:
+      - app_data:/app/data
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["arq", "sandcastle.queue.worker.WorkerSettings"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
+      REDIS_URL: redis://redis:6379/0
+      AUTH_REQUIRED: "true"
+      STORAGE_BACKEND: local
+      DATA_DIR: /app/data
+      WORKFLOWS_DIR: /app/workflows
+      LOG_LEVEL: info
+    volumes:
+      - app_data:/app/data
+
+volumes:
+  pg_data:
+  redis_data:
+  app_data:

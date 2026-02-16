@@ -1,0 +1,23 @@
+# Local development override - runs Sandcastle in local mode (SQLite + in-process queue).
+# Usage: docker compose -f docker-compose.local.yml up
+services:
+  sandcastle:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Empty DATABASE_URL and REDIS_URL trigger local mode automatically
+      DATABASE_URL: ""
+      REDIS_URL: ""
+      AUTH_REQUIRED: "false"
+      STORAGE_BACKEND: local
+      DATA_DIR: /app/data
+      WORKFLOWS_DIR: /app/workflows
+      LOG_LEVEL: debug
+    volumes:
+      - local_data:/app/data
+      - ./workflows:/app/workflows
+
+volumes:
+  local_data:
