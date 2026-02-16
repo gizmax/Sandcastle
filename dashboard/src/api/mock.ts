@@ -1,5 +1,23 @@
 import type { ApiResponse } from "./client";
 
+// NOTE: GET /events is a Server-Sent Events (SSE) endpoint - cannot be mocked
+// via mockFetch. The endpoint streams real-time events with the following format:
+//
+//   event: run.started | run.completed | run.failed |
+//          step.started | step.completed | step.failed | dlq.new
+//   data: {"type": "<event_type>", "data": {...}, "timestamp": "ISO8601"}
+//
+// Event data payloads:
+//   run.started    -> { run_id, workflow }
+//   run.completed  -> { run_id, status, workflow, duration_seconds, total_cost_usd }
+//   run.failed     -> { run_id, workflow, error }
+//   step.started   -> { run_id, step_name, workflow }
+//   step.completed -> { run_id, step_name, status, cost_usd, duration_seconds }
+//   step.failed    -> { run_id, step_name, error }
+//   dlq.new        -> { run_id, step_name, error }
+//
+// Connect from the frontend with: new EventSource("/events")
+
 interface MockStep {
   step_id: string;
   parallel_index: number | null;
@@ -489,6 +507,208 @@ const MOCK_OPTIMIZER_STATS = {
   estimated_savings_30d_usd: 3.45,
 };
 
+const MOCK_TEMPLATES = [
+  {
+    name: "summarize",
+    description: "Summarize text input with configurable detail level",
+    tags: ["NLP", "Text"],
+    step_count: 2,
+  },
+  {
+    name: "translate",
+    description: "Detect language and translate to target language",
+    tags: ["NLP", "Translation"],
+    step_count: 2,
+  },
+  {
+    name: "research_agent",
+    description: "Multi-source research with parallel analysis and fact extraction",
+    tags: ["Research", "Multi-agent"],
+    step_count: 4,
+  },
+  {
+    name: "chain_of_thought",
+    description: "Step-by-step reasoning through complex problems",
+    tags: ["Reasoning", "Chain"],
+    step_count: 3,
+  },
+  {
+    name: "review_and_approve",
+    description: "Content generation with human approval gate before publishing",
+    tags: ["Human-in-loop", "Content"],
+    step_count: 3,
+  },
+];
+
+const TEMPLATE_YAMLS: Record<string, string> = {
+  summarize: `name: "summarize"
+description: "Summarize text input with configurable detail level"
+sandstorm_url: "\${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "extract"
+    prompt: |
+      Extract the key points from the following text.
+      Focus on the main arguments and supporting evidence.
+      Input: {input.text}
+    model: haiku
+
+  - id: "summarize"
+    prompt: |
+      Write a concise summary based on these key points.
+      Detail level: {input.detail_level}
+      Key points: {steps.extract.output}
+    model: sonnet
+    depends_on:
+      - "extract"
+`,
+  translate: `name: "translate"
+description: "Detect language and translate to target language"
+sandstorm_url: "\${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "detect_language"
+    prompt: |
+      Detect the language of the following text and return the language code.
+      Text: {input.text}
+    model: haiku
+
+  - id: "translate"
+    prompt: |
+      Translate the following text to {input.target_language}.
+      Source language: {steps.detect_language.output}
+      Text: {input.text}
+    model: sonnet
+    depends_on:
+      - "detect_language"
+`,
+  research_agent: `name: "research_agent"
+description: "Multi-source research with parallel analysis and fact extraction"
+sandstorm_url: "\${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "plan"
+    prompt: |
+      Create a research plan for the topic: {input.topic}
+      Identify 3-5 angles to investigate and list them as JSON array.
+    model: sonnet
+
+  - id: "research"
+    prompt: |
+      Research the following angle in depth.
+      Topic: {input.topic}
+      Angle: {item}
+      Return key findings with sources.
+    model: sonnet
+    depends_on:
+      - "plan"
+    parallel_over: "steps.plan.output"
+
+  - id: "extract_facts"
+    prompt: |
+      Extract verified facts from all research findings.
+      Findings: {steps.research.output}
+      Return a structured list of facts with confidence scores.
+    model: sonnet
+    depends_on:
+      - "research"
+
+  - id: "synthesize"
+    prompt: |
+      Synthesize the research into a comprehensive report.
+      Facts: {steps.extract_facts.output}
+      Include an executive summary, detailed findings, and recommendations.
+    model: opus
+    depends_on:
+      - "extract_facts"
+`,
+  chain_of_thought: `name: "chain_of_thought"
+description: "Step-by-step reasoning through complex problems"
+sandstorm_url: "\${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "decompose"
+    prompt: |
+      Break down this problem into logical sub-problems.
+      Problem: {input.problem}
+      Return a numbered list of sub-problems to solve in order.
+    model: sonnet
+
+  - id: "reason"
+    prompt: |
+      Solve each sub-problem step by step.
+      Sub-problems: {steps.decompose.output}
+      Show your reasoning for each step.
+    model: opus
+
+  - id: "conclude"
+    prompt: |
+      Based on the step-by-step reasoning, provide the final answer.
+      Reasoning: {steps.reason.output}
+      Original problem: {input.problem}
+      Verify the answer is consistent with all reasoning steps.
+    model: sonnet
+    depends_on:
+      - "reason"
+`,
+  review_and_approve: `name: "review_and_approve"
+description: "Content generation with human approval gate before publishing"
+sandstorm_url: "\${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "generate"
+    prompt: |
+      Generate content based on the following brief.
+      Brief: {input.brief}
+      Tone: {input.tone}
+      Target audience: {input.audience}
+    model: sonnet
+
+  - id: "review"
+    type: approval
+    approval_config:
+      message: "Review the generated content before publishing"
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+    depends_on:
+      - "generate"
+
+  - id: "publish"
+    prompt: |
+      Format the approved content for publishing.
+      Content: {steps.generate.output}
+      Format: {input.output_format}
+    model: haiku
+    depends_on:
+      - "review"
+`,
+};
+
+function getTemplateDetail(name: string) {
+  const template = MOCK_TEMPLATES.find((t) => t.name === name);
+  if (!template) return null;
+  return {
+    ...template,
+    yaml: TEMPLATE_YAMLS[name] || `name: "${name}"\nsteps: []`,
+  };
+}
+
 const MOCK_SETTINGS = {
   sandstorm_url: "http://localhost:8080",
   anthropic_api_key: "****Qf8x",
@@ -608,6 +828,16 @@ const routes: MockRoute[] = [
   {
     match: /^\/optimizer\/stats$/,
     handler: () => MOCK_OPTIMIZER_STATS,
+  },
+  {
+    match: /^\/templates$/,
+    method: "GET",
+    handler: () => MOCK_TEMPLATES,
+  },
+  {
+    match: /^\/templates\/([^/]+)$/,
+    method: "GET",
+    handler: (params) => getTemplateDetail(params._1),
   },
   {
     match: /^\/settings$/,

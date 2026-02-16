@@ -1,0 +1,52 @@
+# name: Chain of Thought Solver
+# description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer
+# tags: [reasoning, chain-of-thought, problem-solving]
+
+name: chain-of-thought-solver
+description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: decompose
+    prompt: >
+      Analyze the following problem and break it down into smaller,
+      manageable sub-problems. List each sub-problem with a clear
+      description of what needs to be solved.
+      Problem: {input.problem}
+    model: sonnet
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        sub_problems:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              description:
+                type: string
+
+  - id: solve
+    depends_on: [decompose]
+    prompt: >
+      Solve each of the following sub-problems step by step.
+      Show your reasoning for each solution.
+      Sub-problems: {steps.decompose.output}
+    model: sonnet
+    max_turns: 15
+
+  - id: synthesize
+    depends_on: [solve]
+    prompt: >
+      Combine the solutions to all sub-problems into a coherent final answer.
+      Verify that the combined solution addresses the original problem completely.
+      Original problem: {input.problem}
+      Sub-problem solutions: {steps.solve.output}
+    model: sonnet
+    max_turns: 10

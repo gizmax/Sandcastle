@@ -216,6 +216,56 @@ async def runtime_info() -> ApiResponse:
     )
 
 
+# --- Templates ---
+
+
+@router.get("/templates")
+async def list_templates() -> ApiResponse:
+    """List all available workflow templates.
+
+    Public endpoint - no authentication required.
+    """
+    from sandcastle.templates import list_templates as _list_templates
+
+    templates = _list_templates()
+    return ApiResponse(
+        data=[
+            {
+                "name": t.name,
+                "description": t.description,
+                "tags": t.tags,
+                "step_count": t.step_count,
+            }
+            for t in templates
+        ]
+    )
+
+
+@router.get("/templates/{template_name}")
+async def get_template(template_name: str) -> ApiResponse:
+    """Get a single workflow template with full YAML content and metadata.
+
+    Public endpoint - no authentication required.
+    """
+    from sandcastle.templates import get_template as _get_template
+
+    try:
+        content, info = _get_template(template_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return ApiResponse(
+        data={
+            "name": info.name,
+            "description": info.description,
+            "tags": info.tags,
+            "step_count": info.step_count,
+            "file_name": info.file_name,
+            "content": content,
+        }
+    )
+
+
 # --- Stats ---
 
 
@@ -798,6 +848,46 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
 def _sse_event(event: str, data: dict) -> str:
     """Format a server-sent event."""
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+@router.get("/events")
+async def global_event_stream() -> StreamingResponse:
+    """Stream global real-time events via SSE.
+
+    Broadcasts run lifecycle, step progress, and DLQ events to all
+    connected dashboard clients. Clients receive events as they happen
+    across all workflows and runs.
+
+    Event types: run.started, run.completed, run.failed,
+    step.started, step.completed, step.failed, dlq.new
+    """
+    from sandcastle.engine.events import event_bus
+
+    queue = await event_bus.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield _sse_event(event["type"], event["data"])
+                except asyncio.TimeoutError:
+                    # Send keepalive comment to prevent connection timeout
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await event_bus.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/runs")

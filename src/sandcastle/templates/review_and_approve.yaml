@@ -1,0 +1,41 @@
+# name: Review and Approve
+# description: Generates content, pauses for human review and approval, then publishes the approved content
+# tags: [approval, human-in-the-loop, content, review]
+
+name: review-and-approve
+description: Generates content, pauses for human review and approval, then publishes the approved content
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: generate
+    prompt: >
+      Generate content based on the following brief.
+      Produce a polished draft ready for review.
+      Brief: {input.brief}
+      Target audience: {input.audience}
+    model: sonnet
+    max_turns: 10
+
+  - id: review-gate
+    depends_on: [generate]
+    type: approval
+    prompt: Review the generated content before publishing
+    approval_config:
+      message: "Review the generated content and approve for publishing"
+      show_data: steps.generate.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  - id: publish
+    depends_on: [review-gate]
+    prompt: >
+      Format and finalize the approved content for publishing.
+      Apply any reviewer edits and prepare the final output.
+      Approved content: {steps.generate.output}
+    model: haiku
+    max_turns: 3

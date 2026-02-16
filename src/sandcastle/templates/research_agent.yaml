@@ -1,0 +1,48 @@
+# name: Research Agent
+# description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results
+# tags: [research, parallel, analysis, extraction]
+
+name: research-agent
+description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: search
+    prompt: >
+      Search for comprehensive information about: {input.topic}.
+      Gather multiple sources and relevant data points.
+      Return a list of sources with their content summaries.
+    model: sonnet
+    max_turns: 10
+
+  - id: analyze-sources
+    depends_on: [search]
+    prompt: >
+      Analyze the credibility and relevance of each source found.
+      Rate each source and identify potential biases or conflicts.
+      Sources: {steps.search.output}
+    model: sonnet
+    max_turns: 5
+
+  - id: extract-facts
+    depends_on: [search]
+    prompt: >
+      Extract key facts, statistics, and claims from the search results.
+      Categorize them by topic and note supporting evidence.
+      Sources: {steps.search.output}
+    model: sonnet
+    max_turns: 5
+
+  - id: synthesize
+    depends_on: [analyze-sources, extract-facts]
+    prompt: >
+      Combine the source analysis and extracted facts into a comprehensive
+      research report. Include a summary, key findings, and source reliability notes.
+      Source analysis: {steps.analyze-sources.output}
+      Extracted facts: {steps.extract-facts.output}
+    model: sonnet
+    max_turns: 10

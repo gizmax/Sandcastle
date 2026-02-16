@@ -4,6 +4,7 @@ import { Menu, Search, PlayCircle, GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
+import { LiveIndicator } from "@/components/shared/LiveIndicator";
 import {
   NotificationCenter,
   type Notification,
@@ -175,6 +176,7 @@ export function Header({
       </div>
 
       <div className="ml-auto flex items-center gap-1">
+        <LiveIndicator />
         <ThemeToggle />
         <NotificationCenter
           notifications={notifications}

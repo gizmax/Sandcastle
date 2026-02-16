@@ -16,6 +16,7 @@ from sandcastle.engine.dag import (
     StepDefinition,
     WorkflowDefinition,
 )
+from sandcastle.engine.events import event_bus
 from sandcastle.engine.sandbox import SandstormClient, SandstormError
 from sandcastle.engine.storage import StorageBackend
 
@@ -379,6 +380,13 @@ async def execute_step_with_retry(
         parallel_index=parallel_index,
     )
 
+    # Broadcast step.started event
+    event_bus.publish("step.started", {
+        "run_id": context.run_id,
+        "step_name": step.id,
+        "workflow": context.workflow_name,
+    })
+
     for attempt in range(1, max_attempts + 1):
         result = await _execute_step_once(
             step, context, sandbox, storage, parallel_index, attempt
@@ -423,6 +431,16 @@ async def execute_step_with_retry(
                 duration_seconds=result.duration_seconds,
                 attempt=attempt,
             )
+
+            # Broadcast step.completed event
+            event_bus.publish("step.completed", {
+                "run_id": context.run_id,
+                "step_name": step.id,
+                "status": "completed",
+                "cost_usd": result.cost_usd,
+                "duration_seconds": result.duration_seconds,
+            })
+
             return result
 
         # Last attempt - check for fallback
@@ -462,6 +480,14 @@ async def execute_step_with_retry(
                 attempt=attempt,
                 error=result.error,
             )
+
+            # Broadcast step.failed event
+            event_bus.publish("step.failed", {
+                "run_id": context.run_id,
+                "step_name": step.id,
+                "error": result.error,
+            })
+
             return result
 
         delay = _backoff_delay(attempt, backoff)
@@ -1090,6 +1116,12 @@ async def execute_workflow(
         e2b_api_key=settings.e2b_api_key,
     )
 
+    # Broadcast run.started event
+    event_bus.publish("run.started", {
+        "run_id": run_id,
+        "workflow": workflow.name,
+    })
+
     try:
         for stage_idx, stage in enumerate(plan.stages):
             # Check cancellation before each stage
@@ -1364,6 +1396,16 @@ async def execute_workflow(
             storage_path = resolve_templates(workflow.on_complete.storage_path, context)
             await storage.write(storage_path, json.dumps(context.step_outputs))
 
+        # Broadcast run.completed event
+        duration = (completed_at - started_at).total_seconds()
+        event_bus.publish("run.completed", {
+            "run_id": run_id,
+            "status": "completed",
+            "workflow": workflow.name,
+            "duration_seconds": duration,
+            "total_cost_usd": context.total_cost,
+        })
+
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -1386,6 +1428,11 @@ async def execute_workflow(
 
     except StepBlocked as e:
         completed_at = datetime.now(timezone.utc)
+        event_bus.publish("run.failed", {
+            "run_id": run_id,
+            "workflow": workflow.name,
+            "error": f"Policy blocked: {e}",
+        })
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -1398,6 +1445,11 @@ async def execute_workflow(
 
     except StepExecutionError as e:
         completed_at = datetime.now(timezone.utc)
+        event_bus.publish("run.failed", {
+            "run_id": run_id,
+            "workflow": workflow.name,
+            "error": str(e),
+        })
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -1411,6 +1463,11 @@ async def execute_workflow(
     except Exception as e:
         completed_at = datetime.now(timezone.utc)
         logger.error(f"Workflow '{workflow.name}' failed: {e}")
+        event_bus.publish("run.failed", {
+            "run_id": run_id,
+            "workflow": workflow.name,
+            "error": str(e),
+        })
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -1523,6 +1580,14 @@ async def _send_to_dead_letter(
             )
             session.add(dlq_item)
             await session.commit()
+
+        # Broadcast dlq.new event
+        event_bus.publish("dlq.new", {
+            "run_id": run_id,
+            "step_name": step_id,
+            "error": error,
+        })
+
         logger.info(f"Step '{step_id}' sent to dead letter queue")
     except Exception as e:
         logger.error(f"Failed to insert into dead letter queue: {e}")

@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Public endpoints that don't require authentication
 PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
+# Path prefixes that don't require authentication
+PUBLIC_PREFIXES = ("/templates",)
+
 
 def hash_key(key: str) -> str:
     """Hash an API key with SHA-256."""
@@ -51,6 +54,10 @@ async def auth_middleware(request: Request, call_next):
 
     # Skip auth for public paths
     if request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+
+    # Skip auth for public path prefixes (e.g. /templates, /templates/{name})
+    if any(request.url.path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
         return await call_next(request)
 
     # Skip auth for dashboard static files

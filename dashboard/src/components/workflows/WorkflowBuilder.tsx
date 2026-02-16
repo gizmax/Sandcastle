@@ -12,10 +12,11 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor, Layers } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import { StepConfigPanel, type StepConfig } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
+import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
 import { cn } from "@/lib/utils";
 
 const nodeTypes: NodeTypes = {
@@ -174,6 +175,13 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     initialWorkflow?.file_name.replace(".yaml", "") || "my-workflow"
   );
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [templateBrowserOpen, setTemplateBrowserOpen] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [pendingTemplate, setPendingTemplate] = useState<{
+    name: string;
+    yaml: string;
+    steps: Array<{ id: string; model?: string; depends_on?: string[] }>;
+  } | null>(null);
   const [counter, setCounter] = useState(initial ? initial.steps.length + 1 : 1);
 
   const onConnect = useCallback(
@@ -262,6 +270,72 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     setSelectedStepId(null);
   }, [selectedStepId, setNodes, setEdges]);
 
+  // Parse template YAML to extract step definitions
+  const parseTemplateSteps = useCallback(
+    (yamlStr: string): Array<{ id: string; model?: string; depends_on?: string[] }> => {
+      const parsed: Array<{ id: string; model?: string; depends_on?: string[] }> = [];
+      const stepBlocks = yamlStr.split(/\n\s+-\s+id:\s+/).slice(1);
+      for (const block of stepBlocks) {
+        const idMatch = block.match(/^"?([^"\n]+)"?/);
+        if (!idMatch) continue;
+        const id = idMatch[1];
+        const modelMatch = block.match(/model:\s+(\w+)/);
+        const model = modelMatch ? modelMatch[1] : undefined;
+        const deps: string[] = [];
+        const depsSection = block.match(/depends_on:\s*\n((?:\s+-\s+"?[^"\n]+"?\n?)*)/);
+        if (depsSection) {
+          const depMatches = depsSection[1].matchAll(/-\s+"?([^"\n]+)"?/g);
+          for (const dm of depMatches) {
+            deps.push(dm[1]);
+          }
+        }
+        parsed.push({ id, model, depends_on: deps.length > 0 ? deps : undefined });
+      }
+      return parsed;
+    },
+    []
+  );
+
+  // Apply a template to the canvas
+  const applyTemplate = useCallback(
+    (templateData: { name: string; yaml: string; steps: Array<{ id: string; model?: string; depends_on?: string[] }> }) => {
+      const built = buildInitialState({
+        name: templateData.name,
+        description: "",
+        steps_count: templateData.steps.length,
+        file_name: `${templateData.name}.yaml`,
+        steps: templateData.steps,
+      });
+
+      setWorkflowName(templateData.name);
+      setSteps(built.steps);
+      setNodes(built.nodes);
+      setEdges(built.edges);
+      setCounter(built.steps.length + 1);
+      setSelectedStepId(null);
+      setPendingTemplate(null);
+      setConfirmReplace(false);
+    },
+    [setNodes, setEdges]
+  );
+
+  // Handle template selection from the browser
+  const handleTemplateSelect = useCallback(
+    (template: { name: string; yaml: string; step_count: number }) => {
+      setTemplateBrowserOpen(false);
+      const parsedSteps = parseTemplateSteps(template.yaml);
+      const templateData = { name: template.name, yaml: template.yaml, steps: parsedSteps };
+
+      if (nodes.length > 0) {
+        setPendingTemplate(templateData);
+        setConfirmReplace(true);
+      } else {
+        applyTemplate(templateData);
+      }
+    },
+    [nodes.length, parseTemplateSteps, applyTemplate]
+  );
+
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const yaml = generateYaml(workflowName, steps, edges);
 
@@ -287,6 +361,17 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
           Agent Step
         </button>
 
+        <button
+          onClick={() => setTemplateBrowserOpen(true)}
+          className={cn(
+            "mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5",
+            "text-xs font-medium text-muted hover:border-accent hover:text-accent transition-colors"
+          )}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          From Template
+        </button>
+
         <div className="mt-6">
           <label className="mb-1 block text-xs font-medium text-muted">Workflow Name</label>
           <input
@@ -307,6 +392,12 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         className="absolute left-3 top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface shadow-sm text-muted hover:text-accent hover:border-accent transition-colors lg:hidden"
       >
         <Plus className="h-4 w-4" />
+      </button>
+      <button
+        onClick={() => setTemplateBrowserOpen(true)}
+        className="absolute left-14 top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface shadow-sm text-muted hover:text-accent hover:border-accent transition-colors lg:hidden"
+      >
+        <Layers className="h-4 w-4" />
       </button>
 
       {/* Canvas */}
@@ -380,6 +471,50 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
       {/* YAML Preview Drawer */}
       <YamlPreview yaml={yaml} open={yamlOpen} onClose={() => setYamlOpen(false)} />
+
+      {/* Template Browser */}
+      <TemplateBrowser
+        open={templateBrowserOpen}
+        onClose={() => setTemplateBrowserOpen(false)}
+        onSelect={handleTemplateSelect}
+      />
+
+      {/* Confirm replace dialog */}
+      {confirmReplace && (
+        <>
+          <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setConfirmReplace(false)} />
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-xl">
+              <h3 className="text-sm font-semibold text-foreground mb-2">Replace current workflow?</h3>
+              <p className="text-xs text-muted leading-relaxed mb-5">
+                This will replace all existing steps with the template. This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setPendingTemplate(null);
+                    setConfirmReplace(false);
+                  }}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (pendingTemplate) applyTemplate(pendingTemplate);
+                  }}
+                  className={cn(
+                    "rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
+                    "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+                  )}
+                >
+                  Replace
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

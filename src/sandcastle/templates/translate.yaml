@@ -1,0 +1,36 @@
+# name: Language Translator
+# description: Detects the source language and translates text to the target language
+# tags: [translation, language, i18n]
+
+name: language-translator
+description: Detects the source language and translates text to the target language
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 5
+default_timeout: 120
+
+steps:
+  - id: detect-language
+    prompt: >
+      Analyze the following text and detect its language.
+      Return the language name and ISO 639-1 code.
+      Text: {input.text}
+    model: haiku
+    max_turns: 3
+    output_schema:
+      type: object
+      properties:
+        language:
+          type: string
+        iso_code:
+          type: string
+
+  - id: translate
+    depends_on: [detect-language]
+    prompt: >
+      Translate the following text from {steps.detect-language.output.language}
+      to {input.target_language}. Preserve the original tone and meaning.
+      Text: {input.text}
+    model: sonnet
+    max_turns: 5
