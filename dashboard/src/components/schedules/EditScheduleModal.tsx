@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import { CronBuilder } from "@/components/schedules/CronBuilder";
 import { cn } from "@/lib/utils";
 
 interface ScheduleItem {
@@ -27,16 +28,11 @@ export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditSch
     onSubmit(schedule.id, { cron_expression: cronExpression, enabled });
   }
 
-  const inputClass = cn(
-    "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-  );
-
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl max-h-[85vh] overflow-y-auto">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">Edit Schedule</h2>
             <button
@@ -50,20 +46,10 @@ export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditSch
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">Workflow</label>
-              <p className="text-sm text-muted-foreground">{schedule.workflow_name}</p>
+              <p className="text-sm text-foreground">{schedule.workflow_name}</p>
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted">Cron Expression</label>
-              <input
-                type="text"
-                value={cronExpression}
-                onChange={(e) => setCronExpression(e.target.value)}
-                required
-                className={cn(inputClass, "font-mono")}
-              />
-              <p className="text-[11px] text-muted-foreground mt-0.5">minute hour day month weekday. Example: 0 */6 * * * = every 6 hours.</p>
-            </div>
+            <CronBuilder value={cronExpression} onChange={setCronExpression} />
 
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-muted">Enabled</label>
