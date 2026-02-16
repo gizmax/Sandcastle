@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from sandcastle.engine.dag import (
+    CsvOutputConfig,
     RetryConfig,
     StepDefinition,
     build_plan,
@@ -14,6 +18,7 @@ from sandcastle.engine.dag import (
 )
 from sandcastle.engine.executor import (
     RunContext,
+    _write_csv_output,
     execute_step_with_retry,
     execute_workflow,
     resolve_templates,
@@ -328,3 +333,112 @@ steps:
 
         assert result.status == "failed"
         assert result.error is not None
+
+
+# --- Tests: _write_csv_output ---
+
+
+class TestWriteCsvOutput:
+    def test_dict_output_new_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = make_step(id="export")
+            step.csv_output = CsvOutputConfig(
+                directory=tmpdir, mode="new_file", filename="test"
+            )
+            output = {"name": "Alice", "score": 95}
+            _write_csv_output(step, output, "run-123")
+
+            files = list(Path(tmpdir).glob("test_*.csv"))
+            assert len(files) == 1
+            with open(files[0]) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            assert len(rows) == 1
+            assert rows[0]["name"] == "Alice"
+            assert rows[0]["score"] == "95"
+
+    def test_list_of_dicts_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = make_step(id="export")
+            step.csv_output = CsvOutputConfig(
+                directory=tmpdir, mode="new_file", filename="multi"
+            )
+            output = [
+                {"name": "Alice", "score": 95},
+                {"name": "Bob", "score": 87},
+            ]
+            _write_csv_output(step, output, "run-456")
+
+            files = list(Path(tmpdir).glob("multi_*.csv"))
+            assert len(files) == 1
+            with open(files[0]) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            assert len(rows) == 2
+            assert rows[1]["name"] == "Bob"
+
+    def test_append_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = make_step(id="log")
+            step.csv_output = CsvOutputConfig(
+                directory=tmpdir, mode="append", filename="log"
+            )
+            # First write
+            _write_csv_output(step, {"event": "start"}, "run-1")
+            # Second write
+            _write_csv_output(step, {"event": "end"}, "run-2")
+
+            filepath = Path(tmpdir) / "log.csv"
+            assert filepath.exists()
+            with open(filepath) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            assert len(rows) == 2
+            assert rows[0]["event"] == "start"
+            assert rows[1]["event"] == "end"
+
+    def test_string_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = make_step(id="text")
+            step.csv_output = CsvOutputConfig(
+                directory=tmpdir, mode="new_file", filename="text"
+            )
+            _write_csv_output(step, "Hello world", "run-str")
+
+            files = list(Path(tmpdir).glob("text_*.csv"))
+            assert len(files) == 1
+            with open(files[0]) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            assert len(rows) == 1
+            assert rows[0]["value"] == "Hello world"
+
+    def test_default_filename_uses_step_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = make_step(id="my-step")
+            step.csv_output = CsvOutputConfig(
+                directory=tmpdir, mode="new_file", filename=""
+            )
+            _write_csv_output(step, {"x": 1}, "run-id")
+
+            files = list(Path(tmpdir).glob("my-step_*.csv"))
+            assert len(files) == 1
+
+    def test_no_csv_output_config(self):
+        """Should silently do nothing when csv_output is None."""
+        step = make_step(id="noop")
+        step.csv_output = None
+        # Should not raise
+        _write_csv_output(step, {"x": 1}, "run-noop")
+
+    def test_creates_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = str(Path(tmpdir) / "a" / "b" / "c")
+            step = make_step(id="deep")
+            step.csv_output = CsvOutputConfig(
+                directory=nested, mode="new_file", filename="deep"
+            )
+            _write_csv_output(step, {"val": 42}, "run-dir")
+
+            files = list(Path(nested).glob("deep_*.csv"))
+            assert len(files) == 1

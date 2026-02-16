@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from sandcastle.engine.dag import (
@@ -336,6 +340,81 @@ def _check_budget(context: RunContext) -> str | None:
     return None
 
 
+def _write_csv_output(
+    step: StepDefinition,
+    output: Any,
+    run_id: str,
+) -> None:
+    """Write step output to a CSV file if csv_output is configured."""
+    cfg = step.csv_output
+    if cfg is None:
+        return
+
+    from sandcastle.engine.dag import CsvOutputConfig  # noqa: F811
+
+    directory = Path(cfg.directory).expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+
+    base_name = cfg.filename or step.id
+
+    # Normalize output to list of dicts for CSV rows
+    rows: list[dict] = []
+    if isinstance(output, list):
+        for item in output:
+            if isinstance(item, dict):
+                rows.append(item)
+            else:
+                rows.append({"value": item})
+    elif isinstance(output, dict):
+        rows.append(output)
+    elif isinstance(output, str):
+        # Try to parse as JSON first
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    rows.append(item if isinstance(item, dict) else {"value": item})
+            elif isinstance(parsed, dict):
+                rows.append(parsed)
+            else:
+                rows.append({"value": parsed})
+        except (json.JSONDecodeError, ValueError):
+            rows.append({"value": output})
+    else:
+        rows.append({"value": str(output) if output is not None else ""})
+
+    if not rows:
+        return
+
+    # Collect all fieldnames across all rows
+    fieldnames: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row:
+            if key not in seen:
+                fieldnames.append(key)
+                seen.add(key)
+
+    if cfg.mode == "append":
+        filepath = directory / f"{base_name}.csv"
+        file_exists = filepath.exists() and filepath.stat().st_size > 0
+        with open(filepath, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            if not file_exists:
+                writer.writeheader()
+            writer.writerows(rows)
+        logger.info(f"CSV append: {len(rows)} rows -> {filepath}")
+    else:
+        # new_file mode: include datetime in filename
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filepath = directory / f"{base_name}_{ts}.csv"
+        with open(filepath, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        logger.info(f"CSV new file: {len(rows)} rows -> {filepath}")
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -456,6 +535,13 @@ async def execute_step_with_retry(
                     )
                 except Exception as e:
                     logger.warning(f"AutoPilot sample recording failed: {e}")
+
+            # Write CSV output if configured
+            if step.csv_output:
+                try:
+                    _write_csv_output(step, result.output, context.run_id)
+                except Exception as e:
+                    logger.warning(f"CSV export failed for step '{step.id}': {e}")
 
             # Record step completion
             await _save_run_step(

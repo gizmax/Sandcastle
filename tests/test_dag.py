@@ -325,3 +325,80 @@ steps:
         # All steps should be in a single stage
         assert len(plan.stages) == 1
         assert sorted(plan.stages[0]) == ["a", "b", "c"]
+
+
+class TestCsvOutput:
+    """Tests for CSV output configuration parsing."""
+
+    def test_csv_output_defaults(self):
+        yaml_content = """
+name: csv-test
+description: test csv output
+sandstorm_url: http://localhost:8000
+steps:
+  - id: export
+    prompt: "Generate data"
+    csv_output:
+      directory: ./results
+"""
+        workflow = parse_yaml_string(yaml_content)
+        step = workflow.get_step("export")
+        assert step.csv_output is not None
+        assert step.csv_output.directory == "./results"
+        assert step.csv_output.mode == "new_file"
+        assert step.csv_output.filename == ""
+
+    def test_csv_output_append_mode(self):
+        yaml_content = """
+name: csv-append
+description: test append mode
+sandstorm_url: http://localhost:8000
+steps:
+  - id: collect
+    prompt: "Collect data"
+    csv_output:
+      directory: /tmp/data
+      mode: append
+      filename: daily-report
+"""
+        workflow = parse_yaml_string(yaml_content)
+        step = workflow.get_step("collect")
+        assert step.csv_output is not None
+        assert step.csv_output.directory == "/tmp/data"
+        assert step.csv_output.mode == "append"
+        assert step.csv_output.filename == "daily-report"
+
+    def test_no_csv_output(self):
+        yaml_content = """
+name: no-csv
+description: no csv
+sandstorm_url: http://localhost:8000
+steps:
+  - id: step1
+    prompt: "No CSV"
+"""
+        workflow = parse_yaml_string(yaml_content)
+        step = workflow.get_step("step1")
+        assert step.csv_output is None
+
+    def test_csv_output_with_other_configs(self):
+        yaml_content = """
+name: full-step
+description: step with csv and retry
+sandstorm_url: http://localhost:8000
+steps:
+  - id: analyze
+    prompt: "Analyze data"
+    model: opus
+    retry:
+      max_attempts: 3
+    csv_output:
+      directory: ~/exports
+      mode: new_file
+"""
+        workflow = parse_yaml_string(yaml_content)
+        step = workflow.get_step("analyze")
+        assert step.csv_output is not None
+        assert step.csv_output.directory == "~/exports"
+        assert step.retry is not None
+        assert step.retry.max_attempts == 3

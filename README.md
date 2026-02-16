@@ -6,7 +6,7 @@
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-231%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-247%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -349,6 +349,8 @@ Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCA
 | **Settings management UI** | - | Yes |
 | **Dark mode** | - | Yes |
 | **Visual workflow builder** | - | Yes |
+| **Directory input (file processing)** | - | Yes |
+| **CSV export per step** | - | Yes |
 | **Human approval gates** | - | Yes |
 | **Self-optimizing workflows (AutoPilot)** | - | Yes |
 | **Hierarchical workflows (workflow-as-step)** | - | Yes |
@@ -622,6 +624,58 @@ The optimizer scores each model option across multiple objectives, filters out o
 
 ---
 
+## Directory Input & CSV Export
+
+Process files from a directory and export results to CSV - all configured in YAML. The workflow builder includes a directory browser and CSV export toggle per step.
+
+### Directory input
+
+Mark a step as directory-aware and Sandcastle adds a `directory` field to the workflow's input schema. Users provide a path at run time, and the agent reads files from that directory.
+
+```yaml
+input_schema:
+  required: ["directory"]
+  properties:
+    directory:
+      type: string
+      description: "Path to directory"
+      default: "~/Documents"
+
+steps:
+  - id: "analyze"
+    prompt: |
+      Read every file in {input.directory} and summarize the key findings.
+```
+
+### CSV export
+
+Any step can export its output to CSV. Two modes:
+
+- **new_file** - each run creates a timestamped file (e.g. `report_20260217_143022.csv`)
+- **append** - all runs append rows to a single file, perfect for ongoing data collection
+
+```yaml
+steps:
+  - id: "extract"
+    prompt: "Extract all contacts from {input.directory}."
+    csv_output:
+      directory: ./output
+      mode: new_file
+      filename: contacts    # optional, defaults to step ID
+
+  - id: "score"
+    depends_on: ["extract"]
+    prompt: "Score each contact for sales potential."
+    csv_output:
+      directory: ./output
+      mode: append          # all runs land in one file
+      filename: scores
+```
+
+Works with any output shape - dicts become columns, lists of dicts become rows, plain text goes into a `value` column. Directories are created automatically.
+
+---
+
 ## 20 Built-in Workflow Templates
 
 <p align="center">
@@ -792,7 +846,7 @@ Click "DAG" on any workflow card to expand an interactive graph of all steps, th
 
 ### Workflow Builder
 
-Visual drag-and-drop editor for building workflows. Add steps, connect dependencies, configure models and timeouts, then preview the generated YAML. Collapsible advanced sections for retry logic, approval gates, policy rules, and SLO optimizer - all reflected in the YAML preview. Editing an existing workflow loads its steps and edges into the canvas.
+Visual drag-and-drop editor for building workflows. Add steps, connect dependencies, configure models and timeouts, then preview the generated YAML. Collapsible advanced sections for retry logic, CSV export, AutoPilot, approval gates, policy rules, and SLO optimizer - all reflected in the YAML preview. Directory input with a server-side file browser. Editing an existing workflow loads its steps and edges into the canvas.
 
 <p align="center">
   <img src="docs/screenshots/workflow-builder.png" alt="Workflow Builder" width="720" />
@@ -1163,7 +1217,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (231 passing)
+# Run tests (247 passing)
 uv run pytest
 
 # Type check backend

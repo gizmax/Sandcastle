@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Cpu, FlaskConical, Gauge, RefreshCw, ShieldCheck } from "lucide-react";
+import { Cpu, FileSpreadsheet, FlaskConical, Gauge, RefreshCw, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
@@ -11,6 +11,7 @@ type StepNodeData = {
   hasRetry?: boolean;
   hasApproval?: boolean;
   hasAutoPilot?: boolean;
+  hasCsvOutput?: boolean;
   hasSlo?: boolean;
 };
 
@@ -19,7 +20,7 @@ type StepNodeType = Node<StepNodeData, "step">;
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const status = data.status || "pending";
   const dotColor = STATUS_DOT_COLORS[status] || "bg-muted";
-  const showBadges = data.hasRetry || data.hasApproval || data.hasAutoPilot || data.hasSlo;
+  const showBadges = data.hasRetry || data.hasApproval || data.hasAutoPilot || data.hasCsvOutput || data.hasSlo;
 
   return (
     <div
@@ -59,6 +60,9 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           )}
           {data.hasAutoPilot && (
             <FlaskConical className="h-3 w-3 text-accent" />
+          )}
+          {data.hasCsvOutput && (
+            <FileSpreadsheet className="h-3 w-3 text-running" />
           )}
           {data.hasSlo && (
             <Gauge className="h-3 w-3 text-success" />

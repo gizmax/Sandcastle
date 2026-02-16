@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  FileSpreadsheet,
   FlaskConical,
   FolderOpen,
   Gauge,
@@ -50,6 +51,13 @@ export interface AutoPilotVariant {
   maxTurns: number | null;
 }
 
+export interface CsvOutputConfig {
+  enabled: boolean;
+  directory: string;
+  mode: "append" | "new_file";
+  filename: string;
+}
+
 export interface AutoPilotConfig {
   enabled: boolean;
   optimizeFor: "quality" | "cost" | "latency" | "pareto";
@@ -70,6 +78,7 @@ export interface StepConfig {
   parallelOver: string;
   dependsOn: string[];
   directoryInput: DirectoryInputConfig;
+  csvOutput: CsvOutputConfig;
   autopilot: AutoPilotConfig;
   retry: RetryConfig;
   approval: ApprovalConfig;
@@ -150,6 +159,7 @@ function CollapsibleSection({
 export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepConfigPanelProps) {
   const [customPolicy, setCustomPolicy] = useState("");
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [csvBrowseOpen, setCsvBrowseOpen] = useState(false);
 
   const inputClass = cn(
     "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
@@ -334,6 +344,96 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {/* Advanced sections */}
       <div className="space-y-2 pt-2">
         <p className="text-xs font-semibold text-muted">ADVANCED</p>
+
+        {/* CSV Output */}
+        <CollapsibleSection
+          icon={FileSpreadsheet}
+          title="CSV Export"
+          enabled={step.csvOutput.enabled}
+          onToggle={() =>
+            onChange({ ...step, csvOutput: { ...step.csvOutput, enabled: !step.csvOutput.enabled } })
+          }
+        >
+          <p className="text-[11px] text-muted-foreground">
+            Export step output to a CSV file. Works with dicts, lists, or plain text.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Directory</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={step.csvOutput.directory}
+                onChange={(e) =>
+                  onChange({
+                    ...step,
+                    csvOutput: { ...step.csvOutput, directory: e.target.value },
+                  })
+                }
+                placeholder="./output"
+                className={cn(inputClass, "text-xs")}
+              />
+              <button
+                type="button"
+                onClick={() => setCsvBrowseOpen(true)}
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent transition-colors"
+              >
+                Browse
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Mode</label>
+            <select
+              value={step.csvOutput.mode}
+              onChange={(e) =>
+                onChange({
+                  ...step,
+                  csvOutput: { ...step.csvOutput, mode: e.target.value as "append" | "new_file" },
+                })
+              }
+              className={inputClass}
+            >
+              <option value="new_file">New file per run</option>
+              <option value="append">Append to one file</option>
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {step.csvOutput.mode === "append"
+                ? "All runs append rows to a single CSV file."
+                : "Each run creates a new file with a timestamp in the name."}
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Filename</label>
+            <input
+              type="text"
+              value={step.csvOutput.filename}
+              onChange={(e) =>
+                onChange({
+                  ...step,
+                  csvOutput: { ...step.csvOutput, filename: e.target.value },
+                })
+              }
+              placeholder={step.id || "step-id"}
+              className={cn(inputClass, "text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Without extension. Leave empty to use step ID.
+            </p>
+          </div>
+        </CollapsibleSection>
+
+        <DirectoryBrowser
+          open={csvBrowseOpen}
+          initialPath={step.csvOutput.directory || "~"}
+          onSelect={(path) => {
+            onChange({
+              ...step,
+              csvOutput: { ...step.csvOutput, directory: path },
+            });
+            setCsvBrowseOpen(false);
+          }}
+          onClose={() => setCsvBrowseOpen(false)}
+        />
 
         {/* Retry */}
         <CollapsibleSection

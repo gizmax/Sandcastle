@@ -87,6 +87,15 @@ class AutoPilotConfig:
 
 
 @dataclass
+class CsvOutputConfig:
+    """Configuration for CSV file export of step output."""
+
+    directory: str = "./output"
+    mode: str = "new_file"  # "append" | "new_file"
+    filename: str = ""  # Custom filename (without extension)
+
+
+@dataclass
 class SubWorkflowConfig:
     """Configuration for a sub-workflow (workflow-as-step)."""
 
@@ -175,6 +184,7 @@ class StepDefinition:
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
+    csv_output: CsvOutputConfig | None = None
     policies: list[str | PolicyDefinition] | None = None  # Policy refs or inline defs
     slo: SLOConfig | None = None
     model_pool: list[ModelPoolOption] | None = None
@@ -381,6 +391,17 @@ def _parse_slo_config(data: dict | None) -> SLOConfig | None:
     )
 
 
+def _parse_csv_output(data: dict | None) -> CsvOutputConfig | None:
+    """Parse CSV output configuration from YAML data."""
+    if data is None:
+        return None
+    return CsvOutputConfig(
+        directory=data.get("directory", "./output"),
+        mode=data.get("mode", "new_file"),
+        filename=data.get("filename", ""),
+    )
+
+
 def _parse_model_pool(data) -> list[ModelPoolOption] | None:
     """Parse model pool from YAML data.
 
@@ -442,6 +463,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         approval_config=_parse_approval_config(data.get("approval_config")),
         autopilot=_parse_autopilot_config(data.get("autopilot")),
         sub_workflow=_parse_sub_workflow_config(data.get("sub_workflow")),
+        csv_output=_parse_csv_output(data.get("csv_output")),
         policies=_parse_step_policies(data.get("policies")),
         slo=slo,
         model_pool=model_pool,

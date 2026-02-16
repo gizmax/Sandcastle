@@ -26,6 +26,7 @@ const nodeTypes: NodeTypes = {
 const DEFAULT_RETRY = { enabled: false, maxAttempts: 3, backoff: "exponential" as const, onFailure: "abort" as const };
 const DEFAULT_APPROVAL = { enabled: false, message: "", timeoutHours: 24, onTimeout: "abort" as const, allowEdit: false };
 const DEFAULT_DIRECTORY_INPUT = { enabled: false, defaultPath: "" };
+const DEFAULT_CSV_OUTPUT = { enabled: false, directory: "./output", mode: "new_file" as const, filename: "" };
 const DEFAULT_AUTOPILOT = {
   enabled: false, optimizeFor: "quality" as const, evaluation: "llm_judge" as const,
   sampleRate: 1.0, minSamples: 10, qualityThreshold: 0.7, autoDeploy: true, variants: [],
@@ -154,6 +155,16 @@ function generateYaml(
       yaml += `      model_pool: auto\n`;
     }
 
+    // CSV output config
+    if (step.csvOutput.enabled) {
+      yaml += `    csv_output:\n`;
+      yaml += `      directory: "${step.csvOutput.directory || "./output"}"\n`;
+      yaml += `      mode: ${step.csvOutput.mode}\n`;
+      if (step.csvOutput.filename) {
+        yaml += `      filename: "${step.csvOutput.filename}"\n`;
+      }
+    }
+
     yaml += `\n`;
   }
 
@@ -189,6 +200,7 @@ function buildInitialState(wf: InitialWorkflow) {
     parallelOver: "",
     dependsOn: s.depends_on || [],
     directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
+    csvOutput: { ...DEFAULT_CSV_OUTPUT },
     autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
     retry: { ...DEFAULT_RETRY },
     approval: { ...DEFAULT_APPROVAL },
@@ -257,6 +269,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       parallelOver: "",
       dependsOn: [],
       directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
+      csvOutput: { ...DEFAULT_CSV_OUTPUT },
       autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
       retry: { ...DEFAULT_RETRY },
       approval: { ...DEFAULT_APPROVAL },
@@ -295,6 +308,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   hasRetry: updated.retry.enabled,
                   hasApproval: updated.approval.enabled,
                   hasAutoPilot: updated.autopilot.enabled,
+                  hasCsvOutput: updated.csvOutput.enabled,
                   hasSlo: updated.slo.enabled,
                 },
               }
