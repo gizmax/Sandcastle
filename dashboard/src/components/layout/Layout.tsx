@@ -9,48 +9,7 @@ import { ToastContainer } from "@/components/shared/ToastContainer";
 import { useToasts } from "@/hooks/useToasts";
 import type { StreamEvent } from "@/hooks/useEventStream";
 
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  {
-    id: "n1",
-    type: "error",
-    message: "Policy violation: secret-block triggered on step 'score'",
-    timestamp: new Date(Date.now() - 12 * 60000),
-    read: false,
-    link: "/violations",
-  },
-  {
-    id: "n2",
-    type: "success",
-    message: "Run lead-enrichment completed ($1.84)",
-    timestamp: new Date(Date.now() - 35 * 60000),
-    read: false,
-    link: "/runs/a1b2c3d4-1111-4000-8000-000000000001",
-  },
-  {
-    id: "n3",
-    type: "info",
-    message: "Optimizer switched step 'analyze' to sonnet (budget pressure 75%)",
-    timestamp: new Date(Date.now() - 2 * 3600000),
-    read: false,
-    link: "/optimizer",
-  },
-  {
-    id: "n4",
-    type: "error",
-    message: "Run competitor-monitor failed: Rate limit exceeded (429)",
-    timestamp: new Date(Date.now() - 5 * 3600000),
-    read: true,
-    link: "/runs/a1b2c3d4-9999-4000-8000-000000000009",
-  },
-  {
-    id: "n5",
-    type: "info",
-    message: "Approval pending: Review Q4 competitor analysis report",
-    timestamp: new Date(Date.now() - 8 * 3600000),
-    read: true,
-    link: "/approvals",
-  },
-];
+const INITIAL_NOTIFICATIONS: Notification[] = [];
 
 // Map SSE event types to notification types
 function eventToNotificationType(eventType: string): Notification["type"] {
