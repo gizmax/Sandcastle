@@ -58,7 +58,7 @@ jobs:
         run: pip install build
       - name: Build package
         if: steps.check.outputs.exists == 'false'
-        run: python -m build
+        run: python -m build --wheel
       - name: Publish to PyPI
         if: steps.check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
