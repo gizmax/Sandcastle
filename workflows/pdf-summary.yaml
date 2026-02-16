@@ -1,0 +1,35 @@
+name: "PDF Summary"
+description: "Scan a directory for PDF files, extract and summarize each one, and merge into a final report."
+default_model: haiku
+default_max_turns: 5
+default_timeout: 300
+
+input_schema:
+  required: ["directory"]
+  properties:
+    directory:
+      type: string
+      description: "Path to directory containing PDF files"
+      default: "~/Desktop"
+
+steps:
+  - id: "scan"
+    prompt: |
+      List all PDF files in the directory: {input.directory}
+      Return a JSON object with a "files" key containing an array of full file paths.
+      Only include files ending with .pdf.
+
+  - id: "summarize"
+    depends_on: ["scan"]
+    parallel_over: "steps.scan.output.files"
+    prompt: |
+      Read the PDF file: {input._item}
+      Extract the key content and create a concise summary (3-5 sentences).
+      Include: what the document is about, main findings or topics, and any conclusions.
+
+  - id: "report"
+    depends_on: ["summarize"]
+    prompt: |
+      Create a final summary report in Czech from all the PDF summaries.
+      For each PDF include: file name, short summary, and key takeaways.
+      Format as a clean markdown document with a table of contents at the top.

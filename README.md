@@ -56,6 +56,10 @@ sandcastle init        # asks for API keys, writes .env
 sandcastle serve       # starts API + dashboard + Sandstorm on one port
 ```
 
+You'll need two API keys:
+- **ANTHROPIC_API_KEY** - get one at [console.anthropic.com](https://console.anthropic.com/)
+- **E2B_API_KEY** - get one at [e2b.dev](https://e2b.dev/) (free tier available)
+
 Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 20 workflow templates included.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.

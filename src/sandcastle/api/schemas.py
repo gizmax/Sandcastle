@@ -222,6 +222,7 @@ class WorkflowInfoResponse(BaseModel):
     steps_count: int
     file_name: str
     steps: list[WorkflowStepInfo] = []
+    input_schema: dict | None = None
 
 
 class ApiKeyResponse(BaseModel):

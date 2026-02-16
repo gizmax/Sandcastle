@@ -3,14 +3,37 @@ import { X, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { JsonEditor } from "@/components/shared/JsonEditor";
 
+interface InputSchemaProperty {
+  type: string;
+  description?: string;
+  default?: unknown;
+}
+
+interface InputSchema {
+  properties: Record<string, InputSchemaProperty>;
+  required?: string[];
+}
+
 interface RunWorkflowModalProps {
   open: boolean;
   workflowName: string;
+  inputSchema?: InputSchema;
   onClose: () => void;
   onRun: (input: Record<string, unknown>, callbackUrl?: string) => void;
 }
 
-export function RunWorkflowModal({ open, workflowName, onClose, onRun }: RunWorkflowModalProps) {
+export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onRun }: RunWorkflowModalProps) {
+  const fields = inputSchema?.properties ? Object.entries(inputSchema.properties) : [];
+  const hasSchema = fields.length > 0;
+  const requiredFields = new Set(inputSchema?.required || []);
+
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const [key, prop] of fields) {
+      init[key] = prop.default != null ? String(prop.default) : "";
+    }
+    return init;
+  });
   const [inputJson, setInputJson] = useState("{}");
   const [callbackUrl, setCallbackUrl] = useState("");
 
@@ -18,11 +41,17 @@ export function RunWorkflowModal({ open, workflowName, onClose, onRun }: RunWork
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    let parsed = {};
-    try {
-      parsed = JSON.parse(inputJson);
-    } catch {
-      // default empty
+    let parsed: Record<string, unknown> = {};
+    if (hasSchema) {
+      for (const [key, val] of Object.entries(fieldValues)) {
+        if (val) parsed[key] = val;
+      }
+    } else {
+      try {
+        parsed = JSON.parse(inputJson);
+      } catch {
+        // default empty
+      }
     }
     onRun(parsed, callbackUrl || undefined);
   }
@@ -40,10 +69,35 @@ export function RunWorkflowModal({ open, workflowName, onClose, onRun }: RunWork
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted">Input Data (JSON)</label>
-              <JsonEditor value={inputJson} onChange={setInputJson} rows={6} />
-            </div>
+            {hasSchema ? (
+              fields.map(([key, prop]) => (
+                <div key={key}>
+                  <label className="mb-1 block text-xs font-medium text-muted">
+                    {key}
+                    {requiredFields.has(key) && <span className="text-error ml-0.5">*</span>}
+                  </label>
+                  {prop.description && (
+                    <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
+                  )}
+                  <input
+                    type="text"
+                    value={fieldValues[key] || ""}
+                    onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                    placeholder={prop.default != null ? String(prop.default) : key}
+                    required={requiredFields.has(key)}
+                    className={cn(
+                      "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
+                      "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                    )}
+                  />
+                </div>
+              ))
+            ) : (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">Input Data (JSON)</label>
+                <JsonEditor value={inputJson} onChange={setInputJson} rows={6} />
+              </div>
+            )}
 
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">

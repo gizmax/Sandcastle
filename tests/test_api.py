@@ -192,3 +192,47 @@ steps:
         )
         # Should fail on validation or plan building
         assert response.status_code == 400
+
+
+# --- Tests: Browse endpoint ---
+
+
+class TestBrowse:
+    def test_browse_home(self):
+        response = client.get("/api/browse", params={"path": "~"})
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "current" in data
+        assert "entries" in data
+        assert isinstance(data["entries"], list)
+
+    def test_browse_default(self):
+        response = client.get("/api/browse")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["current"] is not None
+
+    def test_browse_nonexistent(self):
+        response = client.get("/api/browse", params={"path": "/nonexistent_dir_xyz"})
+        assert response.status_code == 404
+
+    def test_browse_entries_structure(self, tmp_path):
+        # Create a temp structure
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "file.txt").write_text("hello")
+        response = client.get("/api/browse", params={"path": str(tmp_path)})
+        assert response.status_code == 200
+        data = response.json()["data"]
+        names = {e["name"] for e in data["entries"]}
+        assert "subdir" in names
+        assert "file.txt" in names
+        # Dirs come first
+        dir_entry = next(e for e in data["entries"] if e["name"] == "subdir")
+        assert dir_entry["is_dir"] is True
+        file_entry = next(e for e in data["entries"] if e["name"] == "file.txt")
+        assert file_entry["is_dir"] is False
+
+    def test_browse_parent_link(self, tmp_path):
+        response = client.get("/api/browse", params={"path": str(tmp_path)})
+        data = response.json()["data"]
+        assert data["parent"] == str(tmp_path.parent)

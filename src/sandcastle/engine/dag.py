@@ -191,6 +191,7 @@ class WorkflowDefinition:
     default_max_turns: int
     default_timeout: int
     steps: list[StepDefinition]
+    input_schema: dict | None = None
     on_complete: CompletionConfig | None = None
     on_failure: FailureConfig | None = None
     schedule: str | None = None
@@ -495,6 +496,7 @@ def parse(yaml_path: str) -> WorkflowDefinition:
         default_max_turns=default_max_turns,
         default_timeout=default_timeout,
         steps=steps,
+        input_schema=data.get("input_schema"),
         on_complete=on_complete,
         on_failure=on_failure,
         schedule=schedule,

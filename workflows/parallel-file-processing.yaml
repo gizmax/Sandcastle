@@ -4,6 +4,13 @@ default_model: haiku
 default_max_turns: 10
 default_timeout: 300
 
+input_schema:
+  required: ["directory"]
+  properties:
+    directory:
+      type: string
+      description: "Path to the directory to scan and process"
+
 steps:
   - id: "scan"
     prompt: |

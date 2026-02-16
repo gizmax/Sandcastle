@@ -213,6 +213,10 @@ def _cmd_init(args: argparse.Namespace) -> None:
             return
 
     # Collect API keys
+    print(_color("  Get keys at:", _C.DIM))
+    print(_color("    Anthropic: https://console.anthropic.com/", _C.DIM))
+    print(_color("    E2B:       https://e2b.dev/", _C.DIM))
+    print()
     anthropic_key = input("  ANTHROPIC_API_KEY: ").strip()
     if not anthropic_key:
         print(

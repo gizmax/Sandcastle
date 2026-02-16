@@ -25,6 +25,7 @@ const nodeTypes: NodeTypes = {
 
 const DEFAULT_RETRY = { enabled: false, maxAttempts: 3, backoff: "exponential" as const, onFailure: "abort" as const };
 const DEFAULT_APPROVAL = { enabled: false, message: "", timeoutHours: 24, onTimeout: "abort" as const, allowEdit: false };
+const DEFAULT_DIRECTORY_INPUT = { enabled: false, defaultPath: "" };
 const DEFAULT_SLO = { enabled: false, qualityMin: 0.7, costMaxUsd: 0.10, latencyMaxSeconds: 30, optimizeFor: "balanced" as const };
 
 function generateYaml(
@@ -38,12 +39,30 @@ function generateYaml(
     depMap.get(e.target)!.push(e.source);
   });
 
+  // Check if any step uses directory input
+  const hasDirInput = steps.some((s) => s.directoryInput.enabled);
+
   let yaml = `name: "${workflowName}"\n`;
   yaml += `description: ""\n`;
   yaml += `sandstorm_url: "\${SANDSTORM_URL}"\n`;
   yaml += `default_model: sonnet\n`;
   yaml += `default_max_turns: 10\n`;
   yaml += `default_timeout: 300\n\n`;
+
+  if (hasDirInput) {
+    const dirStep = steps.find((s) => s.directoryInput.enabled)!;
+    yaml += `input_schema:\n`;
+    yaml += `  required: ["directory"]\n`;
+    yaml += `  properties:\n`;
+    yaml += `    directory:\n`;
+    yaml += `      type: string\n`;
+    yaml += `      description: "Path to directory"\n`;
+    if (dirStep.directoryInput.defaultPath) {
+      yaml += `      default: "${dirStep.directoryInput.defaultPath}"\n`;
+    }
+    yaml += `\n`;
+  }
+
   yaml += `steps:\n`;
 
   for (const step of steps) {
@@ -138,6 +157,7 @@ function buildInitialState(wf: InitialWorkflow) {
     timeout: 300,
     parallelOver: "",
     dependsOn: s.depends_on || [],
+    directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
     retry: { ...DEFAULT_RETRY },
     approval: { ...DEFAULT_APPROVAL },
     policies: [],
@@ -204,6 +224,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       timeout: 300,
       parallelOver: "",
       dependsOn: [],
+      directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
       retry: { ...DEFAULT_RETRY },
       approval: { ...DEFAULT_APPROVAL },
       policies: [],
@@ -273,8 +294,8 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
   // Parse template YAML to extract step definitions
   const parseTemplateSteps = useCallback(
-    (yamlStr: string): Array<{ id: string; model?: string; depends_on?: string[] }> => {
-      const parsed: Array<{ id: string; model?: string; depends_on?: string[] }> = [];
+    (yamlStr: string): Array<{ id: string; model?: string; depends_on?: string[]; prompt?: string }> => {
+      const parsed: Array<{ id: string; model?: string; depends_on?: string[]; prompt?: string }> = [];
       const stepBlocks = yamlStr.split(/\n\s+-\s+id:\s+/).slice(1);
       for (const block of stepBlocks) {
         const idMatch = block.match(/^"?([^"\n]+)"?/);
@@ -282,6 +303,17 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         const id = idMatch[1];
         const modelMatch = block.match(/model:\s+(\w+)/);
         const model = modelMatch ? modelMatch[1] : undefined;
+        // Extract prompt (block scalar with | or > or inline)
+        let prompt: string | undefined;
+        const blockPrompt = block.match(/prompt:\s*[|>]-?\s*\n((?:[ \t]+[^\n]*\n?)*)/);
+        if (blockPrompt) {
+          prompt = blockPrompt[1].replace(/^[ \t]{2,}/gm, "").trim();
+        } else {
+          const inlinePrompt = block.match(/prompt:\s*"([^"]+)"|prompt:\s+'([^']+)'|prompt:\s+([^\n]+)/);
+          if (inlinePrompt) {
+            prompt = (inlinePrompt[1] || inlinePrompt[2] || inlinePrompt[3] || "").trim();
+          }
+        }
         const deps: string[] = [];
         // Inline format: depends_on: [step1, step2] or depends_on: ["step1", "step2"]
         const inlineDeps = block.match(/depends_on:\s*\[([^\]]+)\]/);
@@ -300,7 +332,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             }
           }
         }
-        parsed.push({ id, model, depends_on: deps.length > 0 ? deps : undefined });
+        parsed.push({ id, model, prompt, depends_on: deps.length > 0 ? deps : undefined });
       }
       return parsed;
     },
@@ -309,7 +341,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
   // Apply a template to the canvas
   const applyTemplate = useCallback(
-    (templateData: { name: string; content: string; steps: Array<{ id: string; model?: string; depends_on?: string[] }> }) => {
+    (templateData: { name: string; content: string; steps: Array<{ id: string; model?: string; depends_on?: string[]; prompt?: string }> }) => {
       const built = buildInitialState({
         name: templateData.name,
         description: "",

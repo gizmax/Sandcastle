@@ -5,6 +5,17 @@ default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
 
+input_schema:
+  required: ["target_url"]
+  properties:
+    target_url:
+      type: string
+      description: "URL of the company website to scrape and enrich"
+    max_depth:
+      type: integer
+      description: "Maximum crawl depth (default: 3)"
+      default: 3
+
 steps:
   - id: "scrape"
     prompt: |

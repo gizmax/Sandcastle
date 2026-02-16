@@ -561,6 +561,13 @@ async def _execute_fallback(
         logger.info(f"Executing fallback for step '{step.id}' (model={step.fallback.model})")
         result = await sandbox.query(request)
         output = result.structured_output if result.structured_output else result.text
+        if isinstance(output, str):
+            try:
+                parsed = json.loads(output)
+                if isinstance(parsed, (dict, list)):
+                    output = parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
 
         return StepResult(
@@ -671,6 +678,14 @@ async def _execute_step_once(
             )
 
         output = result.structured_output if result.structured_output else result.text
+        # Try to parse text output as JSON for downstream steps (parallel_over, etc.)
+        if isinstance(output, str):
+            try:
+                parsed = json.loads(output)
+                if isinstance(parsed, (dict, list)):
+                    output = parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
 
         # Policy evaluation
@@ -1095,8 +1110,17 @@ async def execute_workflow(
         storage = LocalStorage()
 
     started_at = datetime.now(timezone.utc)
+
+    # Merge input_schema defaults with provided input_data
+    merged_input = {}
+    if workflow.input_schema and "properties" in workflow.input_schema:
+        for key, prop in workflow.input_schema["properties"].items():
+            if "default" in prop:
+                merged_input[key] = prop["default"]
+    merged_input.update(input_data)
+
     context = RunContext(
-        run_id=run_id, input=input_data, max_cost_usd=max_cost_usd,
+        run_id=run_id, input=merged_input, max_cost_usd=max_cost_usd,
         workflow_name=workflow.name,
     )
 

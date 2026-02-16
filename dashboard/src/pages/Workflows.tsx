@@ -17,12 +17,24 @@ interface WorkflowStep {
   prompt?: string;
 }
 
+interface InputSchemaProperty {
+  type: string;
+  description?: string;
+  default?: unknown;
+}
+
+interface InputSchema {
+  properties: Record<string, InputSchemaProperty>;
+  required?: string[];
+}
+
 interface WorkflowInfo {
   name: string;
   description: string;
   steps_count: number;
   file_name: string;
   steps?: WorkflowStep[];
+  input_schema?: InputSchema;
 }
 
 export default function Workflows() {
@@ -127,6 +139,7 @@ export default function Workflows() {
         <RunWorkflowModal
           open={true}
           workflowName={runModal.name}
+          inputSchema={runModal.input_schema}
           onClose={() => setRunModal(null)}
           onRun={handleRun}
         />

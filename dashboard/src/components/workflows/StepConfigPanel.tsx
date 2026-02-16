@@ -2,12 +2,14 @@ import { useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  FolderOpen,
   Gauge,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { DirectoryBrowser } from "@/components/workflows/DirectoryBrowser";
 import { cn } from "@/lib/utils";
 
 export interface RetryConfig {
@@ -33,6 +35,11 @@ export interface SloConfig {
   optimizeFor: "cost" | "quality" | "latency" | "balanced";
 }
 
+export interface DirectoryInputConfig {
+  enabled: boolean;
+  defaultPath: string;
+}
+
 export interface StepConfig {
   id: string;
   prompt: string;
@@ -41,6 +48,7 @@ export interface StepConfig {
   timeout: number;
   parallelOver: string;
   dependsOn: string[];
+  directoryInput: DirectoryInputConfig;
   retry: RetryConfig;
   approval: ApprovalConfig;
   policies: string[];
@@ -119,6 +127,7 @@ function CollapsibleSection({
 
 export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepConfigPanelProps) {
   const [customPolicy, setCustomPolicy] = useState("");
+  const [browseOpen, setBrowseOpen] = useState(false);
 
   const inputClass = cn(
     "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
@@ -150,6 +159,77 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
         />
         <p className="text-[11px] text-muted-foreground mt-0.5">{"Use {input.field} for workflow input or {steps.id.output} for previous step data."}</p>
       </div>
+
+      {/* Directory Input */}
+      <div className="rounded-lg border border-border">
+        <button
+          type="button"
+          onClick={() => {
+            const next = !step.directoryInput.enabled;
+            onChange({
+              ...step,
+              directoryInput: { ...step.directoryInput, enabled: next },
+            });
+          }}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        >
+          <FolderOpen className="h-3.5 w-3.5 text-muted" />
+          <span className="flex-1 text-xs font-medium text-foreground">Directory Input</span>
+          <input
+            type="checkbox"
+            checked={step.directoryInput.enabled}
+            onChange={(e) => {
+              e.stopPropagation();
+              onChange({
+                ...step,
+                directoryInput: { ...step.directoryInput, enabled: e.target.checked },
+              });
+            }}
+            className="rounded border-border text-accent focus:ring-accent"
+          />
+        </button>
+        {step.directoryInput.enabled && (
+          <div className="border-t border-border px-3 py-2.5 space-y-2">
+            <p className="text-[11px] text-muted-foreground">
+              This step expects a directory path as input. Use <code className="text-[10px] bg-background px-1 rounded">{"{"} input.directory {"}"}</code> in your prompt.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={step.directoryInput.defaultPath}
+                onChange={(e) =>
+                  onChange({
+                    ...step,
+                    directoryInput: { ...step.directoryInput, defaultPath: e.target.value },
+                  })
+                }
+                placeholder="~/Desktop"
+                className={cn(inputClass, "text-xs")}
+              />
+              <button
+                type="button"
+                onClick={() => setBrowseOpen(true)}
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent transition-colors"
+              >
+                Browse
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <DirectoryBrowser
+        open={browseOpen}
+        initialPath={step.directoryInput.defaultPath || "~"}
+        onSelect={(path) => {
+          onChange({
+            ...step,
+            directoryInput: { ...step.directoryInput, defaultPath: path },
+          });
+          setBrowseOpen(false);
+        }}
+        onClose={() => setBrowseOpen(false)}
+      />
 
       <div>
         <label className="mb-1 block text-xs font-medium text-muted">Model</label>

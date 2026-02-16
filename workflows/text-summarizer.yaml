@@ -10,6 +10,13 @@ default_model: sonnet
 default_max_turns: 5
 default_timeout: 120
 
+input_schema:
+  required: ["text"]
+  properties:
+    text:
+      type: string
+      description: "Text to summarize"
+
 steps:
   - id: summarize
     prompt: >

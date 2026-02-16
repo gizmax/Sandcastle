@@ -1010,7 +1010,7 @@
       <p>
         Sandcastle runs your agent workflows so you don't have to. Parallel execution,
         budget guardrails, human-in-the-loop approvals, policy enforcement - all out of the box.
-        Just <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle serve</code> and you're live.
+        Just <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle init</code> + <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle serve</code> and you're live.
       </p>
       <div class="hero-ctas">
         <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="btn btn-primary">
@@ -1039,12 +1039,13 @@
         <div class="quickstart-body">
           <code>
 <span class="prompt">$</span> <span class="cmd">pip install sandcastle-ai</span>
+<span class="prompt">$</span> <span class="cmd">sandcastle init</span>
 <span class="prompt">$</span> <span class="cmd">sandcastle serve</span>
           </code>
         </div>
       </div>
       <p class="quickstart-note">
-        That's it. Two commands. No PostgreSQL, Redis, or S3 needed - Sandcastle auto-detects empty config and starts in <strong>local mode</strong> with SQLite + in-process queue.
+        Three commands. <code>init</code> asks for your API keys and writes <code>.env</code>. No PostgreSQL, Redis, or S3 needed - Sandcastle auto-detects empty config and starts in <strong>local mode</strong> with SQLite + in-process queue.
       </p>
       <p class="quickstart-note" style="margin-top: 8px;">
         Or from source: <code style="background:var(--surface);padding:2px 8px;border-radius:4px;font-size:0.9em;color:var(--text-muted);">git clone https://github.com/gizmax/Sandcastle.git && cd Sandcastle && uv sync && uv run sandcastle serve</code>
@@ -1138,7 +1139,7 @@
         <div class="feature-card">
           <span class="feature-icon">🚀</span>
           <h3>Zero-Config Local Mode</h3>
-          <p>Just <code>sandcastle serve</code>. Auto-detects local vs production - SQLite or PostgreSQL, in-process or Redis.</p>
+          <p><code>sandcastle init</code> + <code>sandcastle serve</code>. Auto-detects local vs production - SQLite or PostgreSQL, in-process or Redis.</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">📋</span>

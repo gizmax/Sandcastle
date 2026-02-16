@@ -237,6 +237,47 @@ async def runtime_info() -> ApiResponse:
     )
 
 
+# --- Browse (file system) ---
+
+
+@router.get("/browse")
+async def browse_directory(
+    path: str = Query("~", description="Directory path to browse"),
+) -> ApiResponse:
+    """Browse server filesystem directories for workflow input configuration."""
+    try:
+        target = Path(path).expanduser().resolve()
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path does not exist")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    entries = []
+    try:
+        for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            # Skip hidden files/dirs
+            if item.name.startswith("."):
+                continue
+            entries.append({
+                "name": item.name,
+                "path": str(item),
+                "is_dir": item.is_dir(),
+            })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    return ApiResponse(
+        data={
+            "current": str(target),
+            "parent": str(target.parent) if target != target.parent else None,
+            "entries": entries,
+        }
+    )
+
+
 # --- Templates ---
 
 
@@ -423,6 +464,7 @@ async def list_workflows() -> ApiResponse:
                         )
                         for s in workflow.steps
                     ],
+                    input_schema=workflow.input_schema,
                 )
             )
         except Exception as e:
@@ -471,9 +513,11 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
                     id=s.id,
                     depends_on=s.depends_on,
                     model=s.model,
+                    prompt=s.prompt,
                 )
                 for s in workflow.steps
             ],
+            input_schema=workflow.input_schema,
         )
     )
 
