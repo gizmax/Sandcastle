@@ -35,12 +35,31 @@ export function CostChart({ data }: CostChartProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
             dataKey="workflow"
-            tick={{ fontSize: 11, fill: "var(--color-muted)" }}
-            angle={-35}
-            textAnchor="end"
-            height={60}
+            tick={({ x, y, payload }: { x: number; y: number; payload: { value: string } }) => {
+              const name = payload.value;
+              const parts = name.length > 12
+                ? [name.slice(0, Math.ceil(name.length / 2)), name.slice(Math.ceil(name.length / 2))]
+                : [name];
+              return (
+                <g transform={`translate(${x},${y})`}>
+                  {parts.map((part, i) => (
+                    <text
+                      key={i}
+                      x={0}
+                      y={0}
+                      dy={12 + i * 13}
+                      textAnchor="middle"
+                      fill="var(--color-muted)"
+                      fontSize={11}
+                    >
+                      {part}
+                    </text>
+                  ))}
+                </g>
+              );
+            }}
+            height={50}
             interval={0}
-            tickFormatter={(v: string) => v.length > 14 ? v.slice(0, 12) + "..." : v}
           />
           <YAxis
             tick={{ fontSize: 11, fill: "var(--color-muted)" }}
