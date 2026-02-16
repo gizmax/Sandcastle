@@ -176,6 +176,7 @@ function Toast({ message, type }: { message: string; type: "success" | "error" }
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [savingSections, setSavingSections] = useState<Set<SectionName>>(new Set());
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -184,10 +185,13 @@ export default function SettingsPage() {
   const originalRef = useRef<SettingsData | null>(null);
 
   const fetchSettings = useCallback(async () => {
+    setFetchError(null);
     const res = await api.get<SettingsData>("/settings");
     if (res.data) {
       setSettings(res.data);
       originalRef.current = { ...res.data };
+    } else if (res.error) {
+      setFetchError(res.error.message || "Failed to load settings");
     }
     setLoading(false);
   }, []);
@@ -315,10 +319,25 @@ export default function SettingsPage() {
 
   // -- Render ---------------------------------------------------------------
 
-  if (loading || !settings) {
+  if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (fetchError || !settings) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3">
+        <AlertCircle className="h-8 w-8 text-error" />
+        <p className="text-sm text-muted">{fetchError || "Could not load settings"}</p>
+        <button
+          onClick={() => { setLoading(true); void fetchSettings(); }}
+          className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-border/40 transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }

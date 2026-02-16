@@ -1357,7 +1357,31 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                 tenant_id=tenant_id,
             )
             session.add(db_schedule)
+
+            # Register with APScheduler before commit for atomicity
+            if request.enabled:
+                try:
+                    add_schedule(
+                        schedule_id=schedule_id,
+                        cron_expression=request.cron_expression,
+                        workflow_name=request.workflow_name,
+                        input_data=request.input_data,
+                    )
+                except Exception as exc:
+                    await session.rollback()
+                    raise HTTPException(
+                        status_code=500,
+                        detail=ApiResponse(
+                            error=ErrorResponse(
+                                code="SCHEDULER_ERROR",
+                                message=f"Could not register schedule: {exc}",
+                            )
+                        ).model_dump(),
+                    ) from exc
+
             await session.commit()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -1367,16 +1391,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                     message=f"Could not create schedule: {e}",
                 )
             ).model_dump(),
-        )
-
-    # Register with APScheduler if enabled
-    if request.enabled:
-        add_schedule(
-            schedule_id=schedule_id,
-            cron_expression=request.cron_expression,
-            workflow_name=request.workflow_name,
-            input_data=request.input_data,
-        )
+        ) from e
 
     return ApiResponse(
         data=ScheduleResponse(
@@ -2343,17 +2358,19 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
     """Create a new API key. Returns the plaintext key ONCE."""
     auth_tenant = get_tenant_id(req)
 
-    # When auth is enabled, enforce tenant scoping: can only create keys for own tenant
-    if settings.auth_required and auth_tenant is not None and request.tenant_id != auth_tenant:
-        raise HTTPException(
-            status_code=403,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="FORBIDDEN",
-                    message="Cannot create API keys for a different tenant",
-                )
-            ).model_dump(),
-        )
+    # When auth is enabled, enforce tenant scoping
+    if settings.auth_required and auth_tenant is not None:
+        # Tenant keys can only create keys for their own tenant (not admin keys)
+        if request.tenant_id is None or request.tenant_id != auth_tenant:
+            raise HTTPException(
+                status_code=403,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="FORBIDDEN",
+                        message="Cannot create API keys for a different tenant",
+                    )
+                ).model_dump(),
+            )
 
     plaintext_key = generate_api_key()
     key_hash_value = hash_key(plaintext_key)

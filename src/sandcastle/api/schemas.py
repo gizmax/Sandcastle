@@ -68,7 +68,7 @@ class WorkflowSaveRequest(BaseModel):
 class ApiKeyCreateRequest(BaseModel):
     """Request to create a new API key."""
 
-    tenant_id: str
+    tenant_id: str | None = Field(None, description="Tenant scope. Null for admin keys.")
     name: str = Field(..., description="Description for the key")
     max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run")
 
