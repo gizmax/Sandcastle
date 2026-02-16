@@ -1,22 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useEventStream } from "@/hooks/useEventStream";
-import type { ConnectionStatus, StreamEvent } from "@/hooks/useEventStream";
+import { EventStreamContext } from "@/hooks/useEventStreamContext";
+import type { StreamEvent } from "@/hooks/useEventStream";
 
 type EventCallback = (event: StreamEvent) => void;
-
-interface EventStreamContextValue {
-  /** Latest events (most recent first, max 50) */
-  events: StreamEvent[];
-  /** Connection status */
-  connectionStatus: ConnectionStatus;
-  /** Subscribe to a specific event type. Returns unsubscribe function. */
-  subscribe: (eventType: string, callback: EventCallback) => () => void;
-  /** Clear stored events */
-  clearEvents: () => void;
-}
-
-const EventStreamContext = createContext<EventStreamContextValue | null>(null);
 
 interface EventStreamProviderProps {
   children: ReactNode;
@@ -73,16 +61,4 @@ export function EventStreamProvider({ children }: EventStreamProviderProps) {
       {children}
     </EventStreamContext.Provider>
   );
-}
-
-/**
- * Access the event stream context.
- * Must be used within an EventStreamProvider.
- */
-export function useEventStreamContext(): EventStreamContextValue {
-  const ctx = useContext(EventStreamContext);
-  if (!ctx) {
-    throw new Error("useEventStreamContext must be used within EventStreamProvider");
-  }
-  return ctx;
 }

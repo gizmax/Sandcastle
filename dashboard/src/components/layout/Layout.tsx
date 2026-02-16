@@ -4,7 +4,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import type { Notification } from "@/components/layout/NotificationCenter";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { useEventStreamContext } from "@/components/providers/EventStreamProvider";
+import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { ToastContainer } from "@/components/shared/ToastContainer";
 import { useToasts } from "@/hooks/useToasts";
 import type { StreamEvent } from "@/hooks/useEventStream";

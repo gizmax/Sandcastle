@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useEventStreamContext } from "@/components/providers/EventStreamProvider";
+import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 
 /**
  * Small indicator showing the SSE connection status.
