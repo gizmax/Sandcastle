@@ -24,7 +24,8 @@ class ApiClient {
       const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
       if (!res.ok) throw new Error("unhealthy");
       const data = await res.json();
-      if (data?.data?.status !== "ok") throw new Error("unhealthy");
+      const s = data?.data?.status;
+      if (s !== "ok" && s !== "degraded") throw new Error("unhealthy");
       console.info("[Sandcastle] Backend connected");
     } catch {
       console.info("[Sandcastle] Backend unavailable, using demo data");

@@ -82,6 +82,26 @@ router = APIRouter()
 # --- Helpers ---
 
 
+def _duration_seconds_expr():
+    """Avg duration expression portable across PostgreSQL and SQLite."""
+    if settings.is_local_mode:
+        # SQLite: timestamps stored as ISO strings, julianday gives fractional days
+        return func.avg(
+            (func.julianday(Run.completed_at) - func.julianday(Run.started_at)) * 86400
+        )
+    return func.avg(
+        func.extract("epoch", Run.completed_at) - func.extract("epoch", Run.started_at)
+    )
+
+
+def _trunc_day(column):
+    """Truncate timestamp to day, portable across PostgreSQL and SQLite."""
+    if settings.is_local_mode:
+        # SQLite: date() extracts YYYY-MM-DD from ISO timestamp string
+        return func.date(column)
+    return func.date_trunc("day", column)
+
+
 def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
     workflows_dir = Path(settings.workflows_dir)
@@ -305,9 +325,7 @@ async def get_stats(request: Request) -> ApiResponse:
         total_cost = await session.scalar(cost_q)
 
         dur_q = select(
-            func.avg(
-                func.extract("epoch", Run.completed_at) - func.extract("epoch", Run.started_at)
-            )
+            _duration_seconds_expr()
         ).where(
             Run.created_at >= today_start,
             Run.completed_at.isnot(None),
@@ -320,7 +338,7 @@ async def get_stats(request: Request) -> ApiResponse:
         thirty_days_ago = now - timedelta(days=30)
         rbd_q = (
             select(
-                func.date_trunc("day", Run.created_at).label("day"),
+                _trunc_day(Run.created_at).label("day"),
                 Run.status,
                 func.count(Run.id).label("count"),
             )
@@ -333,7 +351,7 @@ async def get_stats(request: Request) -> ApiResponse:
 
         day_map: dict[str, dict] = {}
         for row in runs_by_day_raw:
-            day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
+            day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day) if row.day else "unknown"
             if day_str not in day_map:
                 day_map[day_str] = {"date": day_str, "completed": 0, "failed": 0, "total": 0}
             status_val = row.status.value if hasattr(row.status, "value") else row.status
@@ -2670,13 +2688,13 @@ async def violations_stats(request: Request) -> ApiResponse:
         # By day (last 30 days)
         day_q = _base_filter(
             select(
-                func.date_trunc("day", PolicyViolation.created_at).label("day"),
+                _trunc_day(PolicyViolation.created_at).label("day"),
                 func.count(PolicyViolation.id).label("count"),
             )
         ).group_by("day").order_by("day")
         day_rows = (await session.execute(day_q)).all()
         by_day = [
-            {"date": row.day.strftime("%Y-%m-%d") if row.day else "unknown", "count": row.count}
+            {"date": row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day) if row.day else "unknown", "count": row.count}
             for row in day_rows
         ]
 
