@@ -81,11 +81,13 @@ export function CreateScheduleModal({ open, onClose, onSubmit }: CreateScheduleM
                   "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
                 )}
               />
+              <p className="text-[11px] text-muted-foreground mt-0.5">minute hour day month weekday. Example: 0 */6 * * * = every 6 hours.</p>
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">Input Data (JSON)</label>
               <JsonEditor value={inputJson} onChange={setInputJson} rows={4} />
+              <p className="text-[11px] text-muted-foreground mt-0.5">{"JSON passed to the workflow as {input.*} variables."}</p>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

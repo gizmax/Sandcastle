@@ -55,10 +55,10 @@ interface StepConfigPanelProps {
 }
 
 const POLICY_OPTIONS = [
-  { id: "pii-redact", label: "PII Redact" },
-  { id: "secret-block", label: "Secret Block" },
-  { id: "cost-guard", label: "Cost Guard" },
-  { id: "length-limit", label: "Length Limit" },
+  { id: "pii-redact", label: "PII Redact", hint: "Detects and replaces emails, phones, SSNs in output." },
+  { id: "secret-block", label: "Secret Block", hint: "Blocks execution if API keys or tokens are found." },
+  { id: "cost-guard", label: "Cost Guard", hint: "Stops step if cost exceeds the per-step budget." },
+  { id: "length-limit", label: "Length Limit", hint: "Flags output exceeding the token length limit." },
 ];
 
 function CollapsibleSection({
@@ -137,6 +137,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           onChange={(e) => onChange({ ...step, id: e.target.value })}
           className={inputClass}
         />
+        <p className="text-[11px] text-muted-foreground mt-0.5">Unique identifier used in depends_on and YAML output.</p>
       </div>
 
       <div>
@@ -147,6 +148,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           rows={6}
           className={cn(inputClass, "h-auto py-2 resize-y")}
         />
+        <p className="text-[11px] text-muted-foreground mt-0.5">{"Use {input.field} for workflow input or {steps.id.output} for previous step data."}</p>
       </div>
 
       <div>
@@ -160,6 +162,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="opus">Opus</option>
           <option value="haiku">Haiku</option>
         </select>
+        <p className="text-[11px] text-muted-foreground mt-0.5">Sonnet is balanced, Opus for complex reasoning, Haiku for fast/cheap tasks.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -172,6 +175,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             min={1}
             className={inputClass}
           />
+          <p className="text-[11px] text-muted-foreground mt-0.5">Maximum agent conversation turns before timeout.</p>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-muted">Timeout (s)</label>
@@ -182,6 +186,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             min={1}
             className={inputClass}
           />
+          <p className="text-[11px] text-muted-foreground mt-0.5">Hard time limit in seconds for this step.</p>
         </div>
       </div>
 
@@ -194,6 +199,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           placeholder="e.g. steps.scrape.output"
           className={inputClass}
         />
+        <p className="text-[11px] text-muted-foreground mt-0.5">JSONPath to a list. Step runs once per item in parallel.</p>
       </div>
 
       <div>
@@ -248,6 +254,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               max={10}
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Total tries including the first attempt.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Backoff</label>
@@ -264,6 +271,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <option value="exponential">Exponential</option>
               <option value="fixed">Fixed</option>
             </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Exponential doubles delay each retry. Fixed waits the same interval.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">On Failure</label>
@@ -284,6 +292,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <option value="skip">Skip</option>
               <option value="fallback">Fallback</option>
             </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Abort stops the run. Skip continues to next step. Fallback uses a simpler model.</p>
           </div>
         </CollapsibleSection>
 
@@ -313,6 +322,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               placeholder="Review before proceeding"
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Shown to reviewer in the Approvals dashboard.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Timeout (hours)</label>
@@ -328,6 +338,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               min={1}
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Auto-resolves if nobody responds within this time.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">On Timeout</label>
@@ -347,6 +358,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <option value="abort">Abort</option>
               <option value="skip">Skip</option>
             </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">What happens when approval times out.</p>
           </div>
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input
@@ -362,6 +374,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             />
             <span className="text-xs">Allow reviewer edits</span>
           </label>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Reviewer can modify the step's output data before approving.</p>
         </CollapsibleSection>
 
         {/* Policies */}
@@ -377,22 +390,26 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             }
           }}
         >
-          <div className="space-y-1">
+          <p className="text-[11px] text-muted-foreground">Rules evaluated against step output. Violations are logged.</p>
+          <div className="space-y-2">
             {POLICY_OPTIONS.map((p) => (
-              <label key={p.id} className="flex items-center gap-2 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={step.policies.includes(p.id)}
-                  onChange={(e) => {
-                    const policies = e.target.checked
-                      ? [...step.policies, p.id]
-                      : step.policies.filter((x) => x !== p.id);
-                    onChange({ ...step, policies });
-                  }}
-                  className="rounded border-border text-accent focus:ring-accent"
-                />
-                <span className="text-xs">{p.label}</span>
-              </label>
+              <div key={p.id}>
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={step.policies.includes(p.id)}
+                    onChange={(e) => {
+                      const policies = e.target.checked
+                        ? [...step.policies, p.id]
+                        : step.policies.filter((x) => x !== p.id);
+                      onChange({ ...step, policies });
+                    }}
+                    className="rounded border-border text-accent focus:ring-accent"
+                  />
+                  <span className="text-xs">{p.label}</span>
+                </label>
+                <p className="text-[11px] text-muted-foreground ml-6">{p.hint}</p>
+              </div>
             ))}
           </div>
           <div className="flex gap-2">
@@ -443,6 +460,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             onChange({ ...step, slo: { ...step.slo, enabled: !step.slo.enabled } })
           }
         >
+          <p className="text-[11px] text-muted-foreground">Automatically selects the best model based on constraints.</p>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">
               Min Quality (0-1)
@@ -461,6 +479,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               step={0.1}
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Minimum acceptable quality score (0 = any, 1 = perfect).</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">
@@ -479,6 +498,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               step={0.01}
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Per-step spending limit in USD.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">
@@ -496,6 +516,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               min={1}
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Maximum allowed execution time.</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Optimize For</label>
@@ -517,6 +538,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <option value="quality">Quality</option>
               <option value="latency">Latency</option>
             </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Primary objective when multiple models meet constraints.</p>
           </div>
         </CollapsibleSection>
       </div>

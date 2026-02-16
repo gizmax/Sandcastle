@@ -62,6 +62,7 @@ export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditSch
                 required
                 className={cn(inputClass, "font-mono")}
               />
+              <p className="text-[11px] text-muted-foreground mt-0.5">minute hour day month weekday. Example: 0 */6 * * * = every 6 hours.</p>
             </div>
 
             <div className="flex items-center justify-between">

@@ -52,6 +52,7 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
                 required
                 className={inputClass}
               />
+              <p className="text-[11px] text-muted-foreground mt-0.5">Label for identifying this key in the dashboard.</p>
             </div>
 
             <div>
@@ -64,6 +65,7 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
                 required
                 className={inputClass}
               />
+              <p className="text-[11px] text-muted-foreground mt-0.5">All runs created with this key are scoped to this tenant.</p>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
