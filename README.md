@@ -57,6 +57,8 @@ export E2B_API_KEY=e2b_...
 sandcastle serve
 ```
 
+Dashboard at `http://localhost:8080`, API ready, 20 workflow templates included.
+
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
 ```
@@ -83,25 +85,6 @@ Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No 
 ---
 
 ## Quickstart
-
-### Install from PyPI (30 seconds)
-
-```bash
-pip install sandcastle-ai
-
-# Set your API keys
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
-
-sandcastle serve
-```
-
-You'll see:
-```
-Sandcastle starting in local mode (SQLite + filesystem + in-process queue)
-```
-
-That's it. Dashboard at `http://localhost:8080`, API ready, 20 templates included.
 
 ### Production Mode - Docker (recommended)
 
