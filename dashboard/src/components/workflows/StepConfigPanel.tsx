@@ -2,12 +2,15 @@ import { useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  FlaskConical,
   FolderOpen,
   Gauge,
+  Plus,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Trash2,
+  X,
 } from "lucide-react";
 import { DirectoryBrowser } from "@/components/workflows/DirectoryBrowser";
 import { cn } from "@/lib/utils";
@@ -40,6 +43,24 @@ export interface DirectoryInputConfig {
   defaultPath: string;
 }
 
+export interface AutoPilotVariant {
+  id: string;
+  model: string;
+  prompt: string;
+  maxTurns: number | null;
+}
+
+export interface AutoPilotConfig {
+  enabled: boolean;
+  optimizeFor: "quality" | "cost" | "latency" | "pareto";
+  evaluation: "llm_judge" | "schema_completeness";
+  sampleRate: number;
+  minSamples: number;
+  qualityThreshold: number;
+  autoDeploy: boolean;
+  variants: AutoPilotVariant[];
+}
+
 export interface StepConfig {
   id: string;
   prompt: string;
@@ -49,6 +70,7 @@ export interface StepConfig {
   parallelOver: string;
   dependsOn: string[];
   directoryInput: DirectoryInputConfig;
+  autopilot: AutoPilotConfig;
   retry: RetryConfig;
   approval: ApprovalConfig;
   policies: string[];
@@ -373,6 +395,217 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <option value="fallback">Fallback</option>
             </select>
             <p className="text-[11px] text-muted-foreground mt-0.5">Abort stops the run. Skip continues to next step. Fallback uses a simpler model.</p>
+          </div>
+        </CollapsibleSection>
+
+        {/* AutoPilot */}
+        <CollapsibleSection
+          icon={FlaskConical}
+          title="AutoPilot"
+          enabled={step.autopilot.enabled}
+          onToggle={() =>
+            onChange({ ...step, autopilot: { ...step.autopilot, enabled: !step.autopilot.enabled } })
+          }
+        >
+          <p className="text-[11px] text-muted-foreground">
+            A/B test model variants automatically. Each run picks a variant, evaluates quality, and picks a winner after enough samples.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Optimize For</label>
+            <select
+              value={step.autopilot.optimizeFor}
+              onChange={(e) =>
+                onChange({
+                  ...step,
+                  autopilot: {
+                    ...step.autopilot,
+                    optimizeFor: e.target.value as AutoPilotConfig["optimizeFor"],
+                  },
+                })
+              }
+              className={inputClass}
+            >
+              <option value="quality">Quality</option>
+              <option value="cost">Cost</option>
+              <option value="latency">Latency</option>
+              <option value="pareto">Pareto (balanced)</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Evaluation Method</label>
+            <select
+              value={step.autopilot.evaluation}
+              onChange={(e) =>
+                onChange({
+                  ...step,
+                  autopilot: {
+                    ...step.autopilot,
+                    evaluation: e.target.value as AutoPilotConfig["evaluation"],
+                  },
+                })
+              }
+              className={inputClass}
+            >
+              <option value="llm_judge">LLM Judge</option>
+              <option value="schema_completeness">Schema Completeness</option>
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">LLM Judge uses Haiku to score output quality. Schema checks field completeness.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Min Samples</label>
+              <input
+                type="number"
+                value={step.autopilot.minSamples}
+                onChange={(e) =>
+                  onChange({
+                    ...step,
+                    autopilot: { ...step.autopilot, minSamples: Number(e.target.value) },
+                  })
+                }
+                min={2}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Sample Rate</label>
+              <input
+                type="number"
+                value={step.autopilot.sampleRate}
+                onChange={(e) =>
+                  onChange({
+                    ...step,
+                    autopilot: { ...step.autopilot, sampleRate: Number(e.target.value) },
+                  })
+                }
+                min={0}
+                max={1}
+                step={0.1}
+                className={inputClass}
+              />
+              <p className="text-[11px] text-muted-foreground mt-0.5">Fraction of runs to test (1.0 = all).</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Quality Threshold</label>
+              <input
+                type="number"
+                value={step.autopilot.qualityThreshold}
+                onChange={(e) =>
+                  onChange({
+                    ...step,
+                    autopilot: { ...step.autopilot, qualityThreshold: Number(e.target.value) },
+                  })
+                }
+                min={0}
+                max={1}
+                step={0.1}
+                className={inputClass}
+              />
+            </div>
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={step.autopilot.autoDeploy}
+                  onChange={(e) =>
+                    onChange({
+                      ...step,
+                      autopilot: { ...step.autopilot, autoDeploy: e.target.checked },
+                    })
+                  }
+                  className="rounded border-border text-accent focus:ring-accent"
+                />
+                <span className="text-xs">Auto-deploy winner</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Variants */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-medium text-muted">Variants</label>
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = step.autopilot.variants.length + 1;
+                  const newVariant: AutoPilotVariant = {
+                    id: `variant-${idx}`,
+                    model: idx === 1 ? "haiku" : idx === 2 ? "opus" : "sonnet",
+                    prompt: "",
+                    maxTurns: null,
+                  };
+                  onChange({
+                    ...step,
+                    autopilot: {
+                      ...step.autopilot,
+                      variants: [...step.autopilot.variants, newVariant],
+                    },
+                  });
+                }}
+                className="flex items-center gap-1 text-[11px] text-accent hover:text-accent-hover transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            </div>
+            {step.autopilot.variants.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">Add at least 2 variants to compare.</p>
+            )}
+            <div className="space-y-2">
+              {step.autopilot.variants.map((v, idx) => (
+                <div key={idx} className="rounded-md border border-border p-2 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={v.id}
+                      onChange={(e) => {
+                        const variants = [...step.autopilot.variants];
+                        variants[idx] = { ...v, id: e.target.value };
+                        onChange({ ...step, autopilot: { ...step.autopilot, variants } });
+                      }}
+                      placeholder="variant-id"
+                      className={cn(inputClass, "h-7 text-xs")}
+                    />
+                    <select
+                      value={v.model}
+                      onChange={(e) => {
+                        const variants = [...step.autopilot.variants];
+                        variants[idx] = { ...v, model: e.target.value };
+                        onChange({ ...step, autopilot: { ...step.autopilot, variants } });
+                      }}
+                      className={cn(inputClass, "h-7 text-xs w-24 shrink-0")}
+                    >
+                      <option value="haiku">Haiku</option>
+                      <option value="sonnet">Sonnet</option>
+                      <option value="opus">Opus</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const variants = step.autopilot.variants.filter((_, i) => i !== idx);
+                        onChange({ ...step, autopilot: { ...step.autopilot, variants } });
+                      }}
+                      className="shrink-0 p-0.5 text-muted hover:text-error transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <textarea
+                    value={v.prompt}
+                    onChange={(e) => {
+                      const variants = [...step.autopilot.variants];
+                      variants[idx] = { ...v, prompt: e.target.value };
+                      onChange({ ...step, autopilot: { ...step.autopilot, variants } });
+                    }}
+                    placeholder="Custom prompt (leave empty to use step prompt)"
+                    rows={2}
+                    className={cn(inputClass, "h-auto py-1 text-xs resize-y")}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         </CollapsibleSection>
 

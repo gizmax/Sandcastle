@@ -26,6 +26,10 @@ const nodeTypes: NodeTypes = {
 const DEFAULT_RETRY = { enabled: false, maxAttempts: 3, backoff: "exponential" as const, onFailure: "abort" as const };
 const DEFAULT_APPROVAL = { enabled: false, message: "", timeoutHours: 24, onTimeout: "abort" as const, allowEdit: false };
 const DEFAULT_DIRECTORY_INPUT = { enabled: false, defaultPath: "" };
+const DEFAULT_AUTOPILOT = {
+  enabled: false, optimizeFor: "quality" as const, evaluation: "llm_judge" as const,
+  sampleRate: 1.0, minSamples: 10, qualityThreshold: 0.7, autoDeploy: true, variants: [],
+};
 const DEFAULT_SLO = { enabled: false, qualityMin: 0.7, costMaxUsd: 0.10, latencyMaxSeconds: 30, optimizeFor: "balanced" as const };
 
 function generateYaml(
@@ -105,6 +109,33 @@ function generateYaml(
       yaml += `      on_failure: ${step.retry.onFailure}\n`;
     }
 
+    // AutoPilot config
+    if (step.autopilot.enabled && step.autopilot.variants.length >= 2) {
+      yaml += `    autopilot:\n`;
+      yaml += `      enabled: true\n`;
+      yaml += `      optimize_for: ${step.autopilot.optimizeFor}\n`;
+      yaml += `      sample_rate: ${step.autopilot.sampleRate}\n`;
+      yaml += `      min_samples: ${step.autopilot.minSamples}\n`;
+      yaml += `      quality_threshold: ${step.autopilot.qualityThreshold}\n`;
+      yaml += `      auto_deploy: ${step.autopilot.autoDeploy}\n`;
+      yaml += `      evaluation:\n`;
+      yaml += `        method: ${step.autopilot.evaluation}\n`;
+      yaml += `      variants:\n`;
+      for (const v of step.autopilot.variants) {
+        yaml += `        - id: "${v.id}"\n`;
+        yaml += `          model: ${v.model}\n`;
+        if (v.prompt) {
+          yaml += `          prompt: |\n`;
+          v.prompt.split("\n").forEach((line) => {
+            yaml += `            ${line}\n`;
+          });
+        }
+        if (v.maxTurns) {
+          yaml += `          max_turns: ${v.maxTurns}\n`;
+        }
+      }
+    }
+
     // Policies
     if (step.policies.length > 0) {
       yaml += `    policies:\n`;
@@ -158,6 +189,7 @@ function buildInitialState(wf: InitialWorkflow) {
     parallelOver: "",
     dependsOn: s.depends_on || [],
     directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
+    autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
     retry: { ...DEFAULT_RETRY },
     approval: { ...DEFAULT_APPROVAL },
     policies: [],
@@ -225,6 +257,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       parallelOver: "",
       dependsOn: [],
       directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
+      autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
       retry: { ...DEFAULT_RETRY },
       approval: { ...DEFAULT_APPROVAL },
       policies: [],
@@ -261,6 +294,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   model: updated.model,
                   hasRetry: updated.retry.enabled,
                   hasApproval: updated.approval.enabled,
+                  hasAutoPilot: updated.autopilot.enabled,
                   hasSlo: updated.slo.enabled,
                 },
               }
