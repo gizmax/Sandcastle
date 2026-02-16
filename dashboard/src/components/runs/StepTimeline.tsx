@@ -11,6 +11,7 @@ interface Step {
   duration_seconds: number;
   attempt: number;
   error: string | null;
+  started_at: string | null;
 }
 
 interface StepTimelineProps {
@@ -52,6 +53,7 @@ export function StepTimeline({ steps, onReplay, onFork }: StepTimelineProps) {
               error={step.error}
               output={step.output}
               parallelIndex={step.parallel_index}
+              startedAt={step.started_at}
               onReplay={onReplay}
               onFork={onFork}
             />

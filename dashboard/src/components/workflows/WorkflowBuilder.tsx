@@ -119,6 +119,7 @@ interface InitialWorkflow {
     id: string;
     model?: string;
     depends_on?: string[];
+    prompt?: string;
   }>;
 }
 
@@ -131,7 +132,7 @@ interface WorkflowBuilderProps {
 function buildInitialState(wf: InitialWorkflow) {
   const steps: StepConfig[] = (wf.steps || []).map((s) => ({
     id: s.id,
-    prompt: "",
+    prompt: s.prompt || "",
     model: s.model || "sonnet",
     maxTurns: 10,
     timeout: 300,

@@ -39,6 +39,7 @@ dependencies = [
     "aioboto3>=13",
     "python-dotenv>=1.0",
     "simpleeval>=1.0",
+    "duvo-sandstorm>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -64,6 +65,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sandcastle"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"dashboard/dist" = "sandcastle/dashboard"
 
 [tool.ruff]
 line-length = 100

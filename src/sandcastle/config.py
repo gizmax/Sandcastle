@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     """Sandcastle configuration."""
 
     # Sandstorm connection
-    sandstorm_url: str = "http://localhost:8000"
+    sandstorm_url: str = "http://localhost:3001"
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
 

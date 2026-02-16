@@ -148,6 +148,7 @@ class StepStatusResponse(BaseModel):
     duration_seconds: float = 0.0
     attempt: int = 1
     error: str | None = None
+    started_at: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -204,6 +205,15 @@ class StatsResponse(BaseModel):
     cost_by_workflow: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class WorkflowStepInfo(BaseModel):
+    """Step info for DAG visualization and workflow editing."""
+
+    id: str
+    depends_on: list[str] = []
+    model: str | None = None
+    prompt: str = ""
+
+
 class WorkflowInfoResponse(BaseModel):
     """Workflow file metadata."""
 
@@ -211,6 +221,7 @@ class WorkflowInfoResponse(BaseModel):
     description: str
     steps_count: int
     file_name: str
+    steps: list[WorkflowStepInfo] = []
 
 
 class ApiKeyResponse(BaseModel):

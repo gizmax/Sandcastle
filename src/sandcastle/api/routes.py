@@ -46,6 +46,7 @@ from sandcastle.api.schemas import (
     StatsResponse,
     StepStatusResponse,
     WorkflowInfoResponse,
+    WorkflowStepInfo,
     WorkflowRunRequest,
     WorkflowSaveRequest,
 )
@@ -413,6 +414,15 @@ async def list_workflows() -> ApiResponse:
                     description=workflow.description,
                     steps_count=len(workflow.steps),
                     file_name=yaml_file.name,
+                    steps=[
+                        WorkflowStepInfo(
+                            id=s.id,
+                            depends_on=s.depends_on,
+                            model=s.model,
+                            prompt=s.prompt,
+                        )
+                        for s in workflow.steps
+                    ],
                 )
             )
         except Exception as e:
@@ -456,6 +466,14 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
             description=workflow.description,
             steps_count=len(workflow.steps),
             file_name=file_path.name,
+            steps=[
+                WorkflowStepInfo(
+                    id=s.id,
+                    depends_on=s.depends_on,
+                    model=s.model,
+                )
+                for s in workflow.steps
+            ],
         )
     )
 
@@ -739,6 +757,7 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             duration_seconds=s.duration_seconds,
             attempt=s.attempt,
             error=s.error,
+            started_at=s.started_at.isoformat() if s.started_at else None,
         )
         for s in run.steps
     ]

@@ -55,7 +55,7 @@ def _restore_settings():
 class TestGetSettings:
     def test_get_settings_returns_all_fields(self):
         """GET /settings returns a data dict with all expected setting keys."""
-        response = client.get("/settings")
+        response = client.get("/api/settings")
         assert response.status_code == 200
         data = response.json()["data"]
 
@@ -86,7 +86,7 @@ class TestGetSettings:
         settings.anthropic_api_key = "sk-secret-key-12345678"
         settings.webhook_secret = "whsec_abcdefgh"
 
-        response = client.get("/settings")
+        response = client.get("/api/settings")
         assert response.status_code == 200
         data = response.json()["data"]
 
@@ -99,7 +99,7 @@ class TestGetSettings:
         settings.anthropic_api_key = ""
         settings.e2b_api_key = ""
 
-        response = client.get("/settings")
+        response = client.get("/api/settings")
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["anthropic_api_key"] == ""
@@ -107,7 +107,7 @@ class TestGetSettings:
 
     def test_response_wrapper_format(self):
         """Settings response uses the standard {data, error} wrapper."""
-        response = client.get("/settings")
+        response = client.get("/api/settings")
         body = response.json()
         assert "data" in body
         assert "error" in body
@@ -130,7 +130,7 @@ class TestUpdateSettings:
             mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
             response = client.patch(
-                "/settings",
+                "/api/settings",
                 json={"log_level": "debug"},
             )
 
@@ -150,7 +150,7 @@ class TestUpdateSettings:
             mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
             response = client.patch(
-                "/settings",
+                "/api/settings",
                 json={
                     "log_level": "warning",
                     "max_workflow_depth": 10,
@@ -169,7 +169,7 @@ class TestUpdateSettings:
         settings.log_level = "info"
         settings.max_workflow_depth = 5
 
-        response = client.patch("/settings", json={})
+        response = client.patch("/api/settings", json={})
 
         assert response.status_code == 200
         data = response.json()["data"]
@@ -186,7 +186,7 @@ class TestSettingsValidation:
     def test_invalid_log_level_returns_422(self):
         """Invalid log_level value should be rejected with 422."""
         response = client.patch(
-            "/settings",
+            "/api/settings",
             json={"log_level": "superverbose"},
         )
         assert response.status_code == 422
@@ -194,7 +194,7 @@ class TestSettingsValidation:
     def test_max_workflow_depth_too_high_returns_422(self):
         """max_workflow_depth > 20 should be rejected with 422."""
         response = client.patch(
-            "/settings",
+            "/api/settings",
             json={"max_workflow_depth": 50},
         )
         assert response.status_code == 422
@@ -202,7 +202,7 @@ class TestSettingsValidation:
     def test_max_workflow_depth_too_low_returns_422(self):
         """max_workflow_depth < 1 should be rejected with 422."""
         response = client.patch(
-            "/settings",
+            "/api/settings",
             json={"max_workflow_depth": 0},
         )
         assert response.status_code == 422
@@ -210,7 +210,7 @@ class TestSettingsValidation:
     def test_negative_default_max_cost_returns_422(self):
         """Negative default_max_cost_usd should be rejected with 422."""
         response = client.patch(
-            "/settings",
+            "/api/settings",
             json={"default_max_cost_usd": -1.5},
         )
         assert response.status_code == 422

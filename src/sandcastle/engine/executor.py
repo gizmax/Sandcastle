@@ -22,6 +22,15 @@ from sandcastle.engine.storage import StorageBackend
 
 logger = logging.getLogger(__name__)
 
+# Default instructions prepended to every step prompt to keep agent output clean.
+_STEP_SYSTEM_PREFIX = (
+    "IMPORTANT: Return ONLY the requested data. "
+    "No introductory text, no commentary, no filler phrases, no sign-offs. "
+    "Do not include a Sources/References section. "
+    "Do not include Notes or Remarks sections. "
+    "Go straight to the answer.\n\n"
+)
+
 
 @dataclass
 class StepResult:
@@ -140,8 +149,18 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
     return None
 
 
-def resolve_templates(template: str, context: RunContext) -> str:
-    """Replace {var.path} template variables in a string."""
+def resolve_templates(
+    template: str,
+    context: RunContext,
+    depends_on: list[str] | None = None,
+) -> str:
+    """Replace {var.path} template variables in a string.
+
+    If *depends_on* is provided, outputs from dependency steps that are NOT
+    explicitly referenced in the template are automatically injected so that
+    DAG edges imply data flow without requiring manual ``{steps.X.output}``
+    placeholders.
+    """
 
     def _replace(match: re.Match) -> str:
         var_path = match.group(1)
@@ -152,7 +171,25 @@ def resolve_templates(template: str, context: RunContext) -> str:
             return json.dumps(value)
         return str(value)
 
-    return re.sub(r"\{([^}]+)\}", _replace, template)
+    resolved = re.sub(r"\{([^}]+)\}", _replace, template)
+
+    # Auto-inject unreferenced dependency outputs
+    if depends_on:
+        missing = [
+            dep for dep in depends_on
+            if f"steps.{dep}." not in template and f"steps.{dep}}}" not in template
+            and dep in context.step_outputs
+        ]
+        if missing:
+            parts = []
+            for dep in missing:
+                data = context.step_outputs[dep]
+                formatted = json.dumps(data) if isinstance(data, (dict, list)) else str(data)
+                parts.append(f"[{dep}]: {formatted}")
+            context_block = "\n".join(parts)
+            resolved = f"{resolved}\n\nContext from previous steps:\n{context_block}"
+
+    return resolved
 
 
 async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
@@ -510,8 +547,9 @@ async def _execute_fallback(
     """Execute the fallback prompt for a step."""
     started_at = datetime.now(timezone.utc)
     try:
-        prompt = resolve_templates(step.fallback.prompt, context)
+        prompt = resolve_templates(step.fallback.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
+        prompt = _STEP_SYSTEM_PREFIX + prompt
 
         request: dict[str, Any] = {
             "prompt": prompt,
@@ -603,8 +641,9 @@ async def _execute_step_once(
             except Exception as e:
                 logger.warning(f"Optimizer failed for step '{step.id}', using default: {e}")
 
-        prompt = resolve_templates(step.prompt, context)
+        prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
+        prompt = _STEP_SYSTEM_PREFIX + prompt
 
         request: dict[str, Any] = {
             "prompt": prompt,

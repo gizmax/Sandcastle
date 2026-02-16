@@ -1,7 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronDown, ChevronRight, RotateCcw, GitFork } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { cn, formatDuration, formatCost } from "@/lib/utils";
+
+function ElapsedTimer({ since }: { since: string }) {
+  const [elapsed, setElapsed] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 1000))
+  );
+  useEffect(() => {
+    const interval = setInterval(
+      () => setElapsed(Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 1000))),
+      1000,
+    );
+    return () => clearInterval(interval);
+  }, [since]);
+  return <span className="font-mono text-xs text-muted">{formatDuration(elapsed)}</span>;
+}
 
 function extractText(value: unknown): string | null {
   if (typeof value === "string") return value;
@@ -41,6 +55,7 @@ interface StepCardProps {
   error: string | null;
   output: unknown;
   parallelIndex: number | null;
+  startedAt: string | null;
   onReplay?: (stepId: string) => void;
   onFork?: (stepId: string) => void;
 }
@@ -54,6 +69,7 @@ export function StepCard({
   error,
   output,
   parallelIndex,
+  startedAt,
   onReplay,
   onFork,
 }: StepCardProps) {
@@ -92,6 +108,15 @@ export function StepCard({
 
       {expanded && (
         <div className="border-t border-border px-4 py-3">
+          {status === "running" && !output && !error && (
+            <div className="flex items-center justify-between py-2">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                <p className="text-xs text-muted">Running in Sandstorm sandbox...</p>
+              </div>
+              {startedAt && <ElapsedTimer since={startedAt} />}
+            </div>
+          )}
           {error && (
             <div className="mb-3 rounded-md bg-error/10 px-3 py-2">
               <p className="text-xs font-medium text-error">Error</p>

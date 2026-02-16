@@ -21,6 +21,7 @@ interface Step {
   duration_seconds: number;
   attempt: number;
   error: string | null;
+  started_at: string | null;
 }
 
 interface RunDetail {

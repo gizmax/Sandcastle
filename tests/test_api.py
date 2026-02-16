@@ -38,7 +38,7 @@ class TestHealth:
             mock.close = AsyncMock()
             MockClient.return_value = mock
 
-            response = client.get("/health")
+            response = client.get("/api/health")
 
         assert response.status_code == 200
         data = response.json()
@@ -53,7 +53,7 @@ class TestHealth:
             mock.close = AsyncMock()
             MockClient.return_value = mock
 
-            response = client.get("/health")
+            response = client.get("/api/health")
 
         data = response.json()
         assert "data" in data
@@ -73,7 +73,7 @@ class TestSyncRun:
             mock_session.return_value.__aexit__ = AsyncMock()
 
             response = client.post(
-                "/workflows/run/sync",
+                "/api/workflows/run/sync",
                 json={"workflow": INVALID_WORKFLOW, "input": {}},
             )
 
@@ -87,7 +87,7 @@ sandstorm_url: http://localhost:8000
 steps: []
 """
         response = client.post(
-            "/workflows/run/sync",
+            "/api/workflows/run/sync",
             json={"workflow": empty_yaml, "input": {}},
         )
         assert response.status_code == 400
@@ -122,7 +122,7 @@ steps: []
             mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
             response = client.post(
-                "/workflows/run/sync",
+                "/api/workflows/run/sync",
                 json={
                     "workflow": VALID_WORKFLOW,
                     "input": {"name": "World"},
@@ -150,14 +150,14 @@ class TestResponseFormat:
             mock.close = AsyncMock()
             MockClient.return_value = mock
 
-            response = client.get("/health")
+            response = client.get("/api/health")
 
         data = response.json()
         assert "data" in data
         assert "error" in data
 
-    def test_404_on_unknown_route(self):
-        response = client.get("/nonexistent")
+    def test_404_on_unknown_api_route(self):
+        response = client.get("/api/nonexistent")
         assert response.status_code == 404
 
 
@@ -167,7 +167,7 @@ class TestResponseFormat:
 class TestRequestValidation:
     def test_missing_workflow_field(self):
         response = client.post(
-            "/workflows/run/sync",
+            "/api/workflows/run/sync",
             json={"input": {"name": "test"}},
         )
         # Both workflow and workflow_name are optional, but one must be provided
@@ -187,7 +187,7 @@ steps:
     prompt: "B"
 """
         response = client.post(
-            "/workflows/run/sync",
+            "/api/workflows/run/sync",
             json={"workflow": cycle_yaml, "input": {}},
         )
         # Should fail on validation or plan building

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from sandcastle.api.auth import auth_middleware
@@ -114,6 +117,9 @@ app = FastAPI(
     description="Production-ready workflow orchestrator built on Sandstorm",
     version="0.5.0",
     lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
 
 # Auth (added first = inner middleware)
@@ -138,7 +144,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router)
+app.include_router(router, prefix="/api")
+
+# ---------------------------------------------------------------------------
+# Dashboard static files (served from the same port)
+# ---------------------------------------------------------------------------
+
+# Look for pre-built dashboard in known locations
+_DASHBOARD_CANDIDATES = [
+    Path(__file__).parent.parent.parent / "dashboard" / "dist",  # repo dev
+    Path(__file__).parent / "dashboard",                          # installed pkg
+]
+_dashboard_dir: Path | None = next(
+    (p for p in _DASHBOARD_CANDIDATES if (p / "index.html").exists()), None
+)
+
+if _dashboard_dir:
+    logger.info(f"Serving dashboard from {_dashboard_dir}")
+    app.mount("/assets", StaticFiles(directory=_dashboard_dir / "assets"), name="dashboard-assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa_fallback(path: str):
+        """Serve dashboard SPA - static files or fallback to index.html."""
+        # Don't intercept /api paths - let FastAPI return 404 for unknown API routes
+        if path.startswith("api/") or path == "api":
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Not found")
+        file = _dashboard_dir / path
+        if file.exists() and file.is_file() and ".." not in path:
+            return FileResponse(file)
+        return FileResponse(_dashboard_dir / "index.html")
 
 
 if __name__ == "__main__":

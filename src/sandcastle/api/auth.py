@@ -17,10 +17,10 @@ from sandcastle.models.db import ApiKey, async_session
 logger = logging.getLogger(__name__)
 
 # Public endpoints that don't require authentication
-PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc"}
 
 # Path prefixes that don't require authentication
-PUBLIC_PREFIXES = ("/templates",)
+PUBLIC_PREFIXES = ("/api/templates",)
 
 
 def hash_key(key: str) -> str:
@@ -52,16 +52,16 @@ async def auth_middleware(request: Request, call_next):
         request.state.tenant_id = None
         return await call_next(request)
 
-    # Skip auth for public paths
+    # Skip auth for non-API paths (dashboard, static files)
+    if not request.url.path.startswith("/api"):
+        return await call_next(request)
+
+    # Skip auth for public API paths
     if request.url.path in PUBLIC_PATHS:
         return await call_next(request)
 
-    # Skip auth for public path prefixes (e.g. /templates, /templates/{name})
+    # Skip auth for public path prefixes (e.g. /api/templates)
     if any(request.url.path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
-        return await call_next(request)
-
-    # Skip auth for dashboard static files
-    if request.url.path.startswith("/dashboard"):
         return await call_next(request)
 
     # Extract API key from header

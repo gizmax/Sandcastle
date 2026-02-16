@@ -173,7 +173,7 @@ class TestHealthLocalMode:
             from sandcastle.main import app
 
             test_client = TestClient(app)
-            response = test_client.get("/health")
+            response = test_client.get("/api/health")
 
         assert response.status_code == 200
         data = response.json()
@@ -187,7 +187,7 @@ class TestRuntimeEndpoint:
         from sandcastle.main import app
 
         test_client = TestClient(app)
-        response = test_client.get("/runtime")
+        response = test_client.get("/api/runtime")
 
         assert response.status_code == 200
         data = response.json()

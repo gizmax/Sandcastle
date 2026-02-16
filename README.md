@@ -52,12 +52,11 @@ No Docker, no database server, no Redis. Install, run, done.
 
 ```bash
 pip install sandcastle-ai
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
-sandcastle serve
+sandcastle init        # asks for API keys, writes .env
+sandcastle serve       # starts API + dashboard + Sandstorm on one port
 ```
 
-Dashboard at `http://localhost:8080`, API ready, 20 workflow templates included.
+Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 20 workflow templates included.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
@@ -98,7 +97,7 @@ cd Sandcastle
 cat > .env << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-...
 E2B_API_KEY=e2b_...
-SANDSTORM_URL=http://localhost:8000
+SANDSTORM_URL=http://localhost:3001
 WEBHOOK_SECRET=your-signing-secret
 EOF
 
@@ -131,21 +130,18 @@ uv sync
 # Run database migrations
 uv run alembic upgrade head
 
-# Start the API server
+# Start the API server (serves API + dashboard on one port)
 uv run python -m sandcastle serve
 
 # Start the async worker (separate terminal)
 uv run python -m sandcastle worker
-
-# Start the dashboard (separate terminal)
-cd dashboard && npm install && npm run dev
 ```
 
 ### Your First Workflow
 
 ```bash
 # Run a workflow asynchronously
-curl -X POST http://localhost:8080/workflows/run \
+curl -X POST http://localhost:8080/api/workflows/run \
   -H "Content-Type: application/json" \
   -d '{
     "workflow": "lead-enrichment",
@@ -162,7 +158,7 @@ curl -X POST http://localhost:8080/workflows/run \
 Or run synchronously and wait for the result:
 
 ```bash
-curl -X POST http://localhost:8080/workflows/run/sync \
+curl -X POST http://localhost:8080/api/workflows/run/sync \
   -H "Content-Type: application/json" \
   -d '{
     "workflow": "lead-enrichment",
@@ -218,7 +214,10 @@ async with AsyncSandcastleClient() as client:
 The `sandcastle` command gives you full control from the terminal:
 
 ```bash
-# Start the server
+# Interactive setup wizard (API keys, .env, workflows/)
+sandcastle init
+
+# Start the server (API + dashboard + Sandstorm on one port)
 sandcastle serve
 
 # Run a workflow
@@ -363,6 +362,37 @@ steps:
     depends_on: ["analyze"]
     prompt: "Create executive summary from: {steps.analyze.output}"
 ```
+
+### Data Passing Between Steps
+
+When you connect steps with `depends_on`, data flows automatically. You don't need to reference the previous step's output explicitly - Sandcastle injects it as context:
+
+```yaml
+steps:
+  - id: "research"
+    prompt: "Find all EU presidents and return as JSON."
+
+  - id: "enrich"
+    depends_on: ["research"]
+    prompt: "Add political party and key decisions for each president."
+    # Output from "research" is automatically available - no need for {steps.research.output}
+```
+
+For fine-grained control, you can still reference specific outputs explicitly using `{steps.STEP_ID.output}` or drill into fields with `{steps.STEP_ID.output.field_name}`:
+
+```yaml
+  - id: "score"
+    depends_on: ["scrape", "enrich"]
+    prompt: |
+      Score this lead based on company: {steps.scrape.output.company_name}
+      and enrichment: {steps.enrich.output}
+```
+
+**Rules:**
+- `depends_on` controls execution order **and** data flow
+- Unreferenced dependency outputs are appended as context automatically
+- Explicitly referenced outputs (`{steps.X.output}`) are placed exactly where you write them
+- `{input.X}` references workflow input parameters passed at run time
 
 ---
 
@@ -550,7 +580,7 @@ Plus 5 foundational templates: Summarize, Translate, Research Agent, Chain of Th
 sandcastle templates
 
 # Use a template
-curl http://localhost:8080/templates
+curl http://localhost:8080/api/templates
 ```
 
 Each template includes parallel execution stages, structured output schemas, and human approval gates where appropriate. Use them directly or as starting points in the Workflow Builder.
@@ -563,7 +593,7 @@ Sandcastle provides a global SSE endpoint for real-time updates across the entir
 
 ```bash
 # Connect to the global event stream
-curl -N http://localhost:8080/events
+curl -N http://localhost:8080/api/events
 ```
 
 The dashboard uses this stream to power live indicators showing connection status, toast notifications for run completion and failure, and instant updates across all pages. Event types include:
@@ -588,12 +618,12 @@ Every completed step saves a checkpoint. When something goes wrong - or you just
 
 ```bash
 # Replay from the "enrich" step
-curl -X POST http://localhost:8080/runs/{run_id}/replay \
+curl -X POST http://localhost:8080/api/runs/{run_id}/replay \
   -H "Content-Type: application/json" \
   -d '{ "from_step": "enrich" }'
 
 # Fork with a different model
-curl -X POST http://localhost:8080/runs/{run_id}/fork \
+curl -X POST http://localhost:8080/api/runs/{run_id}/fork \
   -H "Content-Type: application/json" \
   -d '{
     "from_step": "score",
@@ -613,7 +643,7 @@ Set a spending limit per run, per tenant, or as a global default. Sandcastle che
 Budget resolution order: request `max_cost_usd` > tenant API key limit > `DEFAULT_MAX_COST_USD` env var.
 
 ```bash
-curl -X POST http://localhost:8080/workflows/run \
+curl -X POST http://localhost:8080/api/workflows/run \
   -d '{ "workflow": "enrichment", "input": {...}, "max_cost_usd": 0.50 }'
 ```
 
@@ -621,7 +651,7 @@ curl -X POST http://localhost:8080/workflows/run \
 
 ## Dashboard
 
-Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS. Dark and light theme, real-time updates, and zero configuration - just `npm run dev`.
+Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS. Dark and light theme, real-time updates, and zero configuration - just open `http://localhost:8080` after `sandcastle serve`. For frontend development, run `cd dashboard && npm run dev`.
 
 ### Overview
 
@@ -806,104 +836,104 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/workflows` | List available workflows |
-| `POST` | `/workflows` | Save new workflow YAML |
-| `POST` | `/workflows/run` | Run workflow async (returns run_id) |
-| `POST` | `/workflows/run/sync` | Run workflow sync (blocks until done) |
+| `GET` | `/api/workflows` | List available workflows |
+| `POST` | `/api/workflows` | Save new workflow YAML |
+| `POST` | `/api/workflows/run` | Run workflow async (returns run_id) |
+| `POST` | `/api/workflows/run/sync` | Run workflow sync (blocks until done) |
 
 ### Runs
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/runs` | List runs (filterable by status, workflow, date, tenant) |
-| `GET` | `/runs/{id}` | Get run detail with step statuses |
-| `GET` | `/runs/{id}/stream` | SSE stream of live progress |
-| `POST` | `/runs/{id}/cancel` | Cancel a running workflow |
-| `POST` | `/runs/{id}/replay` | Replay from a specific step |
-| `POST` | `/runs/{id}/fork` | Fork from a step with overrides |
+| `GET` | `/api/runs` | List runs (filterable by status, workflow, date, tenant) |
+| `GET` | `/api/runs/{id}` | Get run detail with step statuses |
+| `GET` | `/api/runs/{id}/stream` | SSE stream of live progress |
+| `POST` | `/api/runs/{id}/cancel` | Cancel a running workflow |
+| `POST` | `/api/runs/{id}/replay` | Replay from a specific step |
+| `POST` | `/api/runs/{id}/fork` | Fork from a step with overrides |
 
 ### Schedules
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/schedules` | Create cron schedule |
-| `GET` | `/schedules` | List all schedules |
-| `PATCH` | `/schedules/{id}` | Update schedule (cron, enabled, input) |
-| `DELETE` | `/schedules/{id}` | Delete schedule |
+| `POST` | `/api/schedules` | Create cron schedule |
+| `GET` | `/api/schedules` | List all schedules |
+| `PATCH` | `/api/schedules/{id}` | Update schedule (cron, enabled, input) |
+| `DELETE` | `/api/schedules/{id}` | Delete schedule |
 
 ### Dead Letter Queue
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/dead-letter` | List failed items |
-| `POST` | `/dead-letter/{id}/retry` | Retry failed step (full replay) |
-| `POST` | `/dead-letter/{id}/resolve` | Mark as resolved |
+| `GET` | `/api/dead-letter` | List failed items |
+| `POST` | `/api/dead-letter/{id}/retry` | Retry failed step (full replay) |
+| `POST` | `/api/dead-letter/{id}/resolve` | Mark as resolved |
 
 ### Approval Gates
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/approvals` | List approvals (filterable by status) |
-| `GET` | `/approvals/{id}` | Get approval detail with request data |
-| `POST` | `/approvals/{id}/approve` | Approve (optional edit + comment) |
-| `POST` | `/approvals/{id}/reject` | Reject and fail the run |
-| `POST` | `/approvals/{id}/skip` | Skip step and continue workflow |
+| `GET` | `/api/approvals` | List approvals (filterable by status) |
+| `GET` | `/api/approvals/{id}` | Get approval detail with request data |
+| `POST` | `/api/approvals/{id}/approve` | Approve (optional edit + comment) |
+| `POST` | `/api/approvals/{id}/reject` | Reject and fail the run |
+| `POST` | `/api/approvals/{id}/skip` | Skip step and continue workflow |
 
 ### AutoPilot
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/autopilot/experiments` | List experiments |
-| `GET` | `/autopilot/experiments/{id}` | Experiment detail with samples + stats |
-| `POST` | `/autopilot/experiments/{id}/deploy` | Manually deploy a winning variant |
-| `POST` | `/autopilot/experiments/{id}/reset` | Reset experiment |
-| `GET` | `/autopilot/stats` | Savings and quality overview |
+| `GET` | `/api/autopilot/experiments` | List experiments |
+| `GET` | `/api/autopilot/experiments/{id}` | Experiment detail with samples + stats |
+| `POST` | `/api/autopilot/experiments/{id}/deploy` | Manually deploy a winning variant |
+| `POST` | `/api/autopilot/experiments/{id}/reset` | Reset experiment |
+| `GET` | `/api/autopilot/stats` | Savings and quality overview |
 
 ### Policy Engine
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/violations` | List policy violations (filterable) |
-| `GET` | `/violations/stats` | Violation stats by severity, policy, day |
-| `GET` | `/runs/{id}/violations` | Violations for a specific run |
+| `GET` | `/api/violations` | List policy violations (filterable) |
+| `GET` | `/api/violations/stats` | Violation stats by severity, policy, day |
+| `GET` | `/api/runs/{id}/violations` | Violations for a specific run |
 
 ### Optimizer
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/optimizer/decisions` | List routing decisions |
-| `GET` | `/optimizer/decisions/{run_id}` | Decisions for a specific run |
-| `GET` | `/optimizer/stats` | Model distribution, confidence, savings |
+| `GET` | `/api/optimizer/decisions` | List routing decisions |
+| `GET` | `/api/optimizer/decisions/{run_id}` | Decisions for a specific run |
+| `GET` | `/api/optimizer/stats` | Model distribution, confidence, savings |
 
 ### Templates
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/templates` | List all built-in workflow templates |
-| `GET` | `/templates/{id}` | Get template detail with YAML |
+| `GET` | `/api/templates` | List all built-in workflow templates |
+| `GET` | `/api/templates/{id}` | Get template detail with YAML |
 
 ### Events
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/events` | Global SSE stream (run, step, DLQ events) |
+| `GET` | `/api/events` | Global SSE stream (run, step, DLQ events) |
 
 ### API Keys
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api-keys` | Create API key (returns plaintext once) |
-| `GET` | `/api-keys` | List active keys (prefix only) |
-| `DELETE` | `/api-keys/{id}` | Deactivate key |
+| `POST` | `/api/api-keys` | Create API key (returns plaintext once) |
+| `GET` | `/api/api-keys` | List active keys (prefix only) |
+| `DELETE` | `/api/api-keys/{id}` | Deactivate key |
 
 ### System
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check (Sandstorm, DB, Redis) |
-| `GET` | `/runtime` | Current mode info (database, queue, storage) |
-| `GET` | `/events` | Global SSE event stream |
-| `GET` | `/stats` | Aggregated stats and cost trends |
+| `GET` | `/api/health` | Health check (Sandstorm, DB, Redis) |
+| `GET` | `/api/runtime` | Current mode info (database, queue, storage) |
+| `GET` | `/api/events` | Global SSE event stream |
+| `GET` | `/api/stats` | Aggregated stats and cost trends |
 
 All responses follow the envelope format: `{ "data": ..., "error": null }` or `{ "data": null, "error": { "code": "...", "message": "..." } }`.
 
@@ -915,16 +945,16 @@ Sandcastle supports strict multi-tenant isolation via API keys. Every API key ma
 
 ```bash
 # Create an API key
-curl -X POST http://localhost:8080/api-keys \
+curl -X POST http://localhost:8080/api/api-keys \
   -d '{ "tenant_id": "acme-corp", "name": "Production" }'
 # Returns: { "data": { "key": "sc_abc123...", "key_prefix": "sc_abc12" } }
 
 # Use it
-curl http://localhost:8080/runs -H "X-API-Key: sc_abc123..."
+curl http://localhost:8080/api/runs -H "X-API-Key: sc_abc123..."
 # Only sees runs belonging to acme-corp
 ```
 
-Toggle with `AUTH_REQUIRED=true|false` (default: false for local dev). When enabled, all endpoints except `/health` require a valid API key.
+Toggle with `AUTH_REQUIRED=true|false` (default: false for local dev). When enabled, all endpoints except `/api/health` require a valid API key.
 
 ---
 
@@ -948,7 +978,7 @@ Header: `X-Sandcastle-Signature` for verification against your `WEBHOOK_SECRET`.
 ## Architecture
 
 ```
-Your App --POST /workflows/run--> Sandcastle API (FastAPI)
+Your App --POST /api/workflows/run--> Sandcastle API (FastAPI)
                                        |
                                +-------+--------+
                                |  Workflow Engine |
@@ -1028,11 +1058,11 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
 
 ## Configuration
 
-All configuration via environment variables or `.env` file. Mode is auto-detected based on `DATABASE_URL` and `REDIS_URL`:
+All configuration via environment variables or `.env` file. Run `sandcastle init` for an interactive setup wizard. Mode is auto-detected based on `DATABASE_URL` and `REDIS_URL`:
 
 ```bash
 # Required
-SANDSTORM_URL=http://localhost:8000
+SANDSTORM_URL=http://localhost:3001
 ANTHROPIC_API_KEY=sk-ant-...
 E2B_API_KEY=e2b_...
 

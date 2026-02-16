@@ -14,6 +14,7 @@ interface WorkflowStep {
   id: string;
   model?: string;
   depends_on?: string[];
+  prompt?: string;
 }
 
 interface WorkflowInfo {

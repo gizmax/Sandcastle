@@ -411,7 +411,7 @@ class SandcastleClient:
         if idempotency_key is not None:
             body["idempotency_key"] = idempotency_key
 
-        resp = self._client.post("/workflows/run", json=body)
+        resp = self._client.post("/api/workflows/run", json=body)
         data = _extract_data(resp)
         result = _parse_run(data)
 
@@ -451,7 +451,7 @@ class SandcastleClient:
         if callback_url is not None:
             body["callback_url"] = callback_url
 
-        resp = self._client.post("/workflows/run", json=body)
+        resp = self._client.post("/api/workflows/run", json=body)
         data = _extract_data(resp)
         result = _parse_run(data)
 
@@ -479,7 +479,7 @@ class SandcastleClient:
         Returns:
             Run object with full details including steps.
         """
-        resp = self._client.get(f"/runs/{run_id}")
+        resp = self._client.get(f"/api/runs/{run_id}")
         data = _extract_data(resp)
         return _parse_run(data)
 
@@ -492,7 +492,7 @@ class SandcastleClient:
         Returns:
             Dict with ``cancelled`` and ``run_id`` keys.
         """
-        resp = self._client.post(f"/runs/{run_id}/cancel")
+        resp = self._client.post(f"/api/runs/{run_id}/cancel")
         return _extract_data(resp)
 
     def replay(self, run_id: str, from_step: str) -> Run:
@@ -506,7 +506,7 @@ class SandcastleClient:
             Run object for the new replay run.
         """
         resp = self._client.post(
-            f"/runs/{run_id}/replay",
+            f"/api/runs/{run_id}/replay",
             json={"from_step": from_step},
         )
         data = _extract_data(resp)
@@ -531,7 +531,7 @@ class SandcastleClient:
         body: dict[str, Any] = {"from_step": from_step}
         if changes is not None:
             body["changes"] = changes
-        resp = self._client.post(f"/runs/{run_id}/fork", json=body)
+        resp = self._client.post(f"/api/runs/{run_id}/fork", json=body)
         data = _extract_data(resp)
         return _parse_run(data)
 
@@ -560,7 +560,7 @@ class SandcastleClient:
         if workflow is not None:
             params["workflow"] = workflow
 
-        resp = self._client.get("/runs", params=params)
+        resp = self._client.get("/api/runs", params=params)
         body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)  # will raise
@@ -590,7 +590,7 @@ class SandcastleClient:
         Yields:
             Event dicts parsed from SSE.
         """
-        with self._client.stream("GET", f"/runs/{run_id}/stream") as resp:
+        with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
             if resp.status_code >= 400:
                 resp.read()
                 _extract_data(resp)  # will raise
@@ -617,7 +617,7 @@ class SandcastleClient:
         Returns:
             List of Workflow objects.
         """
-        resp = self._client.get("/workflows")
+        resp = self._client.get("/api/workflows")
         data = _extract_data(resp)
         if isinstance(data, list):
             return [_parse_workflow(w) for w in data]
@@ -634,7 +634,7 @@ class SandcastleClient:
             Workflow object with metadata.
         """
         resp = self._client.post(
-            "/workflows",
+            "/api/workflows",
             json={"name": name, "content": content},
         )
         data = _extract_data(resp)
@@ -658,7 +658,7 @@ class SandcastleClient:
             PaginatedList of Schedule objects.
         """
         params: dict[str, Any] = {"limit": limit, "offset": offset}
-        resp = self._client.get("/schedules", params=params)
+        resp = self._client.get("/api/schedules", params=params)
         body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)
@@ -700,7 +700,7 @@ class SandcastleClient:
         }
         if input is not None:
             body["input_data"] = input
-        resp = self._client.post("/schedules", json=body)
+        resp = self._client.post("/api/schedules", json=body)
         data = _extract_data(resp)
         return _parse_schedule(data)
 
@@ -730,7 +730,7 @@ class SandcastleClient:
             body["cron_expression"] = cron
         if input is not None:
             body["input_data"] = input
-        resp = self._client.patch(f"/schedules/{schedule_id}", json=body)
+        resp = self._client.patch(f"/api/schedules/{schedule_id}", json=body)
         data = _extract_data(resp)
         return _parse_schedule(data)
 
@@ -743,7 +743,7 @@ class SandcastleClient:
         Returns:
             Dict with ``deleted`` and ``id`` keys.
         """
-        resp = self._client.delete(f"/schedules/{schedule_id}")
+        resp = self._client.delete(f"/api/schedules/{schedule_id}")
         return _extract_data(resp)
 
     # -- Health / Info --
@@ -754,7 +754,7 @@ class SandcastleClient:
         Returns:
             HealthStatus object.
         """
-        resp = self._client.get("/health")
+        resp = self._client.get("/api/health")
         data = _extract_data(resp)
         return _parse_health(data)
 
@@ -764,7 +764,7 @@ class SandcastleClient:
         Returns:
             RuntimeInfo object.
         """
-        resp = self._client.get("/runtime")
+        resp = self._client.get("/api/runtime")
         data = _extract_data(resp)
         return _parse_runtime(data)
 
@@ -774,7 +774,7 @@ class SandcastleClient:
         Returns:
             Stats object.
         """
-        resp = self._client.get("/stats")
+        resp = self._client.get("/api/stats")
         data = _extract_data(resp)
         return _parse_stats(data)
 
@@ -856,7 +856,7 @@ class AsyncSandcastleClient:
         if idempotency_key is not None:
             body["idempotency_key"] = idempotency_key
 
-        resp = await self._client.post("/workflows/run", json=body)
+        resp = await self._client.post("/api/workflows/run", json=body)
         data = _extract_data(resp)
         result = _parse_run(data)
 
@@ -896,7 +896,7 @@ class AsyncSandcastleClient:
         if callback_url is not None:
             body["callback_url"] = callback_url
 
-        resp = await self._client.post("/workflows/run", json=body)
+        resp = await self._client.post("/api/workflows/run", json=body)
         data = _extract_data(resp)
         result = _parse_run(data)
 
@@ -926,7 +926,7 @@ class AsyncSandcastleClient:
         Returns:
             Run object with full details including steps.
         """
-        resp = await self._client.get(f"/runs/{run_id}")
+        resp = await self._client.get(f"/api/runs/{run_id}")
         data = _extract_data(resp)
         return _parse_run(data)
 
@@ -939,7 +939,7 @@ class AsyncSandcastleClient:
         Returns:
             Dict with ``cancelled`` and ``run_id`` keys.
         """
-        resp = await self._client.post(f"/runs/{run_id}/cancel")
+        resp = await self._client.post(f"/api/runs/{run_id}/cancel")
         return _extract_data(resp)
 
     async def replay(self, run_id: str, from_step: str) -> Run:
@@ -953,7 +953,7 @@ class AsyncSandcastleClient:
             Run object for the new replay run.
         """
         resp = await self._client.post(
-            f"/runs/{run_id}/replay",
+            f"/api/runs/{run_id}/replay",
             json={"from_step": from_step},
         )
         data = _extract_data(resp)
@@ -978,7 +978,7 @@ class AsyncSandcastleClient:
         body: dict[str, Any] = {"from_step": from_step}
         if changes is not None:
             body["changes"] = changes
-        resp = await self._client.post(f"/runs/{run_id}/fork", json=body)
+        resp = await self._client.post(f"/api/runs/{run_id}/fork", json=body)
         data = _extract_data(resp)
         return _parse_run(data)
 
@@ -1007,7 +1007,7 @@ class AsyncSandcastleClient:
         if workflow is not None:
             params["workflow"] = workflow
 
-        resp = await self._client.get("/runs", params=params)
+        resp = await self._client.get("/api/runs", params=params)
         body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)
@@ -1037,7 +1037,7 @@ class AsyncSandcastleClient:
         Yields:
             Event dicts parsed from SSE.
         """
-        async with self._client.stream("GET", f"/runs/{run_id}/stream") as resp:
+        async with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
             if resp.status_code >= 400:
                 await resp.aread()
                 _extract_data(resp)  # will raise
@@ -1064,7 +1064,7 @@ class AsyncSandcastleClient:
         Returns:
             List of Workflow objects.
         """
-        resp = await self._client.get("/workflows")
+        resp = await self._client.get("/api/workflows")
         data = _extract_data(resp)
         if isinstance(data, list):
             return [_parse_workflow(w) for w in data]
@@ -1081,7 +1081,7 @@ class AsyncSandcastleClient:
             Workflow object with metadata.
         """
         resp = await self._client.post(
-            "/workflows",
+            "/api/workflows",
             json={"name": name, "content": content},
         )
         data = _extract_data(resp)
@@ -1105,7 +1105,7 @@ class AsyncSandcastleClient:
             PaginatedList of Schedule objects.
         """
         params: dict[str, Any] = {"limit": limit, "offset": offset}
-        resp = await self._client.get("/schedules", params=params)
+        resp = await self._client.get("/api/schedules", params=params)
         body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)
@@ -1147,7 +1147,7 @@ class AsyncSandcastleClient:
         }
         if input is not None:
             body["input_data"] = input
-        resp = await self._client.post("/schedules", json=body)
+        resp = await self._client.post("/api/schedules", json=body)
         data = _extract_data(resp)
         return _parse_schedule(data)
 
@@ -1177,7 +1177,7 @@ class AsyncSandcastleClient:
             body["cron_expression"] = cron
         if input is not None:
             body["input_data"] = input
-        resp = await self._client.patch(f"/schedules/{schedule_id}", json=body)
+        resp = await self._client.patch(f"/api/schedules/{schedule_id}", json=body)
         data = _extract_data(resp)
         return _parse_schedule(data)
 
@@ -1190,7 +1190,7 @@ class AsyncSandcastleClient:
         Returns:
             Dict with ``deleted`` and ``id`` keys.
         """
-        resp = await self._client.delete(f"/schedules/{schedule_id}")
+        resp = await self._client.delete(f"/api/schedules/{schedule_id}")
         return _extract_data(resp)
 
     # -- Health / Info --
@@ -1201,7 +1201,7 @@ class AsyncSandcastleClient:
         Returns:
             HealthStatus object.
         """
-        resp = await self._client.get("/health")
+        resp = await self._client.get("/api/health")
         data = _extract_data(resp)
         return _parse_health(data)
 
@@ -1211,7 +1211,7 @@ class AsyncSandcastleClient:
         Returns:
             RuntimeInfo object.
         """
-        resp = await self._client.get("/runtime")
+        resp = await self._client.get("/api/runtime")
         data = _extract_data(resp)
         return _parse_runtime(data)
 
@@ -1221,6 +1221,6 @@ class AsyncSandcastleClient:
         Returns:
             Stats object.
         """
-        resp = await self._client.get("/stats")
+        resp = await self._client.get("/api/stats")
         data = _extract_data(resp)
         return _parse_stats(data)

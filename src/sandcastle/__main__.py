@@ -192,9 +192,127 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
 # Command handlers
 # ---------------------------------------------------------------------------
 
+def _cmd_init(args: argparse.Namespace) -> None:
+    """Interactive setup wizard - create .env and workflows directory."""
+    from pathlib import Path
+
+    env_path = Path(".env")
+
+    print()
+    print(_color("  Sandcastle Setup", _C.BOLD))
+    print(_color("  ================", _C.BOLD))
+    print()
+
+    # Check if .env already exists
+    if env_path.exists():
+        answer = input(
+            _color("  .env already exists. Overwrite? [y/N]: ", _C.YELLOW)
+        ).strip().lower()
+        if answer not in ("y", "yes"):
+            print("  Aborted.")
+            return
+
+    # Collect API keys
+    anthropic_key = input("  ANTHROPIC_API_KEY: ").strip()
+    if not anthropic_key:
+        print(
+            _color("  Error: ANTHROPIC_API_KEY is required.", _C.RED),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    e2b_key = input("  E2B_API_KEY (optional, Enter to skip): ").strip()
+
+    # Determine Sandstorm port
+    sandstorm_port = getattr(args, "sandstorm_port", 3001)
+
+    # Write .env
+    lines = [
+        f"ANTHROPIC_API_KEY={anthropic_key}",
+        f"E2B_API_KEY={e2b_key}" if e2b_key else "# E2B_API_KEY=",
+        f"SANDSTORM_URL=http://localhost:{sandstorm_port}",
+        "",
+        "# Local mode (SQLite + in-process queue) - leave empty",
+        "DATABASE_URL=",
+        "REDIS_URL=",
+    ]
+    env_path.write_text("\n".join(lines) + "\n")
+
+    # Create workflows directory
+    wf_dir = Path("workflows")
+    wf_dir.mkdir(exist_ok=True)
+
+    print()
+    print(_color("  .env created", _C.GREEN))
+    print(_color("  Run: sandcastle serve", _C.CYAN))
+    print()
+
+
 def _cmd_serve(args: argparse.Namespace) -> None:
-    """Start the Sandcastle API server."""
+    """Start the Sandcastle API server (with optional Sandstorm auto-start)."""
+    import atexit
+    import signal
+    import subprocess
+
     import uvicorn
+
+    sandstorm_proc = None
+
+    # Load .env if present so we can read SANDSTORM_URL
+    from sandcastle.config import settings
+
+    sandstorm_url = settings.sandstorm_url
+
+    # Check if Sandstorm is already running
+    sandstorm_running = False
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(f"{sandstorm_url}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=2):
+            sandstorm_running = True
+    except Exception:
+        pass
+
+    if not sandstorm_running:
+        # Try to start Sandstorm
+        # Extract port from URL
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(sandstorm_url)
+            ds_port = str(parsed.port or 3001)
+        except Exception:
+            ds_port = "3001"
+
+        try:
+            sandstorm_proc = subprocess.Popen(
+                ["ds", "serve", "--port", ds_port],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print(
+                _color(f"  Started Sandstorm on port {ds_port}", _C.GREEN)
+            )
+        except FileNotFoundError:
+            print(
+                _color(
+                    "  Sandstorm not found. Install: pipx install duvo-sandstorm",
+                    _C.YELLOW,
+                )
+            )
+
+    # Cleanup Sandstorm on exit
+    def _cleanup():
+        if sandstorm_proc and sandstorm_proc.poll() is None:
+            sandstorm_proc.terminate()
+            try:
+                sandstorm_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                sandstorm_proc.kill()
+
+    atexit.register(_cleanup)
+    signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
 
     uvicorn.run(
         "sandcastle.main:app",
@@ -558,6 +676,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    # --- init ---
+    subparsers.add_parser("init", help="Interactive setup wizard (create .env)")
+
     # --- serve ---
     p_serve = subparsers.add_parser("serve", help="Start the API server")
     p_serve.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
@@ -656,6 +777,7 @@ def main() -> None:
         sys.exit(0)
 
     dispatch: dict[str, Any] = {
+        "init": _cmd_init,
         "serve": _cmd_serve,
         "run": _cmd_run,
         "status": _cmd_status,
