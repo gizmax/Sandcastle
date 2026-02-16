@@ -36,6 +36,11 @@ export function CostChart({ data }: CostChartProps) {
           <XAxis
             dataKey="workflow"
             tick={{ fontSize: 11, fill: "var(--color-muted)" }}
+            angle={-35}
+            textAnchor="end"
+            height={60}
+            interval={0}
+            tickFormatter={(v: string) => v.length > 14 ? v.slice(0, 12) + "..." : v}
           />
           <YAxis
             tick={{ fontSize: 11, fill: "var(--color-muted)" }}
