@@ -49,10 +49,13 @@ async def run_workflow_job(
 
     logger.info(f"Worker picked up run {run_id}")
 
+    import uuid as _uuid
+    run_uuid = _uuid.UUID(run_id) if isinstance(run_id, str) else run_id
+
     callback_url = None
 
     async with async_session() as session:
-        run = await session.get(Run, run_id)
+        run = await session.get(Run, run_uuid)
         if run:
             run.status = RunStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)
