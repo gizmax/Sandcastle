@@ -101,20 +101,25 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
     stem = name.removesuffix(".yaml")
 
     for path in _TEMPLATES_DIR.glob("*.yaml"):
-        if path.stem == stem:
-            content = path.read_text()
-            meta = _parse_comment_metadata(content)
-            data = yaml.safe_load(content)
-            step_count = len(data.get("steps", []))
+        content = path.read_text()
+        meta = _parse_comment_metadata(content)
+        display_name = str(meta.get("name", path.stem))
 
-            info = TemplateInfo(
-                name=str(meta.get("name", path.stem)),
-                description=str(meta.get("description", "")),
-                tags=list(meta.get("tags", [])),
-                file_name=path.name,
-                step_count=step_count,
-            )
-            return content, info
+        # Match by file stem or by display name
+        if path.stem != stem and display_name != name:
+            continue
+
+        data = yaml.safe_load(content)
+        step_count = len(data.get("steps", []))
+
+        info = TemplateInfo(
+            name=display_name,
+            description=str(meta.get("description", "")),
+            tags=list(meta.get("tags", [])),
+            file_name=path.name,
+            step_count=step_count,
+        )
+        return content, info
 
     available = [p.stem for p in _TEMPLATES_DIR.glob("*.yaml")]
     raise FileNotFoundError(
