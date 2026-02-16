@@ -528,6 +528,10 @@ The optimizer scores each model option across multiple objectives, filters out o
 
 ## 20 Built-in Workflow Templates
 
+<p align="center">
+  <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
+</p>
+
 Sandcastle ships with production-ready workflow templates across 6 categories:
 
 | Category | Templates |
