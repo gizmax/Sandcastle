@@ -1,11 +1,11 @@
 # Sandcastle
 
-**AI agent workflow orchestrator with DAG pipelines, parallel execution, policy enforcement, SLO-based model routing, human-in-the-loop approvals, cost tracking, and a real-time dashboard. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).**
+**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).
 
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-164%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-174%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -45,6 +45,119 @@ Sandcastle is that glue. It wraps Sandstorm's agent execution with orchestration
 
 ---
 
+## Start Local. Scale When Ready.
+
+No Docker, no database server, no Redis. Clone, run, done.
+
+```bash
+git clone https://github.com/gizmax/Sandcastle.git
+cd Sandcastle
+cp .env.example .env   # add your ANTHROPIC_API_KEY + E2B_API_KEY
+uv sync
+uv run python -m sandcastle serve
+```
+
+Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
+
+```
+ Prototype                 Staging                   Production
+ ---------                 -------                   ----------
+ SQLite                    PostgreSQL                PostgreSQL
+ In-process queue    -->   Redis + arq          -->  Redis + arq
+ Local filesystem         Local filesystem          S3 / MinIO
+ Single process           Single process            API + Worker + Scheduler
+```
+
+**How to upgrade:** set `DATABASE_URL` and `REDIS_URL` in `.env`, run `alembic upgrade head`, restart. That's it.
+
+| | Local Mode | Production Mode |
+|---|---|---|
+| **Database** | SQLite (auto-created in `./data/`) | PostgreSQL 16 |
+| **Job Queue** | In-process (`asyncio.create_task`) | Redis 7 + arq workers |
+| **Storage** | Filesystem (`./data/`) | S3 / MinIO |
+| **Scheduler** | In-memory APScheduler | In-memory APScheduler |
+| **Setup time** | 30 seconds | 5 minutes |
+| **Config needed** | Just API keys | API keys + connection strings |
+| **Best for** | Prototyping, solo devs, demos | Teams, production, multi-tenant |
+
+---
+
+## Quickstart
+
+### Local Mode (30 seconds)
+
+```bash
+git clone https://github.com/gizmax/Sandcastle.git
+cd Sandcastle
+
+cp .env.example .env   # add your ANTHROPIC_API_KEY + E2B_API_KEY
+
+uv sync
+uv run python -m sandcastle serve
+```
+
+You'll see:
+```
+Sandcastle starting in local mode (SQLite + filesystem + in-process queue)
+```
+
+### Production Mode (5 minutes)
+
+```bash
+git clone https://github.com/gizmax/Sandcastle.git
+cd Sandcastle
+
+cp .env.example .env   # configure all connection strings
+
+uv sync
+
+# Start infrastructure
+docker-compose up -d redis postgres minio
+
+# Run database migrations
+uv run alembic upgrade head
+
+# Start the API server
+uv run python -m sandcastle serve
+
+# Start the async worker (separate terminal)
+uv run python -m sandcastle worker
+
+# Start the dashboard (separate terminal)
+cd dashboard && npm install && npm run dev
+```
+
+### Your First Workflow
+
+```bash
+# Run a workflow asynchronously
+curl -X POST http://localhost:8080/workflows/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "lead-enrichment",
+    "input": {
+      "target_url": "https://example.com",
+      "max_depth": 3
+    },
+    "callback_url": "https://your-app.com/api/done"
+  }'
+
+# Response: { "data": { "run_id": "a1b2c3d4-...", "status": "queued" } }
+```
+
+Or run synchronously and wait for the result:
+
+```bash
+curl -X POST http://localhost:8080/workflows/run/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "lead-enrichment",
+    "input": { "target_url": "https://example.com" }
+  }'
+```
+
+---
+
 ## Features
 
 | Capability | Sandstorm | Sandcastle |
@@ -52,6 +165,7 @@ Sandcastle is that glue. It wraps Sandstorm's agent execution with orchestration
 | Isolated agent execution | Yes | Yes (via Sandstorm) |
 | Structured output & subagents | Yes | Yes |
 | MCP servers & file uploads | Yes | Yes |
+| **Zero-config local mode** | - | Yes |
 | **DAG workflow orchestration** | - | Yes |
 | **Parallel step execution** | - | Yes |
 | **Run Time Machine (replay/fork)** | - | Yes |
@@ -560,7 +674,7 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 |--------|----------|-------------|
 | `POST` | `/schedules` | Create cron schedule |
 | `GET` | `/schedules` | List all schedules |
-| `PATCH` | `/schedules/{id}` | Enable/disable schedule |
+| `PATCH` | `/schedules/{id}` | Update schedule (cron, enabled, input) |
 | `DELETE` | `/schedules/{id}` | Delete schedule |
 
 ### Dead Letter Queue
@@ -615,11 +729,12 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 | `GET` | `/api-keys` | List active keys (prefix only) |
 | `DELETE` | `/api-keys/{id}` | Deactivate key |
 
-### Other
+### System
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Health check (Sandstorm, DB, Redis) |
+| `GET` | `/runtime` | Current mode info (database, queue, storage) |
 | `GET` | `/stats` | Aggregated stats and cost trends |
 
 All responses follow the envelope format: `{ "data": ..., "error": null }` or `{ "data": null, "error": { "code": "...", "message": "..." } }`.
@@ -704,136 +819,45 @@ Your App --POST /workflows/run--> Sandcastle API (FastAPI)
                  model by SLO                   |
                        +-----------+------------+
                                    |
-                  +----------------+-----------------+
-                  v                v                  v
-             PostgreSQL          Redis            S3 / MinIO
-           (runs, keys,       (job queue,       (persistent
-            approvals,        cancel flags,      storage)
-            experiments,      scheduling)
-            violations,
-            routing,
-            checkpoints)
+             +---------------------+---------------------+
+             |                     |                      |
+        Local Mode            Production Mode        Both Modes
+             |                     |                      |
+         SQLite              PostgreSQL              Webhooks
+      (auto-created)       (runs, keys,            SSE Stream
+       In-process           approvals,             APScheduler
+        queue               experiments,
+       Filesystem           violations,
+                             routing,
+                             checkpoints)
                                    |
-                           +-------+--------+
-                           |  Webhook POST   |--> Your App
-                           |  SSE Stream     |--> Dashboard
-                           +----------------+
+                              Redis (arq)
+                            (job queue,
+                            cancel flags)
+                                   |
+                              S3 / MinIO
+                           (persistent storage)
 ```
 
 ### Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| API Server | Python 3.12, FastAPI, Uvicorn |
-| Database | PostgreSQL 16 with SQLAlchemy async + Alembic |
-| Job Queue | Redis 7 with arq |
-| Scheduler | APScheduler with Redis store |
-| Storage | S3 / MinIO |
-| Agent Runtime | Sandstorm (E2B sandboxed) |
-| Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 |
-| DAG Visualization | @xyflow/react |
-| Charts | Recharts |
-
----
-
-## Quickstart
-
-### Quick Start (Local Mode)
-
-Zero-config setup - just clone and run. No PostgreSQL, Redis, or S3 needed.
-
-```bash
-git clone https://github.com/gizmax/Sandcastle.git
-cd Sandcastle
-
-cp .env.example .env   # add your ANTHROPIC_API_KEY + E2B_API_KEY
-
-uv sync
-uv run python -m sandcastle serve
-```
-
-That's it. Sandcastle auto-detects that `DATABASE_URL` and `REDIS_URL` are empty and starts in **local mode**:
-- **SQLite** database (auto-created in `./data/sandcastle.db`)
-- **In-process queue** (no separate worker needed)
-- **Filesystem storage** (local disk)
-
-You'll see in the log:
-```
-Sandcastle starting in local mode (SQLite + filesystem + in-process queue)
-```
-
-### Production Setup
-
-For teams and production workloads, use the full stack:
-
-**Prerequisites:** PostgreSQL, Redis, S3-compatible storage (MinIO for local dev)
-
-```bash
-git clone https://github.com/gizmax/Sandcastle.git
-cd Sandcastle
-
-cp .env.example .env   # configure all connection strings
-
-# Install dependencies
-uv sync
-
-# Start infrastructure
-docker-compose up -d redis postgres minio
-
-# Run database migrations
-uv run alembic upgrade head
-
-# Start the API server
-uv run python -m sandcastle serve
-
-# Start the async worker (separate terminal)
-uv run python -m sandcastle worker
-
-# Start the dashboard (separate terminal)
-cd dashboard && npm install && npm run dev
-```
-
-### Your First Workflow
-
-```bash
-# Run a workflow asynchronously
-curl -X POST http://localhost:8080/workflows/run \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow": "lead-enrichment",
-    "input": {
-      "target_url": "https://example.com",
-      "max_depth": 3
-    },
-    "callback_url": "https://your-app.com/api/done"
-  }'
-
-# Response: { "data": { "run_id": "a1b2c3d4-...", "status": "queued" } }
-```
-
-Or run synchronously and wait for the result:
-
-```bash
-curl -X POST http://localhost:8080/workflows/run/sync \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow": "lead-enrichment",
-    "input": { "target_url": "https://example.com" }
-  }'
-```
+| Component | Local Mode | Production Mode |
+|-----------|------------|-----------------|
+| API Server | Python 3.12, FastAPI, Uvicorn | Python 3.12, FastAPI, Uvicorn |
+| Database | SQLite + aiosqlite | PostgreSQL 16 + asyncpg + Alembic |
+| Job Queue | In-process (asyncio) | Redis 7 + arq |
+| Scheduler | APScheduler (in-memory) | APScheduler (in-memory) |
+| Storage | Local filesystem | S3 / MinIO |
+| Agent Runtime | Sandstorm (E2B sandboxed) | Sandstorm (E2B sandboxed) |
+| Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
+| DAG Visualization | @xyflow/react | @xyflow/react |
+| Charts | Recharts | Recharts |
 
 ---
 
 ## Configuration
 
-All configuration via environment variables or `.env` file. Mode is auto-detected:
-
-| Variable | Local Mode (default) | Production Mode |
-|---|---|---|
-| `DATABASE_URL` | *(empty)* - SQLite | `postgresql+asyncpg://...` |
-| `REDIS_URL` | *(empty)* - in-process | `redis://localhost:6379/0` |
-| `STORAGE_BACKEND` | `local` | `s3` |
-| `DATA_DIR` | `./data` | *(unused)* |
+All configuration via environment variables or `.env` file. Mode is auto-detected based on `DATABASE_URL` and `REDIS_URL`:
 
 ```bash
 # Required
@@ -872,7 +896,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (164 passing)
+# Run tests (174 passing)
 uv run pytest
 
 # Type check backend
