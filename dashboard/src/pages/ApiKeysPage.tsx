@@ -25,7 +25,7 @@ export default function ApiKeysPage() {
   }, [fetchKeys]);
 
   const handleCreate = useCallback(
-    async (data: { name: string; tenant_id: string }) => {
+    async (data: { name: string; tenant_id: string; max_cost_per_run_usd?: number }) => {
       const res = await api.post<{ key: string; key_prefix: string; id: string }>(
         "/api-keys",
         data

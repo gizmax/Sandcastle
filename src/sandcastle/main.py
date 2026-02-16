@@ -39,6 +39,30 @@ async def lifespan(app: FastAPI):
             "Sandcastle starting in production mode (PostgreSQL + Redis + S3)"
         )
 
+    # Load saved settings from DB
+    from sqlalchemy import select as sa_select
+
+    from sandcastle.models.db import Setting, async_session
+
+    async with async_session() as session:
+        result = await session.execute(sa_select(Setting))
+        saved = {s.key: s.value for s in result.scalars().all()}
+
+        for key, value in saved.items():
+            if hasattr(settings, key):
+                field_type = type(getattr(settings, key))
+                if field_type is bool:
+                    setattr(settings, key, value.lower() in ("true", "1", "yes"))
+                elif field_type is int:
+                    setattr(settings, key, int(value))
+                elif field_type is float:
+                    setattr(settings, key, float(value))
+                else:
+                    setattr(settings, key, value)
+
+        if saved:
+            logger.info(f"Loaded {len(saved)} saved settings from database")
+
     # Start the cron scheduler
     from sandcastle.queue.scheduler import restore_schedules, start_scheduler
 

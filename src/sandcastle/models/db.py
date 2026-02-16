@@ -366,6 +366,20 @@ class RunCheckpoint(Base):
     )
 
 
+class Setting(Base):
+    """Key-value configuration stored in the database."""
+
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 # Database engine and session factory
 
 def _build_engine_url() -> str:

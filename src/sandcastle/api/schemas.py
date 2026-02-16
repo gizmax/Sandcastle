@@ -357,5 +357,49 @@ class OptimizerStatsResponse(BaseModel):
     estimated_savings_30d_usd: float = 0.0
 
 
+class SettingsResponse(BaseModel):
+    """Current server settings."""
+
+    # Connections
+    sandstorm_url: str = ""
+    # Credentials (masked - only last 4 chars shown)
+    anthropic_api_key: str = ""
+    e2b_api_key: str = ""
+    # Security
+    auth_required: bool = False
+    dashboard_origin: str = ""
+    # Budget
+    default_max_cost_usd: float = 0.0
+    # Webhooks
+    webhook_secret: str = ""
+    # System
+    log_level: str = "info"
+    max_workflow_depth: int = 5
+    # Storage (read-only info)
+    storage_backend: str = "local"
+    storage_bucket: str = ""
+    storage_endpoint: str = ""
+    data_dir: str = ""
+    workflows_dir: str = ""
+    # Runtime info (read-only)
+    is_local_mode: bool = True
+    database_url: str = ""
+    redis_url: str = ""
+
+
+class SettingsUpdateRequest(BaseModel):
+    """Update server settings. Only include fields you want to change."""
+
+    sandstorm_url: str | None = None
+    anthropic_api_key: str | None = None
+    e2b_api_key: str | None = None
+    auth_required: bool | None = None
+    dashboard_origin: str | None = None
+    default_max_cost_usd: float | None = None
+    webhook_secret: str | None = None
+    log_level: str | None = None
+    max_workflow_depth: int | None = None
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()

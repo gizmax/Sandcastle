@@ -12,6 +12,7 @@ import OptimizerPage from "@/pages/OptimizerPage";
 import Schedules from "@/pages/Schedules";
 import DeadLetterPage from "@/pages/DeadLetterPage";
 import ApiKeysPage from "@/pages/ApiKeysPage";
+import SettingsPage from "@/pages/SettingsPage";
 import Onboarding from "@/pages/Onboarding";
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/dead-letter" element={<DeadLetterPage />} />
           <Route path="/api-keys" element={<ApiKeysPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/onboarding" element={<Onboarding />} />
         </Route>
       </Routes>

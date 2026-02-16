@@ -41,6 +41,8 @@ from sandcastle.api.schemas import (
     ScheduleCreateRequest,
     ScheduleResponse,
     ScheduleUpdateRequest,
+    SettingsResponse,
+    SettingsUpdateRequest,
     StatsResponse,
     StepStatusResponse,
     WorkflowInfoResponse,
@@ -66,6 +68,7 @@ from sandcastle.models.db import (
     RunCheckpoint,
     RunStatus,
     Schedule,
+    Setting,
     async_session,
 )
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
@@ -2713,3 +2716,122 @@ async def deactivate_api_key(key_id: str, request: Request) -> ApiResponse:
         await session.commit()
 
     return ApiResponse(data={"deactivated": True, "id": key_id})
+
+
+# --- Settings ---
+
+_SENSITIVE_KEYS = frozenset({
+    "anthropic_api_key",
+    "e2b_api_key",
+    "database_url",
+    "redis_url",
+    "webhook_secret",
+})
+
+
+def _mask(value: str) -> str:
+    """Mask a sensitive value, showing only the last 4 characters."""
+    if not value:
+        return ""
+    return "****" + value[-4:]
+
+
+def _build_settings_response() -> SettingsResponse:
+    """Build a SettingsResponse from the current runtime settings."""
+    return SettingsResponse(
+        sandstorm_url=settings.sandstorm_url,
+        anthropic_api_key=_mask(settings.anthropic_api_key),
+        e2b_api_key=_mask(settings.e2b_api_key),
+        auth_required=settings.auth_required,
+        dashboard_origin=settings.dashboard_origin,
+        default_max_cost_usd=settings.default_max_cost_usd,
+        webhook_secret=_mask(settings.webhook_secret),
+        log_level=settings.log_level,
+        max_workflow_depth=settings.max_workflow_depth,
+        storage_backend=settings.storage_backend,
+        storage_bucket=settings.storage_bucket,
+        storage_endpoint=settings.storage_endpoint,
+        data_dir=settings.data_dir,
+        workflows_dir=settings.workflows_dir,
+        is_local_mode=settings.is_local_mode,
+        database_url=_mask(settings.database_url),
+        redis_url=_mask(settings.redis_url),
+    )
+
+
+@router.get("/settings")
+async def get_settings() -> ApiResponse:
+    """Return current server settings with sensitive values masked."""
+    return ApiResponse(data=_build_settings_response())
+
+
+@router.patch("/settings")
+async def update_settings(request: SettingsUpdateRequest) -> ApiResponse:
+    """Update server settings and persist to database."""
+    # Validate constraints
+    if request.log_level is not None:
+        if request.log_level.lower() not in ("debug", "info", "warning", "error"):
+            raise HTTPException(
+                status_code=422,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_VALUE",
+                        message="log_level must be one of: debug, info, warning, error",
+                    )
+                ).model_dump(),
+            )
+    if request.max_workflow_depth is not None:
+        if not 1 <= request.max_workflow_depth <= 20:
+            raise HTTPException(
+                status_code=422,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_VALUE",
+                        message="max_workflow_depth must be between 1 and 20",
+                    )
+                ).model_dump(),
+            )
+    if request.default_max_cost_usd is not None:
+        if request.default_max_cost_usd < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_VALUE",
+                        message="default_max_cost_usd must be >= 0",
+                    )
+                ).model_dump(),
+            )
+
+    # Collect non-None updates
+    updates = {
+        k: v
+        for k, v in request.model_dump().items()
+        if v is not None
+    }
+
+    if not updates:
+        return ApiResponse(data=_build_settings_response())
+
+    # Persist each setting to DB and apply to runtime config
+    async with async_session() as session:
+        for key, value in updates.items():
+            str_value = str(value).lower() if isinstance(value, bool) else str(value)
+            # Upsert: try to load existing, otherwise create
+            existing = await session.get(Setting, key)
+            if existing:
+                existing.value = str_value
+            else:
+                session.add(Setting(key=key, value=str_value))
+            # Apply to the runtime settings object
+            setattr(settings, key, value)
+        await session.commit()
+
+    # Special handling: update root logger level
+    if request.log_level is not None:
+        logging.getLogger().setLevel(
+            getattr(logging, request.log_level.upper())
+        )
+
+    logger.info(f"Settings updated: {list(updates.keys())}")
+    return ApiResponse(data=_build_settings_response())

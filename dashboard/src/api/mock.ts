@@ -489,6 +489,26 @@ const MOCK_OPTIMIZER_STATS = {
   estimated_savings_30d_usd: 3.45,
 };
 
+const MOCK_SETTINGS = {
+  sandstorm_url: "http://localhost:8080",
+  anthropic_api_key: "****Qf8x",
+  e2b_api_key: "****mN2k",
+  auth_required: true,
+  dashboard_origin: "http://localhost:5173",
+  default_max_cost_usd: 5.0,
+  webhook_secret: "****tR9w",
+  log_level: "info",
+  max_workflow_depth: 10,
+  storage_backend: "local",
+  storage_bucket: "",
+  storage_endpoint: "",
+  data_dir: "./data",
+  workflows_dir: "./workflows",
+  is_local_mode: true,
+  database_url: "sqlite+aiosqlite:///./data/sandcastle.db",
+  redis_url: "",
+};
+
 // Route matcher
 type MockRoute = {
   match: RegExp;
@@ -588,6 +608,22 @@ const routes: MockRoute[] = [
   {
     match: /^\/optimizer\/stats$/,
     handler: () => MOCK_OPTIMIZER_STATS,
+  },
+  {
+    match: /^\/settings$/,
+    method: "GET",
+    handler: () => ({ ...MOCK_SETTINGS }),
+  },
+  {
+    match: /^\/settings$/,
+    method: "PATCH",
+    handler: (_params, body) => {
+      const updates = body as Record<string, unknown> | undefined;
+      if (updates) {
+        Object.assign(MOCK_SETTINGS, updates);
+      }
+      return { ...MOCK_SETTINGS };
+    },
   },
   {
     match: /^\/api-keys$/,

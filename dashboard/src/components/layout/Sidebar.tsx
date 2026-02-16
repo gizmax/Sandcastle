@@ -9,6 +9,7 @@ import {
   Key,
   LayoutDashboard,
   PlayCircle,
+  Settings,
   ShieldAlert,
   ShieldCheck,
   X,
@@ -33,6 +34,7 @@ const navItems = [
   { to: "/schedules", icon: Calendar, label: "Schedules" },
   { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" as const },
   { to: "/api-keys", icon: Key, label: "API Keys" },
+  { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {

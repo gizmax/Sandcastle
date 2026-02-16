@@ -5,20 +5,27 @@ import { cn } from "@/lib/utils";
 interface CreateApiKeyModalProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (data: { name: string; tenant_id: string }) => void;
+  onSubmit: (data: { name: string; tenant_id: string; max_cost_per_run_usd?: number }) => void;
 }
 
 export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModalProps) {
   const [name, setName] = useState("");
   const [tenantId, setTenantId] = useState("");
+  const [maxCost, setMaxCost] = useState("");
 
   if (!open) return null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSubmit({ name, tenant_id: tenantId });
+    const parsed = maxCost !== "" ? parseFloat(maxCost) : undefined;
+    onSubmit({
+      name,
+      tenant_id: tenantId,
+      ...(parsed !== undefined ? { max_cost_per_run_usd: parsed } : {}),
+    });
     setName("");
     setTenantId("");
+    setMaxCost("");
   }
 
   const inputClass = cn(
@@ -66,6 +73,20 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
                 className={inputClass}
               />
               <p className="text-[11px] text-muted-foreground mt-0.5">All runs created with this key are scoped to this tenant.</p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Max Cost per Run (USD)</label>
+              <input
+                type="number"
+                value={maxCost}
+                onChange={(e) => setMaxCost(e.target.value)}
+                placeholder="e.g. 5.00"
+                min="0"
+                step="0.01"
+                className={inputClass}
+              />
+              <p className="text-[11px] text-muted-foreground mt-0.5">Budget limit per run for this API key. Leave empty for unlimited.</p>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
