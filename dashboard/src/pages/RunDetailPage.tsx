@@ -10,7 +10,7 @@ import { RunTree } from "@/components/runs/RunTree";
 import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
 import { BudgetBar } from "@/components/shared/BudgetBar";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { formatDuration, formatCost, formatRelativeTime, cn } from "@/lib/utils";
+import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn } from "@/lib/utils";
 
 interface Step {
   step_id: string;
@@ -139,9 +139,9 @@ export default function RunDetailPage() {
   const isRunning = ["running", "queued"].includes(run.status);
   const duration =
     run.started_at && run.completed_at
-      ? (new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000
+      ? (parseUTC(run.completed_at).getTime() - parseUTC(run.started_at).getTime()) / 1000
       : run.started_at && isRunning
-        ? (Date.now() - new Date(run.started_at).getTime()) / 1000
+        ? (Date.now() - parseUTC(run.started_at).getTime()) / 1000
         : null;
 
   return (

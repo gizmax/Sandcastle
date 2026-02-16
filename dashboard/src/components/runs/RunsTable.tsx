@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
-import { formatRelativeTime, formatDuration, formatCost, cn } from "@/lib/utils";
+import { formatRelativeTime, formatDuration, formatCost, parseUTC, cn } from "@/lib/utils";
 
 interface RunItem {
   run_id: string;
@@ -25,8 +25,8 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
   const currentPage = Math.floor(offset / limit) + 1;
   function getDuration(run: RunItem): string {
     if (!run.started_at) return "-";
-    const start = new Date(run.started_at).getTime();
-    const end = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+    const start = parseUTC(run.started_at).getTime();
+    const end = run.completed_at ? parseUTC(run.completed_at).getTime() : Date.now();
     return formatDuration((end - start) / 1000);
   }
 
