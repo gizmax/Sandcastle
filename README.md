@@ -33,8 +33,12 @@ Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result,
 - **"Bill the customer per enrichment, track costs per run."** - No usage metering.
 - **"Alert me if the agent fails, retry automatically."** - No production error handling.
 - **"Run this every 6 hours and notify me on Slack."** - No scheduling, no webhooks.
+- **"A human should review this before the agent continues."** - No approval gates.
+- **"Block the output if it contains PII or leaked secrets."** - No policy enforcement.
+- **"Pick the cheapest model that still meets quality SLOs."** - No cost-latency optimization.
+- **"Show me what's running, what failed, and what it cost."** - No dashboard or observability.
 
-Sandcastle takes Sandstorm's sandboxed agent execution and adds the orchestration, persistence, and guardrails needed for production.
+Sandcastle takes Sandstorm's sandboxed agent execution and adds the orchestration, persistence, guardrails, and monitoring needed for production.
 
 > **Sandstorm** = the engine.
 > **Sandcastle** = the product you build with it.
