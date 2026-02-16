@@ -282,11 +282,21 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         const modelMatch = block.match(/model:\s+(\w+)/);
         const model = modelMatch ? modelMatch[1] : undefined;
         const deps: string[] = [];
-        const depsSection = block.match(/depends_on:\s*\n((?:\s+-\s+"?[^"\n]+"?\n?)*)/);
-        if (depsSection) {
-          const depMatches = depsSection[1].matchAll(/-\s+"?([^"\n]+)"?/g);
-          for (const dm of depMatches) {
-            deps.push(dm[1]);
+        // Inline format: depends_on: [step1, step2] or depends_on: ["step1", "step2"]
+        const inlineDeps = block.match(/depends_on:\s*\[([^\]]+)\]/);
+        if (inlineDeps) {
+          for (const d of inlineDeps[1].split(",")) {
+            const cleaned = d.trim().replace(/^["']|["']$/g, "");
+            if (cleaned) deps.push(cleaned);
+          }
+        } else {
+          // Multiline format: depends_on:\n  - "step1"\n  - "step2"
+          const depsSection = block.match(/depends_on:\s*\n((?:\s+-\s+"?[^"\n]+"?\n?)*)/);
+          if (depsSection) {
+            const depMatches = depsSection[1].matchAll(/-\s+"?([^"\n]+)"?/g);
+            for (const dm of depMatches) {
+              deps.push(dm[1]);
+            }
           }
         }
         parsed.push({ id, model, depends_on: deps.length > 0 ? deps : undefined });
