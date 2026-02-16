@@ -1392,18 +1392,31 @@ async def update_schedule(
             schedule.cron_expression = request.cron_expression
         if request.input_data is not None:
             schedule.input_data = request.input_data
-        await session.commit()
 
-    # Update APScheduler
-    if schedule.enabled:
-        add_schedule(
-            schedule_id=schedule_id,
-            cron_expression=schedule.cron_expression,
-            workflow_name=schedule.workflow_name,
-            input_data=schedule.input_data,
-        )
-    else:
-        remove_schedule(schedule_id)
+        # Register with APScheduler BEFORE commit so DB stays in sync
+        try:
+            if schedule.enabled:
+                add_schedule(
+                    schedule_id=schedule_id,
+                    cron_expression=schedule.cron_expression,
+                    workflow_name=schedule.workflow_name,
+                    input_data=schedule.input_data,
+                )
+            else:
+                remove_schedule(schedule_id)
+        except Exception as exc:
+            await session.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="SCHEDULER_ERROR",
+                        message=f"Failed to update scheduler: {exc}",
+                    )
+                ).model_dump(),
+            ) from exc
+
+        await session.commit()
 
     return ApiResponse(
         data=ScheduleResponse(
@@ -2759,15 +2772,38 @@ def _build_settings_response() -> SettingsResponse:
     )
 
 
+def _require_admin(req: Request) -> None:
+    """Block settings access for non-admin tenants when auth is enabled.
+
+    In local mode (auth_required=False) anyone can access settings.
+    With auth enabled, only requests without a tenant scope (i.e. the
+    server operator, not a tenant API key) are allowed.
+    """
+    if settings.auth_required and get_tenant_id(req) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message="Settings require admin access",
+                )
+            ).model_dump(),
+        )
+
+
 @router.get("/settings")
-async def get_settings() -> ApiResponse:
+async def get_settings(req: Request) -> ApiResponse:
     """Return current server settings with sensitive values masked."""
+    _require_admin(req)
     return ApiResponse(data=_build_settings_response())
 
 
 @router.patch("/settings")
-async def update_settings(request: SettingsUpdateRequest) -> ApiResponse:
+async def update_settings(
+    request: SettingsUpdateRequest, req: Request,
+) -> ApiResponse:
     """Update server settings and persist to database."""
+    _require_admin(req)
     # Validate constraints
     if request.log_level is not None:
         if request.log_level.lower() not in ("debug", "info", "warning", "error"):
