@@ -1359,6 +1359,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
             session.add(db_schedule)
 
             # Register with APScheduler before commit for atomicity
+            scheduler_registered = False
             if request.enabled:
                 try:
                     add_schedule(
@@ -1367,6 +1368,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                         workflow_name=request.workflow_name,
                         input_data=request.input_data,
                     )
+                    scheduler_registered = True
                 except Exception as exc:
                     await session.rollback()
                     raise HTTPException(
@@ -1379,7 +1381,24 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                         ).model_dump(),
                     ) from exc
 
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception as e:
+                # Compensate: remove scheduler job if commit fails
+                if scheduler_registered:
+                    try:
+                        remove_schedule(schedule_id)
+                    except Exception:
+                        pass
+                raise HTTPException(
+                    status_code=500,
+                    detail=ApiResponse(
+                        error=ErrorResponse(
+                            code="DB_ERROR",
+                            message=f"Could not create schedule: {e}",
+                        )
+                    ).model_dump(),
+                ) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -1491,6 +1510,12 @@ async def update_schedule(
                     ).model_dump(),
                 ) from exc
 
+        # Snapshot old state for rollback compensation
+        old_enabled = schedule.enabled
+        old_cron = schedule.cron_expression
+        old_workflow = schedule.workflow_name
+        old_input = schedule.input_data
+
         if request.enabled is not None:
             schedule.enabled = request.enabled
         if request.cron_expression is not None:
@@ -1521,7 +1546,31 @@ async def update_schedule(
                 ).model_dump(),
             ) from exc
 
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as exc:
+            # Compensate: revert scheduler to old state
+            try:
+                if old_enabled:
+                    add_schedule(
+                        schedule_id=schedule_id,
+                        cron_expression=old_cron,
+                        workflow_name=old_workflow,
+                        input_data=old_input,
+                    )
+                else:
+                    remove_schedule(schedule_id)
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=500,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="DB_ERROR",
+                        message=f"Failed to commit schedule update: {exc}",
+                    )
+                ).model_dump(),
+            ) from exc
 
     return ApiResponse(
         data=ScheduleResponse(

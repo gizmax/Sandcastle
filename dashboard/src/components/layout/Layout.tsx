@@ -5,7 +5,8 @@ import { Header } from "@/components/layout/Header";
 import type { Notification } from "@/components/layout/NotificationCenter";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEventStreamContext } from "@/components/providers/EventStreamProvider";
-import { ToastContainer, useToasts } from "@/components/shared/ToastContainer";
+import { ToastContainer } from "@/components/shared/ToastContainer";
+import { useToasts } from "@/hooks/useToasts";
 import type { StreamEvent } from "@/hooks/useEventStream";
 
 const INITIAL_NOTIFICATIONS: Notification[] = [

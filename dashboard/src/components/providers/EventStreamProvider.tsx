@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useEventStream } from "@/hooks/useEventStream";
 import type { ConnectionStatus, StreamEvent } from "@/hooks/useEventStream";
@@ -26,26 +26,23 @@ export function EventStreamProvider({ children }: EventStreamProviderProps) {
   const { events, status, clearEvents } = useEventStream();
   const subscribersRef = useRef<Map<string, Set<EventCallback>>>(new Map());
 
-  // Dispatch events to subscribers whenever new events arrive
+  // Dispatch events to subscribers via effect (not during render)
   const lastDispatchedRef = useRef<string | null>(null);
   const latestEvent = events[0] ?? null;
 
-  if (latestEvent && latestEvent.id !== lastDispatchedRef.current) {
+  useEffect(() => {
+    if (!latestEvent || latestEvent.id === lastDispatchedRef.current) return;
     lastDispatchedRef.current = latestEvent.id;
+
     const subs = subscribersRef.current.get(latestEvent.type);
     if (subs) {
-      for (const cb of subs) {
-        cb(latestEvent);
-      }
+      for (const cb of subs) cb(latestEvent);
     }
-    // Also dispatch to wildcard subscribers
     const wildcardSubs = subscribersRef.current.get("*");
     if (wildcardSubs) {
-      for (const cb of wildcardSubs) {
-        cb(latestEvent);
-      }
+      for (const cb of wildcardSubs) cb(latestEvent);
     }
-  }
+  }, [latestEvent]);
 
   const subscribe = useCallback((eventType: string, callback: EventCallback) => {
     if (!subscribersRef.current.has(eventType)) {
