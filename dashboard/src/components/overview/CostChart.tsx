@@ -35,7 +35,9 @@ export function CostChart({ data }: CostChartProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis
             dataKey="workflow"
-            tick={({ x, y, payload }: { x: number; y: number; payload: { value: string } }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            tick={(props: any) => {
+              const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
               const name = payload.value;
               const parts = name.length > 12
                 ? [name.slice(0, Math.ceil(name.length / 2)), name.slice(Math.ceil(name.length / 2))]
