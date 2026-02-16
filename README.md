@@ -6,16 +6,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-164%20passing-brightgreen?style=flat-square)]()
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/app/)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
-  <a href="https://gizmax.github.io/Sandcastle/app/">
+  <a href="https://gizmax.github.io/Sandcastle/">
     <img src="docs/screenshots/overview-dark.png" alt="Sandcastle Dashboard" width="720" />
   </a>
 </p>
 
 <p align="center">
-  <a href="https://gizmax.github.io/Sandcastle/app/"><strong>Try the Live Demo (no backend needed)</strong></a>
+  <a href="https://gizmax.github.io/Sandcastle/"><strong>Try the Live Demo (no backend needed)</strong></a>
 </p>
 
 ---
