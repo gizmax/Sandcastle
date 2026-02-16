@@ -7,14 +7,17 @@ import { formatCost, formatRelativeTime, cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 
 interface Alternative {
+  id: string;
   model: string;
-  score: number;
+  avg_quality: number | null;
+  avg_cost: number | null;
 }
 
 interface SloConfig {
-  max_latency_ms: number;
-  min_quality: number;
-  budget_per_step_usd: number;
+  quality_min: number;
+  cost_max_usd: number;
+  latency_max_seconds: number;
+  optimize_for: string;
 }
 
 interface OptimizerDecision {
@@ -26,7 +29,7 @@ interface OptimizerDecision {
   reason: string;
   budget_pressure: number | null;
   alternatives: Alternative[];
-  slo_config: SloConfig | null;
+  slo: SloConfig | null;
   created_at: string;
 }
 
@@ -217,12 +220,13 @@ export default function OptimizerPage() {
                           <thead>
                             <tr className="border-b border-border bg-background/50">
                               <th className="px-5 py-2.5 text-left font-medium text-muted">Model</th>
-                              <th className="px-5 py-2.5 text-right font-medium text-muted">Score</th>
+                              <th className="px-5 py-2.5 text-right font-medium text-muted">Quality</th>
+                              <th className="px-5 py-2.5 text-right font-medium text-muted">Cost</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
                             {item.alternatives.map((alt) => (
-                              <tr key={alt.model} className={cn(alt.model === item.selected_model && "bg-accent/5")}>
+                              <tr key={alt.id} className={cn(alt.model === item.selected_model && "bg-accent/5")}>
                                 <td className="px-5 py-3">
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium text-foreground capitalize">{alt.model}</span>
@@ -233,7 +237,8 @@ export default function OptimizerPage() {
                                     )}
                                   </div>
                                 </td>
-                                <td className="px-5 py-3 text-right font-mono text-muted">{alt.score.toFixed(3)}</td>
+                                <td className="px-5 py-3 text-right font-mono text-muted">{alt.avg_quality != null ? alt.avg_quality.toFixed(3) : "-"}</td>
+                                <td className="px-5 py-3 text-right font-mono text-muted">{alt.avg_cost != null ? formatCost(alt.avg_cost) : "-"}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -242,11 +247,11 @@ export default function OptimizerPage() {
                     )}
 
                     {/* SLO config */}
-                    {item.slo_config && (
+                    {item.slo && (
                       <div className="px-5 py-4 bg-background/30">
                         <p className="text-xs font-medium text-muted-foreground mb-2">SLO Configuration</p>
                         <pre className="max-h-32 overflow-auto rounded-lg bg-surface border border-border p-3 font-mono text-xs text-muted">
-                          {JSON.stringify(item.slo_config, null, 2)}
+                          {JSON.stringify(item.slo, null, 2)}
                         </pre>
                       </div>
                     )}

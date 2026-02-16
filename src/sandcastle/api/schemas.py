@@ -51,9 +51,11 @@ class ScheduleCreateRequest(BaseModel):
 
 
 class ScheduleUpdateRequest(BaseModel):
-    """Request to update a schedule (enable/disable toggle)."""
+    """Request to update a schedule."""
 
-    enabled: bool
+    enabled: bool | None = None
+    cron_expression: str | None = None
+    input_data: dict[str, Any] | None = None
 
 
 class WorkflowSaveRequest(BaseModel):

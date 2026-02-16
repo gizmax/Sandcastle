@@ -1338,7 +1338,7 @@ async def list_schedules(
 async def update_schedule(
     schedule_id: str, request: ScheduleUpdateRequest, req: Request,
 ) -> ApiResponse:
-    """Enable or disable a schedule."""
+    """Update a schedule (cron, enabled, input_data)."""
     tenant_id = get_tenant_id(req)
 
     try:
@@ -1366,11 +1366,16 @@ async def update_schedule(
                     )
                 ).model_dump(),
             )
-        schedule.enabled = request.enabled
+        if request.enabled is not None:
+            schedule.enabled = request.enabled
+        if request.cron_expression is not None:
+            schedule.cron_expression = request.cron_expression
+        if request.input_data is not None:
+            schedule.input_data = request.input_data
         await session.commit()
 
     # Update APScheduler
-    if request.enabled:
+    if schedule.enabled:
         add_schedule(
             schedule_id=schedule_id,
             cron_expression=schedule.cron_expression,

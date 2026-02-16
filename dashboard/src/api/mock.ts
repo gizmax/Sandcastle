@@ -411,11 +411,11 @@ const MOCK_OPTIMIZER_DECISIONS = [
     reason: "High complexity step with structured output requirements. Sonnet provides best quality-cost ratio for data enrichment tasks.",
     budget_pressure: 0.3,
     alternatives: [
-      { model: "sonnet", score: 0.92 },
-      { model: "haiku", score: 0.61 },
-      { model: "opus", score: 0.88 },
+      { id: "sonnet-v1", model: "sonnet", avg_quality: 0.92, avg_cost: 0.08 },
+      { id: "haiku-v1", model: "haiku", avg_quality: 0.61, avg_cost: 0.02 },
+      { id: "opus-v1", model: "opus", avg_quality: 0.88, avg_cost: 0.15 },
     ],
-    slo_config: { max_latency_ms: 30000, min_quality: 0.7, budget_per_step_usd: 0.10 },
+    slo: { quality_min: 0.7, cost_max_usd: 0.10, latency_max_seconds: 30, optimize_for: "balanced" },
     created_at: h(0.5),
   },
   {
@@ -427,10 +427,10 @@ const MOCK_OPTIMIZER_DECISIONS = [
     reason: "Simple data retrieval step. Haiku sufficient for structured extraction with minimal reasoning.",
     budget_pressure: 0.1,
     alternatives: [
-      { model: "haiku", score: 0.88 },
-      { model: "sonnet", score: 0.72 },
+      { id: "haiku-v1", model: "haiku", avg_quality: 0.88, avg_cost: 0.02 },
+      { id: "sonnet-v1", model: "sonnet", avg_quality: 0.72, avg_cost: 0.08 },
     ],
-    slo_config: { max_latency_ms: 15000, min_quality: 0.5, budget_per_step_usd: 0.05 },
+    slo: { quality_min: 0.5, cost_max_usd: 0.05, latency_max_seconds: 15, optimize_for: "cost" },
     created_at: h(2),
   },
   {
@@ -442,11 +442,11 @@ const MOCK_OPTIMIZER_DECISIONS = [
     reason: "Complex reasoning required for actionable SEO recommendations. Low confidence due to limited historical data for this step type.",
     budget_pressure: 0.92,
     alternatives: [
-      { model: "opus", score: 0.45 },
-      { model: "sonnet", score: 0.42 },
-      { model: "haiku", score: 0.18 },
+      { id: "opus-v1", model: "opus", avg_quality: 0.45, avg_cost: 0.15 },
+      { id: "sonnet-v1", model: "sonnet", avg_quality: 0.42, avg_cost: 0.08 },
+      { id: "haiku-v1", model: "haiku", avg_quality: 0.18, avg_cost: 0.02 },
     ],
-    slo_config: { max_latency_ms: 60000, min_quality: 0.8, budget_per_step_usd: 0.20 },
+    slo: { quality_min: 0.8, cost_max_usd: 0.20, latency_max_seconds: 60, optimize_for: "quality" },
     created_at: h(5),
   },
   {
@@ -458,10 +458,10 @@ const MOCK_OPTIMIZER_DECISIONS = [
     reason: "Lead scoring uses a fixed rubric. Haiku handles structured scoring well within quality SLO.",
     budget_pressure: null,
     alternatives: [
-      { model: "haiku", score: 0.78 },
-      { model: "sonnet", score: 0.65 },
+      { id: "haiku-v1", model: "haiku", avg_quality: 0.78, avg_cost: 0.02 },
+      { id: "sonnet-v1", model: "sonnet", avg_quality: 0.65, avg_cost: 0.08 },
     ],
-    slo_config: { max_latency_ms: 10000, min_quality: 0.6, budget_per_step_usd: 0.03 },
+    slo: { quality_min: 0.6, cost_max_usd: 0.03, latency_max_seconds: 10, optimize_for: "cost" },
     created_at: h(8),
   },
   {
@@ -473,11 +473,11 @@ const MOCK_OPTIMIZER_DECISIONS = [
     reason: "Competitor analysis requires nuanced comparison. Sonnet selected as best balance under current budget pressure.",
     budget_pressure: 0.75,
     alternatives: [
-      { model: "sonnet", score: 0.85 },
-      { model: "opus", score: 0.82 },
-      { model: "haiku", score: 0.39 },
+      { id: "sonnet-v1", model: "sonnet", avg_quality: 0.85, avg_cost: 0.08 },
+      { id: "opus-v1", model: "opus", avg_quality: 0.82, avg_cost: 0.15 },
+      { id: "haiku-v1", model: "haiku", avg_quality: 0.39, avg_cost: 0.02 },
     ],
-    slo_config: { max_latency_ms: 45000, min_quality: 0.7, budget_per_step_usd: 0.08 },
+    slo: { quality_min: 0.7, cost_max_usd: 0.08, latency_max_seconds: 45, optimize_for: "balanced" },
     created_at: h(12),
   },
 ];

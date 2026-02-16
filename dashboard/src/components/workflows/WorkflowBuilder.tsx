@@ -96,9 +96,9 @@ function generateYaml(
     // SLO config
     if (step.slo.enabled) {
       yaml += `    slo:\n`;
-      yaml += `      min_quality: ${step.slo.qualityMin}\n`;
-      yaml += `      max_cost_usd: ${step.slo.costMaxUsd}\n`;
-      yaml += `      max_latency_seconds: ${step.slo.latencyMaxSeconds}\n`;
+      yaml += `      quality_min: ${step.slo.qualityMin}\n`;
+      yaml += `      cost_max_usd: ${step.slo.costMaxUsd}\n`;
+      yaml += `      latency_max_seconds: ${step.slo.latencyMaxSeconds}\n`;
       yaml += `      optimize_for: ${step.slo.optimizeFor}\n`;
       yaml += `      model_pool: auto\n`;
     }

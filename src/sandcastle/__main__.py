@@ -24,10 +24,10 @@ def main() -> None:
         print(f"Unknown command: {' '.join(args)}")
         print("Usage:")
         print("  python -m sandcastle serve      - Start the API server")
-        print("                                    Auto-detects local vs production mode:")
-        print("                                    - No DATABASE_URL/REDIS_URL -> local (SQLite + in-process)")
-        print("                                    - With DATABASE_URL/REDIS_URL -> production (PG + Redis)")
-        print("  python -m sandcastle db migrate  - Run database migrations (PostgreSQL only)")
+        print("    Auto-detects local vs production mode:")
+        print("    - No DATABASE_URL/REDIS_URL -> local (SQLite)")
+        print("    - With DATABASE_URL/REDIS_URL -> production (PG)")
+        print("  python -m sandcastle db migrate  - Run migrations (PG only)")
         sys.exit(1)
 
 
