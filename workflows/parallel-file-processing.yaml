@@ -1,0 +1,24 @@
+name: "Parallel File Processing"
+description: "Scan a directory, process each file in parallel, and merge results into a report."
+default_model: haiku
+default_max_turns: 10
+default_timeout: 300
+
+steps:
+  - id: "scan"
+    prompt: |
+      List all files in {input.directory}.
+      Return as JSON object with a "files" key containing an array of file paths.
+
+  - id: "process"
+    depends_on: ["scan"]
+    parallel_over: "steps.scan.output.files"
+    prompt: |
+      Read and summarize the file: {input._item}
+      Return a short summary with key findings.
+
+  - id: "merge"
+    depends_on: ["process"]
+    prompt: |
+      Combine all file summaries into a final report.
+      Group by topic, highlight key findings, and note any patterns across files.

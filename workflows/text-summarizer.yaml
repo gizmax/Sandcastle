@@ -1,0 +1,28 @@
+# name: Text Summarizer
+# description: Takes text input, summarizes it, and formats the summary for output
+# tags: [text, summarization, formatting]
+
+name: text-summarizer
+description: Takes text input, summarizes it, and formats the summary for output
+
+sandstorm_url: ${SANDSTORM_URL}
+default_model: sonnet
+default_max_turns: 5
+default_timeout: 120
+
+steps:
+  - id: summarize
+    prompt: >
+      Summarize the following text into a concise paragraph capturing
+      the key points and main ideas. Text: {input.text}
+    model: sonnet
+    max_turns: 5
+
+  - id: format
+    depends_on: [summarize]
+    prompt: >
+      Format the following summary into a clean, well-structured output
+      with a title line and bullet points for each key finding.
+      Summary: {steps.summarize.output}
+    model: haiku
+    max_turns: 3
