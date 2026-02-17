@@ -243,8 +243,19 @@ async def runtime_info() -> ApiResponse:
 @router.get("/browse")
 async def browse_directory(
     path: str = Query("~", description="Directory path to browse"),
+    request: Request = None,
 ) -> ApiResponse:
-    """Browse server filesystem directories for workflow input configuration."""
+    """Browse server filesystem directories for workflow input configuration.
+
+    Only available in local mode. In multi-tenant production mode, filesystem
+    browsing is disabled to prevent cross-tenant information leakage.
+    """
+    if not settings.is_local_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Directory browsing is only available in local mode",
+        )
+
     try:
         target = Path(path).expanduser().resolve()
     except (ValueError, OSError):
@@ -935,25 +946,48 @@ def _sse_event(event: str, data: dict) -> str:
 
 
 @router.get("/events")
-async def global_event_stream() -> StreamingResponse:
+async def global_event_stream(request: Request) -> StreamingResponse:
     """Stream global real-time events via SSE.
 
-    Broadcasts run lifecycle, step progress, and DLQ events to all
-    connected dashboard clients. Clients receive events as they happen
-    across all workflows and runs.
+    Broadcasts run lifecycle, step progress, and DLQ events to
+    connected dashboard clients. When auth is enabled, events are
+    filtered to only show runs belonging to the authenticated tenant.
 
     Event types: run.started, run.completed, run.failed,
     step.started, step.completed, step.failed, dlq.new
     """
     from sandcastle.engine.events import event_bus
 
+    tenant_id = get_tenant_id(request)
     queue = await event_bus.subscribe()
+
+    # Cache of run_id -> tenant_id to avoid repeated DB lookups
+    tenant_cache: dict[str, str | None] = {}
+
+    async def _run_belongs_to_tenant(run_id: str) -> bool:
+        """Check if a run belongs to the authenticated tenant."""
+        if tenant_id is None:
+            return True  # No auth = see everything
+        if run_id in tenant_cache:
+            return tenant_cache[run_id] == tenant_id
+        try:
+            async with async_session() as session:
+                run = await session.get(Run, uuid.UUID(run_id))
+                run_tenant = run.tenant_id if run else None
+                tenant_cache[run_id] = run_tenant
+                return run_tenant == tenant_id
+        except Exception:
+            return False
 
     async def event_generator():
         try:
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # Tenant filter: skip events for runs not owned by this tenant
+                    run_id = event.get("data", {}).get("run_id")
+                    if run_id and not await _run_belongs_to_tenant(run_id):
+                        continue
                     yield _sse_event(event["type"], event["data"])
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout

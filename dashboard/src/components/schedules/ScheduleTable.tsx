@@ -1,5 +1,5 @@
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { cronToHuman } from "@/components/schedules/CronBuilder";
+import { cronToHuman } from "@/lib/cron";
 
 interface ScheduleItem {
   id: string;

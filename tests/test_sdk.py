@@ -16,7 +16,6 @@ from sandcastle.sdk import (
     SandcastleError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -115,7 +114,7 @@ class TestSyncRun:
 
         with patch.object(httpx.Client, "post", return_value=mock_resp) as mock_post:
             client = SandcastleClient(base_url="http://test:8080")
-            result = client.run(
+            client.run(
                 "expensive-wf",
                 max_cost_usd=10.0,
                 callback_url="https://example.com/hook",

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { cronToHuman } from "@/lib/cron";
 
 type Frequency = "hourly" | "every_x_hours" | "daily" | "weekly" | "monthly" | "custom";
 
@@ -118,38 +119,6 @@ function buildCron(state: {
       return `${m} ${h} ${state.monthDay} * *`;
     case "custom":
       return state.custom;
-  }
-}
-
-export function cronToHuman(cron: string): string {
-  const parsed = parseCron(cron);
-
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const time = `${pad(parsed.hour)}:${pad(parsed.minute)}`;
-
-  switch (parsed.frequency) {
-    case "hourly":
-      return parsed.minute === 0 ? "Every hour" : `Every hour at :${pad(parsed.minute)}`;
-    case "every_x_hours":
-      return `Every ${parsed.interval} hours`;
-    case "daily":
-      return `Daily at ${time}`;
-    case "weekly": {
-      const dayNames = parsed.weekdays
-        .sort((a, b) => a - b)
-        .map((d) => WEEKDAYS.find((w) => w.value === d)?.label || String(d));
-      if (dayNames.length === 5 && !parsed.weekdays.includes(0) && !parsed.weekdays.includes(6)) {
-        return `Weekdays at ${time}`;
-      }
-      if (dayNames.length === 7) {
-        return `Daily at ${time}`;
-      }
-      return `${dayNames.join(", ")} at ${time}`;
-    }
-    case "monthly":
-      return `Monthly on day ${parsed.monthDay} at ${time}`;
-    case "custom":
-      return cron;
   }
 }
 

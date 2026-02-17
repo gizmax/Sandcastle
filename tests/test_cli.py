@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -14,7 +13,6 @@ from sandcastle.__main__ import (
     _cmd_serve,
     _parse_input_pairs,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests: Argument parsing

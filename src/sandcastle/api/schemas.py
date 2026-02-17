@@ -229,7 +229,7 @@ class ApiKeyResponse(BaseModel):
 
     id: str
     key_prefix: str = ""
-    tenant_id: str
+    tenant_id: str | None = None
     name: str
     is_active: bool
     max_cost_per_run_usd: float | None = None
@@ -242,7 +242,7 @@ class ApiKeyCreatedResponse(BaseModel):
 
     id: str
     key_prefix: str
-    tenant_id: str
+    tenant_id: str | None = None
     name: str
     key: str = Field(..., description="Plaintext API key - shown only once")
 
