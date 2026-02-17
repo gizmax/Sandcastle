@@ -6,7 +6,7 @@
 [![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-247%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-277%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -1205,6 +1205,7 @@ WEBHOOK_SECRET=your-webhook-signing-secret
 AUTH_REQUIRED=false
 DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
 MAX_WORKFLOW_DEPTH=5      # max recursion depth for hierarchical workflows
+SANDBOX_ROOT=             # restrict browse + CSV export to this directory (empty = no restriction)
 
 # Dashboard
 DASHBOARD_ORIGIN=http://localhost:5173
@@ -1217,7 +1218,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (247 passing)
+# Run tests (277 passing)
 uv run pytest
 
 # Type check backend

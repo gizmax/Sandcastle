@@ -1,6 +1,6 @@
 [project]
 name = "sandcastle-ai"
-version = "0.7.1"
+dynamic = ["version"]
 description = "Production-ready workflow orchestrator for AI agents. Define pipelines in YAML, run locally with zero config, scale to production."
 requires-python = ">=3.11"
 license = "MIT"
@@ -62,6 +62,9 @@ sandcastle = "sandcastle.__main__:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/sandcastle/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sandcastle"]
