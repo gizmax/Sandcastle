@@ -513,18 +513,21 @@ const MOCK_TEMPLATES = [
     description: "Summarize text input with configurable detail level",
     tags: ["NLP", "Text"],
     step_count: 2,
+    input_schema: { required: ["text"], properties: { text: { type: "string", description: "Text to summarize" }, detail_level: { type: "string", description: "Detail level: brief, standard, detailed", default: "standard" } } },
   },
   {
     name: "translate",
     description: "Detect language and translate to target language",
     tags: ["NLP", "Translation"],
     step_count: 2,
+    input_schema: { required: ["text", "target_language"], properties: { text: { type: "string", description: "Text to translate" }, target_language: { type: "string", description: "Target language (e.g. en, cs, de)" } } },
   },
   {
     name: "research_agent",
     description: "Multi-source research with parallel analysis and fact extraction",
     tags: ["Research", "Multi-agent"],
     step_count: 4,
+    input_schema: { required: ["topic"], properties: { topic: { type: "string", description: "Research topic or question" }, depth: { type: "string", description: "Research depth: quick, standard, deep", default: "standard" } } },
   },
   {
     name: "chain_of_thought",
@@ -561,6 +564,7 @@ const MOCK_TEMPLATES = [
     description: "Analyze competitor positioning, strengths, weaknesses, and opportunities",
     tags: ["Marketing", "Strategy", "Research"],
     step_count: 4,
+    input_schema: { required: ["company_url"], properties: { company_url: { type: "string", description: "URL of your company website" }, industry: { type: "string", description: "Industry context (optional)" } } },
   },
   {
     name: "ad_copy_generator",
@@ -573,6 +577,7 @@ const MOCK_TEMPLATES = [
     description: "Research and enrich lead data with company info, scoring, and outreach angles",
     tags: ["Sales", "Research", "Lead-Gen"],
     step_count: 5,
+    input_schema: { required: ["company_name"], properties: { company_name: { type: "string", description: "Company name to research" }, contact_email: { type: "string", description: "Contact email (optional)" } } },
   },
   {
     name: "proposal_generator",
@@ -1819,6 +1824,7 @@ function getTemplateDetail(name: string) {
     ...template,
     file_name: `${name}.yaml`,
     content: TEMPLATE_YAMLS[name] || `name: "${name}"\nsteps: []`,
+    input_schema: (template as Record<string, unknown>).input_schema || null,
   };
 }
 
@@ -1889,7 +1895,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data" }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.7.1" }),
   },
   {
     match: /^\/stats$/,
@@ -1904,9 +1910,13 @@ const routes: MockRoute[] = [
     match: /^\/runs$/,
     handler: (_params) => {
       const status = _params.status;
+      const workflow = _params.workflow;
       let filtered = MOCK_RUNS;
       if (status && status !== "all") {
         filtered = filtered.filter((r) => r.status === status);
+      }
+      if (workflow) {
+        filtered = filtered.filter((r) => r.workflow_name === workflow);
       }
       const offset = Number(_params.offset || 0);
       const limit = Number(_params.limit || 20);
@@ -1996,9 +2006,9 @@ const routes: MockRoute[] = [
     handler: (params) => {
       const name = params._1;
       const versions = MOCK_WORKFLOW_VERSIONS[name] || [];
-      const prodVer = versions.find((v: Record<string, unknown>) => v.status === "production") as Record<string, unknown> | undefined;
-      const stagingVer = versions.find((v: Record<string, unknown>) => v.status === "staging") as Record<string, unknown> | undefined;
-      const draftVer = versions.find((v: Record<string, unknown>) => v.status === "draft") as Record<string, unknown> | undefined;
+      const prodVer = versions.find((v) => (v as Record<string, unknown>).status === "production") as Record<string, unknown> | undefined;
+      const stagingVer = versions.find((v) => (v as Record<string, unknown>).status === "staging") as Record<string, unknown> | undefined;
+      const draftVer = versions.find((v) => (v as Record<string, unknown>).status === "draft") as Record<string, unknown> | undefined;
       return {
         _data: {
           workflow_name: name,

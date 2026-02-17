@@ -22,6 +22,7 @@ class TemplateInfo:
     tags: list[str]
     file_name: str
     step_count: int
+    input_schema: dict | None = None
 
 
 _TEMPLATES_DIR = Path(__file__).parent
@@ -80,6 +81,7 @@ def list_templates() -> list[TemplateInfo]:
                 tags=list(meta.get("tags", [])),
                 file_name=path.name,
                 step_count=step_count,
+                input_schema=data.get("input_schema"),
             )
         )
     return templates
@@ -118,6 +120,7 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
             tags=list(meta.get("tags", [])),
             file_name=path.name,
             step_count=step_count,
+            input_schema=data.get("input_schema"),
         )
         return content, info
 

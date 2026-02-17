@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle, GitCompareArrows } from "lucide-react";
+import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -9,6 +9,7 @@ import { LiveStream } from "@/components/runs/LiveStream";
 import { RunTree } from "@/components/runs/RunTree";
 import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
 import { BudgetBar } from "@/components/shared/BudgetBar";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn } from "@/lib/utils";
 
@@ -48,6 +49,8 @@ export default function RunDetailPage() {
   const [loading, setLoading] = useState(true);
   const [inputExpanded, setInputExpanded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"replay" | "fork">("replay");
   const [modalStepId, setModalStepId] = useState("");
@@ -85,6 +88,39 @@ export default function RunDetailPage() {
     }
     setCancelling(false);
   }, [id, cancelling, fetchRun]);
+
+  const handleDelete = useCallback(async () => {
+    if (!id || deleting) return;
+    setDeleting(true);
+    const res = await api.delete(`/runs/${id}`);
+    if (res.error) {
+      toast.error(`Delete failed: ${res.error.message}`);
+    } else {
+      toast.success("Run deleted");
+      navigate("/runs");
+    }
+    setDeleting(false);
+    setDeleteConfirmOpen(false);
+  }, [id, deleting, navigate]);
+
+  const handleDownloadOutput = useCallback(() => {
+    if (!run) return;
+    const blob = new Blob([JSON.stringify(run.outputs ?? {}, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${run.workflow_name}-${run.run_id.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [run]);
+
+  const handleCopyOutput = useCallback(async () => {
+    if (!run?.outputs) return;
+    await navigator.clipboard.writeText(JSON.stringify(run.outputs, null, 2));
+    toast.success("Output copied to clipboard");
+  }, [run]);
 
   const handleReplay = useCallback((stepId: string) => {
     setModalStepId(stepId);
@@ -202,6 +238,19 @@ export default function RunDetailPage() {
                 {cancelling ? "Cancelling..." : "Cancel"}
               </button>
             )}
+            {!isRunning && (
+              <button
+                onClick={() => setDeleteConfirmOpen(true)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-error/30 px-3 py-1.5",
+                  "text-sm font-medium text-error",
+                  "hover:bg-error/10 transition-colors"
+                )}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            )}
             <RunStatusBadge status={run.status} size="md" />
           </div>
         </div>
@@ -289,6 +338,53 @@ export default function RunDetailPage() {
           onFork={handleFork}
         />
       </div>
+
+      {/* Output export */}
+      {run.outputs && Object.keys(run.outputs).length > 0 && (
+        <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Output</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyOutput}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5",
+                  "text-xs font-medium text-muted",
+                  "hover:bg-border/40 hover:text-foreground transition-colors"
+                )}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </button>
+              <button
+                onClick={handleDownloadOutput}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5",
+                  "text-xs font-medium text-muted",
+                  "hover:bg-border/40 hover:text-foreground transition-colors"
+                )}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download JSON
+              </button>
+            </div>
+          </div>
+          <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap">
+            {JSON.stringify(run.outputs, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* Delete confirm */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete Run"
+        description={`Are you sure you want to delete run ${run.run_id.slice(0, 8)}...? This action cannot be undone.`}
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteConfirmOpen(false)}
+      />
 
       {/* Replay/Fork Modal */}
       <ReplayForkModal

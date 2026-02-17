@@ -7,6 +7,7 @@ export interface RuntimeInfo {
   queue: string;
   storage: string;
   data_dir: string | null;
+  version: string | null;
 }
 
 export function useRuntimeInfo() {

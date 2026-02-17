@@ -343,6 +343,7 @@ async def health_check() -> ApiResponse:
 @router.get("/runtime")
 async def runtime_info() -> ApiResponse:
     """Return current runtime mode information."""
+    from sandcastle import __version__
     from sandcastle.models.db import _build_engine_url
 
     engine_url = _build_engine_url()
@@ -357,6 +358,7 @@ async def runtime_info() -> ApiResponse:
             queue=queue_type,
             storage=storage_type,
             data_dir=settings.data_dir if settings.is_local_mode else None,
+            version=__version__,
         )
     )
 
@@ -438,6 +440,7 @@ async def list_templates() -> ApiResponse:
                 "description": t.description,
                 "tags": t.tags,
                 "step_count": t.step_count,
+                "input_schema": t.input_schema,
             }
             for t in templates
         ]
@@ -465,6 +468,7 @@ async def get_template(template_name: str) -> ApiResponse:
             "step_count": info.step_count,
             "file_name": info.file_name,
             "content": content,
+            "input_schema": info.input_schema,
         }
     )
 

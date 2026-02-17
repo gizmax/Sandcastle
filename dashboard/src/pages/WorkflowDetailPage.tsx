@@ -35,7 +35,7 @@ export default function WorkflowDetailPage() {
   const [data, setData] = useState<VersionListData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
-  const [selectedYaml, setSelectedYaml] = useState<string | null>(null);
+  const [, setSelectedYaml] = useState<string | null>(null);
   const [diffModal, setDiffModal] = useState<{ a: number; b: number } | null>(null);
 
   const fetchVersions = useCallback(async () => {

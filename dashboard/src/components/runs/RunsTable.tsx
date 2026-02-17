@@ -17,10 +17,14 @@ interface RunsTableProps {
   limit: number;
   offset: number;
   onPageChange: (offset: number) => void;
+  selectedIds?: Set<string>;
+  onSelectionChange?: (ids: Set<string>) => void;
 }
 
-export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTableProps) {
+export function RunsTable({ runs, total, limit, offset, onPageChange, selectedIds, onSelectionChange }: RunsTableProps) {
   const navigate = useNavigate();
+  const selectable = !!onSelectionChange;
+  const allSelected = selectable && runs.length > 0 && runs.every((r) => selectedIds?.has(r.run_id));
   const totalPages = Math.ceil(total / limit);
   const currentPage = Math.floor(offset / limit) + 1;
   function getDuration(run: RunItem): string {
@@ -36,6 +40,22 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-background/50">
+              {selectable && (
+                <th className="w-10 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={() => {
+                      if (allSelected) {
+                        onSelectionChange?.(new Set());
+                      } else {
+                        onSelectionChange?.(new Set(runs.map((r) => r.run_id)));
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-border accent-accent"
+                  />
+                </th>
+              )}
               <th className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
               <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Status</th>
               <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Started</th>
@@ -48,8 +68,29 @@ export function RunsTable({ runs, total, limit, offset, onPageChange }: RunsTabl
               <tr
                 key={run.run_id}
                 onClick={() => navigate(`/runs/${run.run_id}`)}
-                className="cursor-pointer transition-colors duration-150 hover:bg-border/20"
+                className={cn(
+                  "cursor-pointer transition-colors duration-150 hover:bg-border/20",
+                  selectedIds?.has(run.run_id) && "bg-accent/5"
+                )}
               >
+                {selectable && (
+                  <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds?.has(run.run_id) ?? false}
+                      onChange={() => {
+                        const next = new Set(selectedIds);
+                        if (next.has(run.run_id)) {
+                          next.delete(run.run_id);
+                        } else {
+                          next.add(run.run_id);
+                        }
+                        onSelectionChange?.(next);
+                      }}
+                      className="h-4 w-4 rounded border-border accent-accent"
+                    />
+                  </td>
+                )}
                 <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-medium text-foreground">{run.workflow_name}</td>
                 <td className="px-3 sm:px-5 py-3">
                   <RunStatusBadge status={run.status} />

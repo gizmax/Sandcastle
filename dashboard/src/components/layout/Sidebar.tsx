@@ -7,6 +7,7 @@ import {
   GitBranch,
   Inbox,
   Key,
+  Layers,
   LayoutDashboard,
   PlayCircle,
   Settings,
@@ -15,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 
 interface SidebarProps {
   open: boolean;
@@ -27,6 +29,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Overview", end: true },
   { to: "/runs", icon: PlayCircle, label: "Runs" },
   { to: "/workflows", icon: GitBranch, label: "Workflows" },
+  { to: "/templates", icon: Layers, label: "Templates" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" as const },
   { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
   { to: "/violations", icon: ShieldAlert, label: "Violations" },
@@ -38,6 +41,9 @@ const navItems = [
 ];
 
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
+  const { info } = useRuntimeInfo();
+  const version = info?.version ?? "0.7.1";
+
   return (
     <>
       {open && (
@@ -104,7 +110,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </nav>
 
         <div className="border-t border-border px-5 py-4">
-          <p className="text-xs text-muted-foreground">Sandcastle v0.5.0</p>
+          <p className="text-xs text-muted-foreground">Sandcastle v{version}</p>
         </div>
       </aside>
     </>

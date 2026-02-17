@@ -20,6 +20,7 @@ const Schedules = lazy(() => import("@/pages/Schedules"));
 const DeadLetterPage = lazy(() => import("@/pages/DeadLetterPage"));
 const ApiKeysPage = lazy(() => import("@/pages/ApiKeysPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
               <Route path="/workflows/:name" element={<WorkflowDetailPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/approvals" element={<ApprovalsPage />} />
               <Route path="/autopilot" element={<AutoPilotPage />} />
               <Route path="/violations" element={<ViolationsPage />} />

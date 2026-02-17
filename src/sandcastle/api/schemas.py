@@ -187,6 +187,7 @@ class RuntimeInfoResponse(BaseModel):
     queue: str  # "in-process" or "redis"
     storage: str  # "local" or "s3"
     data_dir: str | None = None  # Only set in local mode
+    version: str | None = None
 
 
 class RunListItem(BaseModel):

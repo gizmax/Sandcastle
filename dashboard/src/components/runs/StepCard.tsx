@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { ChevronDown, ChevronRight, RotateCcw, GitFork } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { ChevronDown, ChevronRight, RotateCcw, GitFork, Copy, Check } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { cn, formatDuration, formatCost } from "@/lib/utils";
 
@@ -74,7 +74,16 @@ export function StepCard({
   onFork,
 }: StepCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const isCompleted = status === "completed" || status === "failed";
+
+  const handleCopyOutput = useCallback(async () => {
+    if (output == null) return;
+    const text = typeof output === "string" ? output : JSON.stringify(output, null, 2);
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [output]);
 
   return (
     <div className="rounded-lg border border-border bg-surface shadow-sm">
@@ -125,7 +134,32 @@ export function StepCard({
           )}
           {output != null && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted">Output</p>
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-xs font-medium text-muted">Output</p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleCopyOutput();
+                  }}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium",
+                    "border border-border text-muted",
+                    "hover:bg-border/40 hover:text-foreground transition-colors"
+                  )}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3 w-3 text-success" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3" />
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
               <OutputBlock value={output} />
             </div>
           )}
