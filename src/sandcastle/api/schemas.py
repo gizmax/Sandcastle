@@ -22,6 +22,9 @@ class WorkflowRunRequest(BaseModel):
     callback_url: str | None = Field(None, description="Webhook URL for completion notification")
     idempotency_key: str | None = Field(None, description="Unique key to prevent duplicate runs")
     max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run")
+    version: int | str | None = Field(
+        None, description="Workflow version (int, 'latest', or None)"
+    )
 
 
 class ReplayRequest(BaseModel):
@@ -63,6 +66,7 @@ class WorkflowSaveRequest(BaseModel):
 
     name: str = Field(..., description="Workflow file name (without .yaml extension)")
     content: str = Field(..., description="Workflow YAML content")
+    description: str = Field("", description="Version description")
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -77,6 +81,22 @@ class DeadLetterResolveRequest(BaseModel):
     """Request to manually resolve a dead letter item."""
 
     reason: str | None = None
+
+
+class WorkflowPromoteRequest(BaseModel):
+    """Request to promote a workflow version (draft->staging->production)."""
+
+    version: int | None = Field(
+        None, description="Version to promote (default: latest)"
+    )
+
+
+class WorkflowRollbackRequest(BaseModel):
+    """Request to rollback a workflow to a previous version."""
+
+    target_version: int | None = Field(
+        None, description="Target version (default: previous)"
+    )
 
 
 class ApprovalRespondRequest(BaseModel):
@@ -181,6 +201,45 @@ class RunListItem(BaseModel):
     parent_run_id: str | None = None
 
 
+class StepDiff(BaseModel):
+    """Comparison of a single step between two runs."""
+
+    step_id: str
+    parallel_index: int | None = None
+    presence: str  # "both", "only_a", "only_b"
+    config_a: dict[str, Any] | None = None
+    config_b: dict[str, Any] | None = None
+    config_changed: bool = False
+    output_a: Any | None = None
+    output_b: Any | None = None
+    output_changed: bool = False
+    cost_a: float = 0.0
+    cost_b: float = 0.0
+    cost_delta: float = 0.0
+    duration_a: float = 0.0
+    duration_b: float = 0.0
+    duration_delta: float = 0.0
+    status_a: str | None = None
+    status_b: str | None = None
+    error_a: str | None = None
+    error_b: str | None = None
+
+
+class RunCompareResponse(BaseModel):
+    """Side-by-side comparison of two runs."""
+
+    run_a: RunListItem
+    run_b: RunListItem
+    total_cost_a: float = 0.0
+    total_cost_b: float = 0.0
+    total_cost_delta: float = 0.0
+    total_duration_a: float | None = None
+    total_duration_b: float | None = None
+    total_duration_delta: float | None = None
+    same_workflow: bool = True
+    steps: list[StepDiff] = []
+
+
 class ScheduleResponse(BaseModel):
     """Schedule information."""
 
@@ -222,6 +281,48 @@ class WorkflowInfoResponse(BaseModel):
     file_name: str
     steps: list[WorkflowStepInfo] = []
     input_schema: dict | None = None
+    version: int | None = None
+    version_status: str | None = None
+    total_versions: int | None = None
+
+
+class WorkflowVersionResponse(BaseModel):
+    """A single workflow version."""
+
+    id: str
+    workflow_name: str
+    version: int
+    status: str
+    description: str = ""
+    steps_count: int = 0
+    steps: list[WorkflowStepInfo] = []
+    checksum: str = ""
+    created_by: str | None = None
+    promoted_by: str | None = None
+    promoted_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class WorkflowVersionListResponse(BaseModel):
+    """Workflow version history."""
+
+    workflow_name: str
+    production_version: int | None = None
+    staging_version: int | None = None
+    latest_draft_version: int | None = None
+    versions: list[WorkflowVersionResponse] = []
+
+
+class WorkflowVersionDiffResponse(BaseModel):
+    """Diff between two workflow versions."""
+
+    version_a: int
+    version_b: int
+    yaml_a: str
+    yaml_b: str
+    steps_added: list[str] = []
+    steps_removed: list[str] = []
+    steps_changed: list[str] = []
 
 
 class ApiKeyResponse(BaseModel):

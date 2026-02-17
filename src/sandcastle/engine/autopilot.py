@@ -161,7 +161,7 @@ async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
     """Use an LLM to judge output quality (via Sandstorm haiku)."""
     try:
         from sandcastle.config import settings
-        from sandcastle.engine.sandbox import SandstormClient
+        from sandcastle.engine.sandbox import get_sandstorm_client
 
         criteria = config.evaluation.criteria if config.evaluation else "overall quality"
         output_str = str(output)[:2000]  # Truncate for efficiency
@@ -172,22 +172,19 @@ async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
             "Respond with ONLY a number between 0.0 and 1.0."
         )
 
-        client = SandstormClient(
+        client = get_sandstorm_client(
             base_url=settings.sandstorm_url,
             anthropic_api_key=settings.anthropic_api_key,
             e2b_api_key=settings.e2b_api_key,
         )
-        try:
-            result = await client.query({
-                "prompt": prompt,
-                "model": "haiku",
-                "max_turns": 1,
-                "timeout": 30,
-            })
-            score = float(result.text.strip())
-            return max(0.0, min(1.0, score))
-        finally:
-            await client.close()
+        result = await client.query({
+            "prompt": prompt,
+            "model": "haiku",
+            "max_turns": 1,
+            "timeout": 30,
+        })
+        score = float(result.text.strip())
+        return max(0.0, min(1.0, score))
 
     except Exception as e:
         logger.warning(f"LLM judge evaluation failed: {e}")

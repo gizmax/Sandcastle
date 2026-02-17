@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Local mode data directory
     data_dir: str = "./data"
 
+    # Sandbox root for filesystem operations (browse, csv_output).
+    # Empty = no restriction (current behavior). Set to e.g. "./data" to restrict.
+    sandbox_root: str = ""
+
     # Webhooks
     webhook_secret: str = "your-webhook-signing-secret"
 

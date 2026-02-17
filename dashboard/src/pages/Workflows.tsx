@@ -35,6 +35,9 @@ interface WorkflowInfo {
   file_name: string;
   steps?: WorkflowStep[];
   input_schema?: InputSchema;
+  version?: number | null;
+  version_status?: string | null;
+  total_versions?: number | null;
 }
 
 export default function Workflows() {
@@ -112,6 +115,7 @@ export default function Workflows() {
           onRun={setRunModal}
           onEdit={(wf) => navigate("/workflows/builder", { state: { workflow: wf } })}
           onViewDag={setDagWorkflow}
+          onViewVersions={(wf) => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
         />
       )}
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import AsyncIterator
 
 import httpx
@@ -29,7 +29,6 @@ class SandstormResult:
     structured_output: dict | None = None
     total_cost_usd: float = 0.0
     num_turns: int = 0
-    events: list[SSEEvent] = field(default_factory=list)
 
 
 class SandstormClient:
@@ -68,7 +67,6 @@ class SandstormClient:
         result = SandstormResult()
 
         async for event in self.query_stream(request):
-            result.events.append(event)
             evt_type = event.data.get("type", event.event)
 
             if evt_type == "result":
@@ -117,3 +115,27 @@ class SandstormClient:
 
 class SandstormError(Exception):
     """Error returned by the Sandstorm API."""
+
+
+# Singleton client pool keyed by (base_url, anthropic_key, e2b_key)
+_client_pool: dict[tuple[str, str, str], SandstormClient] = {}
+
+
+def get_sandstorm_client(
+    base_url: str,
+    anthropic_api_key: str,
+    e2b_api_key: str,
+    timeout: float = 300.0,
+) -> SandstormClient:
+    """Return a shared SandstormClient, reusing TCP connections."""
+    key = (base_url.rstrip("/"), anthropic_api_key, e2b_api_key)
+    client = _client_pool.get(key)
+    if client is None:
+        client = SandstormClient(
+            base_url=base_url,
+            anthropic_api_key=anthropic_api_key,
+            e2b_api_key=e2b_api_key,
+            timeout=timeout,
+        )
+        _client_pool[key] = client
+    return client

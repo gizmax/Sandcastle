@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle } from "lucide-react";
+import { ArrowLeft, XCircle, GitCompareArrows } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -174,6 +174,19 @@ export default function RunDetailPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
+            {run.parent_run_id && (
+              <button
+                onClick={() => navigate(`/runs/compare?run_a=${run.parent_run_id}&run_b=${run.run_id}`)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
+                  "text-sm font-medium text-accent",
+                  "hover:bg-accent/10 transition-colors"
+                )}
+              >
+                <GitCompareArrows className="h-4 w-4" />
+                Compare with Parent
+              </button>
+            )}
             {isRunning && (
               <button
                 onClick={handleCancel}

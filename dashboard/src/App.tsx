@@ -7,9 +7,11 @@ import { EventStreamProvider } from "@/components/providers/EventStreamProvider"
 // Lazy-loaded page components for code splitting
 const Overview = lazy(() => import("@/pages/Overview"));
 const Runs = lazy(() => import("@/pages/Runs"));
+const RunComparePage = lazy(() => import("@/pages/RunComparePage"));
 const RunDetailPage = lazy(() => import("@/pages/RunDetailPage"));
 const Workflows = lazy(() => import("@/pages/Workflows"));
 const WorkflowBuilderPage = lazy(() => import("@/pages/WorkflowBuilderPage"));
+const WorkflowDetailPage = lazy(() => import("@/pages/WorkflowDetailPage"));
 const ApprovalsPage = lazy(() => import("@/pages/ApprovalsPage"));
 const AutoPilotPage = lazy(() => import("@/pages/AutoPilotPage"));
 const ViolationsPage = lazy(() => import("@/pages/ViolationsPage"));
@@ -35,9 +37,11 @@ export default function App() {
             <Route element={<Layout />}>
               <Route path="/" element={<Overview />} />
               <Route path="/runs" element={<Runs />} />
+              <Route path="/runs/compare" element={<RunComparePage />} />
               <Route path="/runs/:id" element={<RunDetailPage />} />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
+              <Route path="/workflows/:name" element={<WorkflowDetailPage />} />
               <Route path="/approvals" element={<ApprovalsPage />} />
               <Route path="/autopilot" element={<AutoPilotPage />} />
               <Route path="/violations" element={<ViolationsPage />} />

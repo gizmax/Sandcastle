@@ -112,3 +112,14 @@ def get_tenant_id(request: Request) -> str | None:
     When auth is enabled, all tenant-scoped queries must use this to filter data.
     """
     return getattr(request.state, "tenant_id", None)
+
+
+def is_admin(request: Request) -> bool:
+    """Return True when the request comes from an admin (no tenant scope).
+
+    Admin = auth is enabled AND the API key has no tenant_id (server operator).
+    When auth is disabled everyone is treated as admin.
+    """
+    if not settings.auth_required:
+        return True
+    return get_tenant_id(request) is None

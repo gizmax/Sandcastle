@@ -19,7 +19,11 @@ from sandcastle.engine.dag import (
     WorkflowDefinition,
 )
 from sandcastle.engine.events import event_bus
-from sandcastle.engine.sandbox import SandstormClient, SandstormError
+from sandcastle.engine.sandbox import (
+    SandstormClient,
+    SandstormError,
+    get_sandstorm_client,
+)
 from sandcastle.engine.storage import StorageBackend
 
 logger = logging.getLogger(__name__)
@@ -349,6 +353,19 @@ def _write_csv_output(
         return
 
     directory = Path(cfg.directory).expanduser().resolve()
+
+    # Enforce sandbox root when configured
+    from sandcastle.config import settings
+
+    if settings.sandbox_root:
+        sandbox = Path(settings.sandbox_root).expanduser().resolve()
+        if not str(directory).startswith(str(sandbox)):
+            logger.warning(
+                "csv_output directory %s is outside sandbox root %s - skipping",
+                directory, sandbox,
+            )
+            return
+
     directory.mkdir(parents=True, exist_ok=True)
 
     base_name = cfg.filename or step.id
@@ -1146,6 +1163,145 @@ async def _execute_sub_workflow_step(
         )
 
 
+async def _prepare_and_run_step(
+    step_id: str,
+    workflow: WorkflowDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    global_policies: list,
+    step_overrides: dict[str, dict] | None,
+    depth: int,
+) -> None:
+    """Execute one step, update context in place. Raises on abort failure."""
+    step = workflow.get_step(step_id)
+    overrides = (step_overrides or {}).get(step_id)
+    use_dead_letter = (
+        workflow.on_failure and workflow.on_failure.dead_letter
+    )
+
+    # Resolve policies
+    if global_policies and step.policies is None:
+        step = StepDefinition(
+            id=step.id, prompt=step.prompt, depends_on=step.depends_on,
+            model=step.model, max_turns=step.max_turns, timeout=step.timeout,
+            parallel_over=step.parallel_over, output_schema=step.output_schema,
+            retry=step.retry, fallback=step.fallback, type=step.type,
+            approval_config=step.approval_config, autopilot=step.autopilot,
+            sub_workflow=step.sub_workflow, policies=global_policies,
+        )
+    elif global_policies and step.policies:
+        try:
+            from sandcastle.engine.policy import resolve_step_policies
+            resolved = resolve_step_policies(step.policies, global_policies)
+            step = StepDefinition(
+                id=step.id, prompt=step.prompt, depends_on=step.depends_on,
+                model=step.model, max_turns=step.max_turns,
+                timeout=step.timeout,
+                parallel_over=step.parallel_over,
+                output_schema=step.output_schema,
+                retry=step.retry, fallback=step.fallback, type=step.type,
+                approval_config=step.approval_config,
+                autopilot=step.autopilot,
+                sub_workflow=step.sub_workflow, policies=resolved,
+            )
+        except Exception as e:
+            logger.warning(f"Could not resolve step policies: {e}")
+
+    # Approval gate
+    if step.type == "approval":
+        await _execute_approval_step(step, context, 0)
+        return  # WorkflowPaused raised above
+
+    # Sub-workflow
+    if step.type == "sub_workflow":
+        sub_result = await _execute_sub_workflow_step(
+            step, context, storage, depth=depth,
+        )
+        context.costs.append(sub_result.cost_usd)
+        if sub_result.status == "completed":
+            context.step_outputs[step_id] = sub_result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=sub_result.output,
+                cost_usd=sub_result.cost_usd,
+                duration_seconds=sub_result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Sub-workflow step '{step_id}' failed: {sub_result.error}"
+            )
+        return
+
+    # Fan-out
+    if step.parallel_over:
+        items = resolve_variable(step.parallel_over, context)
+        if not isinstance(items, list):
+            items = [items]
+
+        tasks = [
+            asyncio.create_task(
+                execute_step_with_retry(
+                    step, context.with_item(item, i), sandbox, storage,
+                    parallel_index=i, step_overrides=overrides,
+                )
+            )
+            for i, item in enumerate(items)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        fan_out_items: list = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                result = StepResult(
+                    step_id=step_id, status="failed", error=str(result),
+                )
+            context.costs.append(result.cost_usd)
+            if result.status == "failed":
+                on_fail = step.retry.on_failure if step.retry else "abort"
+                if use_dead_letter:
+                    await _send_to_dead_letter(
+                        run_id=context.run_id, step_id=step_id,
+                        error=result.error,
+                        input_data={"_item_index": i},
+                        attempts=result.attempt, parallel_index=i,
+                    )
+                    fan_out_items.append(None)
+                elif on_fail == "abort":
+                    raise StepExecutionError(
+                        f"Step '{step_id}' item {i} failed: {result.error}"
+                    )
+                else:
+                    fan_out_items.append(None)
+            else:
+                fan_out_items.append(result.output)
+        context.step_outputs[step_id] = fan_out_items
+        return
+
+    # Regular step
+    result = await execute_step_with_retry(
+        step, context, sandbox, storage, step_overrides=overrides,
+    )
+    context.costs.append(result.cost_usd)
+    if result.status == "failed":
+        on_fail = step.retry.on_failure if step.retry else "abort"
+        if use_dead_letter:
+            await _send_to_dead_letter(
+                run_id=context.run_id, step_id=step_id,
+                error=result.error, input_data=context.input,
+                attempts=result.attempt,
+            )
+            context.step_outputs[step_id] = None
+        elif on_fail == "abort":
+            raise StepExecutionError(
+                f"Step '{step_id}' failed: {result.error}"
+            )
+        else:
+            context.step_outputs[step_id] = None
+    else:
+        context.step_outputs[step_id] = result.output
+
+
 async def execute_workflow(
     workflow: WorkflowDefinition,
     plan: ExecutionPlan,
@@ -1260,7 +1416,7 @@ async def execute_workflow(
         f"Sandstorm connection: url={effective_url!r} "
         f"(workflow={workflow.sandstorm_url!r}, settings={settings.sandstorm_url!r})"
     )
-    sandbox = SandstormClient(
+    sandbox = get_sandstorm_client(
         base_url=effective_url,
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
@@ -1272,11 +1428,34 @@ async def execute_workflow(
         "workflow": workflow.name,
     })
 
+    # Dependency-based scheduler: start steps as soon as deps complete
+    all_step_ids = [s.id for s in workflow.steps]
+    step_deps = {s.id: set(s.depends_on) for s in workflow.steps}
+    done_steps: set[str] = set(skip_steps or ())
+    running: dict[str, asyncio.Task] = {}
+    checkpoint_counter = len(done_steps)
+
+    for sid in done_steps:
+        logger.info(f"Skipping step '{sid}' (replay/fork)")
+
+    def _find_ready() -> list[str]:
+        return sorted(
+            sid for sid in all_step_ids
+            if sid not in done_steps
+            and sid not in running
+            and step_deps[sid].issubset(done_steps)
+        )
+
+    def _cancel_running() -> None:
+        for t in running.values():
+            t.cancel()
+
     try:
-        for stage_idx, stage in enumerate(plan.stages):
-            # Check cancellation before each stage
+        while True:
+            # Cancel check
             if await _check_cancel(run_id):
-                logger.info(f"Run {run_id} cancelled before stage {stage_idx}")
+                _cancel_running()
+                logger.info(f"Run {run_id} cancelled")
                 return WorkflowResult(
                     run_id=run_id,
                     outputs=context.step_outputs,
@@ -1286,9 +1465,10 @@ async def execute_workflow(
                     completed_at=datetime.now(timezone.utc),
                 )
 
-            # Check budget before each stage
+            # Budget check
             budget_status = _check_budget(context)
             if budget_status == "exceeded":
+                _cancel_running()
                 cost = context.total_cost
                 limit = context.max_cost_usd
                 logger.warning(
@@ -1307,236 +1487,47 @@ async def execute_workflow(
             elif budget_status == "warning":
                 logger.warning(
                     f"Run {run_id} at 80%+ budget "
-                    f"(${context.total_cost:.4f} / ${context.max_cost_usd:.4f})"
+                    f"(${context.total_cost:.4f} / "
+                    f"${context.max_cost_usd:.4f})"
                 )
 
-            # Collect all tasks for this stage (parallel execution)
-            tasks: list[asyncio.Task] = []
-            task_meta: list[dict] = []  # Track which step/item each task is for
-
-            for step_id in stage:
-                # Skip steps that are already completed (replay/fork)
-                if skip_steps and step_id in skip_steps:
-                    logger.info(f"Skipping step '{step_id}' (replay/fork)")
-                    continue
-
-                step = workflow.get_step(step_id)
-                overrides = (step_overrides or {}).get(step_id)
-
-                # Resolve policies: step-level overrides or global policies
-                if global_policies and step.policies is None:
-                    # No step-level override -> apply all global policies
-                    step = StepDefinition(
-                        id=step.id,
-                        prompt=step.prompt,
-                        depends_on=step.depends_on,
-                        model=step.model,
-                        max_turns=step.max_turns,
-                        timeout=step.timeout,
-                        parallel_over=step.parallel_over,
-                        output_schema=step.output_schema,
-                        retry=step.retry,
-                        fallback=step.fallback,
-                        type=step.type,
-                        approval_config=step.approval_config,
-                        autopilot=step.autopilot,
-                        sub_workflow=step.sub_workflow,
-                        policies=global_policies,
+            # Launch ready steps
+            for sid in _find_ready():
+                running[sid] = asyncio.create_task(
+                    _prepare_and_run_step(
+                        sid, workflow, context, sandbox, storage,
+                        global_policies, step_overrides, depth,
                     )
-                elif global_policies and step.policies:
-                    # Step has explicit policy list -> resolve refs against globals
-                    try:
-                        from sandcastle.engine.policy import resolve_step_policies
-                        resolved = resolve_step_policies(step.policies, global_policies)
-                        step = StepDefinition(
-                            id=step.id,
-                            prompt=step.prompt,
-                            depends_on=step.depends_on,
-                            model=step.model,
-                            max_turns=step.max_turns,
-                            timeout=step.timeout,
-                            parallel_over=step.parallel_over,
-                            output_schema=step.output_schema,
-                            retry=step.retry,
-                            fallback=step.fallback,
-                            type=step.type,
-                            approval_config=step.approval_config,
-                            autopilot=step.autopilot,
-                            sub_workflow=step.sub_workflow,
-                            policies=resolved,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Could not resolve step policies: {e}")
-
-                # Handle approval gate steps
-                if step.type == "approval":
-                    await _execute_approval_step(step, context, stage_idx)
-                    continue  # Won't reach here - WorkflowPaused is raised
-
-                # Handle sub-workflow steps
-                if step.type == "sub_workflow":
-                    sub_result = await _execute_sub_workflow_step(
-                        step, context, storage, depth=depth,
-                    )
-                    context.costs.append(sub_result.cost_usd)
-                    if sub_result.status == "completed":
-                        context.step_outputs[step_id] = sub_result.output
-                        await _save_run_step(
-                            run_id=context.run_id,
-                            step_id=step.id,
-                            status="completed",
-                            output=sub_result.output,
-                            cost_usd=sub_result.cost_usd,
-                            duration_seconds=sub_result.duration_seconds,
-                        )
-                    else:
-                        raise StepExecutionError(
-                            f"Sub-workflow step '{step_id}' failed: {sub_result.error}"
-                        )
-                    continue
-
-                if step.parallel_over:
-                    # Fan-out: one task per item
-                    items = resolve_variable(step.parallel_over, context)
-                    if not isinstance(items, list):
-                        items = [items]
-
-                    for i, item in enumerate(items):
-                        item_context = context.with_item(item, i)
-                        task = asyncio.create_task(
-                            execute_step_with_retry(
-                                step, item_context, sandbox, storage,
-                                parallel_index=i, step_overrides=overrides,
-                            )
-                        )
-                        tasks.append(task)
-                        task_meta.append({
-                            "step_id": step_id,
-                            "fan_out": True,
-                            "index": i,
-                        })
-                else:
-                    task = asyncio.create_task(
-                        execute_step_with_retry(
-                            step, context, sandbox, storage,
-                            step_overrides=overrides,
-                        )
-                    )
-                    tasks.append(task)
-                    task_meta.append({"step_id": step_id, "fan_out": False})
-
-            if not tasks:
-                continue
-
-            # Await all tasks in the stage concurrently
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process results
-            fan_out_results: dict[str, list] = {}
-
-            for i, (result, meta) in enumerate(zip(results, task_meta)):
-                step_id = meta["step_id"]
-                step = workflow.get_step(step_id)
-
-                if isinstance(result, Exception):
-                    result = StepResult(
-                        step_id=step_id,
-                        status="failed",
-                        error=str(result),
-                    )
-
-                context.costs.append(result.cost_usd)
-
-                # Check if workflow has dead_letter enabled
-                use_dead_letter = (
-                    workflow.on_failure
-                    and workflow.on_failure.dead_letter
                 )
 
-                if meta["fan_out"]:
-                    if step_id not in fan_out_results:
-                        fan_out_results[step_id] = []
+            if not running:
+                break  # All steps done
 
-                    if result.status == "failed":
-                        on_failure = step.retry.on_failure if step.retry else "abort"
-                        if use_dead_letter:
-                            await _send_to_dead_letter(
-                                run_id=run_id,
-                                step_id=step_id,
-                                error=result.error,
-                                input_data={"_item_index": meta["index"]},
-                                attempts=result.attempt,
-                                parallel_index=meta["index"],
-                            )
-                            fan_out_results[step_id].append(None)
-                        elif on_failure == "abort":
-                            raise StepExecutionError(
-                                f"Step '{step_id}' item {meta['index']} failed: {result.error}"
-                            )
-                        else:
-                            fan_out_results[step_id].append(None)
-                    else:
-                        fan_out_results[step_id].append(result.output)
-                else:
-                    if result.status == "failed":
-                        on_failure = step.retry.on_failure if step.retry else "abort"
-                        if use_dead_letter:
-                            await _send_to_dead_letter(
-                                run_id=run_id,
-                                step_id=step_id,
-                                error=result.error,
-                                input_data=context.input,
-                                attempts=result.attempt,
-                            )
-                            context.step_outputs[step_id] = None
-                        elif on_failure == "abort":
-                            raise StepExecutionError(
-                                f"Step '{step_id}' failed: {result.error}"
-                            )
-                        else:
-                            context.step_outputs[step_id] = None
-                    else:
-                        context.step_outputs[step_id] = result.output
+            # Wait for at least one step to finish
+            done_tasks, _ = await asyncio.wait(
+                running.values(),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-            # Store fan-out results
-            for step_id, items in fan_out_results.items():
-                context.step_outputs[step_id] = items
+            for task in done_tasks:
+                sid = next(k for k, v in running.items() if v is task)
+                del running[sid]
 
-            # Save checkpoint after each completed stage
-            last_step_in_stage = stage[-1] if stage else "unknown"
-            await _save_checkpoint(run_id, last_step_in_stage, stage_idx, context)
+                exc = task.exception()
+                if exc is not None:
+                    _cancel_running()
+                    if running:
+                        await asyncio.gather(
+                            *running.values(),
+                            return_exceptions=True,
+                        )
+                        running.clear()
+                    raise exc
 
-            # Post-stage cancel check (catches cancel during execution)
-            if await _check_cancel(run_id):
-                logger.info(
-                    f"Run {run_id} cancelled after stage {stage_idx}"
-                )
-                return WorkflowResult(
-                    run_id=run_id,
-                    outputs=context.step_outputs,
-                    total_cost_usd=context.total_cost,
-                    status="cancelled",
-                    started_at=started_at,
-                    completed_at=datetime.now(timezone.utc),
-                )
-
-            # Post-stage budget check (catches overrun immediately)
-            post_budget = _check_budget(context)
-            if post_budget == "exceeded":
-                cost = context.total_cost
-                limit = context.max_cost_usd
-                logger.warning(
-                    f"Run {run_id} budget exceeded after stage "
-                    f"{stage_idx} (${cost:.4f} / ${limit:.4f})"
-                )
-                return WorkflowResult(
-                    run_id=run_id,
-                    outputs=context.step_outputs,
-                    total_cost_usd=cost,
-                    status="budget_exceeded",
-                    error=f"Budget exceeded: ${cost:.4f} >= ${limit:.4f}",
-                    started_at=started_at,
-                    completed_at=datetime.now(timezone.utc),
+                done_steps.add(sid)
+                checkpoint_counter += 1
+                await _save_checkpoint(
+                    run_id, sid, checkpoint_counter, context,
                 )
 
         completed_at = datetime.now(timezone.utc)
@@ -1629,7 +1620,7 @@ async def execute_workflow(
         )
 
     finally:
-        await sandbox.close()
+        pass  # Singleton client - not closed per run
 
 
 async def _save_routing_decision(

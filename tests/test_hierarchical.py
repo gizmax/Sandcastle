@@ -131,7 +131,7 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.SandstormClient") as MockClient,
+            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage"),
             patch("sandcastle.config.settings") as mock_settings,
         ):
@@ -142,8 +142,7 @@ steps:
             mock_settings.redis_url = "redis://localhost:6379/0"
 
             mock_sandbox = AsyncMock()
-            mock_sandbox.close = AsyncMock()
-            MockClient.return_value = mock_sandbox
+            mock_get_client.return_value = mock_sandbox
 
             result = await execute_workflow(
                 workflow, plan, input_data={}, depth=10
@@ -220,7 +219,7 @@ steps:
 
             with (
                 patch("sandcastle.config.settings") as mock_settings,
-                patch("sandcastle.engine.executor.SandstormClient") as MockClient,
+                patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
             ):
                 mock_settings.max_workflow_depth = 5
                 mock_settings.workflows_dir = tmpdir
@@ -231,8 +230,7 @@ steps:
 
                 mock_sandbox = AsyncMock()
                 mock_sandbox.query.return_value = mock_result
-                mock_sandbox.close = AsyncMock()
-                MockClient.return_value = mock_sandbox
+                mock_get_client.return_value = mock_sandbox
 
                 mock_storage = AsyncMock()
                 mock_storage.read.return_value = None

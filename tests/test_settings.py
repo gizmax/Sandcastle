@@ -231,7 +231,7 @@ class TestSettingsAdminGuard:
         settings.auth_required = True
 
         mock_request = MagicMock()
-        with patch("sandcastle.api.routes.get_tenant_id", return_value="tenant-123"):
+        with patch("sandcastle.api.routes.is_admin", return_value=False):
             with pytest.raises(HTTPException) as exc_info:
                 _require_admin(mock_request)
 
@@ -244,7 +244,7 @@ class TestSettingsAdminGuard:
         settings.auth_required = True
 
         mock_request = MagicMock()
-        with patch("sandcastle.api.routes.get_tenant_id", return_value=None):
+        with patch("sandcastle.api.routes.is_admin", return_value=True):
             # Should not raise
             _require_admin(mock_request)
 
@@ -255,6 +255,6 @@ class TestSettingsAdminGuard:
         settings.auth_required = False
 
         mock_request = MagicMock()
-        with patch("sandcastle.api.routes.get_tenant_id", return_value="tenant-123"):
-            # Should not raise even though tenant_id is set
+        with patch("sandcastle.api.routes.is_admin", return_value=True):
+            # Should not raise when auth is disabled
             _require_admin(mock_request)

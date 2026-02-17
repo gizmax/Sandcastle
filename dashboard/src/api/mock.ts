@@ -1822,6 +1822,39 @@ function getTemplateDetail(name: string) {
   };
 }
 
+const MOCK_WORKFLOW_VERSIONS: Record<string, unknown[]> = {
+  "lead-enrichment": [
+    { id: "wv-001", workflow_name: "lead-enrichment", version: 3, status: "production", description: "Improved scoring model", steps_count: 3, checksum: "abc123", created_at: h(24), promoted_at: h(12) },
+    { id: "wv-002", workflow_name: "lead-enrichment", version: 2, status: "archived", description: "Added parallel enrichment", steps_count: 3, checksum: "def456", created_at: h(72), promoted_at: h(48) },
+    { id: "wv-003", workflow_name: "lead-enrichment", version: 1, status: "archived", description: "Initial version", steps_count: 3, checksum: "ghi789", created_at: h(168), promoted_at: h(120) },
+  ],
+  "competitor-monitor": [
+    { id: "wv-004", workflow_name: "competitor-monitor", version: 2, status: "production", description: "Added format-report step", steps_count: 4, checksum: "jkl012", created_at: h(48), promoted_at: h(24) },
+    { id: "wv-005", workflow_name: "competitor-monitor", version: 1, status: "archived", description: "Initial version", steps_count: 3, checksum: "mno345", created_at: h(120), promoted_at: h(96) },
+  ],
+  "seo-audit": [
+    { id: "wv-006", workflow_name: "seo-audit", version: 2, status: "staging", description: "Enhanced recommendations", steps_count: 3, checksum: "pqr678", created_at: h(12), promoted_at: h(6) },
+    { id: "wv-007", workflow_name: "seo-audit", version: 1, status: "production", description: "Initial version", steps_count: 3, checksum: "stu901", created_at: h(96), promoted_at: h(72) },
+  ],
+};
+
+const MOCK_RUN_COMPARE = {
+  run_a: MOCK_RUNS[0],
+  run_b: MOCK_RUNS[2],
+  total_cost_a: 1.84,
+  total_cost_b: 1.23,
+  total_cost_delta: -0.61,
+  total_duration_a: 180,
+  total_duration_b: 360,
+  total_duration_delta: 180,
+  same_workflow: false,
+  steps: [
+    { step_id: "scrape", parallel_index: null, presence: "both", config_a: { model: "sonnet", prompt: "Scrape..." }, config_b: { model: "sonnet", prompt: "Scrape..." }, config_changed: false, output_a: { url: "https://example.com" }, output_b: { url: "https://example.com" }, output_changed: false, cost_a: 0.52, cost_b: 0.41, cost_delta: -0.11, duration_a: 12.3, duration_b: 11.8, duration_delta: -0.5, status_a: "completed", status_b: "completed", error_a: null, error_b: null },
+    { step_id: "enrich", parallel_index: null, presence: "both", config_a: { model: "sonnet", prompt: "Enrich..." }, config_b: { model: "opus", prompt: "Enrich v2..." }, config_changed: true, output_a: { company: "Example Corp" }, output_b: { company: "Example Corp", extra: "data" }, output_changed: true, cost_a: 0.89, cost_b: 0.62, cost_delta: -0.27, duration_a: 18.7, duration_b: 14.2, duration_delta: -4.5, status_a: "completed", status_b: "completed", error_a: null, error_b: null },
+    { step_id: "score", parallel_index: null, presence: "both", config_a: { model: "haiku" }, config_b: { model: "haiku" }, config_changed: false, output_a: { lead_score: 87 }, output_b: { lead_score: 92 }, output_changed: true, cost_a: 0.43, cost_b: 0.20, cost_delta: -0.23, duration_a: 8.2, duration_b: 6.1, duration_delta: -2.1, status_a: "completed", status_b: "completed", error_a: null, error_b: null },
+  ],
+};
+
 const MOCK_SETTINGS = {
   sandstorm_url: "http://localhost:8080",
   anthropic_api_key: "****Qf8x",
@@ -1951,6 +1984,45 @@ const routes: MockRoute[] = [
     match: /^\/templates\/([^/]+)$/,
     method: "GET",
     handler: (params) => getTemplateDetail(params._1),
+  },
+  {
+    match: /^\/runs\/compare$/,
+    method: "GET",
+    handler: () => MOCK_RUN_COMPARE,
+  },
+  {
+    match: /^\/workflows\/([^/]+)\/versions$/,
+    method: "GET",
+    handler: (params) => {
+      const name = params._1;
+      const versions = MOCK_WORKFLOW_VERSIONS[name] || [];
+      const prodVer = versions.find((v: Record<string, unknown>) => v.status === "production") as Record<string, unknown> | undefined;
+      const stagingVer = versions.find((v: Record<string, unknown>) => v.status === "staging") as Record<string, unknown> | undefined;
+      const draftVer = versions.find((v: Record<string, unknown>) => v.status === "draft") as Record<string, unknown> | undefined;
+      return {
+        _data: {
+          workflow_name: name,
+          production_version: prodVer ? prodVer.version : null,
+          staging_version: stagingVer ? stagingVer.version : null,
+          latest_draft_version: draftVer ? draftVer.version : null,
+          versions,
+        },
+        _meta: { total: versions.length, limit: 50, offset: 0 },
+      };
+    },
+  },
+  {
+    match: /^\/workflows\/([^/]+)\/versions\/diff$/,
+    method: "GET",
+    handler: (params) => ({
+      version_a: Number(params.version_a || 1),
+      version_b: Number(params.version_b || 2),
+      yaml_a: "name: example\nsteps:\n  - id: step1\n    model: sonnet",
+      yaml_b: "name: example\nsteps:\n  - id: step1\n    model: opus\n  - id: step2\n    model: haiku",
+      steps_added: ["step2"],
+      steps_removed: [],
+      steps_changed: ["step1"],
+    }),
   },
   {
     match: /^\/settings$/,

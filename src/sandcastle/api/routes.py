@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -14,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key
+from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.schemas import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
@@ -35,6 +36,7 @@ from sandcastle.api.schemas import (
     PolicyViolationStatsResponse,
     ReplayRequest,
     RoutingDecisionResponse,
+    RunCompareResponse,
     RunListItem,
     RunStatusResponse,
     RuntimeInfoResponse,
@@ -44,11 +46,17 @@ from sandcastle.api.schemas import (
     SettingsResponse,
     SettingsUpdateRequest,
     StatsResponse,
+    StepDiff,
     StepStatusResponse,
     WorkflowInfoResponse,
+    WorkflowPromoteRequest,
+    WorkflowRollbackRequest,
     WorkflowRunRequest,
     WorkflowSaveRequest,
     WorkflowStepInfo,
+    WorkflowVersionDiffResponse,
+    WorkflowVersionListResponse,
+    WorkflowVersionResponse,
 )
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -70,6 +78,8 @@ from sandcastle.models.db import (
     RunStatus,
     Schedule,
     Setting,
+    WorkflowVersion,
+    WorkflowVersionStatus,
     async_session,
 )
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
@@ -116,15 +126,28 @@ def _load_workflow_yaml(workflow_name: str) -> str:
     raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
 
 
-def _resolve_workflow_request(request: WorkflowRunRequest) -> str:
-    """Resolve a WorkflowRunRequest to YAML content.
+async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, int | None]:
+    """Resolve a WorkflowRunRequest to (YAML content, version number).
 
-    Supports both raw YAML via `workflow` field and file reference via `workflow_name`.
+    Tries the registry first, then falls back to disk.
     """
     if request.workflow:
-        return request.workflow
+        return (request.workflow, None)
     if request.workflow_name:
-        return _load_workflow_yaml(request.workflow_name)
+        # Try registry first
+        version_param = request.version
+        if isinstance(version_param, str) and version_param.isdigit():
+            version_param = int(version_param)
+        result = await _load_workflow_from_registry(request.workflow_name, version_param)
+        if result:
+            return result
+        # Fallback to disk and auto-import
+        yaml_content = _load_workflow_yaml(request.workflow_name)
+        try:
+            ver = await _auto_import_workflow(request.workflow_name, yaml_content)
+            return (yaml_content, ver)
+        except Exception:
+            return (yaml_content, None)
     raise ValueError("Either 'workflow' or 'workflow_name' must be provided")
 
 
@@ -162,6 +185,107 @@ async def _resolve_budget(
     if settings.default_max_cost_usd > 0:
         return settings.default_max_cost_usd
     return None
+
+
+# --- Workflow Registry Helpers ---
+
+
+def _compute_checksum(yaml_content: str) -> str:
+    """Compute SHA-256 checksum for workflow YAML content."""
+    return hashlib.sha256(yaml_content.encode()).hexdigest()
+
+
+async def _get_next_version(session, workflow_name: str) -> int:
+    """Get the next version number for a workflow."""
+    result = await session.scalar(
+        select(func.max(WorkflowVersion.version)).where(
+            WorkflowVersion.workflow_name == workflow_name
+        )
+    )
+    return (result or 0) + 1
+
+
+async def _load_workflow_from_registry(
+    name: str, version: int | str | None = None
+) -> tuple[str, int] | None:
+    """Load workflow YAML from the registry.
+
+    Returns (yaml_content, version_number) or None if not found.
+    version=None -> production, version=int -> specific, version='latest' -> highest.
+    """
+    async with async_session() as session:
+        if isinstance(version, int):
+            stmt = select(WorkflowVersion).where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.version == version,
+            )
+        elif version == "latest":
+            stmt = (
+                select(WorkflowVersion)
+                .where(WorkflowVersion.workflow_name == name)
+                .order_by(WorkflowVersion.version.desc())
+                .limit(1)
+            )
+        else:
+            # Default: production version
+            stmt = select(WorkflowVersion).where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+            )
+        result = await session.execute(stmt)
+        wv = result.scalar_one_or_none()
+        if wv:
+            return (wv.yaml_content, wv.version)
+    return None
+
+
+async def _auto_import_workflow(name: str, yaml_content: str) -> int:
+    """Auto-import a disk workflow into the registry as v1 production."""
+    checksum = _compute_checksum(yaml_content)
+    async with async_session() as session:
+        # Check if already imported
+        existing = await session.scalar(
+            select(WorkflowVersion.id).where(
+                WorkflowVersion.workflow_name == name
+            ).limit(1)
+        )
+        if existing:
+            return 1  # Already imported
+
+        try:
+            workflow = parse_yaml_string(yaml_content)
+            steps_count = len(workflow.steps)
+        except Exception:
+            steps_count = 0
+
+        wv = WorkflowVersion(
+            workflow_name=name,
+            version=1,
+            status=WorkflowVersionStatus.PRODUCTION,
+            yaml_content=yaml_content,
+            description="Auto-imported from disk",
+            steps_count=steps_count,
+            checksum=checksum,
+        )
+        session.add(wv)
+        await session.commit()
+        return 1
+
+
+def _extract_step_configs(yaml_content: str) -> dict[str, dict]:
+    """Extract model/prompt/max_turns config per step from workflow YAML."""
+    try:
+        workflow = parse_yaml_string(yaml_content)
+    except Exception:
+        return {}
+    configs = {}
+    for step in workflow.steps:
+        configs[step.id] = {
+            "model": step.model or workflow.default_model,
+            "prompt": step.prompt,
+            "max_turns": getattr(step, "max_turns", None) or workflow.default_max_turns,
+        }
+    return configs
 
 
 # --- Health ---
@@ -260,6 +384,12 @@ async def browse_directory(
         target = Path(path).expanduser().resolve()
     except (ValueError, OSError):
         raise HTTPException(status_code=400, detail="Invalid path")
+
+    # Enforce sandbox root when configured
+    if settings.sandbox_root:
+        sandbox = Path(settings.sandbox_root).expanduser().resolve()
+        if not str(target).startswith(str(sandbox)):
+            raise HTTPException(status_code=403, detail="Path outside sandbox root")
 
     if not target.exists():
         raise HTTPException(status_code=404, detail="Path does not exist")
@@ -458,11 +588,34 @@ async def list_workflows() -> ApiResponse:
     if not workflows_dir.exists():
         return ApiResponse(data=[])
 
+    # Load version info from registry
+    version_info: dict[str, dict] = {}
+    try:
+        async with async_session() as session:
+            stmt = select(
+                WorkflowVersion.workflow_name,
+                WorkflowVersion.version,
+                WorkflowVersion.status,
+            ).order_by(WorkflowVersion.workflow_name, WorkflowVersion.version.desc())
+            rows = (await session.execute(stmt)).all()
+            for row in rows:
+                name = row.workflow_name
+                if name not in version_info:
+                    version_info[name] = {"prod": None, "total": 0}
+                version_info[name]["total"] += 1
+                is_prod = row.status == WorkflowVersionStatus.PRODUCTION
+                if is_prod and version_info[name]["prod"] is None:
+                    version_info[name]["prod"] = row.version
+    except Exception:
+        pass
+
     items = []
     for yaml_file in sorted(workflows_dir.glob("*.yaml")):
         try:
             content = yaml_file.read_text()
             workflow = parse_yaml_string(content)
+            wf_key = yaml_file.stem
+            vi = version_info.get(wf_key, {})
             items.append(
                 WorkflowInfoResponse(
                     name=workflow.name,
@@ -479,6 +632,9 @@ async def list_workflows() -> ApiResponse:
                         for s in workflow.steps
                     ],
                     input_schema=workflow.input_schema,
+                    version=vi.get("prod"),
+                    version_status="production" if vi.get("prod") else None,
+                    total_versions=vi.get("total") or None,
                 )
             )
         except Exception as e:
@@ -489,7 +645,7 @@ async def list_workflows() -> ApiResponse:
 
 @router.post("/workflows")
 async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
-    """Save a workflow YAML file to the workflows directory."""
+    """Save a workflow YAML file to the workflows directory and create a draft version."""
     try:
         workflow = parse_yaml_string(request.content)
     except Exception as e:
@@ -509,12 +665,33 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
             ).model_dump(),
         )
 
+    # Write to disk (backward compat)
     workflows_dir = Path(settings.workflows_dir)
     workflows_dir.mkdir(parents=True, exist_ok=True)
-
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.name)
     file_path = workflows_dir / f"{safe_name}.yaml"
     file_path.write_text(request.content)
+
+    # Create a draft version in the registry
+    new_version = None
+    try:
+        async with async_session() as session:
+            next_ver = await _get_next_version(session, safe_name)
+            checksum = _compute_checksum(request.content)
+            wv = WorkflowVersion(
+                workflow_name=safe_name,
+                version=next_ver,
+                status=WorkflowVersionStatus.DRAFT,
+                yaml_content=request.content,
+                description=request.description,
+                steps_count=len(workflow.steps),
+                checksum=checksum,
+            )
+            session.add(wv)
+            await session.commit()
+            new_version = next_ver
+    except Exception:
+        logger.warning("Could not create workflow version in registry")
 
     return ApiResponse(
         data=WorkflowInfoResponse(
@@ -532,6 +709,8 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
                 for s in workflow.steps
             ],
             input_schema=workflow.input_schema,
+            version=new_version,
+            version_status="draft" if new_version else None,
         )
     )
 
@@ -545,7 +724,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     tenant_id = get_tenant_id(req)
 
     try:
-        yaml_content = _resolve_workflow_request(request)
+        yaml_content, wf_version = await _resolve_workflow_request(request)
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(
             status_code=400,
@@ -612,6 +791,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 tenant_id=tenant_id,
                 idempotency_key=request.idempotency_key,
                 max_cost_usd=budget,
+                workflow_version=wf_version,
                 started_at=datetime.now(timezone.utc),
             )
             session.add(db_run)
@@ -674,7 +854,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
     tenant_id = get_tenant_id(req)
 
     try:
-        yaml_content = _resolve_workflow_request(request)
+        yaml_content, wf_version = await _resolve_workflow_request(request)
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(
             status_code=400,
@@ -730,6 +910,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 tenant_id=tenant_id,
                 idempotency_key=request.idempotency_key,
                 max_cost_usd=budget,
+                workflow_version=wf_version,
             )
             session.add(db_run)
             await session.commit()
@@ -770,6 +951,186 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
 
 
 # --- Runs ---
+
+
+@router.get("/runs/compare")
+async def compare_runs(
+    run_a: str = Query(..., description="First run ID"),
+    run_b: str = Query(..., description="Second run ID"),
+    req: Request = None,
+) -> ApiResponse:
+    """Compare two runs side-by-side for the Replay Studio."""
+    tenant_id = get_tenant_id(req) if req else None
+
+    try:
+        uuid_a = uuid.UUID(run_a)
+        uuid_b = uuid.UUID(run_b)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run ID format")
+
+    async with async_session() as session:
+        stmt_a = (
+            select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_a)
+        )
+        stmt_a = _apply_tenant_filter(stmt_a, tenant_id, Run.tenant_id)
+        stmt_b = (
+            select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_b)
+        )
+        stmt_b = _apply_tenant_filter(stmt_b, tenant_id, Run.tenant_id)
+
+        result_a = await session.execute(stmt_a)
+        result_b = await session.execute(stmt_b)
+        db_run_a = result_a.scalar_one_or_none()
+        db_run_b = result_b.scalar_one_or_none()
+
+    if not db_run_a:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_a}' not found")
+            ).model_dump(),
+        )
+    if not db_run_b:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_b}' not found")
+            ).model_dump(),
+        )
+
+    same_workflow = db_run_a.workflow_name == db_run_b.workflow_name
+
+    # Extract step configs from workflow YAML if available
+    configs_a: dict[str, dict] = {}
+    configs_b: dict[str, dict] = {}
+    try:
+        yaml_a = _load_workflow_yaml(db_run_a.workflow_name)
+        configs_a = _extract_step_configs(yaml_a)
+    except Exception:
+        pass
+    try:
+        yaml_b = _load_workflow_yaml(db_run_b.workflow_name)
+        configs_b = _extract_step_configs(yaml_b)
+    except Exception:
+        pass
+
+    def _step_status_str(step):
+        if not step:
+            return None
+        s = step.status
+        return s.value if hasattr(s, "value") else s
+
+    # Build step maps keyed by (step_id, parallel_index)
+    def _step_key(s):
+        return (s.step_id, s.parallel_index)
+
+    steps_map_a = {_step_key(s): s for s in db_run_a.steps}
+    steps_map_b = {_step_key(s): s for s in db_run_b.steps}
+    all_keys = sorted(set(steps_map_a.keys()) | set(steps_map_b.keys()))
+
+    step_diffs = []
+    for key in all_keys:
+        sa_step = steps_map_a.get(key)
+        sb_step = steps_map_b.get(key)
+        step_id, parallel_index = key
+
+        if sa_step and sb_step:
+            presence = "both"
+        elif sa_step:
+            presence = "only_a"
+        else:
+            presence = "only_b"
+
+        cfg_a = configs_a.get(step_id)
+        cfg_b = configs_b.get(step_id)
+        config_changed = cfg_a != cfg_b if (cfg_a and cfg_b) else False
+
+        out_a = sa_step.output_data if sa_step else None
+        out_b = sb_step.output_data if sb_step else None
+
+        cost_a = sa_step.cost_usd if sa_step else 0.0
+        cost_b = sb_step.cost_usd if sb_step else 0.0
+        dur_a = sa_step.duration_seconds if sa_step else 0.0
+        dur_b = sb_step.duration_seconds if sb_step else 0.0
+
+        step_diffs.append(
+            StepDiff(
+                step_id=step_id,
+                parallel_index=parallel_index,
+                presence=presence,
+                config_a=cfg_a,
+                config_b=cfg_b,
+                config_changed=config_changed,
+                output_a=out_a,
+                output_b=out_b,
+                output_changed=out_a != out_b,
+                cost_a=cost_a,
+                cost_b=cost_b,
+                cost_delta=round(cost_b - cost_a, 6),
+                duration_a=dur_a,
+                duration_b=dur_b,
+                duration_delta=round(dur_b - dur_a, 2),
+                status_a=_step_status_str(sa_step),
+                status_b=_step_status_str(sb_step),
+                error_a=sa_step.error if sa_step else None,
+                error_b=sb_step.error if sb_step else None,
+            )
+        )
+
+    def _run_duration(run):
+        if run.started_at and run.completed_at:
+            return (run.completed_at - run.started_at).total_seconds()
+        return None
+
+    dur_a = _run_duration(db_run_a)
+    dur_b = _run_duration(db_run_b)
+
+    def _run_status_str(run):
+        s = run.status
+        return s.value if hasattr(s, "value") else s
+
+    return ApiResponse(
+        data=RunCompareResponse(
+            run_a=RunListItem(
+                run_id=str(db_run_a.id),
+                workflow_name=db_run_a.workflow_name,
+                status=_run_status_str(db_run_a),
+                total_cost_usd=db_run_a.total_cost_usd,
+                started_at=db_run_a.started_at,
+                completed_at=db_run_a.completed_at,
+                parent_run_id=(
+                    str(db_run_a.parent_run_id)
+                    if db_run_a.parent_run_id else None
+                ),
+            ),
+            run_b=RunListItem(
+                run_id=str(db_run_b.id),
+                workflow_name=db_run_b.workflow_name,
+                status=_run_status_str(db_run_b),
+                total_cost_usd=db_run_b.total_cost_usd,
+                started_at=db_run_b.started_at,
+                completed_at=db_run_b.completed_at,
+                parent_run_id=(
+                    str(db_run_b.parent_run_id)
+                    if db_run_b.parent_run_id else None
+                ),
+            ),
+            total_cost_a=db_run_a.total_cost_usd,
+            total_cost_b=db_run_b.total_cost_usd,
+            total_cost_delta=round(
+                db_run_b.total_cost_usd - db_run_a.total_cost_usd, 6
+            ),
+            total_duration_a=dur_a,
+            total_duration_b=dur_b,
+            total_duration_delta=(
+                round(dur_b - dur_a, 2)
+                if dur_a is not None and dur_b is not None
+                else None
+            ),
+            same_workflow=same_workflow,
+            steps=step_diffs,
+        )
+    )
 
 
 @router.get("/runs/{run_id}")
@@ -3108,19 +3469,19 @@ def _build_settings_response() -> SettingsResponse:
 
 
 def _require_admin(req: Request) -> None:
-    """Block settings access for non-admin tenants when auth is enabled.
+    """Block access for non-admin tenants when auth is enabled.
 
     In local mode (auth_required=False) anyone can access settings.
     With auth enabled, only requests without a tenant scope (i.e. the
     server operator, not a tenant API key) are allowed.
     """
-    if settings.auth_required and get_tenant_id(req) is not None:
+    if not is_admin(req):
         raise HTTPException(
             status_code=403,
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="FORBIDDEN",
-                    message="Settings require admin access",
+                    message="Admin access required",
                 )
             ).model_dump(),
         )
@@ -3206,3 +3567,368 @@ async def update_settings(
 
     logger.info(f"Settings updated: {list(updates.keys())}")
     return ApiResponse(data=_build_settings_response())
+
+
+# --- Workflow Registry ---
+
+
+@router.get("/workflows/{name}/versions")
+async def list_workflow_versions(
+    name: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List all versions of a workflow."""
+    async with async_session() as session:
+        count_stmt = select(func.count(WorkflowVersion.id)).where(
+            WorkflowVersion.workflow_name == name
+        )
+        total = await session.scalar(count_stmt) or 0
+
+        stmt = (
+            select(WorkflowVersion)
+            .where(WorkflowVersion.workflow_name == name)
+            .order_by(WorkflowVersion.version.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        versions = result.scalars().all()
+
+    if not versions and total == 0:
+        # Try auto-import from disk
+        try:
+            yaml_content = _load_workflow_yaml(name)
+            await _auto_import_workflow(name, yaml_content)
+            # Re-query
+            async with async_session() as session:
+                total = 1
+                stmt = select(WorkflowVersion).where(WorkflowVersion.workflow_name == name)
+                result = await session.execute(stmt)
+                versions = result.scalars().all()
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Workflow '{name}' not found")
+                ).model_dump(),
+            )
+
+    prod_ver = None
+    staging_ver = None
+    draft_ver = None
+    for v in versions:
+        status = v.status.value if hasattr(v.status, "value") else v.status
+        if status == "production" and prod_ver is None:
+            prod_ver = v.version
+        elif status == "staging" and staging_ver is None:
+            staging_ver = v.version
+        elif status == "draft" and draft_ver is None:
+            draft_ver = v.version
+
+    version_list = []
+    for v in versions:
+        try:
+            wf = parse_yaml_string(v.yaml_content)
+            steps = [
+                WorkflowStepInfo(id=s.id, depends_on=s.depends_on, model=s.model, prompt=s.prompt)
+                for s in wf.steps
+            ]
+        except Exception:
+            steps = []
+
+        version_list.append(
+            WorkflowVersionResponse(
+                id=str(v.id),
+                workflow_name=v.workflow_name,
+                version=v.version,
+                status=v.status.value if hasattr(v.status, "value") else v.status,
+                description=v.description,
+                steps_count=v.steps_count,
+                steps=steps,
+                checksum=v.checksum,
+                created_by=v.created_by,
+                promoted_by=v.promoted_by,
+                promoted_at=v.promoted_at,
+                created_at=v.created_at,
+            )
+        )
+
+    return ApiResponse(
+        data=WorkflowVersionListResponse(
+            workflow_name=name,
+            production_version=prod_ver,
+            staging_version=staging_ver,
+            latest_draft_version=draft_ver,
+            versions=version_list,
+        ),
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/workflows/{name}/versions/{version}")
+async def get_workflow_version(name: str, version: int) -> ApiResponse:
+    """Get a specific workflow version with full YAML content."""
+    async with async_session() as session:
+        stmt = select(WorkflowVersion).where(
+            WorkflowVersion.workflow_name == name,
+            WorkflowVersion.version == version,
+        )
+        result = await session.execute(stmt)
+        wv = result.scalar_one_or_none()
+
+    if not wv:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Version {version} not found for '{name}'",
+                )
+            ).model_dump(),
+        )
+
+    try:
+        wf = parse_yaml_string(wv.yaml_content)
+        steps = [
+            WorkflowStepInfo(id=s.id, depends_on=s.depends_on, model=s.model, prompt=s.prompt)
+            for s in wf.steps
+        ]
+    except Exception:
+        steps = []
+
+    return ApiResponse(
+        data=WorkflowVersionResponse(
+            id=str(wv.id),
+            workflow_name=wv.workflow_name,
+            version=wv.version,
+            status=wv.status.value if hasattr(wv.status, "value") else wv.status,
+            description=wv.description,
+            steps_count=wv.steps_count,
+            steps=steps,
+            checksum=wv.checksum,
+            created_by=wv.created_by,
+            promoted_by=wv.promoted_by,
+            promoted_at=wv.promoted_at,
+            created_at=wv.created_at,
+        )
+    )
+
+
+@router.post("/workflows/{name}/promote")
+async def promote_workflow(name: str, request: WorkflowPromoteRequest) -> ApiResponse:
+    """Promote a workflow version: draft -> staging -> production."""
+    async with async_session() as session:
+        # Find the version to promote
+        if request.version:
+            stmt = select(WorkflowVersion).where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.version == request.version,
+            )
+        else:
+            # Find latest staging, or latest draft
+            stmt = (
+                select(WorkflowVersion)
+                .where(
+                    WorkflowVersion.workflow_name == name,
+                    WorkflowVersion.status.in_([
+                        WorkflowVersionStatus.STAGING,
+                        WorkflowVersionStatus.DRAFT,
+                    ]),
+                )
+                .order_by(
+                    # Prefer staging over draft
+                    WorkflowVersion.status.desc(),
+                    WorkflowVersion.version.desc(),
+                )
+                .limit(1)
+            )
+
+        result = await session.execute(stmt)
+        wv = result.scalar_one_or_none()
+
+        if not wv:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="No promotable version found")
+                ).model_dump(),
+            )
+
+        current_status = wv.status.value if hasattr(wv.status, "value") else wv.status
+        now = datetime.now(timezone.utc)
+
+        if current_status == "draft":
+            wv.status = WorkflowVersionStatus.STAGING
+        elif current_status == "staging":
+            # Archive current production
+            prod_stmt = select(WorkflowVersion).where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+            )
+            prod_result = await session.execute(prod_stmt)
+            for old_prod in prod_result.scalars().all():
+                old_prod.status = WorkflowVersionStatus.ARCHIVED
+
+            wv.status = WorkflowVersionStatus.PRODUCTION
+
+            # Also update disk file for backward compat
+            try:
+                workflows_dir = Path(settings.workflows_dir)
+                workflows_dir.mkdir(parents=True, exist_ok=True)
+                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+                (workflows_dir / f"{safe_name}.yaml").write_text(wv.yaml_content)
+            except Exception:
+                pass
+        elif current_status == "production":
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="ALREADY_PRODUCTION",
+                        message="Version is already in production",
+                    )
+                ).model_dump(),
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="CANNOT_PROMOTE",
+                        message=f"Cannot promote from '{current_status}'",
+                    )
+                ).model_dump(),
+            )
+
+        wv.promoted_at = now
+        await session.commit()
+
+        new_status = wv.status.value if hasattr(wv.status, "value") else wv.status
+
+    return ApiResponse(
+        data={
+            "workflow_name": name,
+            "version": wv.version,
+            "previous_status": current_status,
+            "new_status": new_status,
+        }
+    )
+
+
+@router.post("/workflows/{name}/rollback")
+async def rollback_workflow(name: str, request: WorkflowRollbackRequest) -> ApiResponse:
+    """Rollback a workflow to a previous production version."""
+    async with async_session() as session:
+        if request.target_version:
+            # Rollback to specific version
+            stmt = select(WorkflowVersion).where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.version == request.target_version,
+            )
+        else:
+            # Find most recent archived version
+            stmt = (
+                select(WorkflowVersion)
+                .where(
+                    WorkflowVersion.workflow_name == name,
+                    WorkflowVersion.status == WorkflowVersionStatus.ARCHIVED,
+                )
+                .order_by(WorkflowVersion.version.desc())
+                .limit(1)
+            )
+
+        result = await session.execute(stmt)
+        target = result.scalar_one_or_none()
+
+        if not target:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="No version found to rollback to")
+                ).model_dump(),
+            )
+
+        # Archive current production
+        prod_stmt = select(WorkflowVersion).where(
+            WorkflowVersion.workflow_name == name,
+            WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+        )
+        prod_result = await session.execute(prod_stmt)
+        for old_prod in prod_result.scalars().all():
+            old_prod.status = WorkflowVersionStatus.ARCHIVED
+
+        # Activate target
+        target.status = WorkflowVersionStatus.PRODUCTION
+        target.promoted_at = datetime.now(timezone.utc)
+        await session.commit()
+
+        # Update disk file
+        try:
+            workflows_dir = Path(settings.workflows_dir)
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+            (workflows_dir / f"{safe_name}.yaml").write_text(target.yaml_content)
+        except Exception:
+            pass
+
+    return ApiResponse(
+        data={
+            "workflow_name": name,
+            "rolled_back_to_version": target.version,
+            "status": "production",
+        }
+    )
+
+
+@router.get("/workflows/{name}/versions/diff")
+async def diff_workflow_versions(
+    name: str,
+    version_a: int = Query(..., description="First version to compare"),
+    version_b: int = Query(..., description="Second version to compare"),
+) -> ApiResponse:
+    """Get a structured diff between two workflow versions."""
+    async with async_session() as session:
+        stmt_a = select(WorkflowVersion).where(
+            WorkflowVersion.workflow_name == name,
+            WorkflowVersion.version == version_a,
+        )
+        stmt_b = select(WorkflowVersion).where(
+            WorkflowVersion.workflow_name == name,
+            WorkflowVersion.version == version_b,
+        )
+        wv_a = (await session.execute(stmt_a)).scalar_one_or_none()
+        wv_b = (await session.execute(stmt_b)).scalar_one_or_none()
+
+    if not wv_a or not wv_b:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="One or both versions not found")
+            ).model_dump(),
+        )
+
+    # Extract step IDs from each version
+    steps_a = set(_extract_step_configs(wv_a.yaml_content).keys())
+    steps_b = set(_extract_step_configs(wv_b.yaml_content).keys())
+
+    configs_a = _extract_step_configs(wv_a.yaml_content)
+    configs_b = _extract_step_configs(wv_b.yaml_content)
+
+    changed = []
+    for sid in steps_a & steps_b:
+        if configs_a.get(sid) != configs_b.get(sid):
+            changed.append(sid)
+
+    return ApiResponse(
+        data=WorkflowVersionDiffResponse(
+            version_a=version_a,
+            version_b=version_b,
+            yaml_a=wv_a.yaml_content,
+            yaml_b=wv_b.yaml_content,
+            steps_added=sorted(steps_b - steps_a),
+            steps_removed=sorted(steps_a - steps_b),
+            steps_changed=sorted(changed),
+        )
+    )
+
+

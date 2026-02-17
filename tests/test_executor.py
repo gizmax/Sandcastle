@@ -244,13 +244,12 @@ steps:
         )
 
         with (
-            patch("sandcastle.engine.executor.SandstormClient") as MockClient,
+            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.return_value = mock_result
-            mock_sandbox.close = AsyncMock()
-            MockClient.return_value = mock_sandbox
+            mock_get_client.return_value = mock_sandbox
 
             mock_storage = AsyncMock()
             mock_storage.read.return_value = None
@@ -284,13 +283,12 @@ steps:
         ]
 
         with (
-            patch("sandcastle.engine.executor.SandstormClient") as MockClient,
+            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.side_effect = results
-            mock_sandbox.close = AsyncMock()
-            MockClient.return_value = mock_sandbox
+            mock_get_client.return_value = mock_sandbox
 
             mock_storage = AsyncMock()
             mock_storage.read.return_value = None
@@ -317,13 +315,12 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.SandstormClient") as MockClient,
+            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.side_effect = Exception("Sandstorm error")
-            mock_sandbox.close = AsyncMock()
-            MockClient.return_value = mock_sandbox
+            mock_get_client.return_value = mock_sandbox
 
             mock_storage = AsyncMock()
             mock_storage.read.return_value = None

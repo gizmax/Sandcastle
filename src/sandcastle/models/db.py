@@ -14,9 +14,11 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
@@ -91,6 +93,7 @@ class Run(Base):
     replay_from_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fork_changes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -377,6 +380,44 @@ class Setting(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class WorkflowVersionStatus(str, enum.Enum):
+    """Possible statuses for a workflow version in the registry."""
+
+    DRAFT = "draft"
+    STAGING = "staging"
+    PRODUCTION = "production"
+    ARCHIVED = "archived"
+
+
+class WorkflowVersion(Base):
+    """A versioned workflow definition stored in the registry."""
+
+    __tablename__ = "workflow_versions"
+    __table_args__ = (
+        UniqueConstraint("workflow_name", "version", name="uq_workflow_name_version"),
+        Index("ix_workflow_versions_name_status", "workflow_name", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[WorkflowVersionStatus] = mapped_column(
+        Enum(WorkflowVersionStatus), nullable=False, default=WorkflowVersionStatus.DRAFT
+    )
+    yaml_content: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    steps_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    promoted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 

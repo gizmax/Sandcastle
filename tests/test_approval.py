@@ -198,14 +198,13 @@ steps:
         mock_result = SandstormResult(text="prepared data", total_cost_usd=0.01)
 
         with (
-            patch("sandcastle.engine.executor.SandstormClient") as MockClient,
+            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
             patch("sandcastle.engine.executor._execute_approval_step") as mock_approval,
         ):
             mock_sandbox = AsyncMock()
             mock_sandbox.query.return_value = mock_result
-            mock_sandbox.close = AsyncMock()
-            MockClient.return_value = mock_sandbox
+            mock_get_client.return_value = mock_sandbox
 
             mock_storage = AsyncMock()
             mock_storage.read.return_value = None

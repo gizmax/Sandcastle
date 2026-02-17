@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from sandcastle import __version__
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
 from sandcastle.config import settings
@@ -116,7 +117,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sandcastle",
     description="Production-ready workflow orchestrator built on Sandstorm",
-    version="0.7.1",
+    version=__version__,
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
