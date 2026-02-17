@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronDown, ChevronRight, RotateCcw, GitFork, Copy, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, RotateCcw, GitFork, Copy, Check, FileText } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
-import { cn, formatDuration, formatCost } from "@/lib/utils";
+import { cn, formatDuration, formatCost, parseUTC } from "@/lib/utils";
 
 function ElapsedTimer({ since }: { since: string }) {
   const [elapsed, setElapsed] = useState(() =>
-    Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 1000))
+    Math.max(0, Math.floor((Date.now() - parseUTC(since).getTime()) / 1000))
   );
   useEffect(() => {
     const interval = setInterval(
-      () => setElapsed(Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 1000))),
+      () => setElapsed(Math.max(0, Math.floor((Date.now() - parseUTC(since).getTime()) / 1000))),
       1000,
     );
     return () => clearInterval(interval);
@@ -56,6 +56,8 @@ interface StepCardProps {
   output: unknown;
   parallelIndex: number | null;
   startedAt: string | null;
+  pdfArtifact?: boolean;
+  runId?: string;
   onReplay?: (stepId: string) => void;
   onFork?: (stepId: string) => void;
 }
@@ -70,6 +72,8 @@ export function StepCard({
   output,
   parallelIndex,
   startedAt,
+  pdfArtifact,
+  runId,
   onReplay,
   onFork,
 }: StepCardProps) {
@@ -161,6 +165,25 @@ export function StepCard({
                 </button>
               </div>
               <OutputBlock value={output} />
+            </div>
+          )}
+
+          {/* PDF download */}
+          {pdfArtifact && runId && (
+            <div className="mt-2">
+              <a
+                href={`/api/runs/${runId}/steps/${stepId}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium",
+                  "border border-accent/30 text-accent",
+                  "hover:bg-accent/10 transition-colors"
+                )}
+              >
+                <FileText className="h-3 w-3" />
+                Download PDF Report
+              </a>
             </div>
           )}
 

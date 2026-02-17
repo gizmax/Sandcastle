@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
     from sqlalchemy import func
     from sqlalchemy import select as sa_select
 
-    from sandcastle.models.db import Setting, async_session
+    from sandcastle.models.db import ApiKey, Setting, async_session
 
     async with async_session() as session:
         result = await session.execute(sa_select(Setting))
@@ -97,19 +97,45 @@ async def lifespan(app: FastAPI):
             await session.commit()
             logger.info(f"Cleaned up {orphan_count} orphaned runs from previous session")
 
-    # Start the cron scheduler
-    from sandcastle.queue.scheduler import restore_schedules, start_scheduler
+    # Start the cron scheduler (skip in multi-worker deployments)
+    if settings.scheduler_enabled:
+        from sandcastle.queue.scheduler import restore_schedules, start_scheduler
 
-    await start_scheduler()
-    await restore_schedules()
+        await start_scheduler()
+        await restore_schedules()
+    else:
+        logger.info("Scheduler disabled (SCHEDULER_ENABLED=false)")
+
+    # Bootstrap admin API key from env var (if configured and not yet in DB)
+    if settings.admin_api_key:
+        from sandcastle.api.auth import hash_key
+
+        admin_hash = hash_key(settings.admin_api_key)
+        async with async_session() as session:
+            existing = await session.execute(
+                sa_select(ApiKey).where(ApiKey.key_hash == admin_hash)
+            )
+            if not existing.scalar_one_or_none():
+                admin_key = ApiKey(
+                    key_hash=admin_hash,
+                    key_prefix=settings.admin_api_key[:8],
+                    tenant_id=None,
+                    name="admin (bootstrap)",
+                    is_active=True,
+                )
+                session.add(admin_key)
+                await session.commit()
+                logger.info("Admin API key bootstrapped from ADMIN_API_KEY env var")
 
     yield
 
     # Shutdown
     from sandcastle.models.db import engine
-    from sandcastle.queue.scheduler import stop_scheduler
 
-    await stop_scheduler()
+    if settings.scheduler_enabled:
+        from sandcastle.queue.scheduler import stop_scheduler
+
+        await stop_scheduler()
     await engine.dispose()
     logger.info("Sandcastle shut down")
 

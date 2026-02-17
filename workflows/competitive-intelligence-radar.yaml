@@ -1,196 +1,126 @@
-name: "Competitive Intelligence Radar"
-description: "Deep competitive analysis - positioning, market signals, SWOT matrix, and strategic recommendations for any company."
+name: "competitive-intelligence-radar"
+description: "Analyze top competitors - positioning, market signals, SWOT, strategic recommendations."
 sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
-default_max_turns: 15
-default_timeout: 600
+default_max_turns: 10
+default_timeout: 300
 
 input_schema:
-  required: ["company_url"]
+  required:
+    - company_url
+    - industry
+    - country
   properties:
     company_url:
       type: string
-      description: "URL of your company website to analyze against competitors"
+      description: "URL of the company to analyze (e.g. https://www.notino.cz)"
     industry:
       type: string
-      description: "Industry context for more targeted analysis (optional)"
+      description: "Industry context (e.g. online cosmetics and perfume retail)"
+    country:
+      type: string
+      description: "Target market / country (e.g. Czech Republic, Germany, USA)"
 
 steps:
   - id: "identify-competitors"
     prompt: |
-      For the company at {input.company_url}, identify the top 5 direct competitors.
+      For the company at {input.company_url}, identify the top 5 direct competitors in {input.country}.
+      Focus on competitors that are active and relevant in the {input.country} market.
       For each competitor, find:
       - Company name and website URL
       - Social media profiles (LinkedIn, Twitter/X)
       - Brief one-line description of what they do
       Industry context: {input.industry}
+      Target market: {input.country}
       Return as a JSON object with a "competitors" key containing an array of competitor objects.
-    output_schema:
-      type: object
-      properties:
-        competitors:
-          type: array
-          items:
-            type: object
-            properties:
-              name: { type: string }
-              url: { type: string }
-              description: { type: string }
+      
 
   - id: "analyze-positioning"
-    depends_on: ["identify-competitors"]
-    parallel_over: "steps.identify-competitors.output.competitors"
     prompt: |
-      Analyze the competitive positioning of {input._item.name} ({input._item.url}):
-      1. Pricing model and tiers (free, paid plans, enterprise)
+      Analyze the competitive positioning of {input._item.company_name} ({input._item.website}) in the {input.country} market:
+      1. Pricing model and tiers (free, paid plans, enterprise) - specific to {input.country}
       2. Core messaging and value proposition
       3. Unique selling points (USP)
-      4. Target audience and ideal customer profile
+      4. Target audience and ideal customer profile in {input.country}
       5. Tech stack and integrations (if visible)
       6. Content strategy (blog, docs, community)
       Return structured JSON with these categories.
-    output_schema:
-      type: object
-      properties:
-        company: { type: string }
-        pricing: { type: string }
-        messaging: { type: string }
-        usp: { type: string }
-        target_audience: { type: string }
-        tech_stack: { type: string }
-        content_strategy: { type: string }
-    csv_output:
-      directory: ./output
-      mode: append
-      filename: competitor-positioning
-    retry:
-      max_attempts: 2
-      backoff: exponential
-      on_failure: skip
+
+    parallel_over: "{steps.identify-competitors.output.competitors}"
+    depends_on:
+      - "identify-competitors"
 
   - id: "analyze-market-signals"
-    depends_on: ["identify-competitors"]
-    parallel_over: "steps.identify-competitors.output.competitors"
     prompt: |
-      Research recent market signals for {input._item.name} ({input._item.url}):
-      1. Recent news and press releases (last 6 months)
-      2. Hiring trends - what roles are they hiring for?
+      Research recent market signals for {input._item.company_name} ({input._item.website}) in {input.country}:
+      1. Recent news and press releases (last 6 months) relevant to {input.country}
+      2. Hiring trends - what roles are they hiring for in {input.country}?
       3. Funding history and recent rounds
-      4. Partnerships and integrations announced
+      4. Partnerships and integrations announced (especially in {input.country})
       5. Product launches or major updates
       Return structured JSON with these signal categories.
-    output_schema:
-      type: object
-      properties:
-        company: { type: string }
-        recent_news: { type: array, items: { type: string } }
-        hiring_trends: { type: string }
-        funding: { type: string }
-        partnerships: { type: array, items: { type: string } }
-        product_updates: { type: array, items: { type: string } }
-    retry:
-      max_attempts: 2
-      backoff: exponential
-      on_failure: skip
+
+    parallel_over: "{steps.identify-competitors.output.competitors}"
+    depends_on:
+      - "identify-competitors"
 
   - id: "swot-matrix"
-    depends_on: ["analyze-positioning", "analyze-market-signals"]
     prompt: |
       Using the competitive positioning data: {steps.analyze-positioning.output}
       And market signals: {steps.analyze-market-signals.output}
-
-      Create a comprehensive SWOT matrix for the company at {input.company_url} relative to its competitors:
+      
+      Create a comprehensive SWOT matrix for the company at {input.company_url} relative to its competitors in the {input.country} market:
       - Strengths: Where we have clear advantages
       - Weaknesses: Where competitors outperform us
       - Opportunities: Market gaps we can exploit
       - Threats: Competitive moves that could hurt us
-
+      
       For each item, reference specific competitors and data points.
-    output_schema:
-      type: object
-      properties:
-        strengths:
-          type: array
-          items: { type: object, properties: { point: { type: string }, evidence: { type: string } } }
-        weaknesses:
-          type: array
-          items: { type: object, properties: { point: { type: string }, evidence: { type: string } } }
-        opportunities:
-          type: array
-          items: { type: object, properties: { point: { type: string }, evidence: { type: string } } }
-        threats:
-          type: array
-          items: { type: object, properties: { point: { type: string }, evidence: { type: string } } }
+      
+    depends_on:
+      - "analyze-positioning"
+      - "analyze-market-signals"
 
   - id: "strategic-recommendations"
-    depends_on: ["swot-matrix"]
     prompt: |
       Based on this SWOT analysis: {steps.swot-matrix.output}
-
+      
       Generate actionable strategic recommendations:
       1. Immediate actions (next 30 days) - quick wins
       2. Short-term initiatives (1-3 months) - competitive responses
       3. Long-term strategy (3-12 months) - market positioning moves
-
+      
       For each recommendation, include:
       - Priority level (P0/P1/P2)
       - Expected impact (high/medium/low)
       - Effort estimate (high/medium/low)
       - Which competitor threat it addresses
-    output_schema:
-      type: object
-      properties:
-        immediate:
-          type: array
-          items:
-            type: object
-            properties:
-              action: { type: string }
-              priority: { type: string }
-              impact: { type: string }
-              effort: { type: string }
-              addresses: { type: string }
-        short_term:
-          type: array
-          items:
-            type: object
-            properties:
-              action: { type: string }
-              priority: { type: string }
-              impact: { type: string }
-              effort: { type: string }
-              addresses: { type: string }
-        long_term:
-          type: array
-          items:
-            type: object
-            properties:
-              action: { type: string }
-              priority: { type: string }
-              impact: { type: string }
-              effort: { type: string }
-              addresses: { type: string }
+      
+    depends_on:
+      - "swot-matrix"
 
   - id: "format-report"
-    depends_on: ["strategic-recommendations"]
-    model: haiku
     prompt: |
-      Compile all competitive intelligence into a professional markdown report:
+      IMPORTANT: Return the complete report as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
 
+      Compile all competitive intelligence into a professional markdown report for {input.company_url} in {input.country}.
+
+      Competitors identified: {steps.identify-competitors.output}
       SWOT Matrix: {steps.swot-matrix.output}
-      Recommendations: {steps.strategic-recommendations.output}
-      Competitor Positioning: {steps.analyze-positioning.output}
-      Market Signals: {steps.analyze-market-signals.output}
+      Strategic Recommendations: {steps.strategic-recommendations.output}
 
       Structure the report with:
       1. Executive Summary (3-5 bullet points)
       2. Competitor Landscape (table: name, pricing, USP, threat level)
-      3. SWOT Matrix (formatted table)
-      4. Market Signals Dashboard
-      5. Strategic Recommendations (by priority)
-      6. Appendix: Raw Data
+      3. SWOT Matrix (formatted tables for Strengths, Weaknesses, Opportunities, Threats)
+      4. Strategic Recommendations (by priority P0/P1/P2)
 
       Use markdown tables, headers, and bullet points for readability.
+    max_turns: 1
 
-on_complete:
-  storage_path: "reports/{run_id}/competitive-intelligence.md"
+    depends_on:
+      - "strategic-recommendations"
+    pdf_report:
+      directory: "/Users/gizmax/Documents"
+      language: cs
+

@@ -123,6 +123,13 @@ const MOCK_WORKFLOWS = [
       { id: "enrich", model: "sonnet", depends_on: ["scrape"] },
       { id: "score", model: "haiku", depends_on: ["enrich"] },
     ],
+    input_schema: {
+      required: ["company_url"],
+      properties: {
+        company_url: { type: "string", description: "Target company website URL" },
+        max_leads: { type: "number", description: "Maximum number of leads to enrich", default: 10 },
+      },
+    },
   },
   {
     name: "Competitor Monitor",
@@ -135,6 +142,13 @@ const MOCK_WORKFLOWS = [
       { id: "summarize", model: "sonnet", depends_on: ["analyze"] },
       { id: "format-report", model: "haiku", depends_on: ["summarize"] },
     ],
+    input_schema: {
+      required: ["competitors"],
+      properties: {
+        competitors: { type: "string", description: "Comma-separated list of competitor URLs" },
+        focus_area: { type: "string", description: "Area to focus on (pricing, features, content)", default: "all" },
+      },
+    },
   },
   {
     name: "SEO Audit",
@@ -146,6 +160,13 @@ const MOCK_WORKFLOWS = [
       { id: "analyze-technical", model: "sonnet", depends_on: ["crawl"] },
       { id: "recommendations", model: "haiku", depends_on: ["analyze-technical"] },
     ],
+    input_schema: {
+      required: ["url"],
+      properties: {
+        url: { type: "string", description: "Website URL to audit" },
+        max_pages: { type: "number", description: "Maximum pages to crawl", default: 50 },
+      },
+    },
   },
 ];
 
@@ -2048,6 +2069,29 @@ const routes: MockRoute[] = [
         Object.assign(MOCK_SETTINGS, updates);
       }
       return { ...MOCK_SETTINGS };
+    },
+  },
+  {
+    match: /^\/workflows$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { name?: string; content?: string } | undefined;
+      return {
+        name: b?.name || "untitled",
+        file_name: `${b?.name || "untitled"}.yaml`,
+        version: 1,
+        status: "draft",
+      };
+    },
+  },
+  {
+    match: /^\/workflows\/run$/,
+    method: "POST",
+    handler: () => {
+      return {
+        run_id: `demo-${Date.now().toString(36)}`,
+        status: "queued",
+      };
     },
   },
   {

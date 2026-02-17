@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # Hierarchical workflows
     max_workflow_depth: int = 5
 
+    # Scheduler (disable in multi-worker deployments; run a dedicated scheduler service)
+    scheduler_enabled: bool = True
+
+    # Admin bootstrap key (auto-created on startup if set and not yet in DB)
+    admin_api_key: str = ""
+
     # Logging
     log_level: str = "info"
 

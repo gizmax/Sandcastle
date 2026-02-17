@@ -11,6 +11,7 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  LogOut,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -597,6 +598,31 @@ export default function SettingsPage() {
           </div>
         </div>
       </SectionCard>
+
+      {/* API Key / Session */}
+      {localStorage.getItem("sandcastle_api_key") && (
+        <SectionCard
+          icon={LogOut}
+          title="Session"
+          description="Connected via saved API key"
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Key: <span className="font-mono">{localStorage.getItem("sandcastle_api_key")?.slice(0, 8)}...</span>
+            </p>
+            <button
+              onClick={() => {
+                localStorage.removeItem("sandcastle_api_key");
+                window.location.reload();
+              }}
+              className="flex items-center gap-2 rounded-lg border border-error/30 px-3 py-1.5 text-sm font-medium text-error hover:bg-error/10 transition-colors cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Disconnect
+            </button>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Infrastructure (read-only) */}
       <SectionCard

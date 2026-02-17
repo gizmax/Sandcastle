@@ -168,6 +168,7 @@ class StepStatusResponse(BaseModel):
     attempt: int = 1
     error: str | None = None
     started_at: str | None = None
+    pdf_artifact: bool = False
 
 
 class HealthResponse(BaseModel):
@@ -285,6 +286,7 @@ class WorkflowInfoResponse(BaseModel):
     version: int | None = None
     version_status: str | None = None
     total_versions: int | None = None
+    yaml_content: str | None = None
 
 
 class WorkflowVersionResponse(BaseModel):

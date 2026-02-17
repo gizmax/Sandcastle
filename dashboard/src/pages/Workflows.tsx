@@ -38,6 +38,7 @@ interface WorkflowInfo {
   version?: number | null;
   version_status?: string | null;
   total_versions?: number | null;
+  yaml_content?: string;
 }
 
 export default function Workflows() {

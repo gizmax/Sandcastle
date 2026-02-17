@@ -14,7 +14,16 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Plus, FileText, Play, Save, Monitor, Layers } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
-import { StepConfigPanel, type StepConfig } from "@/components/workflows/StepConfigPanel";
+import {
+  StepConfigPanel,
+  type StepConfig,
+  type CsvOutputConfig,
+  type PdfReportConfig,
+  type RetryConfig,
+  type ApprovalConfig,
+  type SloConfig,
+  type AutoPilotConfig,
+} from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
 import { cn } from "@/lib/utils";
@@ -27,6 +36,7 @@ const DEFAULT_RETRY = { enabled: false, maxAttempts: 3, backoff: "exponential" a
 const DEFAULT_APPROVAL = { enabled: false, message: "", timeoutHours: 24, onTimeout: "abort" as const, allowEdit: false };
 const DEFAULT_DIRECTORY_INPUT = { enabled: false, defaultPath: "" };
 const DEFAULT_CSV_OUTPUT = { enabled: false, directory: "./output", mode: "new_file" as const, filename: "" };
+const DEFAULT_PDF_REPORT = { enabled: false, directory: "./output", language: "en", filename: "" };
 const DEFAULT_AUTOPILOT = {
   enabled: false, optimizeFor: "quality" as const, evaluation: "llm_judge" as const,
   sampleRate: 1.0, minSamples: 10, qualityThreshold: 0.7, autoDeploy: true, variants: [],
@@ -165,6 +175,16 @@ function generateYaml(
       }
     }
 
+    // PDF report config
+    if (step.pdfReport.enabled) {
+      yaml += `    pdf_report:\n`;
+      yaml += `      directory: "${step.pdfReport.directory || "./output"}"\n`;
+      yaml += `      language: ${step.pdfReport.language}\n`;
+      if (step.pdfReport.filename) {
+        yaml += `      filename: "${step.pdfReport.filename}"\n`;
+      }
+    }
+
     yaml += `\n`;
   }
 
@@ -182,6 +202,7 @@ interface InitialWorkflow {
     depends_on?: string[];
     prompt?: string;
   }>;
+  yaml_content?: string;
 }
 
 interface WorkflowBuilderProps {
@@ -190,23 +211,125 @@ interface WorkflowBuilderProps {
   initialWorkflow?: InitialWorkflow;
 }
 
+/**
+ * Extract a YAML block for a specific step from raw YAML content.
+ * Returns the text between `- id: "stepId"` and the next `- id:` or end of steps.
+ */
+function extractStepBlock(yamlContent: string, stepId: string): string {
+  // Match the block for this step ID (quoted or unquoted)
+  const pattern = new RegExp(
+    `- id:\\s*["']?${stepId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*\\n([\\s\\S]*?)(?=\\n\\s*- id:|$)`
+  );
+  const m = yamlContent.match(pattern);
+  return m ? m[1] : "";
+}
+
+/** Parse simple YAML key: value from a block, supporting nested keys like `csv_output.directory`. */
+function yamlValue(block: string, key: string): string | undefined {
+  const re = new RegExp(`${key}:\\s*["']?([^"'\\n]+)["']?`);
+  const m = block.match(re);
+  return m ? m[1].trim() : undefined;
+}
+
+/** Check if a top-level key exists in a step's YAML block. */
+function hasYamlKey(block: string, key: string): boolean {
+  return new RegExp(`^\\s+${key}:`, "m").test(block);
+}
+
+/** Parse advanced step config from raw YAML content. */
+function parseAdvancedConfig(yamlContent: string | undefined, stepId: string) {
+  if (!yamlContent) return {};
+
+  const block = extractStepBlock(yamlContent, stepId);
+  if (!block) return {};
+
+  const result: Partial<{
+    csvOutput: CsvOutputConfig;
+    pdfReport: PdfReportConfig;
+    retry: RetryConfig;
+    approval: ApprovalConfig;
+    slo: SloConfig;
+    autopilot: Partial<AutoPilotConfig>;
+    policies: string[];
+  }> = {};
+
+  // CSV output
+  if (hasYamlKey(block, "csv_output")) {
+    // Extract the csv_output sub-block
+    const csvBlock = block.match(/csv_output:\s*\n((?:\s{6,}.*\n)*)/)?.[1] || "";
+    result.csvOutput = {
+      enabled: true,
+      directory: yamlValue(csvBlock, "directory") || "./output",
+      mode: (yamlValue(csvBlock, "mode") as "append" | "new_file") || "new_file",
+      filename: yamlValue(csvBlock, "filename") || "",
+    };
+  }
+
+  // PDF report
+  if (hasYamlKey(block, "pdf_report")) {
+    const pdfBlock = block.match(/pdf_report:\s*\n((?:\s{6,}.*\n)*)/)?.[1] || "";
+    result.pdfReport = {
+      enabled: true,
+      directory: yamlValue(pdfBlock, "directory") || "./output",
+      language: yamlValue(pdfBlock, "language") || "en",
+      filename: yamlValue(pdfBlock, "filename") || "",
+    };
+  }
+
+  // Retry
+  if (hasYamlKey(block, "retry")) {
+    const retryBlock = block.match(/retry:\s*\n((?:\s{6,}.*\n)*)/)?.[1] || "";
+    result.retry = {
+      enabled: true,
+      maxAttempts: parseInt(yamlValue(retryBlock, "max_attempts") || "3", 10),
+      backoff: (yamlValue(retryBlock, "backoff") as "exponential" | "fixed") || "exponential",
+      onFailure: (yamlValue(retryBlock, "on_failure") as "abort" | "skip" | "fallback") || "abort",
+    };
+  }
+
+  // SLO
+  if (hasYamlKey(block, "slo")) {
+    const sloBlock = block.match(/slo:\s*\n((?:\s{6,}.*\n)*)/)?.[1] || "";
+    result.slo = {
+      enabled: true,
+      qualityMin: parseFloat(yamlValue(sloBlock, "quality_min") || "0.7"),
+      costMaxUsd: parseFloat(yamlValue(sloBlock, "cost_max_usd") || "0.10"),
+      latencyMaxSeconds: parseInt(yamlValue(sloBlock, "latency_max_seconds") || "30", 10),
+      optimizeFor: (yamlValue(sloBlock, "optimize_for") as "cost" | "quality" | "latency" | "balanced") || "balanced",
+    };
+  }
+
+  // Policies
+  const policiesMatch = block.match(/policies:\s*\n((?:\s+-\s+.*\n)*)/);
+  if (policiesMatch) {
+    const policyLines = policiesMatch[1].matchAll(/-\s+["']?([^"'\n]+)["']?/g);
+    result.policies = [...policyLines].map((m) => m[1].trim());
+  }
+
+  return result;
+}
+
 function buildInitialState(wf: InitialWorkflow) {
-  const steps: StepConfig[] = (wf.steps || []).map((s) => ({
-    id: s.id,
-    prompt: s.prompt || "",
-    model: s.model || "sonnet",
-    maxTurns: 10,
-    timeout: 300,
-    parallelOver: "",
-    dependsOn: s.depends_on || [],
-    directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
-    csvOutput: { ...DEFAULT_CSV_OUTPUT },
-    autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
-    retry: { ...DEFAULT_RETRY },
-    approval: { ...DEFAULT_APPROVAL },
-    policies: [],
-    slo: { ...DEFAULT_SLO },
-  }));
+  const steps: StepConfig[] = (wf.steps || []).map((s) => {
+    const adv = parseAdvancedConfig(wf.yaml_content, s.id);
+    return {
+      id: s.id,
+      prompt: s.prompt || "",
+      model: s.model || "sonnet",
+      maxTurns: 10,
+      timeout: 300,
+      parallelOver: "",
+      dependsOn: s.depends_on || [],
+      directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
+      csvOutput: adv.csvOutput || { ...DEFAULT_CSV_OUTPUT },
+      pdfReport: adv.pdfReport || { ...DEFAULT_PDF_REPORT },
+      autopilot: { ...DEFAULT_AUTOPILOT, variants: [], ...adv.autopilot },
+      retry: adv.retry || { ...DEFAULT_RETRY },
+      approval: { ...DEFAULT_APPROVAL },
+      policies: adv.policies || [],
+      slo: adv.slo || { ...DEFAULT_SLO },
+    };
+  });
 
   const nodes: Node[] = steps.map((s, i) => ({
     id: s.id,
@@ -270,6 +393,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       dependsOn: [],
       directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
       csvOutput: { ...DEFAULT_CSV_OUTPUT },
+      pdfReport: { ...DEFAULT_PDF_REPORT },
       autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
       retry: { ...DEFAULT_RETRY },
       approval: { ...DEFAULT_APPROVAL },
@@ -309,6 +433,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   hasApproval: updated.approval.enabled,
                   hasAutoPilot: updated.autopilot.enabled,
                   hasCsvOutput: updated.csvOutput.enabled,
+                  hasPdfReport: updated.pdfReport.enabled,
                   hasSlo: updated.slo.enabled,
                 },
               }

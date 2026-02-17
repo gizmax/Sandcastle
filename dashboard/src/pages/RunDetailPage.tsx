@@ -23,6 +23,7 @@ interface Step {
   attempt: number;
   error: string | null;
   started_at: string | null;
+  pdf_artifact?: boolean;
 }
 
 interface RunDetail {
@@ -334,6 +335,7 @@ export default function RunDetailPage() {
         <h2 className="mb-3 text-sm font-semibold text-foreground">Steps</h2>
         <StepTimeline
           steps={run.steps || []}
+          runId={run.run_id}
           onReplay={handleReplay}
           onFork={handleFork}
         />

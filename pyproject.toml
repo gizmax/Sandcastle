@@ -40,6 +40,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "simpleeval>=1.0",
     "duvo-sandstorm>=0.4",
+    "fpdf2>=2.8",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

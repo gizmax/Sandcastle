@@ -8,7 +8,7 @@ interface ReplayForkModalProps {
   runId: string;
   stepId: string;
   mode: "replay" | "fork";
-  onSubmit: (data: { from_step: string; changes?: Record<string, unknown> }) => void;
+  onSubmit: (data: { from_step: string; changes?: Record<string, unknown> }) => Promise<void>;
 }
 
 export function ReplayForkModal({
@@ -33,16 +33,19 @@ export function ReplayForkModal({
 
   async function handleSubmit() {
     setSubmitting(true);
-    const changes: Record<string, unknown> = {};
-    if (prompt) changes.prompt = prompt;
-    if (model) changes.model = model;
-    if (maxTurns) changes.max_turns = Number(maxTurns);
+    try {
+      const changes: Record<string, unknown> = {};
+      if (prompt) changes.prompt = prompt;
+      if (model) changes.model = model;
+      if (maxTurns) changes.max_turns = Number(maxTurns);
 
-    onSubmit({
-      from_step: stepId,
-      changes: isReplay ? undefined : Object.keys(changes).length > 0 ? changes : undefined,
-    });
-    setSubmitting(false);
+      await onSubmit({
+        from_step: stepId,
+        changes: isReplay ? undefined : Object.keys(changes).length > 0 ? changes : undefined,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (

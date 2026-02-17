@@ -1,7 +1,7 @@
 """Add workflow_versions table and workflow_version column to runs.
 
-Revision ID: 003
-Revises: 002
+Revision ID: 012
+Revises: 011
 Create Date: 2026-02-17
 """
 from __future__ import annotations
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "003"
-down_revision: str | None = "002"
+revision: str = "012"
+down_revision: str | None = "011"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

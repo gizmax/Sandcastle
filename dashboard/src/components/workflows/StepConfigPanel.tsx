@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
+  FileText,
   FlaskConical,
   FolderOpen,
   Gauge,
@@ -58,6 +59,13 @@ export interface CsvOutputConfig {
   filename: string;
 }
 
+export interface PdfReportConfig {
+  enabled: boolean;
+  directory: string;
+  language: string;
+  filename: string;
+}
+
 export interface AutoPilotConfig {
   enabled: boolean;
   optimizeFor: "quality" | "cost" | "latency" | "pareto";
@@ -79,6 +87,7 @@ export interface StepConfig {
   dependsOn: string[];
   directoryInput: DirectoryInputConfig;
   csvOutput: CsvOutputConfig;
+  pdfReport: PdfReportConfig;
   autopilot: AutoPilotConfig;
   retry: RetryConfig;
   approval: ApprovalConfig;
@@ -160,6 +169,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
   const [customPolicy, setCustomPolicy] = useState("");
   const [browseOpen, setBrowseOpen] = useState(false);
   const [csvBrowseOpen, setCsvBrowseOpen] = useState(false);
+  const [pdfBrowseOpen, setPdfBrowseOpen] = useState(false);
 
   const inputClass = cn(
     "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
@@ -433,6 +443,97 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             setCsvBrowseOpen(false);
           }}
           onClose={() => setCsvBrowseOpen(false)}
+        />
+
+        {/* PDF Report */}
+        <CollapsibleSection
+          icon={FileText}
+          title="PDF Report"
+          enabled={step.pdfReport.enabled}
+          onToggle={() =>
+            onChange({ ...step, pdfReport: { ...step.pdfReport, enabled: !step.pdfReport.enabled } })
+          }
+        >
+          <p className="text-[11px] text-muted-foreground">
+            Generate a branded PDF report from the step output. The agent will format its response as structured markdown.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Language</label>
+            <select
+              value={step.pdfReport.language}
+              onChange={(e) =>
+                onChange({
+                  ...step,
+                  pdfReport: { ...step.pdfReport, language: e.target.value },
+                })
+              }
+              className={inputClass}
+            >
+              <option value="en">English</option>
+              <option value="cs">Czech</option>
+              <option value="de">German</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="ja">Japanese</option>
+              <option value="zh">Chinese</option>
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">The agent will write the report in this language.</p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Directory</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={step.pdfReport.directory}
+                onChange={(e) =>
+                  onChange({
+                    ...step,
+                    pdfReport: { ...step.pdfReport, directory: e.target.value },
+                  })
+                }
+                placeholder="./output"
+                className={cn(inputClass, "text-xs")}
+              />
+              <button
+                type="button"
+                onClick={() => setPdfBrowseOpen(true)}
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent transition-colors"
+              >
+                Browse
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Filename</label>
+            <input
+              type="text"
+              value={step.pdfReport.filename}
+              onChange={(e) =>
+                onChange({
+                  ...step,
+                  pdfReport: { ...step.pdfReport, filename: e.target.value },
+                })
+              }
+              placeholder={step.id || "step-id"}
+              className={cn(inputClass, "text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Without extension. Leave empty to use step ID.
+            </p>
+          </div>
+        </CollapsibleSection>
+
+        <DirectoryBrowser
+          open={pdfBrowseOpen}
+          initialPath={step.pdfReport.directory || "~"}
+          onSelect={(path) => {
+            onChange({
+              ...step,
+              pdfReport: { ...step.pdfReport, directory: path },
+            });
+            setPdfBrowseOpen(false);
+          }}
+          onClose={() => setPdfBrowseOpen(false)}
         />
 
         {/* Retry */}

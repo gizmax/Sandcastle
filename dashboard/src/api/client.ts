@@ -14,16 +14,23 @@ class ApiClient {
   private apiKey: string | null = null;
   private useMock = false;
   private initPromise: Promise<void> | null = null;
+  private _mockListeners: Array<(mock: boolean) => void> = [];
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
+    // Restore saved API key before probing
+    const savedKey = localStorage.getItem("sandcastle_api_key");
+    if (savedKey) this.apiKey = savedKey;
     // Probe backend on first load
     this.initPromise = this.probe();
   }
 
   private async probe(): Promise<void> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
+      const res = await fetch(`${this.baseUrl}/health`, {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(2000),
+      });
       if (!res.ok) throw new Error("unhealthy");
       const data = await res.json();
       const s = data?.data?.status;
@@ -31,7 +38,7 @@ class ApiClient {
       console.info("[Sandcastle] Backend connected");
     } catch {
       console.info("[Sandcastle] Backend unavailable, using demo data");
-      this.useMock = true;
+      this.setMock(true);
     }
   }
 
@@ -39,6 +46,24 @@ class ApiClient {
     if (this.initPromise) {
       await this.initPromise;
       this.initPromise = null;
+    }
+  }
+
+  get isMockMode(): boolean {
+    return this.useMock;
+  }
+
+  onMockChange(cb: (mock: boolean) => void): () => void {
+    this._mockListeners.push(cb);
+    return () => {
+      this._mockListeners = this._mockListeners.filter((l) => l !== cb);
+    };
+  }
+
+  private setMock(value: boolean) {
+    if (this.useMock !== value) {
+      this.useMock = value;
+      this._mockListeners.forEach((cb) => cb(value));
     }
   }
 
@@ -82,7 +107,7 @@ class ApiClient {
     } catch {
       // Only fall back to mock on actual network errors (backend unreachable)
       console.info(`[Sandcastle] Backend unavailable, using demo data`);
-      this.useMock = true;
+      this.setMock(true);
       return this.mock<T>(path, params);
     }
   }
@@ -90,7 +115,16 @@ class ApiClient {
   private async handleResponse<T>(res: Response): Promise<ApiResponse<T>> {
     if (!res.ok) {
       try {
-        return await res.json();
+        const json = await res.json();
+        // FastAPI wraps HTTPException detail in {"detail": ...} - unwrap it
+        if (json.detail && typeof json.detail === "object" && "error" in json.detail) {
+          return json.detail;
+        }
+        // Handle simple string detail from FastAPI
+        if (json.detail && typeof json.detail === "string") {
+          return { data: null, error: { code: `HTTP_${res.status}`, message: json.detail } };
+        }
+        return json;
       } catch {
         return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
       }
@@ -113,7 +147,7 @@ class ApiClient {
       });
       return this.handleResponse<T>(res);
     } catch {
-      this.useMock = true;
+      this.setMock(true);
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
     }
   }
@@ -133,7 +167,7 @@ class ApiClient {
       });
       return this.handleResponse<T>(res);
     } catch {
-      this.useMock = true;
+      this.setMock(true);
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
     }
   }
@@ -152,7 +186,7 @@ class ApiClient {
       });
       return this.handleResponse<T>(res);
     } catch {
-      this.useMock = true;
+      this.setMock(true);
       return { data: { message: "Demo mode - action simulated" } as T, error: null };
     }
   }

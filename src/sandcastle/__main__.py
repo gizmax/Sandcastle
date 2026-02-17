@@ -528,6 +528,26 @@ def _cmd_db_migrate(args: argparse.Namespace) -> None:
     _run_migrations()
 
 
+def _cmd_worker(args: argparse.Namespace) -> None:
+    """Start the arq background worker."""
+    import subprocess
+
+    print(_color("  Starting arq worker...", _C.CYAN))
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "arq", "sandcastle.queue.worker.WorkerSettings"],
+            check=True,
+        )
+    except KeyboardInterrupt:
+        print("\nWorker stopped.")
+    except FileNotFoundError:
+        print(
+            _color("  Error: arq not found. Install: pip install arq", _C.RED),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def _cmd_health(args: argparse.Namespace) -> None:
     """Check the API server health."""
     client = _get_client(args)
@@ -759,6 +779,9 @@ def _build_parser() -> argparse.ArgumentParser:
     db_sub = p_db.add_subparsers(dest="db_action", help="Database action")
     db_sub.add_parser("migrate", help="Run Alembic migrations (PostgreSQL only)")
 
+    # --- worker ---
+    subparsers.add_parser("worker", help="Start the arq background worker")
+
     # --- health ---
     p_health = subparsers.add_parser("health", help="Check API health")
     _add_connection_args(p_health)
@@ -788,6 +811,7 @@ def main() -> None:
         "cancel": _cmd_cancel,
         "logs": _cmd_logs,
         "ls": _cmd_ls,
+        "worker": _cmd_worker,
         "health": _cmd_health,
     }
 

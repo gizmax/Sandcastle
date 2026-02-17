@@ -3,6 +3,8 @@ import { Suspense, lazy } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { EventStreamProvider } from "@/components/providers/EventStreamProvider";
+import { useAuth } from "@/hooks/useAuth";
+import { AuthGate } from "@/components/auth/AuthGate";
 
 // Lazy-loaded page components for code splitting
 const Overview = lazy(() => import("@/pages/Overview"));
@@ -24,6 +26,20 @@ const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 export default function App() {
+  const { state, login } = useAuth();
+
+  if (state === "loading") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (state === "unauthenticated") {
+    return <AuthGate onLogin={login} />;
+  }
+
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <EventStreamProvider>

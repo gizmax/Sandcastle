@@ -43,11 +43,36 @@ services:
       DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
       REDIS_URL: redis://redis:6379/0
       AUTH_REQUIRED: "true"
+      SCHEDULER_ENABLED: "false"
       STORAGE_BACKEND: local
       DATA_DIR: /app/data
       WORKFLOWS_DIR: /app/workflows
       LOG_LEVEL: info
       DASHBOARD_ORIGIN: "*"
+      # ADMIN_API_KEY: "sc_your-bootstrap-key-here"
+    volumes:
+      - app_data:/app/data
+
+  scheduler:
+    build: .
+    restart: unless-stopped
+    command: ["uvicorn", "sandcastle.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
+      REDIS_URL: redis://redis:6379/0
+      AUTH_REQUIRED: "true"
+      SCHEDULER_ENABLED: "true"
+      STORAGE_BACKEND: local
+      DATA_DIR: /app/data
+      WORKFLOWS_DIR: /app/workflows
+      LOG_LEVEL: info
     volumes:
       - app_data:/app/data
 

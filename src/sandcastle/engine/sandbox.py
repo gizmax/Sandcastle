@@ -65,6 +65,8 @@ class SandstormClient:
         Returns the final aggregated result.
         """
         result = SandstormResult()
+        # Accumulate assistant text as fallback if result event has no text
+        assistant_texts: list[str] = []
 
         async for event in self.query_stream(request):
             evt_type = event.data.get("type", event.event)
@@ -74,9 +76,49 @@ class SandstormClient:
                 result.structured_output = event.data.get("structured_output")
                 result.total_cost_usd = event.data.get("total_cost_usd", 0.0)
                 result.num_turns = event.data.get("num_turns", 0)
+                if not result.text:
+                    logger.debug(
+                        "Result event has no text. Keys: %s, turns=%d, cost=%.4f",
+                        list(event.data.keys()),
+                        result.num_turns, result.total_cost_usd,
+                    )
             elif evt_type == "error":
                 error_msg = event.data.get("error", "Unknown Sandstorm error")
                 raise SandstormError(error_msg)
+            elif evt_type in ("assistant", "message"):
+                text = (
+                    event.data.get("text", "")
+                    or event.data.get("content", "")
+                    or event.data.get("result", "")
+                    or event.data.get("data", "")
+                )
+                # Try nested message.content structure (Sandstorm format)
+                if not text:
+                    msg = event.data.get("message", {})
+                    if isinstance(msg, dict):
+                        for block in msg.get("content", []):
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                t = block.get("text", "")
+                                if t:
+                                    text = t
+                                    break
+                # Try content_blocks
+                if not text:
+                    for block in event.data.get("content_blocks", []):
+                        if isinstance(block, dict) and block.get("text"):
+                            text = block["text"]
+                            break
+                if text:
+                    assistant_texts.append(text)
+
+        # Fallback: use accumulated assistant text if result text is empty
+        if not result.text and assistant_texts:
+            result.text = assistant_texts[-1]
+            logger.info(
+                "Using last assistant message as result text (%d chars, "
+                "%d total messages)",
+                len(result.text), len(assistant_texts),
+            )
 
         return result
 

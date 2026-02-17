@@ -115,11 +115,17 @@ def _trunc_day(column):
 
 def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
+    import re
+
     workflows_dir = Path(settings.workflows_dir)
-    # Try exact match first, then with .yaml extension
+    # Slugified version: lowercase, non-alnum chars -> hyphens, collapse runs
+    slug = re.sub(r"[^a-z0-9]+", "-", workflow_name.lower()).strip("-")
+    # Try exact match, slugified match, then without extension
     for candidate in [
         workflows_dir / f"{workflow_name}.yaml",
+        workflows_dir / f"{slug}.yaml",
         workflows_dir / workflow_name,
+        workflows_dir / slug,
     ]:
         if candidate.exists() and candidate.is_file():
             return candidate.read_text()
@@ -639,6 +645,7 @@ async def list_workflows() -> ApiResponse:
                     version=vi.get("prod"),
                     version_status="production" if vi.get("prod") else None,
                     total_versions=vi.get("total") or None,
+                    yaml_content=content,
                 )
             )
         except Exception as e:
@@ -1170,6 +1177,20 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
+    # Deduplicate steps: executor creates a "running" row on start and a
+    # "completed"/"failed" row on finish. Keep only the most final record
+    # per (step_id, parallel_index).
+    _STATUS_PRIORITY = {"completed": 3, "failed": 2, "running": 1, "queued": 0}
+    _dedup: dict[tuple[str, int | None], object] = {}
+    for s in run.steps:
+        key = (s.step_id, s.parallel_index)
+        status_val = s.status.value if hasattr(s.status, "value") else s.status
+        prev = _dedup.get(key)
+        if prev is None or _STATUS_PRIORITY.get(status_val, 0) > _STATUS_PRIORITY.get(
+            prev.status.value if hasattr(prev.status, "value") else prev.status, 0
+        ):
+            _dedup[key] = s
+
     steps = [
         StepStatusResponse(
             step_id=s.step_id,
@@ -1181,8 +1202,11 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             attempt=s.attempt,
             error=s.error,
             started_at=s.started_at.isoformat() if s.started_at else None,
+            pdf_artifact=bool(
+                isinstance(s.output_data, dict) and s.output_data.get("_pdf_artifact")
+            ),
         )
-        for s in run.steps
+        for s in _dedup.values()
     ]
 
     return ApiResponse(
@@ -1213,6 +1237,58 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
                 for c in run.children
             ] if run.children else None,
         )
+    )
+
+
+@router.get("/runs/{run_id}/steps/{step_id}/pdf")
+async def download_step_pdf(run_id: str, step_id: str, req: Request):
+    """Download the PDF report artifact for a specific step."""
+    from fastapi.responses import FileResponse
+
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run ID format")
+
+    async with async_session() as session:
+        stmt = (
+            select(Run)
+            .options(selectinload(Run.steps))
+            .where(Run.id == run_uuid)
+        )
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Find the step
+    step = next(
+        (s for s in run.steps if s.step_id == step_id),
+        None,
+    )
+    if not step:
+        raise HTTPException(status_code=404, detail=f"Step '{step_id}' not found")
+
+    # Extract PDF artifact path from output_data
+    pdf_path = None
+    if isinstance(step.output_data, dict):
+        pdf_path = step.output_data.get("_pdf_artifact")
+
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No PDF artifact for this step")
+
+    file_path = Path(pdf_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        filename=file_path.name,
     )
 
 

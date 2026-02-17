@@ -12,15 +12,17 @@ interface Step {
   attempt: number;
   error: string | null;
   started_at: string | null;
+  pdf_artifact?: boolean;
 }
 
 interface StepTimelineProps {
   steps: Step[];
+  runId?: string;
   onReplay?: (stepId: string) => void;
   onFork?: (stepId: string) => void;
 }
 
-export function StepTimeline({ steps, onReplay, onFork }: StepTimelineProps) {
+export function StepTimeline({ steps, runId, onReplay, onFork }: StepTimelineProps) {
   if (steps.length === 0) {
     return <p className="py-4 text-sm text-muted">No steps recorded</p>;
   }
@@ -54,6 +56,8 @@ export function StepTimeline({ steps, onReplay, onFork }: StepTimelineProps) {
               output={step.output}
               parallelIndex={step.parallel_index}
               startedAt={step.started_at}
+              pdfArtifact={step.pdf_artifact}
+              runId={runId}
               onReplay={onReplay}
               onFork={onFork}
             />

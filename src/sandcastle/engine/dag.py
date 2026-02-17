@@ -96,6 +96,15 @@ class CsvOutputConfig:
 
 
 @dataclass
+class PdfReportConfig:
+    """Configuration for PDF report generation from step output."""
+
+    directory: str = "./output"
+    language: str = "en"
+    filename: str = ""  # Custom filename (without extension)
+
+
+@dataclass
 class SubWorkflowConfig:
     """Configuration for a sub-workflow (workflow-as-step)."""
 
@@ -185,6 +194,7 @@ class StepDefinition:
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
     csv_output: CsvOutputConfig | None = None
+    pdf_report: PdfReportConfig | None = None
     policies: list[str | PolicyDefinition] | None = None  # Policy refs or inline defs
     slo: SLOConfig | None = None
     model_pool: list[ModelPoolOption] | None = None
@@ -402,6 +412,17 @@ def _parse_csv_output(data: dict | None) -> CsvOutputConfig | None:
     )
 
 
+def _parse_pdf_report(data: dict | None) -> PdfReportConfig | None:
+    """Parse PDF report configuration from YAML data."""
+    if data is None:
+        return None
+    return PdfReportConfig(
+        directory=data.get("directory", "./output"),
+        language=data.get("language", "en"),
+        filename=data.get("filename", ""),
+    )
+
+
 def _parse_model_pool(data) -> list[ModelPoolOption] | None:
     """Parse model pool from YAML data.
 
@@ -464,6 +485,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         autopilot=_parse_autopilot_config(data.get("autopilot")),
         sub_workflow=_parse_sub_workflow_config(data.get("sub_workflow")),
         csv_output=_parse_csv_output(data.get("csv_output")),
+        pdf_report=_parse_pdf_report(data.get("pdf_report")),
         policies=_parse_step_policies(data.get("policies")),
         slo=slo,
         model_pool=model_pool,
@@ -570,6 +592,7 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
         default_max_turns=default_max_turns,
         default_timeout=default_timeout,
         steps=steps,
+        input_schema=data.get("input_schema"),
         on_complete=on_complete,
         on_failure=on_failure,
         schedule=data.get("schedule"),

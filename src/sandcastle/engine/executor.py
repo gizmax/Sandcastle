@@ -428,6 +428,162 @@ def _write_csv_output(
         logger.info(f"CSV new file: {len(rows)} rows -> {filepath}")
 
 
+_PDF_REPORT_VISUAL = (
+    "\n\nVISUAL REPORT STRUCTURE:\n"
+    "1. Start with # Title as the first line.\n"
+    "2. Right after the title, include a KPI metrics line:\n"
+    "   <!-- kpi: Metric1=Value1(+Change%)|Metric2=Value2(-Change%)|... -->\n"
+    "   Example: <!-- kpi: Revenue=$2.4M(+12%)|Customers=12,450(+15%)|NPS=72(+5pts) -->\n"
+    "3. Include ## Executive Summary with 3-5 bullet points of key findings.\n"
+    "4. Use tables with numeric data columns - they will be auto-visualized as charts.\n"
+    "5. For important notes use: > [!NOTE] text, > [!WARNING] text, > [!IMPORTANT] text\n"
+    "6. Use #### for sub-labels (rendered as colored chips).\n"
+    "7. Keep tables complete with full text - no abbreviations.\n"
+)
+
+_PDF_REPORT_INSTRUCTIONS: dict[str, str] = {
+    "en": (
+        "FORMATTING: Structure your response as a well-organized report in English. "
+        "Use markdown headings (## and ###), bullet points, numbered lists, "
+        "bold for emphasis, and tables where data is tabular. "
+        "Organize content into logical sections with descriptive headings. "
+        "Be thorough but concise."
+        + _PDF_REPORT_VISUAL
+    ),
+    "cs": (
+        "FORMATOVANI: Strukturuj svou odpoved jako prehledny report v cestine. "
+        "Pouzij markdown nadpisy (## a ###), odrazky, cislovane seznamy, "
+        "tucne pismo pro dulezite informace a tabulky pro tabulkova data. "
+        "Organizuj obsah do logickych sekci s popisnymi nadpisy. "
+        "Bud dustkladny, ale strucny."
+        + _PDF_REPORT_VISUAL
+    ),
+    "de": (
+        "FORMATIERUNG: Strukturiere deine Antwort als gut organisierten Bericht auf Deutsch. "
+        "Verwende Markdown-Uberschriften (## und ###), Aufzahlungszeichen, nummerierte Listen, "
+        "Fettdruck fur Hervorhebungen und Tabellen fur tabellarische Daten. "
+        "Organisiere den Inhalt in logische Abschnitte mit beschreibenden Uberschriften. "
+        "Sei grundlich, aber pragnant."
+        + _PDF_REPORT_VISUAL
+    ),
+    "es": (
+        "FORMATO: Estructura tu respuesta como un informe bien organizado en espanol. "
+        "Usa encabezados markdown (## y ###), puntos, listas numeradas, "
+        "negrita para enfasis y tablas donde los datos sean tabulares. "
+        "Organiza el contenido en secciones logicas con encabezados descriptivos. "
+        "Se minucioso pero conciso."
+        + _PDF_REPORT_VISUAL
+    ),
+    "fr": (
+        "FORMATAGE: Structurez votre reponse comme un rapport bien organise en francais. "
+        "Utilisez les titres markdown (## et ###), les puces, les listes numerotees, "
+        "le gras pour l'emphase et les tableaux pour les donnees tabulaires. "
+        "Organisez le contenu en sections logiques avec des titres descriptifs. "
+        "Soyez complet mais concis."
+        + _PDF_REPORT_VISUAL
+    ),
+    "ja": (
+        "FORMATTING: Structure your response as a well-organized report in Japanese. "
+        "Use markdown headings (## and ###), bullet points, numbered lists, "
+        "bold for emphasis, and tables where data is tabular. "
+        "Organize content into logical sections with descriptive headings. "
+        "Be thorough but concise."
+        + _PDF_REPORT_VISUAL
+    ),
+    "zh": (
+        "FORMATTING: Structure your response as a well-organized report in Chinese. "
+        "Use markdown headings (## and ###), bullet points, numbered lists, "
+        "bold for emphasis, and tables where data is tabular. "
+        "Organize content into logical sections with descriptive headings. "
+        "Be thorough but concise."
+        + _PDF_REPORT_VISUAL
+    ),
+}
+
+
+def _get_pdf_report_instruction(language: str) -> str:
+    """Get the PDF report formatting instruction for a given language."""
+    if language in _PDF_REPORT_INSTRUCTIONS:
+        return _PDF_REPORT_INSTRUCTIONS[language]
+    # Fallback for unknown languages
+    return (
+        f"FORMATTING: Structure your response as a well-organized report in {language}. "
+        "Use markdown headings (## and ###), bullet points, numbered lists, "
+        "bold for emphasis, and tables where data is tabular. "
+        "Include a clear title as the first line (# Title). "
+        "Organize content into logical sections with descriptive headings. "
+        "Be thorough but concise."
+    )
+
+
+def _write_pdf_report(
+    step: StepDefinition,
+    output: Any,
+    run_id: str,
+) -> str | None:
+    """Generate a branded PDF report from step output. Returns the file path or None."""
+    cfg = step.pdf_report
+    if cfg is None:
+        return None
+
+    directory = Path(cfg.directory).expanduser().resolve()
+
+    # Enforce sandbox root when configured
+    from sandcastle.config import settings
+
+    if settings.sandbox_root:
+        sandbox = Path(settings.sandbox_root).expanduser().resolve()
+        if not str(directory).startswith(str(sandbox)):
+            logger.warning(
+                "pdf_report directory %s is outside sandbox root %s - skipping",
+                directory, sandbox,
+            )
+            return None
+
+    # Extract markdown text from output
+    if isinstance(output, str):
+        markdown_text = output
+    elif isinstance(output, dict):
+        # Try common keys, then fall back to JSON dump
+        for key in ("result", "text", "content", "report", "markdown", "output"):
+            if key in output and isinstance(output[key], str) and output[key].strip():
+                markdown_text = output[key]
+                break
+        else:
+            markdown_text = json.dumps(output, indent=2, ensure_ascii=False)
+    elif isinstance(output, list):
+        markdown_text = json.dumps(output, indent=2, ensure_ascii=False)
+    else:
+        markdown_text = str(output) if output is not None else ""
+
+    # Guard: skip PDF generation if there is no content
+    if not markdown_text.strip():
+        logger.warning(
+            "PDF report skipped for step '%s': empty output (type=%s)",
+            step.id, type(output).__name__,
+        )
+        return None
+
+    logger.info(
+        "PDF report for step '%s': %d chars of markdown (output type=%s)",
+        step.id, len(markdown_text), type(output).__name__,
+    )
+
+    base_name = cfg.filename or step.id
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filepath = directory / f"{base_name}_{ts}.pdf"
+
+    try:
+        from sandcastle.engine.pdf import generate_branded_pdf
+
+        generate_branded_pdf(markdown_text, filepath, cfg.language)
+        logger.info(f"PDF report generated: {filepath}")
+        return str(filepath)
+    except Exception as e:
+        logger.error(f"PDF generation failed for step '{step.id}': {e}")
+        return None
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -451,6 +607,8 @@ async def execute_step_with_retry(
                 output_schema=step.output_schema,
                 retry=step.retry,
                 fallback=step.fallback,
+                csv_output=step.csv_output,
+                pdf_report=step.pdf_report,
             )
         elif "model" in step_overrides:
             step = StepDefinition(
@@ -464,6 +622,8 @@ async def execute_step_with_retry(
                 output_schema=step.output_schema,
                 retry=step.retry,
                 fallback=step.fallback,
+                csv_output=step.csv_output,
+                pdf_report=step.pdf_report,
             )
 
     # AutoPilot: pick variant if configured
@@ -555,6 +715,28 @@ async def execute_step_with_retry(
                     _write_csv_output(step, result.output, context.run_id)
                 except Exception as e:
                     logger.warning(f"CSV export failed for step '{step.id}': {e}")
+
+            # Generate PDF report if configured
+            pdf_path = None
+            if step.pdf_report:
+                try:
+                    pdf_path = _write_pdf_report(step, result.output, context.run_id)
+                except Exception as e:
+                    logger.warning(f"PDF report failed for step '{step.id}': {e}")
+
+            # Store PDF artifact path in output_data for API access
+            if pdf_path and isinstance(result.output, dict):
+                result.output["_pdf_artifact"] = pdf_path
+            elif pdf_path:
+                result = StepResult(
+                    step_id=result.step_id,
+                    parallel_index=result.parallel_index,
+                    output={"result": result.output, "_pdf_artifact": pdf_path},
+                    cost_usd=result.cost_usd,
+                    duration_seconds=result.duration_seconds,
+                    status=result.status,
+                    attempt=result.attempt,
+                )
 
             # Record step completion
             await _save_run_step(
@@ -661,8 +843,15 @@ async def _execute_fallback(
         result = await sandbox.query(request)
         output = result.structured_output if result.structured_output else result.text
         if isinstance(output, str):
+            text = output.strip()
+            if text.startswith("```"):
+                first_nl = text.find("\n")
+                if first_nl >= 0:
+                    text = text[first_nl + 1:]
+                if text.endswith("```"):
+                    text = text[:-3].rstrip()
             try:
-                parsed = json.loads(output)
+                parsed = json.loads(text)
                 if isinstance(parsed, (dict, list)):
                     output = parsed
             except (json.JSONDecodeError, ValueError):
@@ -749,7 +938,14 @@ async def _execute_step_once(
 
         prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
-        prompt = _STEP_SYSTEM_PREFIX + prompt
+
+        if step.pdf_report:
+            # PDF report steps need verbose, structured output - skip the terse
+            # system prefix which conflicts with report formatting instructions.
+            pdf_instruction = _get_pdf_report_instruction(step.pdf_report.language)
+            prompt = pdf_instruction + "\n\n" + prompt
+        else:
+            prompt = _STEP_SYSTEM_PREFIX + prompt
 
         request: dict[str, Any] = {
             "prompt": prompt,
@@ -768,6 +964,9 @@ async def _execute_step_once(
             f"Executing step '{step.id}'{idx_str} attempt {attempt} "
             f"(model={effective_model})"
         )
+        logger.info(
+            f"Step '{step.id}' prompt length: {len(prompt)} chars"
+        )
         result = await sandbox.query(request)
 
         # Save routing decision to DB
@@ -777,10 +976,24 @@ async def _execute_step_once(
             )
 
         output = result.structured_output if result.structured_output else result.text
+        logger.info(
+            f"Step '{step.id}' raw output: structured={result.structured_output is not None}, "
+            f"text_len={len(result.text) if result.text else 0}, "
+            f"output_type={type(output).__name__}, "
+            f"output_len={len(str(output)) if output else 0}"
+        )
         # Try to parse text output as JSON for downstream steps (parallel_over, etc.)
         if isinstance(output, str):
+            text = output.strip()
+            # Strip markdown code fences (```json ... ``` or ``` ... ```)
+            if text.startswith("```"):
+                first_nl = text.find("\n")
+                if first_nl >= 0:
+                    text = text[first_nl + 1:]
+                if text.endswith("```"):
+                    text = text[:-3].rstrip()
             try:
-                parsed = json.loads(output)
+                parsed = json.loads(text)
                 if isinstance(parsed, (dict, list)):
                     output = parsed
             except (json.JSONDecodeError, ValueError):
@@ -1062,7 +1275,8 @@ async def _execute_sub_workflow_step(
 
     # Fan-out if parallel_over is configured
     if step.sub_workflow.parallel_over:
-        items = resolve_variable(step.sub_workflow.parallel_over, context)
+        sub_fan_path = step.sub_workflow.parallel_over.strip("{}")
+        items = resolve_variable(sub_fan_path, context)
         if not isinstance(items, list):
             items = [items]
 
@@ -1188,7 +1402,8 @@ async def _prepare_and_run_step(
             parallel_over=step.parallel_over, output_schema=step.output_schema,
             retry=step.retry, fallback=step.fallback, type=step.type,
             approval_config=step.approval_config, autopilot=step.autopilot,
-            sub_workflow=step.sub_workflow, policies=global_policies,
+            sub_workflow=step.sub_workflow, csv_output=step.csv_output,
+            pdf_report=step.pdf_report, policies=global_policies,
         )
     elif global_policies and step.policies:
         try:
@@ -1203,7 +1418,8 @@ async def _prepare_and_run_step(
                 retry=step.retry, fallback=step.fallback, type=step.type,
                 approval_config=step.approval_config,
                 autopilot=step.autopilot,
-                sub_workflow=step.sub_workflow, policies=resolved,
+                sub_workflow=step.sub_workflow, csv_output=step.csv_output,
+                pdf_report=step.pdf_report, policies=resolved,
             )
         except Exception as e:
             logger.warning(f"Could not resolve step policies: {e}")
@@ -1235,7 +1451,9 @@ async def _prepare_and_run_step(
 
     # Fan-out
     if step.parallel_over:
-        items = resolve_variable(step.parallel_over, context)
+        # Strip {braces} - parallel_over may come from YAML as "{steps.x.output.y}"
+        fan_out_path = step.parallel_over.strip("{}")
+        items = resolve_variable(fan_out_path, context)
         if not isinstance(items, list):
             items = [items]
 

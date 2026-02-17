@@ -8,6 +8,7 @@ import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { ToastContainer } from "@/components/shared/ToastContainer";
 import { useToasts } from "@/hooks/useToasts";
 import type { StreamEvent } from "@/hooks/useEventStream";
+import { api } from "@/api/client";
 
 const INITIAL_NOTIFICATIONS: Notification[] = [];
 
@@ -66,11 +67,15 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [dlqCount, setDlqCount] = useState(0);
+  const [isDemo, setIsDemo] = useState(api.isMockMode);
   const navigate = useNavigate();
   const { subscribe } = useEventStreamContext();
   const { toasts, addToast, dismissToast } = useToasts();
 
   useKeyboardShortcuts();
+
+  // Track mock mode changes
+  useEffect(() => api.onMockChange(setIsDemo), []);
 
   // Subscribe to all events for notifications
   useEffect(() => {
@@ -129,6 +134,12 @@ export function Layout() {
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dlqCount={dlqCount} />
       <div className="flex flex-1 flex-col overflow-hidden">
+        {isDemo && (
+          <div className="flex items-center justify-center gap-2 bg-warning/15 border-b border-warning/30 px-3 py-1.5 text-xs font-medium text-warning">
+            Demo Mode - Backend unavailable, showing sample data.
+            Run <code className="mx-1 rounded bg-warning/10 px-1.5 py-0.5 font-mono">sandcastle serve</code> to connect.
+          </div>
+        )}
         <Header
           onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
           notifications={notifications}

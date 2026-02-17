@@ -438,11 +438,25 @@ def _build_engine_kwargs() -> dict:
     url = _build_engine_url()
     kwargs: dict = {"echo": False}
     if url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
+        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     return kwargs
 
 
+def _sqlite_wal_mode(dbapi_conn, _connection_record):
+    """Enable WAL mode for SQLite to allow concurrent reads during writes."""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
+
 engine = create_async_engine(_build_engine_url(), **_build_engine_kwargs())
+
+# Enable WAL mode for SQLite connections
+if _build_engine_url().startswith("sqlite"):
+    from sqlalchemy import event
+
+    event.listen(engine.sync_engine, "connect", _sqlite_wal_mode)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 
