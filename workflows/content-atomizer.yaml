@@ -1,0 +1,232 @@
+name: "Content Atomizer"
+description: "Transform one content piece into dozens of formatted outputs for every channel - social posts, emails, blog variants, video scripts, and a content calendar."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["content"]
+  properties:
+    content:
+      type: string
+      description: "URL of the content piece or the full text to atomize"
+    brand_voice:
+      type: string
+      description: "Brand voice guidelines (optional, e.g. 'professional but approachable')"
+    platforms:
+      type: array
+      items: { type: string }
+      description: "Target platforms (default: twitter, linkedin, instagram)"
+      default: ["twitter", "linkedin", "instagram"]
+
+steps:
+  - id: "ingest-content"
+    prompt: |
+      Read and analyze this content: {input.content}
+
+      Extract:
+      1. Main topic and thesis
+      2. Key arguments and supporting points
+      3. Tone and writing style
+      4. Target audience
+      5. Content type (article, report, guide, etc.)
+      6. Word count and estimated read time
+
+      Brand voice to match: {input.brand_voice}
+
+      Return structured JSON with all extracted elements.
+    output_schema:
+      type: object
+      properties:
+        topic: { type: string }
+        thesis: { type: string }
+        tone: { type: string }
+        audience: { type: string }
+        content_type: { type: string }
+        word_count: { type: integer }
+
+  - id: "extract-atoms"
+    depends_on: ["ingest-content"]
+    prompt: |
+      From this content analysis: {steps.ingest-content.output}
+      And the original content: {input.content}
+
+      Break it down into reusable "content atoms":
+      1. Key messages (3-5 standalone takeaways)
+      2. Quotable lines (punchy, shareable phrases)
+      3. Statistics and data points (with context)
+      4. Arguments (claim + evidence pairs)
+      5. Questions raised (for engagement posts)
+      6. Contrarian takes (for debate/engagement)
+
+      Each atom should work independently without needing the full article context.
+    output_schema:
+      type: object
+      properties:
+        key_messages:
+          type: array
+          items: { type: string }
+        quotes:
+          type: array
+          items: { type: string }
+        statistics:
+          type: array
+          items: { type: object, properties: { stat: { type: string }, context: { type: string } } }
+        arguments:
+          type: array
+          items: { type: object, properties: { claim: { type: string }, evidence: { type: string } } }
+        questions:
+          type: array
+          items: { type: string }
+        contrarian_takes:
+          type: array
+          items: { type: string }
+
+  - id: "generate-social"
+    depends_on: ["extract-atoms"]
+    parallel_over: "input.platforms"
+    prompt: |
+      Generate 3-5 social media posts for {input._item} using these content atoms:
+      {steps.extract-atoms.output}
+
+      Platform-specific rules:
+      - twitter: Max 280 chars, punchy, use threads for longer takes, 2-3 hashtags
+      - linkedin: Professional tone, 1-3 paragraphs, storytelling angle, 3-5 hashtags
+      - instagram: Visual-first caption, emoji-friendly, 5-10 hashtags, include CTA
+
+      Brand voice: {input.brand_voice}
+      Original topic: {steps.ingest-content.output.topic}
+
+      Return structured JSON with platform name and array of posts.
+    output_schema:
+      type: object
+      properties:
+        platform: { type: string }
+        posts:
+          type: array
+          items:
+            type: object
+            properties:
+              text: { type: string }
+              hashtags: { type: array, items: { type: string } }
+              char_count: { type: integer }
+              post_type: { type: string }
+
+  - id: "generate-email"
+    depends_on: ["extract-atoms"]
+    prompt: |
+      Create a newsletter email version of this content:
+      Topic: {steps.ingest-content.output.topic}
+      Key Messages: {steps.extract-atoms.output.key_messages}
+      Statistics: {steps.extract-atoms.output.statistics}
+
+      Structure:
+      - Subject line (A/B: provide 2 options)
+      - Preview text (50 chars max)
+      - Opening hook (2-3 sentences)
+      - Body (3-4 short paragraphs with key takeaways)
+      - CTA (clear, single action)
+      - P.S. line (bonus insight or teaser)
+
+      Brand voice: {input.brand_voice}
+    output_schema:
+      type: object
+      properties:
+        subject_a: { type: string }
+        subject_b: { type: string }
+        preview_text: { type: string }
+        body: { type: string }
+        cta: { type: string }
+        ps_line: { type: string }
+
+  - id: "generate-blog-variants"
+    depends_on: ["extract-atoms"]
+    prompt: |
+      Create 2 blog post variants from the same content atoms:
+      {steps.extract-atoms.output}
+      Original topic: {steps.ingest-content.output.topic}
+
+      Variant 1 - How-To Guide:
+      - Title, meta description, H2 structure
+      - Step-by-step format with actionable advice
+      - 800-1200 words
+
+      Variant 2 - Opinion Piece:
+      - Title, meta description
+      - Hot take angle with strong thesis
+      - Supporting arguments from the atoms
+      - 600-900 words
+
+      Brand voice: {input.brand_voice}
+    output_schema:
+      type: object
+      properties:
+        how_to:
+          type: object
+          properties:
+            title: { type: string }
+            meta_description: { type: string }
+            body: { type: string }
+        opinion:
+          type: object
+          properties:
+            title: { type: string }
+            meta_description: { type: string }
+            body: { type: string }
+
+  - id: "generate-video-script"
+    depends_on: ["extract-atoms"]
+    prompt: |
+      Create a 60-second video script from these content atoms:
+      {steps.extract-atoms.output}
+      Topic: {steps.ingest-content.output.topic}
+
+      Structure:
+      - Hook (0-5s): Attention-grabbing opening line or question
+      - Problem (5-15s): Set up the pain point
+      - Solution (15-40s): Key message with 2-3 supporting points
+      - CTA (40-50s): What should the viewer do next?
+      - End card (50-60s): Brand mention, subscribe/follow
+
+      Include visual direction notes in brackets [B-roll of...].
+      Brand voice: {input.brand_voice}
+    output_schema:
+      type: object
+      properties:
+        hook: { type: string }
+        problem: { type: string }
+        solution: { type: string }
+        cta: { type: string }
+        end_card: { type: string }
+        total_word_count: { type: integer }
+
+  - id: "compile-content-calendar"
+    depends_on: ["generate-social", "generate-email", "generate-blog-variants", "generate-video-script"]
+    model: haiku
+    prompt: |
+      Compile all generated content into a structured content calendar.
+
+      Social Posts: {steps.generate-social.output}
+      Email: {steps.generate-email.output}
+      Blog Variants: {steps.generate-blog-variants.output}
+      Video Script: {steps.generate-video-script.output}
+
+      Create a 2-week content calendar:
+      - Day 1: Original piece goes live + LinkedIn post
+      - Day 2: Twitter thread
+      - Day 3: Newsletter email
+      - Day 4: Instagram post
+      - Day 5: How-to blog variant
+      - Day 8: Opinion piece blog
+      - Day 9: Video content
+      - Day 10-14: Remaining social posts (spread across platforms)
+
+      For each entry include: date (relative day), platform, content type, content preview (first 100 chars), and status (draft).
+    csv_output:
+      directory: ./output
+      mode: new_file
+      filename: content-calendar
+
+on_complete:
+  storage_path: "content/{run_id}/content-calendar.json"

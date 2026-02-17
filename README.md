@@ -676,7 +676,7 @@ Works with any output shape - dicts become columns, lists of dicts become rows, 
 
 ---
 
-## 20 Built-in Workflow Templates
+## 23 Built-in Workflow Templates
 
 <p align="center">
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
@@ -686,8 +686,8 @@ Sandcastle ships with production-ready workflow templates across 6 categories:
 
 | Category | Templates |
 |----------|-----------|
-| **Marketing** | Blog to Social, SEO Content, Email Campaign, Competitor Analysis, Ad Copy Generator |
-| **Sales** | Lead Enrichment, Proposal Generator, Meeting Recap |
+| **Marketing** | Blog to Social, SEO Content, Email Campaign, Competitor Analysis, Ad Copy Generator, Competitive Radar, Content Atomizer |
+| **Sales** | Lead Enrichment, Proposal Generator, Meeting Recap, Lead Outreach |
 | **Support** | Ticket Classifier, Review Sentiment |
 | **HR** | Job Description, Resume Screener |
 | **Legal** | Contract Review |

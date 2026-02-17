@@ -1,0 +1,172 @@
+name: "Lead Enrichment & Personalized Outreach"
+description: "Enrich leads with company data, identify decision makers, research pain points, and generate personalized multi-touch email sequences."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["target_url"]
+  properties:
+    target_url:
+      type: string
+      description: "URL of the target company website"
+    your_product:
+      type: string
+      description: "Brief description of your product/service for personalization"
+    tone:
+      type: string
+      description: "Email tone: professional, casual, consultative (default: consultative)"
+      default: consultative
+
+steps:
+  - id: "scrape-company"
+    prompt: |
+      Visit {input.target_url} and extract comprehensive company data:
+      1. Company name and legal entity
+      2. Company size (employees estimate)
+      3. Industry and sub-industry
+      4. Main product/service offering
+      5. Tech stack (from job postings, docs, or integrations page)
+      6. Company stage (startup, growth, enterprise)
+      7. Key value propositions they promote
+      Return as structured JSON.
+    output_schema:
+      type: object
+      properties:
+        company_name: { type: string }
+        size: { type: string }
+        industry: { type: string }
+        product: { type: string }
+        tech_stack: { type: array, items: { type: string } }
+        stage: { type: string }
+        value_props: { type: array, items: { type: string } }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: "find-decision-makers"
+    depends_on: ["scrape-company"]
+    prompt: |
+      For {steps.scrape-company.output.company_name} ({input.target_url}):
+      Identify 2-4 likely decision makers for a B2B sale.
+      Look for:
+      - C-level (CEO, CTO, CMO, CRO)
+      - VP/Director level (VP Engineering, Head of Product, Director of Ops)
+      - Relevant team leads
+
+      For each person, provide:
+      - Full name
+      - Title/role
+      - LinkedIn profile hint (name + company for lookup)
+      - Why they would be a relevant contact
+
+      Return as JSON with a "decision_makers" array.
+    output_schema:
+      type: object
+      properties:
+        decision_makers:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              title: { type: string }
+              linkedin_hint: { type: string }
+              relevance: { type: string }
+
+  - id: "research-pain-points"
+    depends_on: ["scrape-company"]
+    prompt: |
+      Based on this company profile: {steps.scrape-company.output}
+
+      Research and identify their likely pain points:
+      1. Industry-specific challenges for {steps.scrape-company.output.industry}
+      2. Stage-specific challenges for a {steps.scrape-company.output.stage} company
+      3. Tech-related pain points based on their stack
+      4. Growth bottlenecks typical for their size ({steps.scrape-company.output.size})
+
+      For each pain point, rate urgency (high/medium/low) and explain how
+      our product ({input.your_product}) could address it.
+    output_schema:
+      type: object
+      properties:
+        pain_points:
+          type: array
+          items:
+            type: object
+            properties:
+              pain_point: { type: string }
+              category: { type: string }
+              urgency: { type: string }
+              our_solution: { type: string }
+
+  - id: "generate-outreach"
+    depends_on: ["find-decision-makers", "research-pain-points"]
+    parallel_over: "steps.find-decision-makers.output.decision_makers"
+    prompt: |
+      Generate a personalized 3-email outreach sequence for:
+      Contact: {input._item.name}, {input._item.title}
+      Company: {steps.scrape-company.output.company_name}
+      Pain Points: {steps.research-pain-points.output.pain_points}
+      Our Product: {input.your_product}
+      Tone: {input.tone}
+
+      Email 1 (Day 1 - Cold intro):
+      - Personalized opening referencing their role and company
+      - One specific pain point relevant to their role
+      - Soft CTA (question, not a meeting request)
+
+      Email 2 (Day 4 - Value add):
+      - Reference Email 1
+      - Share a relevant insight or case study
+      - Mention a specific result/metric
+      - CTA: offer a resource or quick call
+
+      Email 3 (Day 8 - Direct ask):
+      - Brief, direct
+      - Restate the core value prop
+      - Clear CTA with specific time suggestion
+
+      Return structured JSON with subject line and body for each email.
+    output_schema:
+      type: object
+      properties:
+        contact_name: { type: string }
+        contact_title: { type: string }
+        emails:
+          type: array
+          items:
+            type: object
+            properties:
+              sequence_number: { type: integer }
+              send_day: { type: integer }
+              subject: { type: string }
+              body: { type: string }
+    csv_output:
+      directory: ./output
+      mode: append
+      filename: outreach-sequences
+
+  - id: "compile-playbook"
+    depends_on: ["generate-outreach"]
+    model: haiku
+    prompt: |
+      Compile a complete sales playbook from all the research:
+
+      Company Data: {steps.scrape-company.output}
+      Decision Makers: {steps.find-decision-makers.output}
+      Pain Points: {steps.research-pain-points.output}
+      Outreach Sequences: {steps.generate-outreach.output}
+
+      Structure the playbook as:
+      1. Company Overview (one paragraph)
+      2. Key Contacts (table: name, title, approach angle)
+      3. Pain Point Priority Matrix (table: pain point, urgency, our fit)
+      4. Outreach Timeline (calendar view of all emails across contacts)
+      5. Talking Points (for live calls)
+      6. Objection Handling (3-5 likely objections with responses)
+
+on_complete:
+  storage_path: "leads/{run_id}/outreach-playbook.json"
