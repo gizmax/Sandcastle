@@ -1,6 +1,6 @@
 """Sandcastle - Production-ready workflow orchestrator built on Sandstorm."""
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 from sandcastle.sdk import AsyncSandcastleClient, SandcastleClient
 
