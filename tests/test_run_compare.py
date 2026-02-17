@@ -9,7 +9,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from sandcastle.main import app
-from sandcastle.models.db import Run, RunStatus, RunStep, StepStatus, async_session
+from sandcastle.models import db as _db
+from sandcastle.models.db import Run, RunStatus, RunStep, StepStatus
 
 client = TestClient(app)
 
@@ -24,7 +25,7 @@ async def _create_test_run(
 ) -> uuid.UUID:
     """Helper to create a test run with steps in the DB."""
     run_id = uuid.uuid4()
-    async with async_session() as session:
+    async with _db.async_session() as session:
         run = Run(
             id=run_id,
             workflow_name=workflow_name,

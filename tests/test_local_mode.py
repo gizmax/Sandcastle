@@ -54,13 +54,16 @@ class TestLocalModeConfig:
 
 
 class TestSQLiteEngine:
-    def test_engine_url_is_sqlite(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("DATABASE_URL", "")
-        monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-        # Re-import to pick up new settings
+    def test_engine_url_is_sqlite(self, tmp_path):
+        from unittest.mock import patch
+
         from sandcastle.models.db import _build_engine_url
 
-        url = _build_engine_url()
+        with patch("sandcastle.models.db.settings") as mock_settings:
+            mock_settings.database_url = ""
+            mock_settings.data_dir = str(tmp_path / "data")
+            url = _build_engine_url()
+
         assert url.startswith("sqlite+aiosqlite:///")
         assert "sandcastle.db" in url
 
