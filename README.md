@@ -1097,64 +1097,36 @@ Header: `X-Sandcastle-Signature` for verification against your `WEBHOOK_SECRET`.
 
 ## Architecture
 
-```
-Your App --POST /api/workflows/run--> Sandcastle API (FastAPI)
-                                       |
-                               +-------+--------+
-                               |  Workflow Engine |
-                               |  (DAG executor) |
-                               +-------+--------+
-                                       |
-                            +----------+-----------+
-                            |                      |
-                     Standard Steps          Sub-Workflow Steps
-                            |              (recursive execution)
-                     +------+------+               |
-                     v      v      v        +------+------+
-                 Sandstorm (parallel)       | Child Engine |
-                  Agent A  Agent B  ...     +------+------+
-                     |      |                      |
-                     v      v               Sandstorm (child)
-                  E2B VMs                       |
-                     |                       E2B VMs
-                     |                          |
-          +----[Approval Gate?]----+            |
-          |                        |            |
-        Pause               Continue            |
-     (wait for              (auto)              |
-      human)                   |                |
-          |          [AutoPilot?]               |
-          v          Pick variant               |
-     Approve/          |                        |
-     Reject/     Evaluate quality               |
-     Skip              |                        |
-                 [Policy Engine]                 |
-                 PII redact /                    |
-                 block / alert                   |
-                       |                        |
-                 [SLO Optimizer]                |
-                 Route to best                  |
-                 model by SLO                   |
-                       +-----------+------------+
-                                   |
-             +---------------------+---------------------+
-             |                     |                      |
-        Local Mode            Production Mode        Both Modes
-             |                     |                      |
-         SQLite              PostgreSQL              Webhooks
-      (auto-created)       (runs, keys,            SSE Stream
-       In-process           approvals,             APScheduler
-        queue               experiments,
-       Filesystem           violations,
-                             routing,
-                             checkpoints)
-                                   |
-                              Redis (arq)
-                            (job queue,
-                            cancel flags)
-                                   |
-                              S3 / MinIO
-                           (persistent storage)
+```mermaid
+flowchart TD
+    App["Your App"] -->|"POST /api/workflows/run"| API["Sandcastle API\n(FastAPI)"]
+    API --> Engine["Workflow Engine\n(DAG executor)"]
+
+    Engine --> Standard["Standard Steps"]
+    Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
+
+    Standard --> Sandstorm["Sandstorm (parallel)\nAgent A · Agent B · ..."]
+    Sub --> Child["Child Engine"]
+    Child --> SandstormChild["Sandstorm (child)"]
+
+    Sandstorm --> E2B["E2B VMs"]
+    SandstormChild --> E2B2["E2B VMs"]
+
+    E2B --> Gate{"Approval Gate?"}
+    E2B2 --> Merge
+
+    Gate -->|"Pause (wait for human)"| Review["Approve / Reject / Skip"]
+    Gate -->|"Continue (auto)"| AutoPilot
+
+    Review --> AutoPilot["AutoPilot\nPick variant · Evaluate quality"]
+    AutoPilot --> Policy["Policy Engine\nPII redact · block · alert"]
+    Policy --> Optimizer["SLO Optimizer\nRoute to best model by SLO"]
+
+    Optimizer --> Merge((" "))
+
+    Merge --> Local["Local Mode\nSQLite · In-process queue · Filesystem"]
+    Merge --> Prod["Production Mode\nPostgreSQL · Redis (arq) · S3 / MinIO"]
+    Merge --> Both["Both Modes\nWebhooks · SSE Stream · APScheduler"]
 ```
 
 ### Tech Stack
