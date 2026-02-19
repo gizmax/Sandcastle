@@ -21,6 +21,35 @@
 
 ---
 
+## Table of Contents
+
+- [Why Sandcastle?](#why-sandcastle)
+- [Start Local. Scale When Ready.](#start-local-scale-when-ready)
+- [Quickstart](#quickstart)
+- [Features](#features)
+- [Workflow Engine](#workflow-engine)
+- [Human Approval Gates](#human-approval-gates)
+- [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
+- [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
+- [Policy Engine](#policy-engine)
+- [Cost-Latency Optimizer](#cost-latency-optimizer)
+- [Directory Input & CSV Export](#directory-input--csv-export)
+- [23 Built-in Workflow Templates](#23-built-in-workflow-templates)
+- [Real-time Event Stream](#real-time-event-stream)
+- [Run Time Machine](#run-time-machine)
+- [Budget Guardrails](#budget-guardrails)
+- [Dashboard](#dashboard)
+- [API Reference](#api-reference)
+- [Multi-Tenant Auth](#multi-tenant-auth)
+- [Webhooks](#webhooks)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
+
+---
+
 ## Why Sandcastle?
 
 [Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full agent, completely sandboxed. It nails the core problem: giving agents full system access without worrying about what they do with it.
@@ -1128,6 +1157,10 @@ flowchart TD
     Merge --> Prod["Production Mode\nPostgreSQL · Redis (arq) · S3 / MinIO"]
     Merge --> Both["Both Modes\nWebhooks · SSE Stream · APScheduler"]
 ```
+
+- **Local mode** — auto-created SQLite, in-process asyncio queue, and local filesystem. Zero dependencies.
+- **Production mode** — PostgreSQL (runs, API keys, approvals, experiments, violations, routing decisions, checkpoints), Redis via arq (job queue, cancel flags), and S3/MinIO for persistent artifact storage.
+- **Both modes** — HMAC-signed webhooks, SSE event streaming, and APScheduler for cron-based scheduling.
 
 ### Tech Stack
 
