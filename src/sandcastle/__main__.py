@@ -227,14 +227,10 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
     e2b_key = input("  E2B_API_KEY (optional, Enter to skip): ").strip()
 
-    # Determine Sandstorm port
-    sandstorm_port = getattr(args, "sandstorm_port", 3001)
-
     # Write .env
     lines = [
         f"ANTHROPIC_API_KEY={anthropic_key}",
         f"E2B_API_KEY={e2b_key}" if e2b_key else "# E2B_API_KEY=",
-        f"SANDSTORM_URL=http://localhost:{sandstorm_port}",
         "",
         "# Local mode (SQLite + in-process queue) - leave empty",
         "DATABASE_URL=",
@@ -253,70 +249,8 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:
-    """Start the Sandcastle API server (with optional Sandstorm auto-start)."""
-    import atexit
-    import signal
-    import subprocess
-
+    """Start the Sandcastle API server."""
     import uvicorn
-
-    sandstorm_proc = None
-
-    # Load .env if present so we can read SANDSTORM_URL
-    from sandcastle.config import settings
-
-    sandstorm_url = settings.sandstorm_url
-
-    # Check if Sandstorm is already running
-    sandstorm_running = False
-    try:
-        import urllib.request
-
-        req = urllib.request.Request(f"{sandstorm_url}/health", method="GET")
-        with urllib.request.urlopen(req, timeout=2):
-            sandstorm_running = True
-    except Exception:
-        pass
-
-    if not sandstorm_running:
-        # Try to start Sandstorm
-        # Extract port from URL
-        try:
-            from urllib.parse import urlparse
-
-            parsed = urlparse(sandstorm_url)
-            ds_port = str(parsed.port or 3001)
-        except Exception:
-            ds_port = "3001"
-
-        try:
-            sandstorm_proc = subprocess.Popen(
-                ["ds", "serve", "--port", ds_port],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            print(
-                _color(f"  Started Sandstorm on port {ds_port}", _C.GREEN)
-            )
-        except FileNotFoundError:
-            print(
-                _color(
-                    "  Sandstorm not found. Install: pipx install duvo-sandstorm",
-                    _C.YELLOW,
-                )
-            )
-
-    # Cleanup Sandstorm on exit
-    def _cleanup():
-        if sandstorm_proc and sandstorm_proc.poll() is None:
-            sandstorm_proc.terminate()
-            try:
-                sandstorm_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                sandstorm_proc.kill()
-
-    atexit.register(_cleanup)
-    signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
 
     uvicorn.run(
         "sandcastle.main:app",
@@ -556,7 +490,7 @@ def _cmd_health(args: argparse.Namespace) -> None:
         data = _to_dict(h)
         status = data.get("status", "unknown")
         print(f"Status:    {_status_color(status)}")
-        print(f"Sandstorm: {'ok' if data.get('sandstorm') else 'unreachable'}")
+        print(f"Runtime:   {'ok' if data.get('sandstorm') else 'not configured'}")
         if data.get("redis") is not None:
             print(f"Redis:     {'ok' if data.get('redis') else 'unreachable'}")
         print(f"Database:  {'ok' if data.get('database') else 'unreachable'}")

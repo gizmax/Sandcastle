@@ -15,7 +15,7 @@ from sandcastle.engine.executor import (
     _check_budget,
     execute_workflow,
 )
-from sandcastle.engine.sandbox import SandstormResult
+from sandcastle.engine.sandshore import SandshoreResult
 
 # --- Budget checks ---
 
@@ -95,12 +95,12 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.executor._check_cancel", return_value=False),
         ):
             mock_sandbox = AsyncMock()
             # Step 1 costs 2.0 which exceeds budget of 1.0
-            mock_sandbox.query.return_value = SandstormResult(
+            mock_sandbox.query.return_value = SandshoreResult(
                 text="expensive result", total_cost_usd=2.0
             )
             mock_get_client.return_value = mock_sandbox
@@ -127,11 +127,11 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.executor._check_cancel", return_value=False),
         ):
             mock_sandbox = AsyncMock()
-            mock_sandbox.query.return_value = SandstormResult(
+            mock_sandbox.query.return_value = SandshoreResult(
                 text="result", total_cost_usd=0.01
             )
             mock_get_client.return_value = mock_sandbox
@@ -166,14 +166,14 @@ steps:
         cancel_calls = [False, True]  # Not cancelled at first, cancelled after step1
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch(
                 "sandcastle.engine.executor._check_cancel",
                 side_effect=cancel_calls,
             ),
         ):
             mock_sandbox = AsyncMock()
-            mock_sandbox.query.return_value = SandstormResult(
+            mock_sandbox.query.return_value = SandshoreResult(
                 text="step1 result", total_cost_usd=0.01
             )
             mock_get_client.return_value = mock_sandbox
@@ -207,11 +207,11 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.executor._check_cancel", return_value=False),
         ):
             mock_sandbox = AsyncMock()
-            mock_sandbox.query.return_value = SandstormResult(
+            mock_sandbox.query.return_value = SandshoreResult(
                 text="replayed result", total_cost_usd=0.01
             )
             mock_get_client.return_value = mock_sandbox

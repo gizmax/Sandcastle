@@ -19,10 +19,10 @@ from sandcastle.engine.dag import (
     WorkflowDefinition,
 )
 from sandcastle.engine.events import event_bus
-from sandcastle.engine.sandbox import (
-    SandstormClient,
-    SandstormError,
-    get_sandstorm_client,
+from sandcastle.engine.sandshore import (
+    SandshoreError,
+    SandshoreRuntime,
+    get_sandshore_runtime,
 )
 from sandcastle.engine.storage import StorageBackend
 
@@ -636,7 +636,7 @@ def _write_pdf_report(
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
-    sandbox: SandstormClient,
+    sandbox: SandshoreRuntime,
     storage: StorageBackend,
     parallel_index: int | None = None,
     step_overrides: dict | None = None,
@@ -871,7 +871,7 @@ async def execute_step_with_retry(
 async def _execute_fallback(
     step: StepDefinition,
     context: RunContext,
-    sandbox: SandstormClient,
+    sandbox: SandshoreRuntime,
     storage: StorageBackend,
     parallel_index: int | None = None,
     attempt: int = 1,
@@ -935,7 +935,7 @@ async def _execute_fallback(
 async def _execute_step_once(
     step: StepDefinition,
     context: RunContext,
-    sandbox: SandstormClient,
+    sandbox: SandshoreRuntime,
     storage: StorageBackend,
     parallel_index: int | None = None,
     attempt: int = 1,
@@ -1145,7 +1145,7 @@ async def _execute_step_once(
     except (StepBlocked, WorkflowPaused):
         raise
 
-    except (SandstormError, Exception) as e:
+    except (SandshoreError, Exception) as e:
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
         logger.error(f"Step '{step.id}' attempt {attempt} error: {e}")
         return StepResult(
@@ -1680,15 +1680,16 @@ async def execute_workflow(
         except Exception as e:
             logger.warning(f"Could not load global policies: {e}")
 
-    effective_url = workflow.sandstorm_url or settings.sandstorm_url
+    proxy_url = workflow.sandstorm_url or settings.sandstorm_url or None
     logger.info(
-        f"Sandstorm connection: url={effective_url!r} "
-        f"(workflow={workflow.sandstorm_url!r}, settings={settings.sandstorm_url!r})"
+        "Sandshore runtime: e2b_key=%s, proxy=%s",
+        "set" if settings.e2b_api_key else "unset",
+        proxy_url or "none",
     )
-    sandbox = get_sandstorm_client(
-        base_url=effective_url,
+    sandbox = get_sandshore_runtime(
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
+        proxy_url=proxy_url,
     )
 
     # Broadcast run.started event

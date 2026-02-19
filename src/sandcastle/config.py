@@ -7,8 +7,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Sandcastle configuration."""
 
-    # Sandstorm connection
-    sandstorm_url: str = "http://localhost:3001"
+    # Runtime connection
+    sandstorm_url: str = ""  # Deprecated: legacy proxy URL (optional fallback)
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
 

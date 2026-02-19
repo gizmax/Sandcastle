@@ -8,7 +8,7 @@ readme = "README.md"
 authors = [
     { name = "Tomas Pflanzer", email = "tomas@gizmax.cz" },
 ]
-keywords = ["ai", "agents", "workflow", "orchestrator", "sandstorm", "llm", "pipeline", "workflow-templates"]
+keywords = ["ai", "agents", "workflow", "orchestrator", "e2b", "llm", "pipeline", "workflow-templates"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
@@ -39,7 +39,7 @@ dependencies = [
     "aioboto3>=13",
     "python-dotenv>=1.0",
     "simpleeval>=1.0",
-    "duvo-sandstorm>=0.4",
+    "e2b>=1.0",
     "fpdf2>=2.8",
     "matplotlib>=3.8",
 ]

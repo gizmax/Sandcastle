@@ -31,7 +31,7 @@ INVALID_WORKFLOW = "this is not valid yaml: ["
 class TestHealth:
     def test_health_endpoint(self):
         with patch(
-            "sandcastle.api.routes.SandstormClient"
+            "sandcastle.api.routes.SandshoreRuntime"
         ) as MockClient:
             mock = AsyncMock()
             mock.health.return_value = False
@@ -46,7 +46,7 @@ class TestHealth:
 
     def test_health_response_format(self):
         with patch(
-            "sandcastle.api.routes.SandstormClient"
+            "sandcastle.api.routes.SandshoreRuntime"
         ) as MockClient:
             mock = AsyncMock()
             mock.health.return_value = False
@@ -143,7 +143,7 @@ class TestResponseFormat:
     def test_api_response_wrapper(self):
         """All responses should use the {data, error} wrapper."""
         with patch(
-            "sandcastle.api.routes.SandstormClient"
+            "sandcastle.api.routes.SandshoreRuntime"
         ) as MockClient:
             mock = AsyncMock()
             mock.health.return_value = True
