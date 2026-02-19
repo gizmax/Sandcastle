@@ -348,9 +348,13 @@ Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCA
 
 Sandcastle ships with a built-in [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. This lets Claude Desktop, Cursor, Windsurf, and any MCP-compatible client interact with Sandcastle directly from the chat interface - run workflows, check status, manage schedules, browse results.
 
-```
-Claude Desktop  --stdio-->  sandcastle mcp  --HTTP-->  localhost:8080
-     (client)               (MCP server)              (sandcastle serve)
+```mermaid
+flowchart LR
+    Client["Claude Desktop\nCursor / Windsurf"]
+    MCP["sandcastle mcp\n(MCP server)"]
+    API["localhost:8080\n(sandcastle serve)"]
+
+    Client -->|stdio| MCP -->|HTTP| API
 ```
 
 Install the MCP extra:
