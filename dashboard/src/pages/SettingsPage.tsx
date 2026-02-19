@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Settings,
   Link,
-  KeyRound,
   Shield,
   DollarSign,
   Webhook,
@@ -54,7 +53,6 @@ type EditableFields = Omit<
 
 type SectionName =
   | "connections"
-  | "credentials"
   | "security"
   | "budget"
   | "webhooks"
@@ -224,8 +222,6 @@ export default function SettingsPage() {
     switch (section) {
       case "connections":
         return settings.sandstorm_url !== o.sandstorm_url;
-      case "credentials":
-        return settings.anthropic_api_key !== o.anthropic_api_key || settings.e2b_api_key !== o.e2b_api_key;
       case "security":
         return settings.auth_required !== o.auth_required || settings.dashboard_origin !== o.dashboard_origin;
       case "budget":
@@ -245,11 +241,6 @@ export default function SettingsPage() {
     switch (section) {
       case "connections":
         return diffFields({ sandstorm_url: settings.sandstorm_url }, { sandstorm_url: o.sandstorm_url });
-      case "credentials":
-        return diffFields(
-          { anthropic_api_key: settings.anthropic_api_key, e2b_api_key: settings.e2b_api_key },
-          { anthropic_api_key: o.anthropic_api_key, e2b_api_key: o.e2b_api_key }
-        );
       case "security":
         return diffFields(
           { auth_required: settings.auth_required, dashboard_origin: settings.dashboard_origin },
@@ -394,76 +385,6 @@ export default function SettingsPage() {
               dirty={isSectionDirty("connections")}
               saving={savingSections.has("connections")}
               onClick={() => void handleSave("connections")}
-            />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* API Credentials */}
-      <SectionCard
-        icon={KeyRound}
-        title="API Credentials"
-        description="Manage API keys for external services"
-      >
-        <div className="space-y-4">
-          <div>
-            <FieldLabel htmlFor="anthropic_api_key">Anthropic API Key</FieldLabel>
-            <input
-              id="anthropic_api_key"
-              type="password"
-              className={inputClass}
-              value={settings.anthropic_api_key}
-              onChange={(e) => updateField("anthropic_api_key", e.target.value)}
-              placeholder={originalRef.current?.anthropic_api_key || "sk-ant-..."}
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="e2b_api_key">E2B API Key</FieldLabel>
-            <input
-              id="e2b_api_key"
-              type="password"
-              className={inputClass}
-              value={settings.e2b_api_key}
-              onChange={(e) => updateField("e2b_api_key", e.target.value)}
-              placeholder={originalRef.current?.e2b_api_key || "e2b_..."}
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="openai_api_key_hint">OpenAI API Key</FieldLabel>
-            <input
-              id="openai_api_key_hint"
-              type="text"
-              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
-              readOnly
-              placeholder="Set via OPENAI_API_KEY env var"
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="minimax_api_key_hint">MiniMax API Key</FieldLabel>
-            <input
-              id="minimax_api_key_hint"
-              type="text"
-              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
-              readOnly
-              placeholder="Set via MINIMAX_API_KEY env var"
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="openrouter_api_key_hint">OpenRouter API Key</FieldLabel>
-            <input
-              id="openrouter_api_key_hint"
-              type="text"
-              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
-              readOnly
-              placeholder="Set via OPENROUTER_API_KEY env var"
-            />
-          </div>
-          <HelperText>Leave empty to keep the current value. Values are masked for security.</HelperText>
-          <div className="flex justify-end">
-            <SaveButton
-              dirty={isSectionDirty("credentials")}
-              saving={savingSections.has("credentials")}
-              onClick={() => void handleSave("credentials")}
             />
           </div>
         </div>
