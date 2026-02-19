@@ -391,92 +391,138 @@
       border-top: 1px solid var(--border);
     }
 
-    .problem-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 64px;
-      align-items: start;
-      margin-top: 48px;
+    .problem-intro {
+      max-width: 720px;
+      margin-top: 8px;
     }
 
-    .problem-text p {
+    .problem-intro p {
       color: var(--text-muted);
-      margin-bottom: 20px;
-      font-size: 16px;
+      font-size: 17px;
       line-height: 1.7;
     }
 
-    .problem-text strong {
+    .problem-intro strong {
       color: var(--text);
     }
 
-    .problem-quote {
-      padding: 24px 28px;
-      background: var(--surface);
-      border-left: 3px solid var(--accent);
-      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      margin-top: 24px;
-    }
-
-    .problem-quote p {
-      font-size: 15px;
-      color: var(--text);
-      margin: 0;
-      font-weight: 500;
-    }
-
-    .problem-quote .dim {
-      color: var(--text-muted);
-      font-weight: 400;
-    }
-
-    .pain-grid {
+    /* Without / With comparison */
+    .contrast-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 40px;
+    }
+
+    .contrast-box {
+      padding: 28px 28px 24px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+
+    .contrast-box--without {
+      background: rgba(239, 68, 68, 0.04);
+      border-color: rgba(239, 68, 68, 0.15);
+    }
+
+    .contrast-box--with {
+      background: rgba(34, 197, 94, 0.04);
+      border-color: rgba(34, 197, 94, 0.15);
+    }
+
+    .contrast-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 16px;
+    }
+
+    .contrast-box--without .contrast-label {
+      color: #ef4444;
+    }
+
+    .contrast-box--with .contrast-label {
+      color: #22c55e;
+    }
+
+    .contrast-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
       gap: 10px;
     }
 
+    .contrast-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-muted);
+    }
+
+    .contrast-list li .mark {
+      flex-shrink: 0;
+      font-size: 14px;
+      margin-top: 2px;
+    }
+
+    .contrast-box--without .contrast-list li .mark { color: #ef4444; }
+    .contrast-box--with .contrast-list li .mark { color: #22c55e; }
+
+    .contrast-list li strong {
+      color: var(--text);
+    }
+
+    /* Capability cards */
+    .pain-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 48px;
+    }
+
     .pain-card {
-      padding: 16px 18px;
+      padding: 20px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      transition: border-color 0.2s;
+      border-radius: var(--radius);
+      transition: border-color 0.2s, transform 0.2s;
     }
 
     .pain-card:hover {
       border-color: var(--border-light);
-    }
-
-    .pain-card-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 6px;
+      transform: translateY(-2px);
     }
 
     .pain-card-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
       background: var(--accent-dim);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 15px;
+      font-size: 18px;
       flex-shrink: 0;
+      margin-bottom: 14px;
     }
 
     .pain-card-title {
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
       color: var(--text);
+      margin-bottom: 6px;
     }
 
     .pain-card-desc {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--text-dim);
-      line-height: 1.4;
+      line-height: 1.5;
       font-style: italic;
     }
 
@@ -1072,10 +1118,14 @@
         grid-template-columns: repeat(2, 1fr);
       }
 
-      .problem-grid,
+      .contrast-row,
       .yaml-wrapper {
         grid-template-columns: 1fr;
-        gap: 32px;
+        gap: 16px;
+      }
+
+      .pain-grid {
+        grid-template-columns: repeat(2, 1fr);
       }
 
       .projects-grid {
@@ -1101,8 +1151,11 @@
       }
 
       .features-grid,
-      .pain-grid,
       .compat-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .pain-grid {
         grid-template-columns: 1fr;
       }
 
@@ -1232,79 +1285,80 @@
   <section class="problem">
     <div class="container fade-in">
       <span class="section-label">The Problem</span>
-      <h2 class="section-title">Why Sandcastle?</h2>
-      <div class="problem-grid">
-        <div class="problem-text">
-          <p>
-            AI agent frameworks give you building blocks - LLM calls, tool use, maybe a graph.
-            But when you start building real products, <strong>the glue code piles up fast.</strong>
-          </p>
-          <p>
-            You need orchestration, retries, scheduling, cost controls, approvals, monitoring,
-            and the ability to switch between sandbox providers and AI models without rewriting everything.
-          </p>
-          <div class="problem-quote">
-            <p><strong>Sandcastle</strong> handles all of that.</p>
-            <p><span class="dim">Define in YAML. Run anywhere. Ship to production.</span></p>
-          </div>
+      <h2 class="section-title">Your agents need an operations layer.</h2>
+      <div class="problem-intro">
+        <p>
+          Agent frameworks give you LLM calls and tools.
+          <strong>You</strong> get to build the retries, scheduling, cost controls, approvals, monitoring, and provider switching.
+          That's not a product - that's glue code.
+        </p>
+      </div>
+
+      <!-- Without / With -->
+      <div class="contrast-row">
+        <div class="contrast-box contrast-box--without">
+          <div class="contrast-label"><span>&#10005;</span> Without Sandcastle</div>
+          <ul class="contrast-list">
+            <li><span class="mark">&#10005;</span>Hand-rolled retry loops and backoff logic</li>
+            <li><span class="mark">&#10005;</span>Cron jobs duct-taped to Python scripts</li>
+            <li><span class="mark">&#10005;</span>No idea what a run costs until the invoice</li>
+            <li><span class="mark">&#10005;</span>Rewrite everything to switch models or providers</li>
+            <li><span class="mark">&#10005;</span>PII leaks because nobody added output filters</li>
+          </ul>
         </div>
-        <div class="pain-grid">
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">🔗</div>
-              <span class="pain-card-title">Multi-step pipelines</span>
-            </div>
-            <span class="pain-card-desc">"Step A scrapes, step B enriches, step C scores."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">⚡</div>
-              <span class="pain-card-title">Parallel fan-out</span>
-            </div>
-            <span class="pain-card-desc">"Fan out over 50 leads, then merge results."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">💰</div>
-              <span class="pain-card-title">Cost tracking</span>
-            </div>
-            <span class="pain-card-desc">"Bill per enrichment, track spend per run."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">🔄</div>
-              <span class="pain-card-title">Retry with backoff</span>
-            </div>
-            <span class="pain-card-desc">"Alert me if it fails, retry automatically."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">⏰</div>
-              <span class="pain-card-title">Scheduling</span>
-            </div>
-            <span class="pain-card-desc">"Run this every 6 hours, POST results to Slack."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">👤</div>
-              <span class="pain-card-title">Human approvals</span>
-            </div>
-            <span class="pain-card-desc">"A human should review this before continuing."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">🛡️</div>
-              <span class="pain-card-title">Policy enforcement</span>
-            </div>
-            <span class="pain-card-desc">"Block the output if it contains PII."</span>
-          </div>
-          <div class="pain-card">
-            <div class="pain-card-header">
-              <div class="pain-card-icon">🎯</div>
-              <span class="pain-card-title">Model routing</span>
-            </div>
-            <span class="pain-card-desc">"Pick the cheapest model that meets quality SLOs."</span>
-          </div>
+        <div class="contrast-box contrast-box--with">
+          <div class="contrast-label"><span>&#10003;</span> With Sandcastle</div>
+          <ul class="contrast-list">
+            <li><span class="mark">&#10003;</span><strong>Declare in YAML</strong> - retries, backoff, timeouts built in</li>
+            <li><span class="mark">&#10003;</span><strong>Built-in scheduler</strong> - cron syntax, webhooks, Slack</li>
+            <li><span class="mark">&#10003;</span><strong>Cost tracking per step</strong> - budgets and alerts</li>
+            <li><span class="mark">&#10003;</span><strong>One env var</strong> to switch backend or model provider</li>
+            <li><span class="mark">&#10003;</span><strong>Policy engine</strong> - PII redaction, secret blocking, guardrails</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Capability cards -->
+      <div class="pain-grid">
+        <div class="pain-card">
+          <div class="pain-card-icon">🔗</div>
+          <div class="pain-card-title">Multi-step pipelines</div>
+          <span class="pain-card-desc">"Step A scrapes, step B enriches, step C scores."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">⚡</div>
+          <div class="pain-card-title">Parallel fan-out</div>
+          <span class="pain-card-desc">"Fan out over 50 leads, then merge results."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">💰</div>
+          <div class="pain-card-title">Cost tracking</div>
+          <span class="pain-card-desc">"Bill per enrichment, track spend per run."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">🔄</div>
+          <div class="pain-card-title">Retry with backoff</div>
+          <span class="pain-card-desc">"Alert me if it fails, retry automatically."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">⏰</div>
+          <div class="pain-card-title">Scheduling</div>
+          <span class="pain-card-desc">"Run this every 6 hours, POST results to Slack."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">👤</div>
+          <div class="pain-card-title">Human approvals</div>
+          <span class="pain-card-desc">"A human should review this before continuing."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">🛡️</div>
+          <div class="pain-card-title">Policy enforcement</div>
+          <span class="pain-card-desc">"Block the output if it contains PII."</span>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-icon">🎯</div>
+          <div class="pain-card-title">Model routing</div>
+          <span class="pain-card-desc">"Pick the cheapest model that meets quality SLOs."</span>
         </div>
       </div>
     </div>
