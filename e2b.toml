@@ -1,0 +1,8 @@
+# E2B custom sandbox template for Sandcastle
+# Build: e2b template build --name sandcastle-runner
+# This template pre-installs Claude Agent SDK and runner.mjs
+# saving ~60 seconds on every workflow step execution.
+
+[template]
+dockerfile = "e2b.Dockerfile"
+name = "sandcastle-runner"

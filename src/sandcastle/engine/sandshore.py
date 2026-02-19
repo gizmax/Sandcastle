@@ -62,11 +62,15 @@ class SandshoreRuntime:
         e2b_api_key: str,
         proxy_url: str | None = None,
         timeout: float = 300.0,
+        template: str = "",
+        max_concurrent: int = 5,
     ) -> None:
         self.anthropic_api_key = anthropic_api_key
         self.e2b_api_key = e2b_api_key
         self.proxy_url = proxy_url.rstrip("/") if proxy_url else None
         self.timeout = timeout
+        self.template = template
+        self._semaphore = asyncio.Semaphore(max_concurrent)
         self._http: httpx.AsyncClient | None = None
         self._use_direct = self._can_use_direct()
 
@@ -99,12 +103,16 @@ class SandshoreRuntime:
                 return False
         return False
 
-    async def query(self, request: dict) -> SandshoreResult:
+    async def query(
+        self,
+        request: dict,
+        cancel_event: asyncio.Event | None = None,
+    ) -> SandshoreResult:
         """Execute a query and return the final aggregated result."""
         result = SandshoreResult()
         assistant_texts: list[str] = []
 
-        async for event in self.query_stream(request):
+        async for event in self.query_stream(request, cancel_event=cancel_event):
             evt_type = event.data.get("type", event.event)
 
             if evt_type == "result":
@@ -142,10 +150,16 @@ class SandshoreRuntime:
 
         return result
 
-    async def query_stream(self, request: dict) -> AsyncIterator[SSEEvent]:
+    async def query_stream(
+        self,
+        request: dict,
+        cancel_event: asyncio.Event | None = None,
+    ) -> AsyncIterator[SSEEvent]:
         """Execute a query and yield SSE events as they stream."""
         if self._use_direct:
-            async for event in self._stream_direct(request):
+            async for event in self._stream_direct(
+                request, cancel_event=cancel_event
+            ):
                 yield event
         elif self.proxy_url:
             async for event in self._stream_proxy(request):
@@ -160,11 +174,15 @@ class SandshoreRuntime:
     # Direct E2B SDK mode
     # ------------------------------------------------------------------
 
-    async def _stream_direct(self, request: dict) -> AsyncIterator[SSEEvent]:
+    async def _stream_direct(
+        self,
+        request: dict,
+        cancel_event: asyncio.Event | None = None,
+    ) -> AsyncIterator[SSEEvent]:
         """Create an E2B sandbox and stream execution events."""
         from e2b import AsyncSandbox
 
-        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
+        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue(maxsize=1000)
         sandbox = None
 
         def on_stdout(data: Any) -> None:
@@ -176,6 +194,8 @@ class SandshoreRuntime:
                     data=parsed,
                 )
                 queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning("Event queue full, dropping event")
             except (json.JSONDecodeError, ValueError):
                 logger.debug("Non-JSON stdout: %s", line[:200])
 
@@ -184,60 +204,89 @@ class SandshoreRuntime:
             logger.debug("Sandbox stderr: %s", line[:500])
 
         try:
-            sandbox = await AsyncSandbox.create(
-                api_key=self.e2b_api_key,
-                timeout=int(self.timeout),
-                envs={
-                    "ANTHROPIC_API_KEY": self.anthropic_api_key,
-                    "SANDCASTLE_REQUEST": json.dumps(request),
-                },
-            )
+            async with self._semaphore:
+                sandbox_kwargs: dict[str, Any] = {
+                    "api_key": self.e2b_api_key,
+                    "timeout": int(self.timeout),
+                    "envs": {
+                        "ANTHROPIC_API_KEY": self.anthropic_api_key,
+                        "SANDCASTLE_REQUEST": json.dumps(request),
+                    },
+                }
+                if self.template:
+                    sandbox_kwargs["template"] = self.template
 
-            # Upload runner script
-            runner_code = _get_runner_mjs()
-            await sandbox.files.write("/home/user/runner.mjs", runner_code)
+                sandbox = await AsyncSandbox.create(**sandbox_kwargs)
 
-            # Install Claude Agent SDK if not in template
-            await sandbox.commands.run(
-                "npm install @anthropic-ai/claude-agent-sdk 2>/dev/null || true",
-                timeout=60,
-            )
+                if not self.template:
+                    # Upload runner script
+                    runner_code = _get_runner_mjs()
+                    await sandbox.files.write(
+                        "/home/user/runner.mjs", runner_code
+                    )
 
-            # Run the agent
-            handle = await sandbox.commands.run(
-                "node /home/user/runner.mjs",
-                background=True,
-                on_stdout=on_stdout,
-                on_stderr=on_stderr,
-                cwd="/home/user",
-                timeout=int(self.timeout),
-            )
+                    # Install Claude Agent SDK if not in template
+                    await sandbox.commands.run(
+                        "npm install @anthropic-ai/claude-agent-sdk"
+                        " 2>/dev/null || true",
+                        timeout=60,
+                    )
 
-            # Yield events from the queue as they arrive
-            while True:
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=2.0)
-                    if event is None:
+                # Run the agent
+                handle = await sandbox.commands.run(
+                    "node /home/user/runner.mjs",
+                    background=True,
+                    on_stdout=on_stdout,
+                    on_stderr=on_stderr,
+                    cwd="/home/user",
+                    timeout=int(self.timeout),
+                )
+
+                # Yield events from the queue as they arrive
+                cancelled = False
+                while True:
+                    if cancel_event is not None and cancel_event.is_set():
+                        logger.info("Cancellation requested, stopping sandbox")
+                        cancelled = True
                         break
-                    yield event
-                except asyncio.TimeoutError:
-                    # Check if process finished
-                    if handle.exit_code is not None:
-                        break
-                    continue
 
-            # Drain remaining events
-            while not queue.empty():
-                event = queue.get_nowait()
-                if event is not None:
-                    yield event
+                    try:
+                        event = await asyncio.wait_for(
+                            queue.get(), timeout=2.0
+                        )
+                        if event is None:
+                            break
+                        yield event
+                    except asyncio.TimeoutError:
+                        # Check if process finished
+                        if handle.exit_code is not None:
+                            break
+                        continue
 
-            await handle.wait()
+                if cancelled:
+                    # Kill sandbox immediately on cancellation
+                    if sandbox:
+                        try:
+                            await sandbox.kill()
+                        except Exception:
+                            pass
+                        sandbox = None
+                    return
+
+                # Drain remaining events
+                while not queue.empty():
+                    event = queue.get_nowait()
+                    if event is not None:
+                        yield event
+
+                await handle.wait()
 
         except SandshoreError:
             raise
         except Exception as e:
-            raise SandshoreError(f"E2B sandbox execution failed: {e}") from e
+            raise SandshoreError(
+                f"E2B sandbox execution failed: {e}"
+            ) from e
         finally:
             if sandbox:
                 try:
@@ -352,7 +401,7 @@ for await (const message of query({
 # Singleton pool
 # ------------------------------------------------------------------
 
-_client_pool: dict[tuple[str, str], SandshoreRuntime] = {}
+_client_pool: dict[tuple[str, str, str], SandshoreRuntime] = {}
 
 
 def get_sandshore_runtime(
@@ -360,9 +409,11 @@ def get_sandshore_runtime(
     e2b_api_key: str,
     proxy_url: str | None = None,
     timeout: float = 300.0,
+    template: str = "",
+    max_concurrent: int = 5,
 ) -> SandshoreRuntime:
     """Return a shared SandshoreRuntime instance."""
-    key = (anthropic_api_key, e2b_api_key)
+    key = (anthropic_api_key, e2b_api_key, template or "")
     client = _client_pool.get(key)
     if client is None:
         client = SandshoreRuntime(
@@ -370,6 +421,8 @@ def get_sandshore_runtime(
             e2b_api_key=e2b_api_key,
             proxy_url=proxy_url,
             timeout=timeout,
+            template=template,
+            max_concurrent=max_concurrent,
         )
         _client_pool[key] = client
     return client

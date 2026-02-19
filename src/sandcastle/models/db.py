@@ -370,6 +370,27 @@ class RunCheckpoint(Base):
     )
 
 
+class StepCache(Base):
+    """Cached step results to avoid redundant sandbox executions."""
+
+    __tablename__ = "step_cache"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    workflow_name: Mapped[str] = mapped_column(String(200), default="")
+    step_id: Mapped[str] = mapped_column(String(200))
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class Setting(Base):
     """Key-value configuration stored in the database."""
 

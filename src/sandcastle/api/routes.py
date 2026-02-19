@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
+from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
@@ -747,6 +748,7 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
 @router.post("/workflows/run/sync")
 async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow synchronously. Blocks until complete."""
+    execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -877,6 +879,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
 @router.post("/workflows/run")
 async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow asynchronously. Returns immediately with run_id."""
+    execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -1660,6 +1663,7 @@ async def delete_run(run_id: str, req: Request) -> ApiResponse:
 @router.post("/runs/{run_id}/replay")
 async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiResponse:
     """Replay a run from a specific step using saved checkpoints."""
+    execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -1799,6 +1803,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
 @router.post("/runs/{run_id}/fork")
 async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiResponse:
     """Fork a run from a specific step with overrides (prompt, model, etc.)."""
+    execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:

@@ -26,6 +26,24 @@ from sandcastle.engine.executor import (
 )
 from sandcastle.engine.sandshore import SandshoreResult, SandshoreRuntime
 
+
+@pytest.fixture(autouse=True)
+def _disable_step_cache():
+    """Disable step cache during tests to avoid cross-test interference."""
+    with (
+        patch(
+            "sandcastle.engine.executor._get_cached_result",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "sandcastle.engine.executor._save_to_cache",
+            new_callable=AsyncMock,
+        ),
+    ):
+        yield
+
+
 # --- Fixtures ---
 
 

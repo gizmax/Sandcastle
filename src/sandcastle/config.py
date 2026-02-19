@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
 
+    # E2B custom template (pre-built sandbox with SDK installed)
+    e2b_template: str = ""  # e.g. "sandcastle-runner"
+
+    # Max concurrent E2B sandboxes (prevents rate limiting)
+    max_concurrent_sandboxes: int = 5
+
     # Database (empty = local SQLite mode)
     database_url: str = ""
 

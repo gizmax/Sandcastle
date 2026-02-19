@@ -9,7 +9,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -932,6 +932,95 @@ async def _execute_fallback(
         )
 
 
+def _compute_cache_key(
+    workflow_name: str,
+    step_id: str,
+    prompt: str,
+    model: str,
+) -> str:
+    """Compute a deterministic cache key for a step execution."""
+    import hashlib
+
+    raw = f"{workflow_name}:{step_id}:{model}:{prompt}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def _get_cached_result(cache_key: str) -> dict | None:
+    """Look up a cached step result. Returns output_data dict or None."""
+    try:
+        from sqlalchemy import select as sa_select
+
+        from sandcastle.models.db import StepCache, async_session
+
+        now = datetime.now(timezone.utc)
+        async with async_session() as session:
+            row = await session.scalar(
+                sa_select(StepCache).where(
+                    StepCache.cache_key == cache_key,
+                    (StepCache.expires_at.is_(None)) | (StepCache.expires_at > now),
+                )
+            )
+            if row:
+                row.hit_count += 1
+                await session.commit()
+                return {
+                    "output": row.output_data,
+                    "cost_usd": row.cost_usd,
+                }
+    except Exception as e:
+        logger.debug(f"Cache lookup failed: {e}")
+    return None
+
+
+async def _save_to_cache(
+    cache_key: str,
+    workflow_name: str,
+    step_id: str,
+    model: str,
+    output: Any,
+    cost_usd: float,
+    ttl_hours: int = 24,
+) -> None:
+    """Save a step result to cache."""
+    try:
+        from sandcastle.models.db import StepCache, async_session
+
+        expires = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+        output_data = output if isinstance(output, dict) else {"result": output}
+
+        async with async_session() as session:
+            entry = StepCache(
+                cache_key=cache_key,
+                workflow_name=workflow_name,
+                step_id=step_id,
+                model=model,
+                output_data=output_data,
+                cost_usd=cost_usd,
+                expires_at=expires,
+            )
+            session.add(entry)
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                # Key collision - update existing
+                from sqlalchemy import update as sa_update
+
+                await session.execute(
+                    sa_update(StepCache)
+                    .where(StepCache.cache_key == cache_key)
+                    .values(
+                        output_data=output_data,
+                        cost_usd=cost_usd,
+                        expires_at=expires,
+                        hit_count=0,
+                    )
+                )
+                await session.commit()
+    except Exception as e:
+        logger.debug(f"Cache save failed: {e}")
+
+
 async def _execute_step_once(
     step: StepDefinition,
     context: RunContext,
@@ -986,6 +1075,26 @@ async def _execute_step_once(
                 )
             except Exception as e:
                 logger.warning(f"Optimizer failed for step '{step.id}', using default: {e}")
+
+        # Step result cache - check before executing
+        cache_key = _compute_cache_key(
+            context.workflow_name, step.id, step.prompt, effective_model or step.model
+        )
+        cached = await _get_cached_result(cache_key)
+        if cached:
+            duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+            logger.info(
+                f"Step '{step.id}' cache HIT (key={cache_key[:12]}...)"
+            )
+            return StepResult(
+                step_id=step.id,
+                parallel_index=parallel_index,
+                output=cached["output"],
+                cost_usd=0.0,  # No cost for cached results
+                duration_seconds=duration,
+                status="completed",
+                attempt=attempt,
+            )
 
         prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
@@ -1131,6 +1240,16 @@ async def _execute_step_once(
                 raise
             except Exception as e:
                 logger.warning(f"Policy evaluation failed for step '{step.id}': {e}")
+
+        # Save to cache
+        await _save_to_cache(
+            cache_key=cache_key,
+            workflow_name=context.workflow_name,
+            step_id=step.id,
+            model=effective_model or step.model,
+            output=output,
+            cost_usd=result.total_cost_usd,
+        )
 
         return StepResult(
             step_id=step.id,
@@ -1690,6 +1809,8 @@ async def execute_workflow(
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
         proxy_url=proxy_url,
+        template=settings.e2b_template,
+        max_concurrent=settings.max_concurrent_sandboxes,
     )
 
     # Broadcast run.started event
