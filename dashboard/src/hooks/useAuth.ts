@@ -17,7 +17,9 @@ export function useAuth() {
         signal: AbortSignal.timeout(3000),
       });
       if (res.status === 401) return false;
-      if (!res.ok) return false;
+      // Any other response (including 200, 404, 502) means we can proceed.
+      // 404 = no backend (demo/GitHub Pages), 502 = proxy down - both should
+      // fall through to mock mode rather than blocking on the auth gate.
       return true;
     } catch {
       // Network error - backend unreachable, let the app handle it (mock mode)
