@@ -531,6 +531,29 @@ def _cmd_worker(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cmd_mcp(args: argparse.Namespace) -> None:
+    """Start the MCP (Model Context Protocol) server for desktop AI clients."""
+    # Propagate CLI args to env vars so mcp_server.py picks them up
+    url = getattr(args, "url", None)
+    api_key = getattr(args, "api_key", None)
+    if url:
+        os.environ["SANDCASTLE_URL"] = url
+    if api_key:
+        os.environ["SANDCASTLE_API_KEY"] = api_key
+
+    try:
+        from sandcastle.mcp_server import main as mcp_main
+    except ImportError:
+        print(
+            "Error: MCP support requires the 'mcp' package.\n"
+            "Install it with: pip install sandcastle-ai[mcp]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    mcp_main()
+
+
 def _cmd_health(args: argparse.Namespace) -> None:
     """Check the API server health."""
     client = _get_client(args)
@@ -772,6 +795,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_health = subparsers.add_parser("health", help="Check API health")
     _add_connection_args(p_health)
 
+    # --- mcp ---
+    p_mcp = subparsers.add_parser(
+        "mcp",
+        help="Start MCP server for Claude Desktop / Cursor / Windsurf",
+    )
+    _add_connection_args(p_mcp)
+
     return parser
 
 
@@ -799,6 +829,7 @@ def main() -> None:
         "ls": _cmd_ls,
         "worker": _cmd_worker,
         "health": _cmd_health,
+        "mcp": _cmd_mcp,
     }
 
     handler = dispatch.get(args.command)
