@@ -359,7 +359,7 @@ def _write_csv_output(
 
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
-        if not str(directory).startswith(str(sandbox)):
+        if not directory.is_relative_to(sandbox):
             logger.warning(
                 "csv_output directory %s is outside sandbox root %s - skipping",
                 directory, sandbox,
@@ -533,7 +533,7 @@ def _write_pdf_report(
 
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
-        if not str(directory).startswith(str(sandbox)):
+        if not directory.is_relative_to(sandbox):
             logger.warning(
                 "pdf_report directory %s is outside sandbox root %s - skipping",
                 directory, sandbox,

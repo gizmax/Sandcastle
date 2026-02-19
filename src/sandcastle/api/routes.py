@@ -396,7 +396,7 @@ async def browse_directory(
     # Enforce sandbox root when configured
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
-        if not str(target).startswith(str(sandbox)):
+        if not target.is_relative_to(sandbox):
             raise HTTPException(status_code=403, detail="Path outside sandbox root")
 
     if not target.exists():
@@ -3021,7 +3021,8 @@ async def _resume_after_approval(
 
 @router.post("/api-keys")
 async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiResponse:
-    """Create a new API key. Returns the plaintext key ONCE."""
+    """Create a new API key. Returns the plaintext key ONCE. Requires admin."""
+    _require_admin(req)
     auth_tenant = get_tenant_id(req)
 
     # When auth is enabled, enforce tenant scoping
@@ -3621,6 +3622,23 @@ async def update_settings(
         for k, v in request.model_dump().items()
         if v is not None
     }
+
+    # Block mutation of security-critical settings via API
+    immutable = {"auth_required", "webhook_secret", "database_url", "redis_url"}
+    blocked = immutable & updates.keys()
+    if blocked:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="IMMUTABLE_SETTING",
+                    message=(
+                        f"Settings {', '.join(sorted(blocked))} "
+                        "can only be changed via environment variables"
+                    ),
+                )
+            ).model_dump(),
+        )
 
     if not updates:
         return ApiResponse(data=_build_settings_response())
