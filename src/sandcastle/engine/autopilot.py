@@ -176,6 +176,10 @@ async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
             anthropic_api_key=settings.anthropic_api_key,
             e2b_api_key=settings.e2b_api_key,
             proxy_url=settings.sandstorm_url or None,
+            sandbox_backend=settings.sandbox_backend,
+            docker_image=settings.docker_image,
+            docker_url=settings.docker_url or None,
+            cloudflare_worker_url=settings.cloudflare_worker_url,
         )
         result = await client.query({
             "prompt": prompt,

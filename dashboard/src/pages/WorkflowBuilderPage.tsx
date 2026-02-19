@@ -51,6 +51,19 @@ export default function WorkflowBuilderPage() {
     [navigate]
   );
 
+  const runWorkflow = useCallback(
+    async (yaml: string, input: Record<string, unknown>) => {
+      const res = await api.post<{ run_id: string }>("/workflows/run", {
+        workflow: yaml,
+        input,
+      });
+      if (res.data?.run_id) {
+        navigate(`/runs/${res.data.run_id}`);
+      }
+    },
+    [navigate]
+  );
+
   const handleRunClick = useCallback((yaml: string) => {
     // Parse YAML to extract input_schema and name
     try {
@@ -69,20 +82,7 @@ export default function WorkflowBuilderPage() {
       // YAML parse failed, run directly
       void runWorkflow(yaml, {});
     }
-  }, []);
-
-  const runWorkflow = useCallback(
-    async (yaml: string, input: Record<string, unknown>) => {
-      const res = await api.post<{ run_id: string }>("/workflows/run", {
-        workflow: yaml,
-        input,
-      });
-      if (res.data?.run_id) {
-        navigate(`/runs/${res.data.run_id}`);
-      }
-    },
-    [navigate]
-  );
+  }, [runWorkflow]);
 
   return (
     <div className="space-y-3 sm:space-y-4">

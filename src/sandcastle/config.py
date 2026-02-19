@@ -12,10 +12,25 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
 
+    # Multi-model provider keys (optional)
+    minimax_api_key: str = ""
+    openai_api_key: str = ""
+    openrouter_api_key: str = ""
+
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"
 
-    # Max concurrent E2B sandboxes (prevents rate limiting)
+    # Sandbox backend: "e2b" | "docker" | "local" | "cloudflare"
+    sandbox_backend: str = "e2b"
+
+    # Docker backend settings
+    docker_image: str = "sandcastle-runner:latest"
+    docker_url: str = ""  # empty = local Docker socket
+
+    # Cloudflare backend settings
+    cloudflare_worker_url: str = ""  # e.g. "https://sandbox.your-domain.workers.dev"
+
+    # Max concurrent sandboxes (prevents rate limiting)
     max_concurrent_sandboxes: int = 5
 
     # Database (empty = local SQLite mode)

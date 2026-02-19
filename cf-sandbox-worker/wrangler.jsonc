@@ -1,0 +1,8 @@
+{
+  "name": "sandcastle-sandbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "containers": {
+    "max_instances": 5
+  }
+}

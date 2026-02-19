@@ -149,7 +149,7 @@ export default function TemplatesPage() {
       const runId = (res.data as Record<string, unknown>).run_id as string;
       if (runId) navigate(`/runs/${runId}`);
     }
-  }, [detail, runInput, navigate]);
+  }, [detail, fieldValues, runInput, navigate]);
 
   if (loading) {
     return (
