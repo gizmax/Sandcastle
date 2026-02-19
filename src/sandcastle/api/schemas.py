@@ -482,6 +482,9 @@ class SettingsResponse(BaseModel):
     # Credentials (masked - only last 4 chars shown)
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
+    openai_api_key: str = ""
+    minimax_api_key: str = ""
+    openrouter_api_key: str = ""
     # Security
     auth_required: bool = False
     dashboard_origin: str = ""
@@ -510,6 +513,9 @@ class SettingsUpdateRequest(BaseModel):
     sandstorm_url: str | None = None
     anthropic_api_key: str | None = None
     e2b_api_key: str | None = None
+    openai_api_key: str | None = None
+    minimax_api_key: str | None = None
+    openrouter_api_key: str | None = None
     auth_required: bool | None = None
     dashboard_origin: str | None = None
     default_max_cost_usd: float | None = None

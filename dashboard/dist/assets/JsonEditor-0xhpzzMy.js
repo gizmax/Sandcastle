@@ -1,3 +1,0 @@
-import{r as o,j as t,a as n}from"./index-CwcY_0GV.js";function m({value:l,onChange:a,placeholder:c,className:u,rows:i=8}){const[e,r]=o.useState(null),d=o.useCallback(x=>{const s=x.target.value;if(a(s),s.trim()===""){r(null);return}try{JSON.parse(s),r(null)}catch(p){r(p.message)}},[a]);return t.jsxs("div",{className:n("space-y-1",u),children:[t.jsx("textarea",{value:l,onChange:d,placeholder:c||`{
-  "key": "value"
-}`,rows:i,spellCheck:!1,className:n("w-full rounded-lg border bg-surface px-3 py-2 font-mono text-sm","placeholder:text-muted-foreground/50","focus:outline-none focus:ring-2 focus:ring-ring/30","transition-all duration-200 resize-y",e?"border-error":"border-border")}),e&&t.jsx("p",{className:"text-xs text-error",children:e})]})}export{m as J};

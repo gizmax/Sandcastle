@@ -13,6 +13,9 @@ import { cn } from "@/lib/utils";
 interface SettingsData {
   anthropic_api_key: string;
   e2b_api_key: string;
+  openai_api_key: string;
+  minimax_api_key: string;
+  openrouter_api_key: string;
   [key: string]: unknown;
 }
 
@@ -96,7 +99,16 @@ export default function ApiKeysPage() {
   // External services state
   const [anthropicKey, setAnthropicKey] = useState("");
   const [e2bKey, setE2bKey] = useState("");
-  const originalRef = useRef<{ anthropic_api_key: string; e2b_api_key: string } | null>(null);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [minimaxKey, setMinimaxKey] = useState("");
+  const [openrouterKey, setOpenrouterKey] = useState("");
+  const originalRef = useRef<{
+    anthropic_api_key: string;
+    e2b_api_key: string;
+    openai_api_key: string;
+    minimax_api_key: string;
+    openrouter_api_key: string;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -114,9 +126,15 @@ export default function ApiKeysPage() {
     if (res.data) {
       setAnthropicKey(res.data.anthropic_api_key);
       setE2bKey(res.data.e2b_api_key);
+      setOpenaiKey(res.data.openai_api_key);
+      setMinimaxKey(res.data.minimax_api_key);
+      setOpenrouterKey(res.data.openrouter_api_key);
       originalRef.current = {
         anthropic_api_key: res.data.anthropic_api_key,
         e2b_api_key: res.data.e2b_api_key,
+        openai_api_key: res.data.openai_api_key,
+        minimax_api_key: res.data.minimax_api_key,
+        openrouter_api_key: res.data.openrouter_api_key,
       };
     }
   }, []);
@@ -159,13 +177,19 @@ export default function ApiKeysPage() {
   const credentialsDirty =
     originalRef.current != null &&
     (anthropicKey !== originalRef.current.anthropic_api_key ||
-      e2bKey !== originalRef.current.e2b_api_key);
+      e2bKey !== originalRef.current.e2b_api_key ||
+      openaiKey !== originalRef.current.openai_api_key ||
+      minimaxKey !== originalRef.current.minimax_api_key ||
+      openrouterKey !== originalRef.current.openrouter_api_key);
 
   const handleSaveCredentials = useCallback(async () => {
     if (!originalRef.current) return;
     const changed: Record<string, string> = {};
     if (anthropicKey !== originalRef.current.anthropic_api_key) changed.anthropic_api_key = anthropicKey;
     if (e2bKey !== originalRef.current.e2b_api_key) changed.e2b_api_key = e2bKey;
+    if (openaiKey !== originalRef.current.openai_api_key) changed.openai_api_key = openaiKey;
+    if (minimaxKey !== originalRef.current.minimax_api_key) changed.minimax_api_key = minimaxKey;
+    if (openrouterKey !== originalRef.current.openrouter_api_key) changed.openrouter_api_key = openrouterKey;
     if (Object.keys(changed).length === 0) return;
 
     setSaving(true);
@@ -175,10 +199,16 @@ export default function ApiKeysPage() {
     if (res.error) {
       setToast({ message: `Failed to save: ${res.error.message}`, type: "error" });
     } else {
-      originalRef.current = { anthropic_api_key: anthropicKey, e2b_api_key: e2bKey };
+      originalRef.current = {
+        anthropic_api_key: anthropicKey,
+        e2b_api_key: e2bKey,
+        openai_api_key: openaiKey,
+        minimax_api_key: minimaxKey,
+        openrouter_api_key: openrouterKey,
+      };
       setToast({ message: "Credentials saved successfully", type: "success" });
     }
-  }, [anthropicKey, e2bKey]);
+  }, [anthropicKey, e2bKey, openaiKey, minimaxKey, openrouterKey]);
 
   if (loading) {
     return (
@@ -246,33 +276,36 @@ export default function ApiKeysPage() {
             />
           </div>
           <div>
-            <FieldLabel htmlFor="openai_api_key_hint">OpenAI API Key</FieldLabel>
+            <FieldLabel htmlFor="openai_api_key">OpenAI API Key</FieldLabel>
             <input
-              id="openai_api_key_hint"
-              type="text"
-              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
-              readOnly
-              placeholder="Set via OPENAI_API_KEY env var"
+              id="openai_api_key"
+              type="password"
+              className={inputClass}
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+              placeholder={originalRef.current?.openai_api_key || "sk-..."}
             />
           </div>
           <div>
-            <FieldLabel htmlFor="minimax_api_key_hint">MiniMax API Key</FieldLabel>
+            <FieldLabel htmlFor="minimax_api_key">MiniMax API Key</FieldLabel>
             <input
-              id="minimax_api_key_hint"
-              type="text"
-              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
-              readOnly
-              placeholder="Set via MINIMAX_API_KEY env var"
+              id="minimax_api_key"
+              type="password"
+              className={inputClass}
+              value={minimaxKey}
+              onChange={(e) => setMinimaxKey(e.target.value)}
+              placeholder={originalRef.current?.minimax_api_key || "minimax-..."}
             />
           </div>
           <div>
-            <FieldLabel htmlFor="openrouter_api_key_hint">OpenRouter API Key</FieldLabel>
+            <FieldLabel htmlFor="openrouter_api_key">OpenRouter API Key</FieldLabel>
             <input
-              id="openrouter_api_key_hint"
-              type="text"
-              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
-              readOnly
-              placeholder="Set via OPENROUTER_API_KEY env var"
+              id="openrouter_api_key"
+              type="password"
+              className={inputClass}
+              value={openrouterKey}
+              onChange={(e) => setOpenrouterKey(e.target.value)}
+              placeholder={originalRef.current?.openrouter_api_key || "sk-or-..."}
             />
           </div>
           <HelperText>Leave empty to keep the current value. Values are masked for security.</HelperText>
