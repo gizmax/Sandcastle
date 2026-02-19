@@ -228,7 +228,6 @@ class TestRunStoresVersion:
             mock_settings.workflows_dir = str(tmp_path)
             mock_settings.is_local_mode = True
             mock_settings.auth_required = False
-            mock_settings.sandstorm_url = "http://localhost:8000"
             mock_settings.anthropic_api_key = "test"
             mock_settings.e2b_api_key = "test"
             mock_settings.default_max_cost_usd = 0

@@ -174,7 +174,7 @@ class TestApprovalWorkflow:
         """Full workflow with approval step should return awaiting_approval status."""
         from sandcastle.engine.dag import build_plan
         from sandcastle.engine.executor import execute_workflow
-        from sandcastle.engine.sandbox import SandstormResult
+        from sandcastle.engine.sandshore import SandshoreResult
 
         yaml_content = """
 name: approval-flow
@@ -195,10 +195,10 @@ steps:
         workflow = parse_yaml_string(yaml_content)
         plan = build_plan(workflow)
 
-        mock_result = SandstormResult(text="prepared data", total_cost_usd=0.01)
+        mock_result = SandshoreResult(text="prepared data", total_cost_usd=0.01)
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
             patch("sandcastle.engine.executor._execute_approval_step") as mock_approval,
         ):

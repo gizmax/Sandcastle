@@ -24,7 +24,7 @@ from sandcastle.engine.executor import (
     resolve_templates,
     resolve_variable,
 )
-from sandcastle.engine.sandbox import SandstormClient, SandstormResult
+from sandcastle.engine.sandshore import SandshoreResult, SandshoreRuntime
 
 # --- Fixtures ---
 
@@ -144,8 +144,8 @@ class TestExecuteStepWithRetry:
         step = make_step()
         ctx = make_context()
 
-        mock_sandbox = AsyncMock(spec=SandstormClient)
-        mock_sandbox.query.return_value = SandstormResult(
+        mock_sandbox = AsyncMock(spec=SandshoreRuntime)
+        mock_sandbox.query.return_value = SandshoreResult(
             text="result text",
             structured_output={"answer": 42},
             total_cost_usd=0.01,
@@ -167,12 +167,12 @@ class TestExecuteStepWithRetry:
         step = make_step(retry=RetryConfig(max_attempts=3, backoff="fixed", on_failure="abort"))
         ctx = make_context()
 
-        mock_sandbox = AsyncMock(spec=SandstormClient)
+        mock_sandbox = AsyncMock(spec=SandshoreRuntime)
         # Fail twice, succeed on third
         mock_sandbox.query.side_effect = [
             Exception("fail 1"),
             Exception("fail 2"),
-            SandstormResult(text="ok", total_cost_usd=0.01),
+            SandshoreResult(text="ok", total_cost_usd=0.01),
         ]
 
         mock_storage = AsyncMock()
@@ -190,7 +190,7 @@ class TestExecuteStepWithRetry:
         step = make_step(retry=RetryConfig(max_attempts=2, backoff="fixed", on_failure="abort"))
         ctx = make_context()
 
-        mock_sandbox = AsyncMock(spec=SandstormClient)
+        mock_sandbox = AsyncMock(spec=SandshoreRuntime)
         mock_sandbox.query.side_effect = Exception("always fails")
 
         mock_storage = AsyncMock()
@@ -208,7 +208,7 @@ class TestExecuteStepWithRetry:
         step = make_step(retry=None)
         ctx = make_context()
 
-        mock_sandbox = AsyncMock(spec=SandstormClient)
+        mock_sandbox = AsyncMock(spec=SandshoreRuntime)
         mock_sandbox.query.side_effect = Exception("single failure")
 
         mock_storage = AsyncMock()
@@ -238,13 +238,13 @@ steps:
         workflow = parse_yaml_string(yaml_content)
         plan = build_plan(workflow)
 
-        mock_result = SandstormResult(
+        mock_result = SandshoreResult(
             text="Hello response",
             total_cost_usd=0.005,
         )
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
@@ -278,12 +278,12 @@ steps:
         plan = build_plan(workflow)
 
         results = [
-            SandstormResult(text="first result", total_cost_usd=0.01),
-            SandstormResult(text="second result", total_cost_usd=0.02),
+            SandshoreResult(text="first result", total_cost_usd=0.01),
+            SandshoreResult(text="second result", total_cost_usd=0.02),
         ]
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()
@@ -315,7 +315,7 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage") as MockStorage,
         ):
             mock_sandbox = AsyncMock()

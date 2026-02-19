@@ -19,7 +19,7 @@ from sandcastle.engine.executor import (
     _execute_sub_workflow_step,
     execute_workflow,
 )
-from sandcastle.engine.sandbox import SandstormResult
+from sandcastle.engine.sandshore import SandshoreResult
 
 # --- DAG parsing ---
 
@@ -131,11 +131,10 @@ steps:
         plan = build_plan(workflow)
 
         with (
-            patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+            patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             patch("sandcastle.engine.storage.LocalStorage"),
             patch("sandcastle.config.settings") as mock_settings,
         ):
-            mock_settings.sandstorm_url = "http://localhost:8000"
             mock_settings.anthropic_api_key = ""
             mock_settings.e2b_api_key = ""
             mock_settings.max_workflow_depth = 3
@@ -215,15 +214,14 @@ steps:
                 step_outputs={},
             )
 
-            mock_result = SandstormResult(text="enriched Acme", total_cost_usd=0.01)
+            mock_result = SandshoreResult(text="enriched Acme", total_cost_usd=0.01)
 
             with (
                 patch("sandcastle.config.settings") as mock_settings,
-                patch("sandcastle.engine.executor.get_sandstorm_client") as mock_get_client,
+                patch("sandcastle.engine.executor.get_sandshore_runtime") as mock_get_client,
             ):
                 mock_settings.max_workflow_depth = 5
                 mock_settings.workflows_dir = tmpdir
-                mock_settings.sandstorm_url = "http://localhost:8000"
                 mock_settings.anthropic_api_key = ""
                 mock_settings.e2b_api_key = ""
                 mock_settings.redis_url = "redis://localhost:6379/0"

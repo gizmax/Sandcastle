@@ -1,4 +1,4 @@
-"""Sandcastle - Production-ready workflow orchestrator built on Sandstorm."""
+"""Sandcastle - Production-ready workflow orchestrator for AI agents."""
 
 __version__ = "0.8.0"
 

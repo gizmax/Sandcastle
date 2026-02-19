@@ -166,7 +166,7 @@ class TestInMemoryCancel:
 class TestHealthLocalMode:
     def test_health_redis_is_null(self):
         with patch(
-            "sandcastle.api.routes.SandstormClient"
+            "sandcastle.api.routes.SandshoreRuntime"
         ) as MockClient:
             mock = AsyncMock()
             mock.health.return_value = True

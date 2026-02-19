@@ -61,7 +61,7 @@ from sandcastle.api.schemas import (
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.sandbox import SandstormClient
+from sandcastle.engine.sandshore import SandshoreRuntime
 from sandcastle.engine.storage import LocalStorage
 from sandcastle.models.db import (
     ApiKey,
@@ -315,13 +315,13 @@ def _extract_step_configs(yaml_content: str) -> dict[str, dict]:
 @router.get("/health")
 async def health_check() -> ApiResponse:
     """Check health of Sandcastle and its dependencies."""
-    sandbox = SandstormClient(
-        base_url=settings.sandstorm_url,
+    runtime = SandshoreRuntime(
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
+        proxy_url=settings.sandstorm_url or None,
     )
-    sandstorm_ok = await sandbox.health()
-    await sandbox.close()
+    sandstorm_ok = await runtime.health()
+    await runtime.close()
 
     # Check database
     db_ok = False
@@ -3544,7 +3544,7 @@ def _mask(value: str) -> str:
 def _build_settings_response() -> SettingsResponse:
     """Build a SettingsResponse from the current runtime settings."""
     return SettingsResponse(
-        sandstorm_url=settings.sandstorm_url,
+        sandstorm_url=settings.sandstorm_url or "",
         anthropic_api_key=_mask(settings.anthropic_api_key),
         e2b_api_key=_mask(settings.e2b_api_key),
         auth_required=settings.auth_required,

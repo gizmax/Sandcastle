@@ -158,10 +158,10 @@ def _evaluate_schema_completeness(output: Any, schema: dict | None) -> float:
 
 
 async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
-    """Use an LLM to judge output quality (via Sandstorm haiku)."""
+    """Use an LLM to judge output quality (via Sandshore haiku)."""
     try:
         from sandcastle.config import settings
-        from sandcastle.engine.sandbox import get_sandstorm_client
+        from sandcastle.engine.sandshore import get_sandshore_runtime
 
         criteria = config.evaluation.criteria if config.evaluation else "overall quality"
         output_str = str(output)[:2000]  # Truncate for efficiency
@@ -172,10 +172,10 @@ async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
             "Respond with ONLY a number between 0.0 and 1.0."
         )
 
-        client = get_sandstorm_client(
-            base_url=settings.sandstorm_url,
+        client = get_sandshore_runtime(
             anthropic_api_key=settings.anthropic_api_key,
             e2b_api_key=settings.e2b_api_key,
+            proxy_url=settings.sandstorm_url or None,
         )
         result = await client.query({
             "prompt": prompt,
