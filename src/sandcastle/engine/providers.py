@@ -8,7 +8,10 @@ the OpenAI-compatible runner (runner-openai.mjs).
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -106,3 +109,129 @@ def is_claude_model(model_str: str) -> bool:
     """Return True if *model_str* resolves to a Claude model."""
     info = PROVIDER_REGISTRY.get(model_str)
     return info is not None and info.provider == "claude"
+
+
+# ---------------------------------------------------------------------------
+# Failover chains
+# ---------------------------------------------------------------------------
+
+# Ordered fallback list for each model: same-provider cheaper first,
+# then same-provider pricier, then cross-provider equivalents.
+FAILOVER_CHAINS: dict[str, list[str]] = {
+    "sonnet": [
+        "haiku", "opus",
+        "openai/codex-mini", "minimax/m2.5", "google/gemini-2.5-pro",
+    ],
+    "opus": [
+        "sonnet", "haiku",
+        "google/gemini-2.5-pro", "openai/codex",
+    ],
+    "haiku": [
+        "sonnet", "opus",
+        "minimax/m2.5", "openai/codex-mini",
+    ],
+    "minimax/m2.5": [
+        "openai/codex-mini", "haiku", "sonnet",
+    ],
+    "openai/codex-mini": [
+        "openai/codex",
+        "minimax/m2.5", "haiku", "sonnet",
+    ],
+    "openai/codex": [
+        "openai/codex-mini",
+        "sonnet", "google/gemini-2.5-pro",
+    ],
+    "google/gemini-2.5-pro": [
+        "sonnet", "opus",
+        "openai/codex", "minimax/m2.5",
+    ],
+}
+
+
+class ProviderFailover:
+    """Thread-safe failover manager with per-key cooldown tracking."""
+
+    def __init__(self) -> None:
+        self._cooldowns: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def mark_cooldown(
+        self,
+        api_key_env: str,
+        duration_seconds: float | None = None,
+    ) -> None:
+        """Put *api_key_env* on cooldown until ``now + duration_seconds``."""
+        if duration_seconds is None:
+            from sandcastle.config import settings
+            duration_seconds = settings.failover_cooldown_seconds
+        with self._lock:
+            self._cooldowns[api_key_env] = time.monotonic() + duration_seconds
+
+    def is_available(self, api_key_env: str) -> bool:
+        """Return True if *api_key_env* is NOT on cooldown."""
+        with self._lock:
+            deadline = self._cooldowns.get(api_key_env)
+            if deadline is None:
+                return True
+            if time.monotonic() >= deadline:
+                del self._cooldowns[api_key_env]
+                return True
+            return False
+
+    def get_alternatives(self, model_str: str) -> list[str]:
+        """Return ordered fallback models, filtered by cooldown and configured keys."""
+        chain = FAILOVER_CHAINS.get(model_str, [])
+        result: list[str] = []
+        for alt in chain:
+            info = PROVIDER_REGISTRY.get(alt)
+            if info is None:
+                continue
+            # Skip if key is on cooldown
+            if not self.is_available(info.api_key_env):
+                continue
+            # Skip if key is not configured
+            if not get_api_key(info):
+                continue
+            result.append(alt)
+        return result
+
+    def get_status(self) -> dict[str, Any]:
+        """Return diagnostics: active cooldowns and available models."""
+        now = time.monotonic()
+        with self._lock:
+            active_cooldowns: dict[str, float] = {}
+            for key, deadline in list(self._cooldowns.items()):
+                remaining = deadline - now
+                if remaining > 0:
+                    active_cooldowns[key] = round(remaining, 1)
+                else:
+                    del self._cooldowns[key]
+
+        available: list[str] = []
+        unavailable: list[str] = []
+        for model_str, info in PROVIDER_REGISTRY.items():
+            if get_api_key(info) and self.is_available(info.api_key_env):
+                available.append(model_str)
+            else:
+                unavailable.append(model_str)
+
+        return {
+            "active_cooldowns": active_cooldowns,
+            "available_models": available,
+            "unavailable_models": unavailable,
+        }
+
+
+# Singleton
+_failover_instance: ProviderFailover | None = None
+_failover_lock = threading.Lock()
+
+
+def get_failover() -> ProviderFailover:
+    """Return the shared ``ProviderFailover`` singleton."""
+    global _failover_instance
+    if _failover_instance is None:
+        with _failover_lock:
+            if _failover_instance is None:
+                _failover_instance = ProviderFailover()
+    return _failover_instance

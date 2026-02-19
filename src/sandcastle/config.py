@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # Admin bootstrap key (auto-created on startup if set and not yet in DB)
     admin_api_key: str = ""
 
+    # Model failover
+    failover_cooldown_seconds: float = 60.0
+
     # Logging
     log_level: str = "info"
 
