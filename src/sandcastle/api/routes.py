@@ -1177,9 +1177,9 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Deduplicate steps: executor creates a "running" row on start and a
-    # "completed"/"failed" row on finish. Keep only the most final record
-    # per (step_id, parallel_index).
+    # Deduplicate steps: kept for backwards compatibility with records
+    # created before the upsert fix. New records use upsert and won't
+    # have duplicates.
     _STATUS_PRIORITY = {"completed": 3, "failed": 2, "running": 1, "queued": 0}
     _dedup: dict[tuple[str, int | None], object] = {}
     for s in run.steps:
