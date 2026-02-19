@@ -232,6 +232,7 @@ async def _save_run_step(
     duration_seconds: float = 0.0,
     attempt: int = 1,
     error: str | None = None,
+    model: str | None = None,
 ) -> None:
     """Create or update a RunStep record in the database.
 
@@ -280,6 +281,8 @@ async def _save_run_step(
                     existing.duration_seconds = duration_seconds
                 existing.attempt = attempt
                 existing.error = error
+                if model:
+                    existing.model = model
                 if status in ("completed", "failed", "skipped"):
                     existing.completed_at = now
             else:
@@ -294,6 +297,7 @@ async def _save_run_step(
                     duration_seconds=duration_seconds,
                     attempt=attempt,
                     error=error,
+                    model=model,
                     started_at=now if status == "running" else None,
                     completed_at=(
                         now if status in ("completed", "failed", "skipped")
@@ -793,6 +797,7 @@ async def execute_step_with_retry(
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 attempt=attempt,
+                model=step.model,
             )
 
             # Broadcast step.completed event
@@ -842,6 +847,7 @@ async def execute_step_with_retry(
                 duration_seconds=result.duration_seconds,
                 attempt=attempt,
                 error=result.error,
+                model=step.model,
             )
 
             # Broadcast step.failed event
