@@ -935,85 +935,136 @@
       border: 1px solid var(--border);
     }
 
-    /* ---- COMPAT STRIPS ---- */
-    .compat-strips {
+    /* ---- COMPAT SECTION ---- */
+    .compat-section {
+      margin-top: 72px;
       display: flex;
       flex-direction: column;
-      gap: 32px;
-      margin-top: 56px;
+      gap: 48px;
     }
 
-    .compat-strip-label {
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-dim);
-      margin-bottom: 14px;
+    .compat-group {
+      position: relative;
     }
 
-    .compat-strip {
+    .compat-group-header {
       display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .compat-badge {
-      display: inline-flex;
       align-items: center;
-      gap: 10px;
-      padding: 12px 20px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      transition: border-color 0.2s, transform 0.2s;
+      gap: 12px;
+      margin-bottom: 20px;
     }
 
-    .compat-badge:hover {
-      border-color: var(--border-light);
-      transform: translateY(-1px);
-    }
-
-    .compat-badge-icon {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
+    .compat-group-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--accent-dim);
       display: flex;
       align-items: center;
       justify-content: center;
+      font-size: 18px;
+    }
+
+    .compat-group-label {
       font-size: 16px;
       font-weight: 700;
-      flex-shrink: 0;
-    }
-
-    .compat-badge-text {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-
-    .compat-badge-name {
-      font-size: 14px;
-      font-weight: 600;
       color: var(--text);
     }
 
-    .compat-badge-desc {
-      font-size: 11px;
+    .compat-group-sub {
+      font-size: 13px;
       color: var(--text-dim);
+      font-weight: 400;
+      margin-left: 4px;
     }
 
-    /* Provider colors */
-    .badge-claude .compat-badge-icon { background: rgba(204, 120, 50, 0.15); color: #cc7832; }
-    .badge-openai .compat-badge-icon { background: rgba(16, 163, 127, 0.15); color: #10a37f; }
-    .badge-minimax .compat-badge-icon { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
-    .badge-gemini .compat-badge-icon { background: rgba(66, 133, 244, 0.15); color: #4285f4; }
+    .compat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
 
-    /* Backend colors */
-    .badge-e2b .compat-badge-icon { background: rgba(245, 158, 11, 0.15); color: var(--accent); }
-    .badge-docker .compat-badge-icon { background: rgba(29, 99, 237, 0.15); color: #1d63ed; }
-    .badge-local .compat-badge-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-    .badge-cf .compat-badge-icon { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+    .compat-card {
+      position: relative;
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      overflow: hidden;
+    }
+
+    .compat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      opacity: 0.7;
+      transition: opacity 0.25s;
+    }
+
+    .compat-card:hover {
+      transform: translateY(-3px);
+      border-color: var(--border-light);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .compat-card:hover::before {
+      opacity: 1;
+    }
+
+    .compat-card-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 14px;
+    }
+
+    .compat-card-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .compat-card-models {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* Provider card colors */
+    .card-claude::before { background: linear-gradient(90deg, #cc7832, #e89a4f); }
+    .card-claude .compat-card-icon { background: rgba(204, 120, 50, 0.15); color: #cc7832; }
+
+    .card-openai::before { background: linear-gradient(90deg, #10a37f, #34d399); }
+    .card-openai .compat-card-icon { background: rgba(16, 163, 127, 0.15); color: #10a37f; }
+
+    .card-minimax::before { background: linear-gradient(90deg, #6366f1, #818cf8); }
+    .card-minimax .compat-card-icon { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+
+    .card-gemini::before { background: linear-gradient(90deg, #4285f4, #60a5fa); }
+    .card-gemini .compat-card-icon { background: rgba(66, 133, 244, 0.15); color: #4285f4; }
+
+    /* Backend card colors */
+    .card-e2b::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .card-e2b .compat-card-icon { background: rgba(245, 158, 11, 0.15); color: var(--accent); }
+
+    .card-docker::before { background: linear-gradient(90deg, #1d63ed, #3b82f6); }
+    .card-docker .compat-card-icon { background: rgba(29, 99, 237, 0.15); color: #1d63ed; }
+
+    .card-local::before { background: linear-gradient(90deg, #22c55e, #4ade80); }
+    .card-local .compat-card-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+
+    .card-cf::before { background: linear-gradient(90deg, #f97316, #fb923c); }
+    .card-cf .compat-card-icon { background: rgba(249, 115, 22, 0.15); color: #f97316; }
 
     /* ---- RESPONSIVE ---- */
     @media (max-width: 900px) {
@@ -1034,6 +1085,10 @@
       .pain-grid {
         grid-template-columns: 1fr 1fr;
       }
+
+      .compat-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
     }
 
     @media (max-width: 600px) {
@@ -1046,7 +1101,8 @@
       }
 
       .features-grid,
-      .pain-grid {
+      .pain-grid,
+      .compat-grid {
         grid-template-columns: 1fr;
       }
 
@@ -1323,71 +1379,61 @@
         </div>
       </div>
 
-      <!-- Compat strips -->
-      <div class="compat-strips">
-        <div>
-          <div class="compat-strip-label">Supported AI Providers</div>
-          <div class="compat-strip">
-            <div class="compat-badge badge-claude">
-              <div class="compat-badge-icon">C</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">Claude</span>
-                <span class="compat-badge-desc">Opus, Sonnet, Haiku</span>
-              </div>
+      <!-- Providers & Backends -->
+      <div class="compat-section">
+        <div class="compat-group">
+          <div class="compat-group-header">
+            <div class="compat-group-icon">🤖</div>
+            <span class="compat-group-label">AI Providers <span class="compat-group-sub">- mix per step</span></span>
+          </div>
+          <div class="compat-grid">
+            <div class="compat-card card-claude">
+              <div class="compat-card-icon">C</div>
+              <div class="compat-card-name">Claude</div>
+              <div class="compat-card-models">Opus, Sonnet, Haiku</div>
             </div>
-            <div class="compat-badge badge-openai">
-              <div class="compat-badge-icon">O</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">OpenAI</span>
-                <span class="compat-badge-desc">Codex, Codex Mini</span>
-              </div>
+            <div class="compat-card card-openai">
+              <div class="compat-card-icon">O</div>
+              <div class="compat-card-name">OpenAI</div>
+              <div class="compat-card-models">Codex, Codex Mini</div>
             </div>
-            <div class="compat-badge badge-minimax">
-              <div class="compat-badge-icon">M</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">MiniMax</span>
-                <span class="compat-badge-desc">M2.5</span>
-              </div>
+            <div class="compat-card card-minimax">
+              <div class="compat-card-icon">M</div>
+              <div class="compat-card-name">MiniMax</div>
+              <div class="compat-card-models">M2.5</div>
             </div>
-            <div class="compat-badge badge-gemini">
-              <div class="compat-badge-icon">G</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">Google Gemini</span>
-                <span class="compat-badge-desc">via OpenRouter</span>
-              </div>
+            <div class="compat-card card-gemini">
+              <div class="compat-card-icon">G</div>
+              <div class="compat-card-name">Gemini</div>
+              <div class="compat-card-models">via OpenRouter</div>
             </div>
           </div>
         </div>
-        <div>
-          <div class="compat-strip-label">Sandbox Backends</div>
-          <div class="compat-strip">
-            <div class="compat-badge badge-e2b">
-              <div class="compat-badge-icon">E</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">E2B</span>
-                <span class="compat-badge-desc">Cloud sandboxes (default)</span>
-              </div>
+        <div class="compat-group">
+          <div class="compat-group-header">
+            <div class="compat-group-icon">📦</div>
+            <span class="compat-group-label">Sandbox Backends <span class="compat-group-sub">- switch via env var</span></span>
+          </div>
+          <div class="compat-grid">
+            <div class="compat-card card-e2b">
+              <div class="compat-card-icon">E</div>
+              <div class="compat-card-name">E2B</div>
+              <div class="compat-card-models">Cloud sandboxes (default)</div>
             </div>
-            <div class="compat-badge badge-docker">
-              <div class="compat-badge-icon">D</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">Docker</span>
-                <span class="compat-badge-desc">Local containers</span>
-              </div>
+            <div class="compat-card card-docker">
+              <div class="compat-card-icon">D</div>
+              <div class="compat-card-name">Docker</div>
+              <div class="compat-card-models">Local containers</div>
             </div>
-            <div class="compat-badge badge-local">
-              <div class="compat-badge-icon">L</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">Local</span>
-                <span class="compat-badge-desc">Subprocess (dev only)</span>
-              </div>
+            <div class="compat-card card-local">
+              <div class="compat-card-icon">L</div>
+              <div class="compat-card-name">Local</div>
+              <div class="compat-card-models">Subprocess (dev only)</div>
             </div>
-            <div class="compat-badge badge-cf">
-              <div class="compat-badge-icon">CF</div>
-              <div class="compat-badge-text">
-                <span class="compat-badge-name">Cloudflare</span>
-                <span class="compat-badge-desc">Edge Workers</span>
-              </div>
+            <div class="compat-card card-cf">
+              <div class="compat-card-icon">CF</div>
+              <div class="compat-card-name">Cloudflare</div>
+              <div class="compat-card-models">Edge Workers</div>
             </div>
           </div>
         </div>
