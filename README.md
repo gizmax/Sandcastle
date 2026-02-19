@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-364%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-400%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -25,6 +25,7 @@
 - [Why Sandcastle?](#why-sandcastle)
 - [Start Local. Scale When Ready.](#start-local-scale-when-ready)
 - [Quickstart](#quickstart)
+- [MCP Integration](#mcp-integration)
 - [Features](#features)
 - [Pluggable Sandbox Backends](#pluggable-sandbox-backends)
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
@@ -343,6 +344,102 @@ sandcastle health
 
 Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCASTLE_URL` env var. Auth via `--api-key` or `SANDCASTLE_API_KEY`.
 
+### MCP Integration
+
+Sandcastle ships with a built-in [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. This lets Claude Desktop, Cursor, Windsurf, and any MCP-compatible client interact with Sandcastle directly from the chat interface - run workflows, check status, manage schedules, browse results.
+
+```
+Claude Desktop  --stdio-->  sandcastle mcp  --HTTP-->  localhost:8080
+     (client)               (MCP server)              (sandcastle serve)
+```
+
+Install the MCP extra:
+
+```bash
+pip install sandcastle-ai[mcp]
+```
+
+#### Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `run_workflow` | Run a saved workflow by name with optional input data and wait mode |
+| `run_workflow_yaml` | Run a workflow from inline YAML definition |
+| `get_run_status` | Get detailed run status including all step results |
+| `cancel_run` | Cancel a queued or running workflow |
+| `list_runs` | List runs with optional status and workflow filters |
+| `save_workflow` | Save a workflow YAML definition to the server |
+| `create_schedule` | Create a cron schedule for a workflow |
+| `delete_schedule` | Delete a workflow schedule |
+
+#### Available MCP Resources
+
+| URI | Description |
+|-----|-------------|
+| `sandcastle://workflows` | Read-only list of all available workflows |
+| `sandcastle://schedules` | Read-only list of all active schedules |
+| `sandcastle://health` | Server health status (sandbox backend, DB, Redis) |
+
+#### Client Configuration
+
+**Claude Desktop** - add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "sandcastle": {
+      "command": "sandcastle",
+      "args": ["mcp"],
+      "env": {
+        "SANDCASTLE_URL": "http://localhost:8080",
+        "SANDCASTLE_API_KEY": "sc_..."
+      }
+    }
+  }
+}
+```
+
+**Cursor** - add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "sandcastle": {
+      "command": "sandcastle",
+      "args": ["mcp", "--url", "http://localhost:8080"]
+    }
+  }
+}
+```
+
+**Windsurf** - add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "sandcastle": {
+      "command": "sandcastle",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The MCP server uses stdio transport (spawned as a child process by the client). It requires a running `sandcastle serve` instance to connect to. Connection is configured via `--url` / `--api-key` CLI args or `SANDCASTLE_URL` / `SANDCASTLE_API_KEY` env vars.
+
+#### What You Can Do from Chat
+
+Once connected, ask your AI assistant to:
+
+- "Run the lead-enrichment workflow for https://example.com"
+- "What's the status of my last run?"
+- "List all failed runs from today"
+- "Create a schedule to run data-sync every day at 9am"
+- "Cancel run abc-123"
+- "Save this workflow YAML to the server"
+- "Show me all available workflows"
+- "Check if Sandcastle is healthy"
+
 ---
 
 ## Features
@@ -368,6 +465,7 @@ Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCA
 | **Multi-tenant API keys** | Yes |
 | **Python SDK + async client** | Yes |
 | **CLI tool** | Yes |
+| **MCP server** (Claude Desktop, Cursor, Windsurf) | Yes |
 | **Docker one-command deploy** | Yes |
 | **Dashboard with real-time monitoring** | Yes |
 | **23 built-in workflow templates** | Yes |
@@ -1311,7 +1409,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (364 passing)
+# Run tests (400 passing)
 uv run pytest
 
 # Type check backend

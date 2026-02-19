@@ -1431,6 +1431,11 @@
           <h3>Real-time Updates</h3>
           <p>Live SSE event stream. See runs complete, steps execute, and errors appear instantly. No page refresh needed.</p>
         </div>
+        <div class="feature-card">
+          <span class="feature-icon">🔌</span>
+          <h3>MCP Server</h3>
+          <p>Built-in Model Context Protocol server. Run workflows, check status, and manage schedules from Claude Desktop, Cursor, or Windsurf.</p>
+        </div>
       </div>
 
       <!-- Providers & Backends -->
@@ -1584,6 +1589,55 @@
         <a href="https://gizmax.github.io/Sandcastle/" target="_blank" rel="noopener" class="btn btn-secondary">
           Try Live Demo - no backend needed
         </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- MCP Integration -->
+  <section class="yaml-section">
+    <div class="container fade-in">
+      <span class="section-label">Integrate</span>
+      <h2 class="section-title">Talk to Sandcastle from your AI editor</h2>
+      <p class="section-subtitle">Built-in MCP (Model Context Protocol) server. Claude Desktop, Cursor, and Windsurf can run workflows, check status, and manage schedules - all from the chat interface.</p>
+      <div class="yaml-wrapper">
+        <div class="yaml-block">
+          <div class="yaml-header">
+            <span class="yaml-dot yaml-dot--red"></span>
+            <span class="yaml-dot yaml-dot--yellow"></span>
+            <span class="yaml-dot yaml-dot--green"></span>
+            claude_desktop_config.json
+          </div>
+          <pre><code>{
+  <span class="y-key">"mcpServers"</span>: {
+    <span class="y-key">"sandcastle"</span>: {
+      <span class="y-key">"command"</span>: <span class="y-str">"sandcastle"</span>,
+      <span class="y-key">"args"</span>: [<span class="y-str">"mcp"</span>]
+    }
+  }
+}</code></pre>
+        </div>
+        <div class="yaml-info">
+          <h3>8 tools. 3 resources. Zero config.</h3>
+          <p>
+            Add one JSON block to your client config. The MCP server connects to a running
+            <code>sandcastle serve</code> instance and exposes the full workflow API.
+          </p>
+          <ul class="yaml-features">
+            <li><span class="check">&#10003;</span><strong>run_workflow</strong> - run a saved workflow by name with optional input</li>
+            <li><span class="check">&#10003;</span><strong>run_workflow_yaml</strong> - run a workflow from inline YAML definition</li>
+            <li><span class="check">&#10003;</span><strong>get_run_status</strong> - detailed status with all step results</li>
+            <li><span class="check">&#10003;</span><strong>list_runs</strong> - browse runs with status and workflow filters</li>
+            <li><span class="check">&#10003;</span><strong>cancel_run</strong> - stop a queued or running workflow</li>
+            <li><span class="check">&#10003;</span><strong>save_workflow</strong> - save YAML workflow definitions to the server</li>
+            <li><span class="check">&#10003;</span><strong>create_schedule</strong> / <strong>delete_schedule</strong> - manage cron schedules</li>
+            <li><span class="check">&#10003;</span><strong>Resources</strong> - read-only access to workflows, schedules, and health</li>
+          </ul>
+          <div class="mode-pills" style="justify-content: flex-start; margin-top: 16px;">
+            <span class="mode-pill"><span class="dot"></span> Claude Desktop</span>
+            <span class="mode-pill"><span class="dot"></span> Cursor</span>
+            <span class="mode-pill"><span class="dot"></span> Windsurf</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
