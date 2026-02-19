@@ -125,7 +125,7 @@ export function StepCard({
             <div className="flex items-center justify-between py-2">
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                <p className="text-xs text-muted">Running in Sandstorm sandbox...</p>
+                <p className="text-xs text-muted">Running in sandbox...</p>
               </div>
               {startedAt && <ElapsedTimer since={startedAt} />}
             </div>

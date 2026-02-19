@@ -8,6 +8,7 @@ export interface RuntimeInfo {
   storage: string;
   data_dir: string | null;
   version: string | null;
+  sandbox_backend: "e2b" | "docker" | "local" | "cloudflare";
 }
 
 export function useRuntimeInfo() {

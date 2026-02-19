@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { StepConnectSandstorm } from "./StepConnectSandstorm";
+import { StepConnectSandshore } from "./StepConnectSandshore";
 import { StepFirstWorkflow } from "./StepFirstWorkflow";
 import { StepRunTest } from "./StepRunTest";
 import { cn } from "@/lib/utils";
@@ -52,7 +52,7 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
       {/* Content */}
       <div className="rounded-xl border border-border bg-surface p-8 shadow-sm">
         {currentStep === 0 && (
-          <StepConnectSandstorm onComplete={() => setCurrentStep(1)} />
+          <StepConnectSandshore onComplete={() => setCurrentStep(1)} />
         )}
         {currentStep === 1 && (
           <StepFirstWorkflow onSelect={() => setCurrentStep(2)} />

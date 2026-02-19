@@ -280,11 +280,23 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           onChange={(e) => onChange({ ...step, model: e.target.value })}
           className={inputClass}
         >
-          <option value="sonnet">Sonnet</option>
-          <option value="opus">Opus</option>
-          <option value="haiku">Haiku</option>
+          <optgroup label="Claude (Anthropic)">
+            <option value="sonnet">Sonnet</option>
+            <option value="opus">Opus</option>
+            <option value="haiku">Haiku</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option value="openai/codex-mini">Codex Mini</option>
+            <option value="openai/codex">Codex</option>
+          </optgroup>
+          <optgroup label="MiniMax">
+            <option value="minimax/m2.5">MiniMax M2.5</option>
+          </optgroup>
+          <optgroup label="Google">
+            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+          </optgroup>
         </select>
-        <p className="text-[11px] text-muted-foreground mt-0.5">Sonnet is balanced, Opus for complex reasoning, Haiku for fast/cheap tasks.</p>
+        <p className="text-[11px] text-muted-foreground mt-0.5">Claude is default. Multi-provider routing supports OpenAI, MiniMax, and Google models.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -776,11 +788,23 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                         variants[idx] = { ...v, model: e.target.value };
                         onChange({ ...step, autopilot: { ...step.autopilot, variants } });
                       }}
-                      className={cn(inputClass, "h-7 text-xs w-24 shrink-0")}
+                      className={cn(inputClass, "h-7 text-xs w-32 shrink-0")}
                     >
-                      <option value="haiku">Haiku</option>
-                      <option value="sonnet">Sonnet</option>
-                      <option value="opus">Opus</option>
+                      <optgroup label="Claude">
+                        <option value="haiku">Haiku</option>
+                        <option value="sonnet">Sonnet</option>
+                        <option value="opus">Opus</option>
+                      </optgroup>
+                      <optgroup label="OpenAI">
+                        <option value="openai/codex-mini">Codex Mini</option>
+                        <option value="openai/codex">Codex</option>
+                      </optgroup>
+                      <optgroup label="MiniMax">
+                        <option value="minimax/m2.5">M2.5</option>
+                      </optgroup>
+                      <optgroup label="Google">
+                        <option value="google/gemini-2.5-pro">Gemini 2.5</option>
+                      </optgroup>
                     </select>
                     <button
                       type="button"
