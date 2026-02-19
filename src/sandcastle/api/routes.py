@@ -150,9 +150,15 @@ async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, i
         # Fallback to disk and auto-import
         yaml_content = _load_workflow_yaml(request.workflow_name)
         try:
-            ver = await _auto_import_workflow(request.workflow_name, yaml_content)
+            ver = await _auto_import_workflow(
+                request.workflow_name, yaml_content
+            )
             return (yaml_content, ver)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Auto-import failed for workflow '%s': %s",
+                request.workflow_name, e,
+            )
             return (yaml_content, None)
     raise ValueError("Either 'workflow' or 'workflow_name' must be provided")
 
@@ -246,7 +252,12 @@ async def _load_workflow_from_registry(
 
 
 async def _auto_import_workflow(name: str, yaml_content: str) -> int:
-    """Auto-import a disk workflow into the registry as v1 production."""
+    """Auto-import a disk workflow into the registry as v1 production.
+
+    Uses IntegrityError catch to handle concurrent insert race conditions.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     checksum = _compute_checksum(yaml_content)
     async with async_session() as session:
         # Check if already imported
@@ -274,7 +285,11 @@ async def _auto_import_workflow(name: str, yaml_content: str) -> int:
             checksum=checksum,
         )
         session.add(wv)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Another request already created it - that's fine
+            await session.rollback()
         return 1
 
 

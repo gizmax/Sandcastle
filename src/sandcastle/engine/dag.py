@@ -492,67 +492,11 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     )
 
 
-def parse(yaml_path: str) -> WorkflowDefinition:
-    """Parse a workflow YAML file into a WorkflowDefinition."""
-    path = Path(yaml_path)
-    with path.open() as f:
-        data = yaml.safe_load(f)
-
-    sandstorm_url = _resolve_env_vars(data.get("sandstorm_url", "http://localhost:8000"))
-    default_model = data.get("default_model", "sonnet")
-    default_max_turns = data.get("default_max_turns", 10)
-    default_timeout = data.get("default_timeout", 300)
-
-    defaults = {
-        "model": default_model,
-        "max_turns": default_max_turns,
-        "timeout": default_timeout,
-    }
-
-    steps = [_parse_step(s, defaults) for s in data.get("steps", [])]
-
-    on_complete = None
-    if "on_complete" in data:
-        oc = data["on_complete"]
-        on_complete = CompletionConfig(
-            webhook=_resolve_env_vars(oc["webhook"]) if oc.get("webhook") else None,
-            storage_path=oc.get("storage_path"),
-        )
-
-    on_failure = None
-    if "on_failure" in data:
-        of = data["on_failure"]
-        on_failure = FailureConfig(
-            dead_letter=of.get("dead_letter", False),
-            webhook=_resolve_env_vars(of["webhook"]) if of.get("webhook") else None,
-        )
-
-    schedule = data.get("schedule")
-
-    # Parse global policies
-    global_policies = [_parse_policy(p) for p in data.get("policies", [])]
-
-    return WorkflowDefinition(
-        name=data["name"],
-        description=data.get("description", ""),
-        sandstorm_url=sandstorm_url,
-        default_model=default_model,
-        default_max_turns=default_max_turns,
-        default_timeout=default_timeout,
-        steps=steps,
-        input_schema=data.get("input_schema"),
-        on_complete=on_complete,
-        on_failure=on_failure,
-        schedule=schedule,
-        policies=global_policies,
+def _parse_raw(data: dict) -> WorkflowDefinition:
+    """Parse a raw YAML dict into a WorkflowDefinition."""
+    sandstorm_url = _resolve_env_vars(
+        data.get("sandstorm_url", "http://localhost:8000")
     )
-
-
-def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
-    """Parse a workflow from a YAML string (for API submissions)."""
-    data = yaml.safe_load(yaml_content)
-
-    sandstorm_url = _resolve_env_vars(data.get("sandstorm_url", "http://localhost:8000"))
     default_model = data.get("default_model", "sonnet")
     default_max_turns = data.get("default_max_turns", 10)
     default_timeout = data.get("default_timeout", 300)
@@ -569,7 +513,9 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
     if "on_complete" in data:
         oc = data["on_complete"]
         on_complete = CompletionConfig(
-            webhook=_resolve_env_vars(oc["webhook"]) if oc.get("webhook") else None,
+            webhook=(
+                _resolve_env_vars(oc["webhook"]) if oc.get("webhook") else None
+            ),
             storage_path=oc.get("storage_path"),
         )
 
@@ -578,10 +524,11 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
         of = data["on_failure"]
         on_failure = FailureConfig(
             dead_letter=of.get("dead_letter", False),
-            webhook=_resolve_env_vars(of["webhook"]) if of.get("webhook") else None,
+            webhook=(
+                _resolve_env_vars(of["webhook"]) if of.get("webhook") else None
+            ),
         )
 
-    # Parse global policies
     global_policies = [_parse_policy(p) for p in data.get("policies", [])]
 
     return WorkflowDefinition(
@@ -598,6 +545,20 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
         schedule=data.get("schedule"),
         policies=global_policies,
     )
+
+
+def parse(yaml_path: str) -> WorkflowDefinition:
+    """Parse a workflow YAML file into a WorkflowDefinition."""
+    path = Path(yaml_path)
+    with path.open() as f:
+        data = yaml.safe_load(f)
+    return _parse_raw(data)
+
+
+def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
+    """Parse a workflow from a YAML string (for API submissions)."""
+    data = yaml.safe_load(yaml_content)
+    return _parse_raw(data)
 
 
 def validate(workflow: WorkflowDefinition) -> list[str]:
