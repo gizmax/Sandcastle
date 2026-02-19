@@ -56,6 +56,10 @@ const MODEL_STYLES: Record<string, string> = {
   haiku: "bg-success/10 text-success border-success/30",
   sonnet: "bg-accent/10 text-accent border-accent/30",
   opus: "bg-purple-500/10 text-purple-400 border-purple-500/30",
+  "minimax/m2.5": "bg-indigo-500/10 text-indigo-400 border-indigo-500/30",
+  "openai/codex-mini": "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+  "openai/codex": "bg-green-500/10 text-green-400 border-green-500/30",
+  "google/gemini-2.5-pro": "bg-blue-500/10 text-blue-400 border-blue-500/30",
 };
 
 export default function OptimizerPage() {

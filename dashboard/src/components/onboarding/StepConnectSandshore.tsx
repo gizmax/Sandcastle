@@ -4,11 +4,11 @@ import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 
-interface StepConnectSandstormProps {
+interface StepConnectSandshoreProps {
   onComplete: () => void;
 }
 
-export function StepConnectSandstorm({ onComplete }: StepConnectSandstormProps) {
+export function StepConnectSandshore({ onComplete }: StepConnectSandshoreProps) {
   const [testing, setTesting] = useState(false);
   const [connected, setConnected] = useState(false);
   const { info } = useRuntimeInfo();
@@ -32,9 +32,9 @@ export function StepConnectSandstorm({ onComplete }: StepConnectSandstormProps) 
         <Server className="h-8 w-8 text-accent" />
       </div>
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Connect to Sandstorm</h2>
+        <h2 className="text-lg font-semibold text-foreground">Connect to Sandshore</h2>
         <p className="mt-1 text-sm text-muted">
-          Verify that your Sandstorm instance is running and accessible.
+          Verify that your Sandshore runtime is running and accessible.
         </p>
       </div>
 
@@ -52,6 +52,8 @@ export function StepConnectSandstorm({ onComplete }: StepConnectSandstormProps) 
             <span>{info.queue}</span>
             <span className="text-border">|</span>
             <span>{info.storage}</span>
+            <span className="text-border">|</span>
+            <span className="capitalize">{info.sandbox_backend}</span>
           </div>
         </div>
       )}

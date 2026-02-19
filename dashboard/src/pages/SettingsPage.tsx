@@ -16,6 +16,7 @@ import {
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { cn } from "@/lib/utils";
+import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 
 // -- Types ------------------------------------------------------------------
 
@@ -181,6 +182,7 @@ export default function SettingsPage() {
   const [savingSections, setSavingSections] = useState<Set<SectionName>>(new Set());
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
+  const { info: runtimeInfo } = useRuntimeInfo();
 
   // Keep a snapshot of the original values for dirty checking
   const originalRef = useRef<SettingsData | null>(null);
@@ -308,12 +310,12 @@ export default function SettingsPage() {
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
-        setToast({ message: "Connection to Sandstorm successful", type: "success" });
+        setToast({ message: "Connection to Sandshore successful", type: "success" });
       } else {
-        setToast({ message: `Sandstorm returned HTTP ${res.status}`, type: "error" });
+        setToast({ message: `Sandshore returned HTTP ${res.status}`, type: "error" });
       }
     } catch {
-      setToast({ message: "Could not reach Sandstorm at this URL", type: "error" });
+      setToast({ message: "Could not reach Sandshore at this URL", type: "error" });
     }
     setTestingConnection(false);
   }, [settings]);
@@ -356,11 +358,11 @@ export default function SettingsPage() {
       <SectionCard
         icon={Link}
         title="Connections"
-        description="Configure the upstream Sandstorm server URL"
+        description="Configure the upstream Sandshore runtime URL"
       >
         <div className="space-y-3">
           <div>
-            <FieldLabel htmlFor="sandstorm_url">Sandstorm URL</FieldLabel>
+            <FieldLabel htmlFor="sandstorm_url">Sandshore URL</FieldLabel>
             <div className="flex gap-2">
               <input
                 id="sandstorm_url"
@@ -424,6 +426,36 @@ export default function SettingsPage() {
               value={settings.e2b_api_key}
               onChange={(e) => updateField("e2b_api_key", e.target.value)}
               placeholder={originalRef.current?.e2b_api_key || "e2b_..."}
+            />
+          </div>
+          <div>
+            <FieldLabel htmlFor="openai_api_key_hint">OpenAI API Key</FieldLabel>
+            <input
+              id="openai_api_key_hint"
+              type="text"
+              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
+              readOnly
+              placeholder="Set via OPENAI_API_KEY env var"
+            />
+          </div>
+          <div>
+            <FieldLabel htmlFor="minimax_api_key_hint">MiniMax API Key</FieldLabel>
+            <input
+              id="minimax_api_key_hint"
+              type="text"
+              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
+              readOnly
+              placeholder="Set via MINIMAX_API_KEY env var"
+            />
+          </div>
+          <div>
+            <FieldLabel htmlFor="openrouter_api_key_hint">OpenRouter API Key</FieldLabel>
+            <input
+              id="openrouter_api_key_hint"
+              type="text"
+              className={cn(inputClass, "bg-border/30 cursor-not-allowed")}
+              readOnly
+              placeholder="Set via OPENROUTER_API_KEY env var"
             />
           </div>
           <HelperText>Leave empty to keep the current value. Values are masked for security.</HelperText>
@@ -644,6 +676,15 @@ export default function SettingsPage() {
               {settings.is_local_mode ? "Local" : "Production"}
             </span>
           </div>
+
+          {runtimeInfo && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">Sandbox Backend</span>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent/15 border border-accent/30 text-accent capitalize">
+                {runtimeInfo.sandbox_backend}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
             <div>

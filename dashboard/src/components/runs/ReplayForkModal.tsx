@@ -112,9 +112,21 @@ export function ReplayForkModal({
                   )}
                 >
                   <option value="">Keep original</option>
-                  <option value="opus">Opus</option>
-                  <option value="sonnet">Sonnet</option>
-                  <option value="haiku">Haiku</option>
+                  <optgroup label="Claude (Anthropic)">
+                    <option value="opus">Opus</option>
+                    <option value="sonnet">Sonnet</option>
+                    <option value="haiku">Haiku</option>
+                  </optgroup>
+                  <optgroup label="OpenAI">
+                    <option value="openai/codex-mini">Codex Mini</option>
+                    <option value="openai/codex">Codex</option>
+                  </optgroup>
+                  <optgroup label="MiniMax">
+                    <option value="minimax/m2.5">MiniMax M2.5</option>
+                  </optgroup>
+                  <optgroup label="Google">
+                    <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                  </optgroup>
                 </select>
               </div>
               <div className="w-28">
