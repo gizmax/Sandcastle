@@ -199,7 +199,7 @@ class PolicyEngine:
 
         # Build redacted output for storage/webhooks
         redacted_output = modified_output
-        if redact_targets and policy.trigger.patterns:
+        if redact_targets:
             # If any redact policy has apply_to targets, build a separately
             # redacted version from the original output
             redacted_output = copy.deepcopy(output)

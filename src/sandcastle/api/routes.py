@@ -150,9 +150,15 @@ async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, i
         # Fallback to disk and auto-import
         yaml_content = _load_workflow_yaml(request.workflow_name)
         try:
-            ver = await _auto_import_workflow(request.workflow_name, yaml_content)
+            ver = await _auto_import_workflow(
+                request.workflow_name, yaml_content
+            )
             return (yaml_content, ver)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Auto-import failed for workflow '%s': %s",
+                request.workflow_name, e,
+            )
             return (yaml_content, None)
     raise ValueError("Either 'workflow' or 'workflow_name' must be provided")
 
@@ -246,7 +252,12 @@ async def _load_workflow_from_registry(
 
 
 async def _auto_import_workflow(name: str, yaml_content: str) -> int:
-    """Auto-import a disk workflow into the registry as v1 production."""
+    """Auto-import a disk workflow into the registry as v1 production.
+
+    Uses IntegrityError catch to handle concurrent insert race conditions.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     checksum = _compute_checksum(yaml_content)
     async with async_session() as session:
         # Check if already imported
@@ -274,7 +285,11 @@ async def _auto_import_workflow(name: str, yaml_content: str) -> int:
             checksum=checksum,
         )
         session.add(wv)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Another request already created it - that's fine
+            await session.rollback()
         return 1
 
 
@@ -396,7 +411,7 @@ async def browse_directory(
     # Enforce sandbox root when configured
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
-        if not str(target).startswith(str(sandbox)):
+        if not target.is_relative_to(sandbox):
             raise HTTPException(status_code=403, detail="Path outside sandbox root")
 
     if not target.exists():
@@ -1177,9 +1192,9 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Deduplicate steps: executor creates a "running" row on start and a
-    # "completed"/"failed" row on finish. Keep only the most final record
-    # per (step_id, parallel_index).
+    # Deduplicate steps: kept for backwards compatibility with records
+    # created before the upsert fix. New records use upsert and won't
+    # have duplicates.
     _STATUS_PRIORITY = {"completed": 3, "failed": 2, "running": 1, "queued": 0}
     _dedup: dict[tuple[str, int | None], object] = {}
     for s in run.steps:
@@ -3021,7 +3036,8 @@ async def _resume_after_approval(
 
 @router.post("/api-keys")
 async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiResponse:
-    """Create a new API key. Returns the plaintext key ONCE."""
+    """Create a new API key. Returns the plaintext key ONCE. Requires admin."""
+    _require_admin(req)
     auth_tenant = get_tenant_id(req)
 
     # When auth is enabled, enforce tenant scoping
@@ -3621,6 +3637,23 @@ async def update_settings(
         for k, v in request.model_dump().items()
         if v is not None
     }
+
+    # Block mutation of security-critical settings via API
+    immutable = {"auth_required", "webhook_secret", "database_url", "redis_url"}
+    blocked = immutable & updates.keys()
+    if blocked:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="IMMUTABLE_SETTING",
+                    message=(
+                        f"Settings {', '.join(sorted(blocked))} "
+                        "can only be changed via environment variables"
+                    ),
+                )
+            ).model_dump(),
+        )
 
     if not updates:
         return ApiResponse(data=_build_settings_response())

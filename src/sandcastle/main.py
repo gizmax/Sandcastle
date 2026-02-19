@@ -106,6 +106,29 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Scheduler disabled (SCHEDULER_ENABLED=false)")
 
+    # Warn when authentication is disabled
+    if not settings.auth_required:
+        logger.warning(
+            "Authentication is DISABLED. All API endpoints are publicly accessible. "
+            "Set AUTH_REQUIRED=true for production deployments."
+        )
+
+    # Warn about placeholder credentials
+    _placeholders = {"minioadmin", "your-webhook-signing-secret", "sandcastle"}
+    _cred_warnings = []
+    if settings.webhook_secret in _placeholders:
+        _cred_warnings.append("WEBHOOK_SECRET")
+    if settings.aws_access_key_id in _placeholders:
+        _cred_warnings.append("AWS_ACCESS_KEY_ID")
+    if settings.aws_secret_access_key in _placeholders:
+        _cred_warnings.append("AWS_SECRET_ACCESS_KEY")
+    if _cred_warnings:
+        logger.warning(
+            "Placeholder credentials detected for: %s. "
+            "Set secure values via environment variables for production.",
+            ", ".join(_cred_warnings),
+        )
+
     # Bootstrap admin API key from env var (if configured and not yet in DB)
     if settings.admin_api_key:
         from sandcastle.api.auth import hash_key
@@ -154,19 +177,27 @@ app = FastAPI(
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
 # CORS (added second = outer middleware, wraps everything including auth)
+_cors_origins = [
+    settings.dashboard_origin,
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:5176",
+    "http://localhost:5177",
+    "http://localhost:5178",
+    "http://localhost:5179",
+    "http://localhost:5180",
+]
+# Wildcard + credentials is invalid per CORS spec - filter it out
+_cors_origins = [o for o in _cors_origins if o != "*"]
+if settings.dashboard_origin == "*":
+    logger.warning(
+        "DASHBOARD_ORIGIN='*' is invalid with allow_credentials=True. "
+        "Set it to your actual dashboard URL."
+    )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.dashboard_origin,
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://localhost:5177",
-        "http://localhost:5178",
-        "http://localhost:5179",
-        "http://localhost:5180",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

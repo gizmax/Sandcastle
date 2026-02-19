@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import hmac as _hmac
 import logging
+import os
 import secrets
 from datetime import datetime, timezone
 
@@ -22,10 +24,18 @@ PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc"}
 # Path prefixes that don't require authentication
 PUBLIC_PREFIXES = ("/api/templates",)
 
+# Pepper for HMAC key hashing - falls back to a stable default for dev/local mode.
+# In production, set API_KEY_PEPPER as an environment variable.
+_API_KEY_PEPPER = os.getenv("API_KEY_PEPPER", "sandcastle-default-pepper-change-in-production")
+
 
 def hash_key(key: str) -> str:
-    """Hash an API key with SHA-256."""
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+    """Hash an API key with HMAC-SHA256 using a server-side pepper."""
+    return _hmac.new(
+        _API_KEY_PEPPER.encode("utf-8"),
+        key.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def generate_api_key() -> str:

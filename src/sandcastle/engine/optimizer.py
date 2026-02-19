@@ -255,12 +255,10 @@ class CostLatencyOptimizer:
             stats_by_model: dict[str, PerformanceStats] = {}
 
             async with async_session() as session:
-                # Query from run_steps (historical data)
-                # We get avg cost and avg duration grouped by step model
-                # Note: model is not stored on run_steps directly, so we use
-                # cost as a proxy indicator for model type
+                # Query from run_steps grouped by model
                 step_q = (
                     select(
+                        RunStep.model,
                         func.avg(RunStep.cost_usd).label("avg_cost"),
                         func.avg(RunStep.duration_seconds).label("avg_duration"),
                         func.count(RunStep.id).label("count"),
@@ -268,19 +266,20 @@ class CostLatencyOptimizer:
                     .where(
                         RunStep.step_id == step_id,
                         RunStep.status == StepStatus.COMPLETED,
+                        RunStep.model.is_not(None),
                     )
+                    .group_by(RunStep.model)
                 )
                 result = await session.execute(step_q)
-                row = result.first()
-                if row and row.count > 0:
-                    # Use cost buckets as rough model indicator
-                    # < 0.02 = haiku, 0.02-0.10 = sonnet, > 0.10 = opus
-                    stats_by_model["sonnet"] = PerformanceStats(
-                        model="sonnet",
-                        avg_cost=float(row.avg_cost or 0),
-                        avg_latency=float(row.avg_duration or 0),
-                        sample_count=int(row.count),
-                    )
+                for row in result.all():
+                    if row.count > 0:
+                        model_name = row.model or "sonnet"
+                        stats_by_model[model_name] = PerformanceStats(
+                            model=model_name,
+                            avg_cost=float(row.avg_cost or 0),
+                            avg_latency=float(row.avg_duration or 0),
+                            sample_count=int(row.count),
+                        )
 
                 # Query from autopilot_samples (higher quality)
                 from sandcastle.models.db import AutoPilotExperiment

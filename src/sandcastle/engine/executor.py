@@ -232,9 +232,15 @@ async def _save_run_step(
     duration_seconds: float = 0.0,
     attempt: int = 1,
     error: str | None = None,
+    model: str | None = None,
 ) -> None:
-    """Create or update a RunStep record in the database."""
+    """Create or update a RunStep record in the database.
+
+    Uses upsert: INSERT on first call (running), UPDATE on completion/failure.
+    """
     try:
+        from sqlalchemy import select as sa_select
+
         from sandcastle.models.db import RunStep, StepStatus, async_session
 
         status_map = {
@@ -246,31 +252,59 @@ async def _save_run_step(
             "awaiting_approval": StepStatus.AWAITING_APPROVAL,
         }
 
+        now = datetime.now(timezone.utc)
+        db_status = status_map.get(status, StepStatus.PENDING)
+        output_data = (
+            output if isinstance(output, dict)
+            else {"result": output} if output else None
+        )
+
         async with async_session() as session:
-            step = RunStep(
-                run_id=uuid.UUID(run_id),
-                step_id=step_id,
-                parallel_index=parallel_index,
-                status=status_map.get(status, StepStatus.PENDING),
-                output_data=(
-                    output if isinstance(output, dict)
-                    else {"result": output} if output else None
-                ),
-                cost_usd=cost_usd,
-                duration_seconds=duration_seconds,
-                attempt=attempt,
-                error=error,
-                started_at=(
-                    datetime.now(timezone.utc) if status == "running"
-                    else None
-                ),
-                completed_at=(
-                    datetime.now(timezone.utc)
-                    if status in ("completed", "failed", "skipped")
-                    else None
-                ),
+            # Try to find existing step record (from the "running" INSERT)
+            run_uuid = uuid.UUID(run_id)
+            existing = await session.scalar(
+                sa_select(RunStep).where(
+                    RunStep.run_id == run_uuid,
+                    RunStep.step_id == step_id,
+                    RunStep.parallel_index == parallel_index,
+                )
             )
-            session.add(step)
+
+            if existing:
+                # Update existing record
+                existing.status = db_status
+                if output_data is not None:
+                    existing.output_data = output_data
+                if cost_usd:
+                    existing.cost_usd = cost_usd
+                if duration_seconds:
+                    existing.duration_seconds = duration_seconds
+                existing.attempt = attempt
+                existing.error = error
+                if model:
+                    existing.model = model
+                if status in ("completed", "failed", "skipped"):
+                    existing.completed_at = now
+            else:
+                # Create new record
+                step = RunStep(
+                    run_id=run_uuid,
+                    step_id=step_id,
+                    parallel_index=parallel_index,
+                    status=db_status,
+                    output_data=output_data,
+                    cost_usd=cost_usd,
+                    duration_seconds=duration_seconds,
+                    attempt=attempt,
+                    error=error,
+                    model=model,
+                    started_at=now if status == "running" else None,
+                    completed_at=(
+                        now if status in ("completed", "failed", "skipped")
+                        else None
+                    ),
+                )
+                session.add(step)
             await session.commit()
     except Exception as e:
         logger.warning(f"Could not save RunStep for {step_id}: {e}")
@@ -308,20 +342,35 @@ def cancel_run_local(run_id: str) -> None:
     _cancel_flags.add(run_id)
 
 
+_redis_pool = None
+
+
+async def _get_redis():
+    """Return a shared Redis connection (reused across cancel checks)."""
+    global _redis_pool
+    if _redis_pool is None:
+        import redis.asyncio as aioredis
+
+        from sandcastle.config import settings
+
+        _redis_pool = aioredis.from_url(settings.redis_url)
+    return _redis_pool
+
+
 async def _check_cancel(run_id: str) -> bool:
     """Check if a run has been cancelled via Redis flag or in-memory set."""
     from sandcastle.config import settings
 
     if not settings.redis_url:
-        # Local mode: check in-memory set
-        return run_id in _cancel_flags
+        # Local mode: check in-memory set and clean up after detection
+        if run_id in _cancel_flags:
+            _cancel_flags.discard(run_id)
+            return True
+        return False
 
     try:
-        import redis.asyncio as aioredis
-
-        r = aioredis.from_url(settings.redis_url)
+        r = await _get_redis()
         result = await r.get(f"cancel:{run_id}")
-        await r.aclose()
         return result is not None
     except Exception:
         return False
@@ -359,7 +408,7 @@ def _write_csv_output(
 
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
-        if not str(directory).startswith(str(sandbox)):
+        if not directory.is_relative_to(sandbox):
             logger.warning(
                 "csv_output directory %s is outside sandbox root %s - skipping",
                 directory, sandbox,
@@ -533,7 +582,7 @@ def _write_pdf_report(
 
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
-        if not str(directory).startswith(str(sandbox)):
+        if not directory.is_relative_to(sandbox):
             logger.warning(
                 "pdf_report directory %s is outside sandbox root %s - skipping",
                 directory, sandbox,
@@ -748,6 +797,7 @@ async def execute_step_with_retry(
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 attempt=attempt,
+                model=step.model,
             )
 
             # Broadcast step.completed event
@@ -797,6 +847,7 @@ async def execute_step_with_retry(
                 duration_seconds=result.duration_seconds,
                 attempt=attempt,
                 error=result.error,
+                model=step.model,
             )
 
             # Broadcast step.failed event
@@ -1550,7 +1601,7 @@ async def execute_workflow(
     from sandcastle.engine.storage import LocalStorage
 
     # Depth check for hierarchical workflows
-    if depth > settings.max_workflow_depth:
+    if depth >= settings.max_workflow_depth:
         return WorkflowResult(
             run_id=run_id or str(uuid.uuid4()),
             outputs={},

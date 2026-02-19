@@ -5,16 +5,53 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
+import socket
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from sandcastle.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Networks blocked for SSRF prevention
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+
+def validate_callback_url(url: str) -> str:
+    """Validate a callback URL to prevent SSRF attacks."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError(f"callback_url must use http(s), got '{parsed.scheme}'")
+    if not parsed.hostname:
+        raise ValueError("callback_url has no hostname")
+
+    try:
+        resolved = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+    except socket.gaierror as e:
+        raise ValueError(f"Cannot resolve hostname '{parsed.hostname}': {e}")
+
+    for _, _, _, _, sockaddr in resolved:
+        ip = ipaddress.ip_address(sockaddr[0])
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise ValueError(
+                    f"callback_url resolves to blocked network ({ip})"
+                )
+    return url
 
 
 async def dispatch_webhook(
@@ -33,6 +70,12 @@ async def dispatch_webhook(
 
     Returns True if the webhook was delivered successfully.
     """
+    # Validate URL to prevent SSRF
+    try:
+        validate_callback_url(url)
+    except ValueError as e:
+        logger.error(f"Webhook URL validation failed: {e}")
+        return False
     payload = {
         "event": event,
         "run_id": run_id,

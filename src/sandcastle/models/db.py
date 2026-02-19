@@ -132,6 +132,7 @@ class RunStep(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sub_run_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     policy_violations_count: Mapped[int] = mapped_column(Integer, default=0)
     policy_actions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
