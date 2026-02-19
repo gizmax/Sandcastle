@@ -554,6 +554,168 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
     mcp_main()
 
 
+def _cmd_doctor(args: argparse.Namespace) -> None:
+    """Run local diagnostics - no running server needed."""
+    from pathlib import Path
+    import importlib
+    import socket
+
+    failures = 0
+
+    def _pass(msg: str) -> None:
+        print(f"  {_color('[PASS]', _C.GREEN)} {msg}")
+
+    def _warn(msg: str) -> None:
+        print(f"  {_color('[WARN]', _C.YELLOW)} {msg}")
+
+    def _fail(msg: str) -> None:
+        nonlocal failures
+        failures += 1
+        print(f"  {_color('[FAIL]', _C.RED)} {msg}")
+
+    # --- Section 1: Configuration ---
+    print()
+    print(_color("  Configuration", _C.BOLD))
+    print(_color("  -------------", _C.BOLD))
+
+    env_path = Path(".env")
+    if env_path.exists():
+        _pass(".env file found")
+    else:
+        _warn(".env file not found (using defaults/environment)")
+
+    try:
+        from sandcastle.config import Settings
+        cfg = Settings()
+        _pass("Settings loaded successfully")
+    except Exception as e:
+        _fail(f"Settings failed to load: {e}")
+        cfg = None
+
+    if cfg:
+        if cfg.anthropic_api_key:
+            _pass(f"ANTHROPIC_API_KEY configured ({cfg.anthropic_api_key[:8]}...)")
+        else:
+            _fail("ANTHROPIC_API_KEY not set")
+
+        if cfg.e2b_api_key:
+            _pass(f"E2B_API_KEY configured ({cfg.e2b_api_key[:8]}...)")
+        else:
+            _warn("E2B_API_KEY not set (needed for e2b backend)")
+
+    # --- Section 2: Providers & Models ---
+    print()
+    print(_color("  Providers & Models", _C.BOLD))
+    print(_color("  ------------------", _C.BOLD))
+
+    from sandcastle.engine.providers import (
+        PROVIDER_REGISTRY,
+        get_api_key,
+        get_failover,
+    )
+
+    failover = get_failover()
+    status = failover.get_status()
+
+    for model_name, model_info in PROVIDER_REGISTRY.items():
+        key = get_api_key(model_info)
+        if key:
+            avail = "available" if failover.is_available(model_info.api_key_env) else "on cooldown"
+            _pass(f"{model_name} ({model_info.provider}) - {avail}")
+        else:
+            _warn(f"{model_name} ({model_info.provider}) - key not configured")
+
+    if status["active_cooldowns"]:
+        for env_key, remaining in status["active_cooldowns"].items():
+            _warn(f"{env_key} on cooldown ({remaining}s remaining)")
+
+    # --- Section 3: Sandbox Backend ---
+    print()
+    print(_color("  Sandbox Backend", _C.BOLD))
+    print(_color("  ---------------", _C.BOLD))
+
+    backend = cfg.sandbox_backend if cfg else "e2b"
+    _pass(f"Backend: {backend}")
+
+    if backend == "e2b":
+        try:
+            import e2b  # noqa: F401
+            _pass("E2B SDK installed")
+        except ImportError:
+            _fail("E2B SDK not installed (pip install e2b)")
+    elif backend == "docker":
+        try:
+            import aiodocker  # noqa: F401
+            _pass("aiodocker installed")
+        except ImportError:
+            _fail("aiodocker not installed (pip install aiodocker)")
+        import shutil
+        if shutil.which("docker"):
+            _pass("Docker CLI found")
+        else:
+            _warn("Docker CLI not found in PATH")
+    elif backend == "local":
+        import shutil
+        if shutil.which("node"):
+            _pass("Node.js found")
+        else:
+            _fail("Node.js not found in PATH (required for runners)")
+    elif backend == "cloudflare":
+        if cfg and cfg.cloudflare_worker_url:
+            _pass(f"CF Worker URL: {cfg.cloudflare_worker_url}")
+        else:
+            _fail("CLOUDFLARE_WORKER_URL not configured")
+
+    # --- Section 4: Dependencies ---
+    print()
+    print(_color("  Dependencies", _C.BOLD))
+    print(_color("  ------------", _C.BOLD))
+
+    required_pkgs = ["fastapi", "uvicorn", "httpx", "pydantic", "pydantic_settings", "httpx_sse"]
+    optional_pkgs = {"mcp": "MCP server", "aiodocker": "Docker backend", "arq": "Redis worker"}
+
+    for pkg in required_pkgs:
+        try:
+            importlib.import_module(pkg)
+            _pass(f"{pkg}")
+        except ImportError:
+            _fail(f"{pkg} not installed")
+
+    for pkg, desc in optional_pkgs.items():
+        try:
+            importlib.import_module(pkg)
+            _pass(f"{pkg} ({desc})")
+        except ImportError:
+            _warn(f"{pkg} not installed ({desc})")
+
+    # --- Section 5: Network ---
+    print()
+    print(_color("  Network", _C.BOLD))
+    print(_color("  -------", _C.BOLD))
+
+    port = 8080
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(("127.0.0.1", port))
+            if result != 0:
+                _pass(f"Port {port} is available")
+            else:
+                _warn(f"Port {port} is already in use")
+    except OSError:
+        _pass(f"Port {port} is available")
+
+    # --- Summary ---
+    print()
+    if failures == 0:
+        print(_color("  All checks passed!", _C.GREEN))
+    else:
+        print(_color(f"  {failures} check(s) failed", _C.RED))
+    print()
+
+    sys.exit(1 if failures else 0)
+
+
 def _cmd_health(args: argparse.Namespace) -> None:
     """Check the API server health."""
     client = _get_client(args)
@@ -802,6 +964,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_connection_args(p_mcp)
 
+    # --- doctor ---
+    subparsers.add_parser("doctor", help="Run local diagnostics")
+
     return parser
 
 
@@ -830,6 +995,7 @@ def main() -> None:
         "worker": _cmd_worker,
         "health": _cmd_health,
         "mcp": _cmd_mcp,
+        "doctor": _cmd_doctor,
     }
 
     handler = dispatch.get(args.command)

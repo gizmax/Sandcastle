@@ -15,10 +15,13 @@ import logging
 from dataclasses import dataclass
 from typing import AsyncIterator
 
+import re
+
 import httpx
 from httpx_sse import aconnect_sse
 
 from sandcastle.engine.backends import SandboxBackend, SSEEvent, create_backend
+from sandcastle.engine.providers import get_failover
 
 logger = logging.getLogger(__name__)
 
@@ -216,12 +219,30 @@ class SandshoreRuntime:
 
         return envs, runner_file, use_claude_runner
 
-    async def _stream_backend(
+    @staticmethod
+    def _is_retriable_provider_error(error_msg: str) -> bool:
+        """Return True if *error_msg* indicates a retriable provider error (429/5xx)."""
+        msg = error_msg.lower()
+        # Rate limit patterns
+        if "429" in msg or "rate limit" in msg or "too many requests" in msg:
+            return True
+        # 5xx patterns
+        if re.search(r"\b50[0-4]\b", msg):
+            return True
+        if "server error" in msg or "overloaded" in msg or "capacity" in msg:
+            return True
+        return False
+
+    async def _stream_backend_once(
         self,
         request: dict,
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
-        """Execute via the pluggable backend with semaphore + cancellation."""
+        """Execute via the pluggable backend with semaphore + cancellation.
+
+        Detects retriable SSE error events and raises ``SandshoreError``
+        instead of yielding them, so the failover wrapper can catch and retry.
+        """
         envs, runner_file, use_claude_runner = self._build_env(request)
 
         try:
@@ -237,6 +258,13 @@ class SandshoreRuntime:
                         logger.info("Cancellation requested, stopping backend")
                         cancelled = True
                         break
+
+                    # Detect retriable provider errors in SSE error events
+                    if event.event == "error" or event.data.get("type") == "error":
+                        error_msg = event.data.get("error", "")
+                        if self._is_retriable_provider_error(error_msg):
+                            raise SandshoreError(error_msg)
+
                     yield event
 
                 if cancelled:
@@ -248,6 +276,73 @@ class SandshoreRuntime:
             raise SandshoreError(
                 f"Sandbox backend '{self._backend.name}' execution failed: {e}"
             ) from e
+
+    async def _stream_backend(
+        self,
+        request: dict,
+        cancel_event: asyncio.Event | None = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """Execute with automatic model failover on retriable errors."""
+        from sandcastle.engine.providers import resolve_model
+
+        model_str = request.get("model", "sonnet")
+        failover = get_failover()
+
+        # Try primary model
+        try:
+            async for event in self._stream_backend_once(
+                request, cancel_event=cancel_event
+            ):
+                yield event
+            return
+        except SandshoreError as exc:
+            if not self._is_retriable_provider_error(str(exc)):
+                raise
+            # Mark the primary model's key on cooldown
+            try:
+                info = resolve_model(model_str)
+                failover.mark_cooldown(info.api_key_env)
+                logger.warning(
+                    "Model '%s' hit retriable error: %s - trying alternatives",
+                    model_str, exc,
+                )
+            except KeyError:
+                raise exc
+
+        # Try alternatives
+        alternatives = failover.get_alternatives(model_str)
+        if not alternatives:
+            raise SandshoreError(
+                f"Model '{model_str}' is rate-limited and no alternatives are available"
+            )
+
+        last_error: SandshoreError | None = None
+        for alt_model in alternatives:
+            alt_request = {**request, "model": alt_model}
+            try:
+                logger.info("Failing over from '%s' to '%s'", model_str, alt_model)
+                async for event in self._stream_backend_once(
+                    alt_request, cancel_event=cancel_event
+                ):
+                    yield event
+                return
+            except SandshoreError as exc:
+                last_error = exc
+                if self._is_retriable_provider_error(str(exc)):
+                    try:
+                        alt_info = resolve_model(alt_model)
+                        failover.mark_cooldown(alt_info.api_key_env)
+                    except KeyError:
+                        pass
+                    logger.warning(
+                        "Alternative '%s' also failed: %s", alt_model, exc,
+                    )
+                    continue
+                raise
+
+        raise SandshoreError(
+            f"All failover alternatives exhausted for '{model_str}': {last_error}"
+        )
 
     # ------------------------------------------------------------------
     # HTTP proxy fallback (Sandstorm-compatible)
