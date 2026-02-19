@@ -319,21 +319,102 @@
       user-select: none;
     }
 
-    .quickstart-note {
-      margin-top: 16px;
+    .quickstart-footer {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    .quickstart-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .quickstart-step {
+      padding: 20px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      text-align: left;
+    }
+
+    .quickstart-step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+
+    .quickstart-step-title {
       font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .quickstart-step-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    .quickstart-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .quickstart-divider::before,
+    .quickstart-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .quickstart-divider span {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
       color: var(--text-dim);
     }
 
-    .quickstart-note strong {
+    .quickstart-alt {
+      margin-top: 16px;
+      padding: 14px 20px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      text-align: left;
+    }
+
+    .quickstart-alt code {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+      font-size: 13px;
       color: var(--text-muted);
+      word-break: break-all;
+    }
+
+    .quickstart-alt code .prompt {
+      color: var(--accent);
+      user-select: none;
     }
 
     .mode-pills {
       display: flex;
       justify-content: center;
       gap: 12px;
-      margin-top: 20px;
+      margin-top: 24px;
       flex-wrap: wrap;
     }
 
@@ -354,6 +435,12 @@
       height: 6px;
       border-radius: 50%;
       background: var(--accent);
+    }
+
+    @media (max-width: 600px) {
+      .quickstart-steps {
+        grid-template-columns: 1fr;
+      }
     }
 
     /* ---- SECTIONS ---- */
@@ -1257,7 +1344,7 @@
             <span class="yaml-dot yaml-dot--yellow"></span>
             <span class="yaml-dot yaml-dot--green"></span>
           </div>
-          <span class="label">Quick Start</span>
+          <span class="label">Terminal</span>
         </div>
         <div class="quickstart-body">
           <code>
@@ -1267,16 +1354,36 @@
           </code>
         </div>
       </div>
-      <p class="quickstart-note">
-        Three commands. <code>init</code> asks for your API keys, picks a sandbox backend, and writes <code>.env</code>. No PostgreSQL, Redis, or S3 needed - Sandcastle auto-detects empty config and starts in <strong>local mode</strong> with SQLite + in-process queue.
-      </p>
-      <p class="quickstart-note" style="margin-top: 8px;">
-        Or from source: <code style="background:var(--surface);padding:2px 8px;border-radius:4px;font-size:0.9em;color:var(--text-muted);">git clone https://github.com/gizmax/Sandcastle.git && cd Sandcastle && uv sync && uv run sandcastle serve</code>
-      </p>
-      <div class="mode-pills">
-        <span class="mode-pill"><span class="dot"></span> SQLite database</span>
-        <span class="mode-pill"><span class="dot"></span> In-process queue</span>
-        <span class="mode-pill"><span class="dot"></span> Filesystem storage</span>
+
+      <div class="quickstart-footer">
+        <div class="quickstart-steps">
+          <div class="quickstart-step">
+            <div class="quickstart-step-num">1</div>
+            <div class="quickstart-step-title">Install</div>
+            <div class="quickstart-step-desc">One pip install. No database, no Redis, no S3 - everything runs locally.</div>
+          </div>
+          <div class="quickstart-step">
+            <div class="quickstart-step-num">2</div>
+            <div class="quickstart-step-title">Configure</div>
+            <div class="quickstart-step-desc">Interactive wizard asks for API keys, picks a sandbox backend, writes <code>.env</code>.</div>
+          </div>
+          <div class="quickstart-step">
+            <div class="quickstart-step-num">3</div>
+            <div class="quickstart-step-title">Run</div>
+            <div class="quickstart-step-desc">API + dashboard on one port. 23 workflow templates included. Ready to go.</div>
+          </div>
+        </div>
+
+        <div class="mode-pills">
+          <span class="mode-pill"><span class="dot"></span> Zero infrastructure</span>
+          <span class="mode-pill"><span class="dot"></span> Auto-detects local vs production</span>
+          <span class="mode-pill"><span class="dot"></span> Scale when ready</span>
+        </div>
+
+        <div class="quickstart-divider"><span>or from source</span></div>
+        <div class="quickstart-alt">
+          <code><span class="prompt">$</span> git clone https://github.com/gizmax/Sandcastle.git && cd Sandcastle && uv sync && uv run sandcastle serve</code>
+        </div>
       </div>
     </div>
   </section>
