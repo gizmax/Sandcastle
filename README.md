@@ -20,6 +20,37 @@
 
 ---
 
+## Table of Contents
+
+- [Why Sandcastle?](#why-sandcastle)
+- [Start Local. Scale When Ready.](#start-local-scale-when-ready)
+- [Quickstart](#quickstart)
+- [Features](#features)
+- [Pluggable Sandbox Backends](#pluggable-sandbox-backends)
+- [Multi-Provider Model Routing](#multi-provider-model-routing)
+- [Workflow Engine](#workflow-engine)
+- [Human Approval Gates](#human-approval-gates)
+- [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
+- [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
+- [Policy Engine](#policy-engine)
+- [Cost-Latency Optimizer](#cost-latency-optimizer)
+- [Directory Input & CSV Export](#directory-input--csv-export)
+- [23 Built-in Workflow Templates](#23-built-in-workflow-templates)
+- [Real-time Event Stream](#real-time-event-stream)
+- [Run Time Machine](#run-time-machine)
+- [Budget Guardrails](#budget-guardrails)
+- [Dashboard](#dashboard)
+- [API Reference](#api-reference)
+- [Multi-Tenant Auth](#multi-tenant-auth)
+- [Webhooks](#webhooks)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
+
+---
+
 ## Why Sandcastle?
 
 AI agent frameworks give you building blocks - LLM calls, tool use, maybe a graph. But when you start building real products, the glue code piles up fast:
@@ -1154,70 +1185,51 @@ Header: `X-Sandcastle-Signature` for verification against your `WEBHOOK_SECRET`.
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    App["Your App"] -->|"POST /api/workflows/run"| API["Sandcastle API\n(FastAPI)"]
+    API --> Engine["Workflow Engine\n(DAG executor)"]
+
+    Engine --> Standard["Standard Steps"]
+    Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
+
+    Standard --> Sandshore["Sandshore Runtime\n(pluggable backends)"]
+    Sub --> Child["Child Engine"]
+    Child --> SandshoreChild["Sandshore (child)"]
+
+    Sandshore --> E2B["E2B\n(cloud)"]
+    Sandshore --> Docker["Docker\n(local)"]
+    Sandshore --> Local["Local\n(subprocess)"]
+    Sandshore --> CF["Cloudflare\n(edge)"]
+    SandshoreChild --> E2B2["Sandbox (child)"]
+
+    E2B --> Execution
+    Docker --> Execution
+    Local --> Execution
+    CF --> Execution
+    E2B2 --> Merge
+
+    Execution["Parallel Execution"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
+
+    Provider --> Gate{"Approval\nGate?"}
+
+    Gate -->|"Pause"| Review["Approve / Reject / Skip"]
+    Gate -->|"Continue"| AutoPilot
+
+    Review --> AutoPilot["AutoPilot\nA/B test variants"]
+    AutoPilot --> Policy["Policy Engine\nPII redact / block / alert"]
+    Policy --> Optimizer["SLO Optimizer\nRoute to best model"]
+
+    Optimizer --> Merge((" "))
+
+    Merge --> LocalMode["Local Mode\nSQLite / In-process queue / Filesystem"]
+    Merge --> ProdMode["Production Mode\nPostgreSQL / Redis (arq) / S3"]
+    Merge --> BothModes["Both Modes\nWebhooks / SSE Stream / APScheduler"]
 ```
-Your App --POST /api/workflows/run--> Sandcastle API (FastAPI)
-                                       |
-                               +-------+--------+
-                               |  Workflow Engine |
-                               |  (DAG executor) |
-                               +-------+--------+
-                                       |
-                            +----------+-----------+
-                            |                      |
-                     Standard Steps          Sub-Workflow Steps
-                            |              (recursive execution)
-                     +------+------+               |
-                     v      v      v        +------+------+
-              Sandshore Runtime              | Child Engine |
-           (pluggable backends)              +------+------+
-                     |                              |
-          +----------+----------+           Sandshore (child)
-          |     |      |       |                   |
-        E2B  Docker  Local  Cloudflare      Sandbox (child)
-          |     |      |       |
-          v     v      v       v
-       Sandboxes (parallel execution)
-                     |
-          +----[Approval Gate?]----+
-          |                        |
-        Pause               Continue
-     (wait for              (auto)
-      human)                   |
-          |          [Multi-Provider Router]
-          v          Claude / OpenAI / MiniMax / Gemini
-     Approve/              |
-     Reject/     [AutoPilot?]
-     Skip        Pick variant
-                       |
-                 Evaluate quality
-                       |
-                 [Policy Engine]
-                 PII redact /
-                 block / alert
-                       |
-                 [SLO Optimizer]
-                 Route to best
-                 model by SLO
-                       |
-             +---------------------+---------------------+
-             |                     |                      |
-        Local Mode            Production Mode        Both Modes
-             |                     |                      |
-         SQLite              PostgreSQL              Webhooks
-      (auto-created)       (runs, keys,            SSE Stream
-       In-process           approvals,             APScheduler
-        queue               experiments,
-       Filesystem           violations,
-                             routing,
-                             checkpoints)
-                                   |
-                              Redis (arq)
-                            (job queue,
-                            cancel flags)
-                                   |
-                              S3 / MinIO
-                           (persistent storage)
-```
+
+- **Local mode** - auto-created SQLite, in-process asyncio queue, and local filesystem. Zero dependencies.
+- **Production mode** - PostgreSQL (runs, API keys, approvals, experiments, violations, routing decisions, checkpoints), Redis via arq (job queue, cancel flags), and S3/MinIO for persistent artifact storage.
+- **Both modes** - HMAC-signed webhooks, SSE event streaming, and APScheduler for cron-based scheduling.
 
 ### Tech Stack
 
