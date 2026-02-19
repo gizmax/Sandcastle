@@ -48,6 +48,7 @@ export default function RunDetailPage() {
   const navigate = useNavigate();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [inputExpanded, setInputExpanded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -60,7 +61,16 @@ export default function RunDetailPage() {
     if (!id) return;
     try {
       const res = await api.get<RunDetail>(`/runs/${id}`);
-      if (res.data) setRun(res.data);
+      if (res.data) {
+        setRun(res.data);
+        setError(null);
+      } else if (res.error) {
+        setError(res.error.message || "Failed to load run");
+      } else {
+        setError("Run not found");
+      }
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -171,8 +181,15 @@ export default function RunDetailPage() {
 
   if (!run) {
     return (
-      <div className="py-16 text-center">
-        <p className="text-muted">Run not found</p>
+      <div className="py-16 text-center space-y-3">
+        <p className="text-muted">{error || "Run not found"}</p>
+        <button
+          onClick={() => navigate("/runs")}
+          className="inline-flex items-center gap-1 text-sm text-accent hover:text-accent/80 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Runs
+        </button>
       </div>
     );
   }
