@@ -915,6 +915,86 @@
       border: 1px solid var(--border);
     }
 
+    /* ---- COMPAT STRIPS ---- */
+    .compat-strips {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      margin-top: 56px;
+    }
+
+    .compat-strip-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+
+    .compat-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .compat-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .compat-badge:hover {
+      border-color: var(--border-light);
+      transform: translateY(-1px);
+    }
+
+    .compat-badge-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .compat-badge-text {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .compat-badge-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .compat-badge-desc {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Provider colors */
+    .badge-claude .compat-badge-icon { background: rgba(204, 120, 50, 0.15); color: #cc7832; }
+    .badge-openai .compat-badge-icon { background: rgba(16, 163, 127, 0.15); color: #10a37f; }
+    .badge-minimax .compat-badge-icon { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+    .badge-gemini .compat-badge-icon { background: rgba(66, 133, 244, 0.15); color: #4285f4; }
+
+    /* Backend colors */
+    .badge-e2b .compat-badge-icon { background: rgba(245, 158, 11, 0.15); color: var(--accent); }
+    .badge-docker .compat-badge-icon { background: rgba(29, 99, 237, 0.15); color: #1d63ed; }
+    .badge-local .compat-badge-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+    .badge-cf .compat-badge-icon { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+
     /* ---- RESPONSIVE ---- */
     @media (max-width: 900px) {
       .features-grid {
@@ -1144,16 +1224,6 @@
           <p>SLO-based model routing. Define quality, cost, and latency constraints - let the optimizer pick the model.</p>
         </div>
         <div class="feature-card">
-          <span class="feature-icon">🔌</span>
-          <h3>Pluggable Backends</h3>
-          <p>E2B cloud, Docker local, Cloudflare edge, or bare subprocess. Switch sandbox providers without changing workflows.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🤖</span>
-          <h3>Multi-Provider Models</h3>
-          <p>Claude, OpenAI, MiniMax, Google Gemini - mix providers per step. Use expensive models where they matter, cheap ones everywhere else.</p>
-        </div>
-        <div class="feature-card">
           <span class="feature-icon">🚀</span>
           <h3>Zero-Config Local Mode</h3>
           <p><code>sandcastle init</code> + <code>sandcastle serve</code>. Auto-detects local vs production - SQLite or PostgreSQL, in-process or Redis.</p>
@@ -1177,6 +1247,76 @@
           <span class="feature-icon">📡</span>
           <h3>Real-time Updates</h3>
           <p>Live SSE event stream. See runs complete, steps execute, and errors appear instantly. No page refresh needed.</p>
+        </div>
+      </div>
+
+      <!-- Compat strips -->
+      <div class="compat-strips">
+        <div>
+          <div class="compat-strip-label">Supported AI Providers</div>
+          <div class="compat-strip">
+            <div class="compat-badge badge-claude">
+              <div class="compat-badge-icon">C</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">Claude</span>
+                <span class="compat-badge-desc">Opus, Sonnet, Haiku</span>
+              </div>
+            </div>
+            <div class="compat-badge badge-openai">
+              <div class="compat-badge-icon">O</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">OpenAI</span>
+                <span class="compat-badge-desc">Codex, Codex Mini</span>
+              </div>
+            </div>
+            <div class="compat-badge badge-minimax">
+              <div class="compat-badge-icon">M</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">MiniMax</span>
+                <span class="compat-badge-desc">M2.5</span>
+              </div>
+            </div>
+            <div class="compat-badge badge-gemini">
+              <div class="compat-badge-icon">G</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">Google Gemini</span>
+                <span class="compat-badge-desc">via OpenRouter</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="compat-strip-label">Sandbox Backends</div>
+          <div class="compat-strip">
+            <div class="compat-badge badge-e2b">
+              <div class="compat-badge-icon">E</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">E2B</span>
+                <span class="compat-badge-desc">Cloud sandboxes (default)</span>
+              </div>
+            </div>
+            <div class="compat-badge badge-docker">
+              <div class="compat-badge-icon">D</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">Docker</span>
+                <span class="compat-badge-desc">Local containers</span>
+              </div>
+            </div>
+            <div class="compat-badge badge-local">
+              <div class="compat-badge-icon">L</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">Local</span>
+                <span class="compat-badge-desc">Subprocess (dev only)</span>
+              </div>
+            </div>
+            <div class="compat-badge badge-cf">
+              <div class="compat-badge-icon">CF</div>
+              <div class="compat-badge-text">
+                <span class="compat-badge-name">Cloudflare</span>
+                <span class="compat-badge-desc">Edge Workers</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
