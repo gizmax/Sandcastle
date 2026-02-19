@@ -187,6 +187,7 @@ class RuntimeInfoResponse(BaseModel):
     database: str  # "sqlite" or "postgresql"
     queue: str  # "in-process" or "redis"
     storage: str  # "local" or "s3"
+    sandbox_backend: str = "e2b"  # "e2b" | "docker" | "local" | "cloudflare"
     data_dir: str | None = None  # Only set in local mode
     version: str | None = None
 

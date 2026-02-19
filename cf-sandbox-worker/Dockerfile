@@ -1,0 +1,9 @@
+FROM node:20-slim
+
+RUN useradd --uid 1000 --create-home runner
+USER runner
+WORKDIR /home/user
+
+RUN npm install @anthropic-ai/claude-agent-sdk openai && npm cache clean --force
+
+ENV NODE_PATH=/home/user/node_modules

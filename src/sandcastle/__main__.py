@@ -227,10 +227,59 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
     e2b_key = input("  E2B_API_KEY (optional, Enter to skip): ").strip()
 
+    print()
+    print(_color("  Multi-model support (all optional):", _C.DIM))
+    print(_color("    MiniMax:    https://www.minimaxi.com/", _C.DIM))
+    print(_color("    OpenAI:     https://platform.openai.com/", _C.DIM))
+    print(_color("    OpenRouter: https://openrouter.ai/", _C.DIM))
+    print()
+    minimax_key = input("  MINIMAX_API_KEY (optional, Enter to skip): ").strip()
+    openai_key = input("  OPENAI_API_KEY (optional, Enter to skip): ").strip()
+    openrouter_key = input("  OPENROUTER_API_KEY (optional, Enter to skip): ").strip()
+
+    # Sandbox backend selection
+    print()
+    print(_color("  Sandbox backend:", _C.DIM))
+    print(_color("    e2b        - Cloud sandboxes (requires E2B_API_KEY)", _C.DIM))
+    print(_color("    docker     - Local Docker containers", _C.DIM))
+    print(_color("    cloudflare - Cloudflare edge sandboxes (requires CF Worker)", _C.DIM))
+    print(_color("    local      - Direct subprocess (no isolation, dev only)", _C.DIM))
+    print()
+    sandbox_backend = input("  SANDBOX_BACKEND [e2b]: ").strip().lower() or "e2b"
+    if sandbox_backend not in ("e2b", "docker", "local", "cloudflare"):
+        print(
+            _color(f"  Warning: unknown backend '{sandbox_backend}', using 'e2b'", _C.YELLOW),
+        )
+        sandbox_backend = "e2b"
+
+    cf_worker_url = ""
+    if sandbox_backend == "cloudflare":
+        cf_worker_url = input("  CLOUDFLARE_WORKER_URL: ").strip()
+        if not cf_worker_url:
+            print(
+                _color(
+                    "  CLOUDFLARE_WORKER_URL is required - falling back to e2b",
+                    _C.YELLOW,
+                ),
+            )
+            sandbox_backend = "e2b"
+
     # Write .env
     lines = [
         f"ANTHROPIC_API_KEY={anthropic_key}",
         f"E2B_API_KEY={e2b_key}" if e2b_key else "# E2B_API_KEY=",
+        "",
+        "# Sandbox backend: e2b | docker | local | cloudflare",
+        f"SANDBOX_BACKEND={sandbox_backend}",
+    ]
+    if cf_worker_url:
+        lines.append(f"CLOUDFLARE_WORKER_URL={cf_worker_url}")
+    lines += [
+        "",
+        "# Multi-model provider keys (optional)",
+        f"MINIMAX_API_KEY={minimax_key}" if minimax_key else "# MINIMAX_API_KEY=",
+        f"OPENAI_API_KEY={openai_key}" if openai_key else "# OPENAI_API_KEY=",
+        f"OPENROUTER_API_KEY={openrouter_key}" if openrouter_key else "# OPENROUTER_API_KEY=",
         "",
         "# Local mode (SQLite + in-process queue) - leave empty",
         "DATABASE_URL=",
@@ -507,6 +556,9 @@ def _cmd_health(args: argparse.Namespace) -> None:
 
 def _to_dicts(data: Any) -> list[dict[str, Any]]:
     """Normalize an API response to a list of plain dicts."""
+    # PaginatedList (from sdk.py) has an .items attribute
+    if hasattr(data, "items") and isinstance(data.items, list):
+        return [_to_dict(i) for i in data.items]
     if isinstance(data, dict):
         # Might be wrapped in {"data": [...]}
         if "data" in data and isinstance(data["data"], list):

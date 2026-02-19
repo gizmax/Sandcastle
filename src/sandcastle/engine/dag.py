@@ -435,6 +435,8 @@ def _parse_model_pool(data) -> list[ModelPoolOption] | None:
             ModelPoolOption(id="fast-cheap", model="haiku", max_turns=5),
             ModelPoolOption(id="balanced", model="sonnet", max_turns=10),
             ModelPoolOption(id="thorough", model="opus", max_turns=20),
+            ModelPoolOption(id="minimax-m2.5", model="minimax/m2.5", max_turns=15),
+            ModelPoolOption(id="openai-codex-mini", model="openai/codex-mini", max_turns=10),
         ]
     if isinstance(data, list):
         return [
@@ -598,6 +600,25 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Sub-workflow step '{step.id}' must have sub_workflow.workflow"
                 )
+
+    # Check model names against provider registry
+    from sandcastle.engine.providers import KNOWN_MODELS
+
+    all_models = {workflow.default_model}
+    for step in workflow.steps:
+        all_models.add(step.model)
+        if step.fallback:
+            all_models.add(step.fallback.model)
+        if step.autopilot:
+            for variant in step.autopilot.variants:
+                if variant.model:
+                    all_models.add(variant.model)
+    for model_name in all_models:
+        if model_name not in KNOWN_MODELS:
+            errors.append(
+                f"Unknown model '{model_name}'. "
+                f"Available: {', '.join(sorted(KNOWN_MODELS))}"
+            )
 
     # Check SLO configuration
     for step in workflow.steps:

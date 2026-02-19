@@ -320,6 +320,10 @@ async def health_check() -> ApiResponse:
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
         proxy_url=settings.sandstorm_url or None,
+        sandbox_backend=settings.sandbox_backend,
+        docker_image=settings.docker_image,
+        docker_url=settings.docker_url or None,
+        cloudflare_worker_url=settings.cloudflare_worker_url,
     )
     sandstorm_ok = await runtime.health()
     await runtime.close()
@@ -379,6 +383,7 @@ async def runtime_info() -> ApiResponse:
             database=db_type,
             queue=queue_type,
             storage=storage_type,
+            sandbox_backend=settings.sandbox_backend,
             data_dir=settings.data_dir if settings.is_local_mode else None,
             version=__version__,
         )

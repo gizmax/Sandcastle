@@ -124,7 +124,7 @@ class TestSandshoreRuntime:
         cancel = asyncio.Event()
         cancel.set()
         from sandcastle.engine.sandshore import SandshoreError
-        with pytest.raises(SandshoreError, match="No runtime configured"):
+        with pytest.raises(SandshoreError, match="not available"):
             await rt.query({"prompt": "test"}, cancel_event=cancel)
 
 
@@ -137,6 +137,7 @@ class TestPerformanceConfig:
         s = Settings(
             anthropic_api_key="test",
             e2b_api_key="test",
+            e2b_template="",
         )
         assert s.e2b_template == ""
         assert s.max_concurrent_sandboxes == 5

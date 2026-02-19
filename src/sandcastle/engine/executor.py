@@ -1811,6 +1811,10 @@ async def execute_workflow(
         proxy_url=proxy_url,
         template=settings.e2b_template,
         max_concurrent=settings.max_concurrent_sandboxes,
+        sandbox_backend=settings.sandbox_backend,
+        docker_image=settings.docker_image,
+        docker_url=settings.docker_url or None,
+        cloudflare_worker_url=settings.cloudflare_worker_url,
     )
 
     # Broadcast run.started event

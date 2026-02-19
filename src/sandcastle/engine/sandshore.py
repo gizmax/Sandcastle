@@ -1,11 +1,10 @@
-"""Sandshore runtime - direct E2B sandbox execution for Sandcastle.
+"""Sandshore runtime - pluggable sandbox execution for Sandcastle.
 
-Replaces the Sandstorm HTTP proxy with a direct E2B SDK integration.
-Creates E2B sandboxes, uploads the bundled runner.mjs, and streams
-stdout events via an asyncio.Queue bridge.
+Supports multiple sandbox backends (E2B, Docker, Local, Cloudflare)
+through the ``SandboxBackend`` protocol defined in ``backends.py``.
 
-When E2B is not available (no API key or SDK), falls back to the
-legacy HTTP proxy mode for backward compatibility.
+When no backend is available, falls back to the legacy HTTP proxy
+mode for backward compatibility.
 """
 
 from __future__ import annotations
@@ -14,24 +13,14 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
 import httpx
 from httpx_sse import aconnect_sse
 
+from sandcastle.engine.backends import SandboxBackend, SSEEvent, create_backend
+
 logger = logging.getLogger(__name__)
-
-# Bundled runner script (Claude Agent SDK inside E2B sandbox)
-_RUNNER_MJS_PATH = Path(__file__).parent / "runner.mjs"
-
-
-@dataclass
-class SSEEvent:
-    """A single SSE event from the execution stream."""
-
-    event: str  # "system", "assistant", "user", "result", "error"
-    data: dict
 
 
 @dataclass
@@ -49,11 +38,11 @@ class SandshoreError(Exception):
 
 
 class SandshoreRuntime:
-    """Unified runtime - direct E2B SDK or HTTP proxy fallback.
+    """Unified runtime with pluggable sandbox backends.
 
-    When ``e2b_api_key`` is set and the ``e2b`` package is available,
-    sandboxes are created directly via the E2B Python SDK.  Otherwise,
-    falls back to the legacy HTTP proxy (Sandstorm-compatible endpoint).
+    Resolves the sandbox backend from config (``sandbox_backend`` setting)
+    and delegates execution.  Falls back to the legacy HTTP proxy when
+    no backend is healthy and a ``proxy_url`` is configured.
     """
 
     def __init__(
@@ -64,6 +53,10 @@ class SandshoreRuntime:
         timeout: float = 300.0,
         template: str = "",
         max_concurrent: int = 5,
+        sandbox_backend: str = "e2b",
+        docker_image: str = "sandcastle-runner:latest",
+        docker_url: str | None = None,
+        cloudflare_worker_url: str = "",
     ) -> None:
         self.anthropic_api_key = anthropic_api_key
         self.e2b_api_key = e2b_api_key
@@ -72,28 +65,37 @@ class SandshoreRuntime:
         self.template = template
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._http: httpx.AsyncClient | None = None
-        self._use_direct = self._can_use_direct()
+        self._sandbox_backend_type = sandbox_backend
 
-    def _can_use_direct(self) -> bool:
-        """Check if direct E2B SDK mode is available."""
-        if not self.e2b_api_key:
-            return False
-        try:
-            import e2b  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        # Create the pluggable backend
+        self._backend: SandboxBackend = create_backend(
+            sandbox_backend,
+            e2b_api_key=e2b_api_key,
+            template=template,
+            docker_image=docker_image,
+            docker_url=docker_url or None,
+            cloudflare_worker_url=cloudflare_worker_url,
+            timeout=timeout,
+        )
+
+    @property
+    def backend_name(self) -> str:
+        """Return the name of the active sandbox backend."""
+        return self._backend.name
 
     async def close(self) -> None:
-        """Close underlying HTTP client (proxy mode only)."""
+        """Close underlying resources."""
+        await self._backend.close()
         if self._http:
             await self._http.aclose()
             self._http = None
 
     async def health(self) -> bool:
-        """Check runtime health."""
-        if self._use_direct:
-            return bool(self.e2b_api_key and self.anthropic_api_key)
+        """Check runtime health via the active backend."""
+        backend_ok = await self._backend.health()
+        if backend_ok:
+            return True
+        # Fallback: check proxy if available
         if self.proxy_url:
             try:
                 client = await self._get_http()
@@ -156,8 +158,10 @@ class SandshoreRuntime:
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Execute a query and yield SSE events as they stream."""
-        if self._use_direct:
-            async for event in self._stream_direct(
+        backend_healthy = await self._backend.health()
+
+        if backend_healthy:
+            async for event in self._stream_backend(
                 request, cancel_event=cancel_event
             ):
                 yield event
@@ -166,133 +170,84 @@ class SandshoreRuntime:
                 yield event
         else:
             raise SandshoreError(
-                "No runtime configured. Set E2B_API_KEY for direct mode "
-                "or provide a proxy URL."
+                f"Sandbox backend '{self._sandbox_backend_type}' is not "
+                f"available and no proxy URL is configured."
             )
 
     # ------------------------------------------------------------------
-    # Direct E2B SDK mode
+    # Backend delegation
     # ------------------------------------------------------------------
 
-    async def _stream_direct(
+    def _build_env(self, request: dict) -> tuple[dict[str, str], str, bool]:
+        """Build environment variables and resolve runner info for request.
+
+        Returns (envs, runner_file, use_claude_runner).
+        """
+        from sandcastle.engine.providers import (
+            get_api_key,
+            resolve_model,
+        )
+
+        model_str = request.get("model", "sonnet")
+        try:
+            model_info = resolve_model(model_str)
+        except KeyError:
+            logger.warning("Unknown model '%s', falling back to sonnet", model_str)
+            model_str = "sonnet"
+            model_info = resolve_model(model_str)
+
+        use_claude_runner = model_info.provider == "claude"
+        runner_file = model_info.runner
+
+        envs: dict[str, str] = {
+            "SANDCASTLE_REQUEST": json.dumps(request),
+        }
+
+        if use_claude_runner:
+            envs["ANTHROPIC_API_KEY"] = self.anthropic_api_key
+        else:
+            model_api_key = get_api_key(model_info)
+            envs["MODEL_API_KEY"] = model_api_key
+            envs["MODEL_ID"] = model_info.api_model_id
+            envs["MODEL_INPUT_PRICE"] = str(model_info.input_price_per_m)
+            envs["MODEL_OUTPUT_PRICE"] = str(model_info.output_price_per_m)
+            if model_info.api_base_url:
+                envs["MODEL_BASE_URL"] = model_info.api_base_url
+
+        return envs, runner_file, use_claude_runner
+
+    async def _stream_backend(
         self,
         request: dict,
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
-        """Create an E2B sandbox and stream execution events."""
-        from e2b import AsyncSandbox
-
-        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue(maxsize=1000)
-        sandbox = None
-
-        def on_stdout(data: Any) -> None:
-            line = data.line if hasattr(data, "line") else str(data)
-            try:
-                parsed = json.loads(line)
-                event = SSEEvent(
-                    event=parsed.get("type", "message"),
-                    data=parsed,
-                )
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.warning("Event queue full, dropping event")
-            except (json.JSONDecodeError, ValueError):
-                logger.debug("Non-JSON stdout: %s", line[:200])
-
-        def on_stderr(data: Any) -> None:
-            line = data.line if hasattr(data, "line") else str(data)
-            logger.debug("Sandbox stderr: %s", line[:500])
+        """Execute via the pluggable backend with semaphore + cancellation."""
+        envs, runner_file, use_claude_runner = self._build_env(request)
 
         try:
             async with self._semaphore:
-                sandbox_kwargs: dict[str, Any] = {
-                    "api_key": self.e2b_api_key,
-                    "timeout": int(self.timeout),
-                    "envs": {
-                        "ANTHROPIC_API_KEY": self.anthropic_api_key,
-                        "SANDCASTLE_REQUEST": json.dumps(request),
-                    },
-                }
-                if self.template:
-                    sandbox_kwargs["template"] = self.template
-
-                sandbox = await AsyncSandbox.create(**sandbox_kwargs)
-
-                if not self.template:
-                    # Upload runner script
-                    runner_code = _get_runner_mjs()
-                    await sandbox.files.write(
-                        "/home/user/runner.mjs", runner_code
-                    )
-
-                    # Install Claude Agent SDK if not in template
-                    await sandbox.commands.run(
-                        "npm install @anthropic-ai/claude-agent-sdk"
-                        " 2>/dev/null || true",
-                        timeout=60,
-                    )
-
-                # Run the agent
-                handle = await sandbox.commands.run(
-                    "node /home/user/runner.mjs",
-                    background=True,
-                    on_stdout=on_stdout,
-                    on_stderr=on_stderr,
-                    cwd="/home/user",
-                    timeout=int(self.timeout),
-                )
-
-                # Yield events from the queue as they arrive
                 cancelled = False
-                while True:
+                async for event in self._backend.start(
+                    runner_file=runner_file,
+                    envs=envs,
+                    use_claude_runner=use_claude_runner,
+                    timeout=self.timeout,
+                ):
                     if cancel_event is not None and cancel_event.is_set():
-                        logger.info("Cancellation requested, stopping sandbox")
+                        logger.info("Cancellation requested, stopping backend")
                         cancelled = True
                         break
-
-                    try:
-                        event = await asyncio.wait_for(
-                            queue.get(), timeout=2.0
-                        )
-                        if event is None:
-                            break
-                        yield event
-                    except asyncio.TimeoutError:
-                        # Check if process finished
-                        if handle.exit_code is not None:
-                            break
-                        continue
+                    yield event
 
                 if cancelled:
-                    # Kill sandbox immediately on cancellation
-                    if sandbox:
-                        try:
-                            await sandbox.kill()
-                        except Exception:
-                            pass
-                        sandbox = None
                     return
-
-                # Drain remaining events
-                while not queue.empty():
-                    event = queue.get_nowait()
-                    if event is not None:
-                        yield event
-
-                await handle.wait()
 
         except SandshoreError:
             raise
         except Exception as e:
             raise SandshoreError(
-                f"E2B sandbox execution failed: {e}"
+                f"Sandbox backend '{self._backend.name}' execution failed: {e}"
             ) from e
-        finally:
-            if sandbox:
-                try:
-                    await sandbox.kill()
-                except Exception:
-                    pass
 
     # ------------------------------------------------------------------
     # HTTP proxy fallback (Sandstorm-compatible)
@@ -368,40 +323,11 @@ def _extract_text(data: dict) -> str:
     return ""
 
 
-def _get_runner_mjs() -> str:
-    """Load the bundled runner.mjs script."""
-    if _RUNNER_MJS_PATH.exists():
-        return _RUNNER_MJS_PATH.read_text()
-
-    # Inline fallback if file not found in package
-    return '''
-import { query } from "@anthropic-ai/claude-agent-sdk";
-
-const request = JSON.parse(process.env.SANDCASTLE_REQUEST);
-
-const options = {
-    allowedTools: ["Bash","Read","Write","Edit","Glob","Grep","WebSearch","WebFetch"],
-    permissionMode: "bypassPermissions",
-    model: request.model || "sonnet",
-    maxTurns: request.max_turns || 10,
-};
-if (request.output_format) options.outputFormat = request.output_format;
-if (request.max_budget_usd) options.maxBudgetUsd = request.max_budget_usd;
-
-for await (const message of query({
-    prompt: request.prompt,
-    options,
-})) {
-    process.stdout.write(JSON.stringify(message) + "\\n");
-}
-'''
-
-
 # ------------------------------------------------------------------
 # Singleton pool
 # ------------------------------------------------------------------
 
-_client_pool: dict[tuple[str, str, str], SandshoreRuntime] = {}
+_client_pool: dict[tuple[str, ...], SandshoreRuntime] = {}
 
 
 def get_sandshore_runtime(
@@ -411,9 +337,13 @@ def get_sandshore_runtime(
     timeout: float = 300.0,
     template: str = "",
     max_concurrent: int = 5,
+    sandbox_backend: str = "e2b",
+    docker_image: str = "sandcastle-runner:latest",
+    docker_url: str | None = None,
+    cloudflare_worker_url: str = "",
 ) -> SandshoreRuntime:
     """Return a shared SandshoreRuntime instance."""
-    key = (anthropic_api_key, e2b_api_key, template or "")
+    key = (anthropic_api_key, e2b_api_key, template or "", sandbox_backend)
     client = _client_pool.get(key)
     if client is None:
         client = SandshoreRuntime(
@@ -423,6 +353,10 @@ def get_sandshore_runtime(
             timeout=timeout,
             template=template,
             max_concurrent=max_concurrent,
+            sandbox_backend=sandbox_backend,
+            docker_image=docker_image,
+            docker_url=docker_url,
+            cloudflare_worker_url=cloudflare_worker_url,
         )
         _client_pool[key] = client
     return client
