@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sandcastle - AI Agent Workflow Orchestrator</title>
-  <meta name="description" content="Production-ready workflow orchestrator for AI agents. DAG pipelines, parallel execution, cost tracking, policy enforcement, and a real-time dashboard. Built on Sandstorm.">
+  <meta name="description" content="Production-ready workflow orchestrator for AI agents. Pluggable sandbox backends, multi-provider model routing, DAG pipelines, parallel execution, cost tracking, policy enforcement, and a real-time dashboard.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
   <meta property="og:title" content="Sandcastle - AI Agent Workflow Orchestrator">
-  <meta property="og:description" content="Stop babysitting your AI agents. Sandcastle runs your agent workflows with parallel execution, budget guardrails, approvals, and policy enforcement - all out of the box.">
+  <meta property="og:description" content="Stop babysitting your AI agents. Sandcastle runs your agent workflows with pluggable sandbox backends, multi-provider model routing, budget guardrails, and policy enforcement - all out of the box.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://gizmax.cz/sandcastle">
   <meta property="og:type" content="website">
@@ -17,7 +17,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Sandcastle - AI Agent Workflow Orchestrator">
-  <meta name="twitter:description" content="Stop babysitting your AI agents. DAG pipelines, parallel execution, cost tracking, and a real-time dashboard.">
+  <meta name="twitter:description" content="Stop babysitting your AI agents. Pluggable sandbox backends, multi-provider models, DAG pipelines, and a real-time dashboard.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
@@ -1010,15 +1010,15 @@
   <header class="hero">
     <div class="container">
       <div class="hero-badge">
-        Built on <a href="https://github.com/tomascupr/sandstorm" target="_blank" rel="noopener">Sandstorm</a>
+        v0.8.0 - Pluggable Backends + Multi-Provider
       </div>
       <h1>
         Stop babysitting<br>
         <span class="accent">your AI agents.</span>
       </h1>
       <p>
-        Sandcastle runs your agent workflows so you don't have to. Parallel execution,
-        budget guardrails, human-in-the-loop approvals, policy enforcement - all out of the box.
+        Sandcastle runs your agent workflows so you don't have to. Pluggable sandbox backends (E2B, Docker, Cloudflare),
+        multi-provider model routing (Claude, OpenAI, Gemini), budget guardrails, approvals, policy enforcement - all out of the box.
         Just <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle init</code> + <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle serve</code> and you're live.
       </p>
       <div class="hero-ctas">
@@ -1054,7 +1054,7 @@
         </div>
       </div>
       <p class="quickstart-note">
-        Three commands. <code>init</code> asks for your API keys and writes <code>.env</code>. No PostgreSQL, Redis, or S3 needed - Sandcastle auto-detects empty config and starts in <strong>local mode</strong> with SQLite + in-process queue.
+        Three commands. <code>init</code> asks for your API keys, picks a sandbox backend, and writes <code>.env</code>. No PostgreSQL, Redis, or S3 needed - Sandcastle auto-detects empty config and starts in <strong>local mode</strong> with SQLite + in-process queue.
       </p>
       <p class="quickstart-note" style="margin-top: 8px;">
         Or from source: <code style="background:var(--surface);padding:2px 8px;border-radius:4px;font-size:0.9em;color:var(--text-muted);">git clone https://github.com/gizmax/Sandcastle.git && cd Sandcastle && uv sync && uv run sandcastle serve</code>
@@ -1075,18 +1075,16 @@
       <div class="problem-grid">
         <div class="problem-text">
           <p>
-            <a href="https://github.com/tomascupr/sandstorm" target="_blank" rel="noopener">Sandstorm</a>
-            is a brilliant piece of engineering - one API call, a full agent, completely sandboxed.
-            It nails the core problem: giving agents full system access without worrying about what they do with it.
+            AI agent frameworks give you building blocks - LLM calls, tool use, maybe a graph.
+            But when you start building real products, <strong>the glue code piles up fast.</strong>
           </p>
           <p>
-            But when you start building real products on top of it, <strong>the glue code piles up fast.</strong>
-            You need orchestration, retries, scheduling, cost controls, approvals, and monitoring -
-            none of which are Sandstorm's job.
+            You need orchestration, retries, scheduling, cost controls, approvals, monitoring,
+            and the ability to switch between sandbox providers and AI models without rewriting everything.
           </p>
           <div class="problem-quote">
-            <p><strong>Sandstorm</strong> = the engine.</p>
-            <p><strong>Sandcastle</strong> <span class="dim">= the product you build with it.</span></p>
+            <p><strong>Sandcastle</strong> handles all of that.</p>
+            <p><span class="dim">Define in YAML. Run anywhere. Ship to production.</span></p>
           </div>
         </div>
         <ul class="pain-list">
@@ -1108,7 +1106,7 @@
     <div class="container fade-in">
       <span class="section-label">Capabilities</span>
       <h2 class="section-title">Everything you need for production agents</h2>
-      <p class="section-subtitle">Sandcastle adds the orchestration layer Sandstorm doesn't need to have.</p>
+      <p class="section-subtitle">From sandbox execution to production-grade orchestration - everything you need in one package.</p>
       <div class="features-grid">
         <div class="feature-card">
           <span class="feature-icon">🔀</span>
@@ -1146,13 +1144,23 @@
           <p>SLO-based model routing. Define quality, cost, and latency constraints - let the optimizer pick the model.</p>
         </div>
         <div class="feature-card">
+          <span class="feature-icon">🔌</span>
+          <h3>Pluggable Backends</h3>
+          <p>E2B cloud, Docker local, Cloudflare edge, or bare subprocess. Switch sandbox providers without changing workflows.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🤖</span>
+          <h3>Multi-Provider Models</h3>
+          <p>Claude, OpenAI, MiniMax, Google Gemini - mix providers per step. Use expensive models where they matter, cheap ones everywhere else.</p>
+        </div>
+        <div class="feature-card">
           <span class="feature-icon">🚀</span>
           <h3>Zero-Config Local Mode</h3>
           <p><code>sandcastle init</code> + <code>sandcastle serve</code>. Auto-detects local vs production - SQLite or PostgreSQL, in-process or Redis.</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">📋</span>
-          <h3>20 Built-in Templates</h3>
+          <h3>23 Built-in Templates</h3>
           <p>Marketing, sales, support, HR, legal, and product templates ready to use. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
         </div>
         <div class="feature-card">
@@ -1189,7 +1197,6 @@
             lead-enrichment.yaml
           </div>
           <pre><code><span class="y-key">name:</span> <span class="y-str">"Lead Enrichment"</span>
-<span class="y-key">sandstorm_url:</span> <span class="y-str">"${SANDSTORM_URL}"</span>
 <span class="y-key">default_model:</span> <span class="y-str">sonnet</span>
 <span class="y-key">default_timeout:</span> <span class="y-num">300</span>
 
@@ -1224,15 +1231,15 @@
         <div class="yaml-info">
           <h3>Three steps. One file. Production-ready.</h3>
           <p>
-            Each step runs inside a Sandstorm sandbox - full system access,
-            completely isolated. Sandcastle handles the orchestration between them.
+            Each step runs inside an isolated sandbox - E2B cloud, Docker container,
+            or Cloudflare edge. Sandcastle handles the orchestration between them.
           </p>
           <ul class="yaml-features">
             <li><span class="check">&#10003;</span><strong>Dependencies</strong> - steps run in order or parallel based on <code>depends_on</code></li>
             <li><span class="check">&#10003;</span><strong>Data passing</strong> - reference prior outputs with <code>{steps.id.output}</code></li>
             <li><span class="check">&#10003;</span><strong>Schema validation</strong> - enforce structured output per step</li>
             <li><span class="check">&#10003;</span><strong>Automatic retries</strong> - exponential backoff on failure</li>
-            <li><span class="check">&#10003;</span><strong>Per-step models</strong> - use expensive models only where it matters</li>
+            <li><span class="check">&#10003;</span><strong>Per-step models</strong> - Claude, OpenAI, MiniMax, Gemini - mix per step</li>
             <li><span class="check">&#10003;</span><strong>CSV export</strong> - write step output to CSV files, append or per-run</li>
             <li><span class="check">&#10003;</span><strong>Persistent storage</strong> - results saved to disk (local) or S3 (production)</li>
           </ul>
@@ -1272,7 +1279,7 @@
   <section class="templates-section">
     <div class="container fade-in">
       <span class="section-label">Templates</span>
-      <h2 class="section-title">23 workflows, ready to deploy</h2>
+      <h2 class="section-title">23 workflow templates, ready to deploy</h2>
       <p class="section-subtitle">Skip the blank page. Pick a template, tweak the prompts, and ship. Every category covers real production use cases.</p>
       <div class="templates-grid">
         <div class="template-category">
@@ -1371,9 +1378,9 @@
           </div>
         </div>
         <div class="stack-item">
-          <span class="stack-icon">🌪️</span>
+          <span class="stack-icon">🏖️</span>
           <div>
-            <div class="stack-name">Sandstorm</div>
+            <div class="stack-name">Sandshore</div>
             <div class="stack-role">Agent Runtime</div>
           </div>
         </div>
@@ -1446,8 +1453,7 @@
     <div class="container footer-inner">
       <div class="footer-left">
         <strong>Sandcastle</strong> - MIT License<br>
-        Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax<br>
-        Built on <a href="https://github.com/tomascupr/sandstorm" target="_blank" rel="noopener">Sandstorm</a> by @tomascupr
+        Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax
       </div>
       <div class="footer-links">
         <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener">GitHub</a>

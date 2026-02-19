@@ -103,10 +103,13 @@ def test_auto_model_pool():
     step = wf.get_step("step1")
     assert step.slo is not None
     assert step.model_pool is not None
-    assert len(step.model_pool) == 3
-    assert step.model_pool[0].model == "haiku"
-    assert step.model_pool[1].model == "sonnet"
-    assert step.model_pool[2].model == "opus"
+    assert len(step.model_pool) == 5
+    models = [m.model for m in step.model_pool]
+    assert "haiku" in models
+    assert "sonnet" in models
+    assert "opus" in models
+    assert "minimax/m2.5" in models
+    assert "openai/codex-mini" in models
 
 
 def test_step_without_slo():

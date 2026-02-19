@@ -1,12 +1,11 @@
 # Sandcastle
 
-**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Built on [Sandstorm](https://github.com/tomascupr/sandstorm).
+**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Pluggable sandbox backends, multi-provider model routing, and a full-featured dashboard included.
 
 [![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
-[![Built on Sandstorm](https://img.shields.io/badge/Built%20on-Sandstorm-orange?style=flat-square)](https://github.com/tomascupr/sandstorm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-277%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-364%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -23,11 +22,7 @@
 
 ## Why Sandcastle?
 
-[Sandstorm](https://github.com/tomascupr/sandstorm) by [@tomascupr](https://github.com/tomascupr) is a brilliant piece of engineering - one API call, a full agent, completely sandboxed. It nails the core problem: giving agents full system access without worrying about what they do with it.
-
-But sometimes you need to **build something lasting from the storm.**
-
-Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result, sandbox destroyed. That's exactly what it should do. But when you start building real products on top of it, the glue code piles up fast:
+AI agent frameworks give you building blocks - LLM calls, tool use, maybe a graph. But when you start building real products, the glue code piles up fast:
 
 - **"Step A scrapes, step B enriches, step C scores."** - You need workflow orchestration.
 - **"Fan out over 50 leads in parallel, then merge."** - You need a DAG engine.
@@ -37,12 +32,11 @@ Sandstorm gives you isolated, one-shot agent runs - fire a prompt, get a result,
 - **"A human should review this before the agent continues."** - You need approval gates.
 - **"Block the output if it contains PII or leaked secrets."** - You need policy enforcement.
 - **"Pick the cheapest model that still meets quality SLOs."** - You need cost-latency optimization.
+- **"Use Claude for quality, GPT for speed, Gemini for cost."** - You need multi-provider routing.
+- **"Run on E2B cloud, Docker locally, or Cloudflare at the edge."** - You need pluggable runtimes.
 - **"Show me what's running, what failed, and what it cost."** - You need a dashboard.
 
-Sandcastle is that glue. It wraps Sandstorm's agent execution with orchestration, guardrails, and monitoring so you can ship agent workflows to production.
-
-> **Sandstorm** = the engine.
-> **Sandcastle** = the product you build with it.
+Sandcastle handles all of that. Define workflows in YAML, pick your sandbox backend, choose your models, and ship to production.
 
 ---
 
@@ -52,15 +46,17 @@ No Docker, no database server, no Redis. Install, run, done.
 
 ```bash
 pip install sandcastle-ai
-sandcastle init        # asks for API keys, writes .env
-sandcastle serve       # starts API + dashboard + Sandstorm on one port
+sandcastle init        # asks for API keys, picks sandbox backend, writes .env
+sandcastle serve       # starts API + dashboard on one port
 ```
 
-You'll need two API keys:
-- **ANTHROPIC_API_KEY** - get one at [console.anthropic.com](https://console.anthropic.com/)
-- **E2B_API_KEY** - get one at [e2b.dev](https://e2b.dev/) (free tier available)
+You'll need API keys for your chosen setup:
+- **ANTHROPIC_API_KEY** - get one at [console.anthropic.com](https://console.anthropic.com/) (for Claude models)
+- **E2B_API_KEY** - get one at [e2b.dev](https://e2b.dev/) (for E2B cloud sandboxes - free tier available)
 
-Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 20 workflow templates included.
+Or use the `docker` backend (needs Docker installed) or `local` backend (dev only, no sandbox isolation) and skip the E2B key.
+
+Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 23 workflow templates included.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
@@ -163,7 +159,7 @@ cd Sandcastle
 cat > .env << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-...
 E2B_API_KEY=e2b_...
-SANDSTORM_URL=http://localhost:3001
+SANDBOX_BACKEND=e2b
 WEBHOOK_SECRET=your-signing-secret
 EOF
 
@@ -283,7 +279,7 @@ The `sandcastle` command gives you full control from the terminal:
 # Interactive setup wizard (API keys, .env, workflows/)
 sandcastle init
 
-# Start the server (API + dashboard + Sandstorm on one port)
+# Start the server (API + dashboard on one port)
 sandcastle serve
 
 # Run a workflow
@@ -320,42 +316,104 @@ Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCA
 
 ## Features
 
-| Capability | Sandstorm | Sandcastle |
-|---|---|---|
-| Isolated agent execution | Yes | Yes (via Sandstorm) |
-| Structured output & subagents | Yes | Yes |
-| MCP servers & file uploads | Yes | Yes |
-| **Zero-config local mode** | - | Yes |
-| **DAG workflow orchestration** | - | Yes |
-| **Parallel step execution** | - | Yes |
-| **Run Time Machine (replay/fork)** | - | Yes |
-| **Budget guardrails** | - | Yes |
-| **Run cancellation** | - | Yes |
-| **Idempotent run requests** | - | Yes |
-| **Persistent storage (S3/MinIO)** | - | Yes |
-| **Webhook callbacks (HMAC-signed)** | - | Yes |
-| **Scheduled / cron agents** | - | Yes |
-| **Retry logic with exponential backoff** | - | Yes |
-| **Dead letter queue with full replay** | - | Yes |
-| **Per-run cost tracking** | - | Yes |
-| **SSE live streaming** | - | Yes |
-| **Multi-tenant API keys** | - | Yes |
-| **Python SDK + async client** | - | Yes |
-| **CLI tool** | - | Yes |
-| **Docker one-command deploy** | - | Yes |
-| **Dashboard with real-time monitoring** | - | Yes |
-| **20 built-in workflow templates** | - | Yes |
-| **Real-time SSE event stream** | - | Yes |
-| **Settings management UI** | - | Yes |
-| **Dark mode** | - | Yes |
-| **Visual workflow builder** | - | Yes |
-| **Directory input (file processing)** | - | Yes |
-| **CSV export per step** | - | Yes |
-| **Human approval gates** | - | Yes |
-| **Self-optimizing workflows (AutoPilot)** | - | Yes |
-| **Hierarchical workflows (workflow-as-step)** | - | Yes |
-| **Policy engine (PII redaction, secret guard)** | - | Yes |
-| **Cost-latency optimizer (SLO-based routing)** | - | Yes |
+| Capability | |
+|---|---|
+| **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
+| **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
+| **Zero-config local mode** | Yes |
+| **DAG workflow orchestration** | Yes |
+| **Parallel step execution** | Yes |
+| **Run Time Machine (replay/fork)** | Yes |
+| **Budget guardrails** | Yes |
+| **Run cancellation** | Yes |
+| **Idempotent run requests** | Yes |
+| **Persistent storage (S3/MinIO)** | Yes |
+| **Webhook callbacks (HMAC-signed)** | Yes |
+| **Scheduled / cron agents** | Yes |
+| **Retry logic with exponential backoff** | Yes |
+| **Dead letter queue with full replay** | Yes |
+| **Per-run cost tracking** | Yes |
+| **SSE live streaming** | Yes |
+| **Multi-tenant API keys** | Yes |
+| **Python SDK + async client** | Yes |
+| **CLI tool** | Yes |
+| **Docker one-command deploy** | Yes |
+| **Dashboard with real-time monitoring** | Yes |
+| **23 built-in workflow templates** | Yes |
+| **Visual workflow builder** | Yes |
+| **Directory input (file processing)** | Yes |
+| **CSV export per step** | Yes |
+| **Human approval gates** | Yes |
+| **Self-optimizing workflows (AutoPilot)** | Yes |
+| **Hierarchical workflows (workflow-as-step)** | Yes |
+| **Policy engine (PII redaction, secret guard)** | Yes |
+| **Cost-latency optimizer (SLO-based routing)** | Yes |
+| **Concurrency control** (rate limiter, semaphores) | Yes |
+
+---
+
+## Pluggable Sandbox Backends
+
+Sandcastle uses the **Sandshore runtime** with pluggable backends for agent execution. Each step runs inside an isolated sandbox - choose the backend that fits your needs:
+
+| Backend | Description | Best For |
+|---------|-------------|----------|
+| **e2b** (default) | Cloud sandboxes via [E2B](https://e2b.dev/) SDK | Production, zero-infra setup |
+| **docker** | Local Docker containers via aiodocker | Self-hosted, air-gapped environments |
+| **local** | Direct subprocess on the host (no isolation) | Development and testing only |
+| **cloudflare** | Edge sandboxes via Cloudflare Workers | Low-latency, globally distributed |
+
+```bash
+# Set in .env or via sandcastle init
+SANDBOX_BACKEND=e2b        # default
+SANDBOX_BACKEND=docker     # requires Docker + pip install sandcastle-ai[docker]
+SANDBOX_BACKEND=local      # dev only, no isolation
+SANDBOX_BACKEND=cloudflare # requires deployed CF Worker
+```
+
+All backends share the same `SandboxBackend` protocol - same YAML, same API, same dashboard. Switch backends without changing workflows.
+
+---
+
+## Multi-Provider Model Routing
+
+Use different AI providers per step. Claude for quality-critical tasks, cheaper models for simple scoring, or mix providers in a single workflow:
+
+| Model ID | Provider | Runner | Pricing (per 1M tokens) |
+|----------|----------|--------|-------------------------|
+| `sonnet` | Claude (Anthropic) | Claude Agent SDK | $3 in / $15 out |
+| `opus` | Claude (Anthropic) | Claude Agent SDK | $15 in / $75 out |
+| `haiku` | Claude (Anthropic) | Claude Agent SDK | $0.80 in / $4 out |
+| `openai/codex-mini` | OpenAI | OpenAI-compatible | $0.25 in / $2 out |
+| `openai/codex` | OpenAI | OpenAI-compatible | $1.25 in / $10 out |
+| `minimax/m2.5` | MiniMax | OpenAI-compatible | $0.30 in / $1.20 out |
+| `google/gemini-2.5-pro` | Google (via OpenRouter) | OpenAI-compatible | $4 in / $20 out |
+
+```yaml
+steps:
+  - id: "research"
+    model: opus                    # Claude for deep research
+    prompt: "Research {input.company} thoroughly."
+
+  - id: "score"
+    depends_on: ["research"]
+    model: haiku                   # Claude Haiku for cheap scoring
+    prompt: "Score this lead 1-100."
+
+  - id: "classify"
+    depends_on: ["research"]
+    model: openai/codex-mini       # OpenAI for classification
+    prompt: "Classify the industry."
+```
+
+Set the API keys in `.env` for each provider you want to use:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...       # Claude models
+OPENAI_API_KEY=sk-...              # OpenAI models
+MINIMAX_API_KEY=...                # MiniMax models
+OPENROUTER_API_KEY=sk-or-...       # Google Gemini via OpenRouter
+```
 
 ---
 
@@ -368,7 +426,6 @@ Define multi-step agent pipelines as YAML. Each step can run in parallel, depend
 ```yaml
 name: "Lead Enrichment"
 description: "Scrape, enrich, and score leads for sales outreach."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -814,7 +871,7 @@ When a step fails, expand it to see the full error, retry count, and two powerfu
 
 ### Run Detail - Running with Parallel Steps
 
-Live view of a running workflow showing parallel step execution. Steps with a pulsing blue dot are currently executing inside Sandstorm sandboxes.
+Live view of a running workflow showing parallel step execution. Steps with a pulsing blue dot are currently executing inside sandboxes.
 
 <p align="center">
   <img src="docs/screenshots/run-detail-running.png" alt="Running Workflow with Parallel Steps" width="720" />
@@ -1050,7 +1107,7 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/health` | Health check (Sandstorm, DB, Redis) |
+| `GET` | `/api/health` | Health check (sandbox backend, DB, Redis) |
 | `GET` | `/api/runtime` | Current mode info (database, queue, storage) |
 | `GET` | `/api/events` | Global SSE event stream |
 | `GET` | `/api/stats` | Aggregated stats and cost trends |
@@ -1111,32 +1168,37 @@ Your App --POST /api/workflows/run--> Sandcastle API (FastAPI)
                             |              (recursive execution)
                      +------+------+               |
                      v      v      v        +------+------+
-                 Sandstorm (parallel)       | Child Engine |
-                  Agent A  Agent B  ...     +------+------+
-                     |      |                      |
-                     v      v               Sandstorm (child)
-                  E2B VMs                       |
-                     |                       E2B VMs
-                     |                          |
-          +----[Approval Gate?]----+            |
-          |                        |            |
-        Pause               Continue            |
-     (wait for              (auto)              |
-      human)                   |                |
-          |          [AutoPilot?]               |
-          v          Pick variant               |
-     Approve/          |                        |
-     Reject/     Evaluate quality               |
-     Skip              |                        |
-                 [Policy Engine]                 |
-                 PII redact /                    |
-                 block / alert                   |
-                       |                        |
-                 [SLO Optimizer]                |
-                 Route to best                  |
-                 model by SLO                   |
-                       +-----------+------------+
-                                   |
+              Sandshore Runtime              | Child Engine |
+           (pluggable backends)              +------+------+
+                     |                              |
+          +----------+----------+           Sandshore (child)
+          |     |      |       |                   |
+        E2B  Docker  Local  Cloudflare      Sandbox (child)
+          |     |      |       |
+          v     v      v       v
+       Sandboxes (parallel execution)
+                     |
+          +----[Approval Gate?]----+
+          |                        |
+        Pause               Continue
+     (wait for              (auto)
+      human)                   |
+          |          [Multi-Provider Router]
+          v          Claude / OpenAI / MiniMax / Gemini
+     Approve/              |
+     Reject/     [AutoPilot?]
+     Skip        Pick variant
+                       |
+                 Evaluate quality
+                       |
+                 [Policy Engine]
+                 PII redact /
+                 block / alert
+                       |
+                 [SLO Optimizer]
+                 Route to best
+                 model by SLO
+                       |
              +---------------------+---------------------+
              |                     |                      |
         Local Mode            Production Mode        Both Modes
@@ -1166,7 +1228,8 @@ Your App --POST /api/workflows/run--> Sandcastle API (FastAPI)
 | Job Queue | In-process (asyncio) | Redis 7 + arq |
 | Scheduler | APScheduler (in-memory) | APScheduler (in-memory) |
 | Storage | Local filesystem | S3 / MinIO |
-| Agent Runtime | Sandstorm (E2B sandboxed) | Sandstorm (E2B sandboxed) |
+| Agent Runtime | Sandshore (E2B / Docker / Local / Cloudflare) | Sandshore (E2B / Docker / Local / Cloudflare) |
+| Model Providers | Claude, OpenAI, MiniMax, Google/Gemini | Claude, OpenAI, MiniMax, Google/Gemini |
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react | @xyflow/react |
 | Charts | Recharts | Recharts |
@@ -1182,9 +1245,27 @@ All configuration via environment variables or `.env` file. Run `sandcastle init
 
 ```bash
 # Required
-SANDSTORM_URL=http://localhost:3001
 ANTHROPIC_API_KEY=sk-ant-...
-E2B_API_KEY=e2b_...
+E2B_API_KEY=e2b_...            # required for E2B backend
+
+# Sandbox backend: "e2b" (default) | "docker" | "local" | "cloudflare"
+SANDBOX_BACKEND=e2b
+MAX_CONCURRENT_SANDBOXES=5     # rate limiter for parallel execution
+
+# Docker backend (only if SANDBOX_BACKEND=docker)
+# DOCKER_IMAGE=sandcastle-runner:latest
+# DOCKER_URL=                  # empty = local Docker socket
+
+# Cloudflare backend (only if SANDBOX_BACKEND=cloudflare)
+# CLOUDFLARE_WORKER_URL=https://sandbox.your-domain.workers.dev
+
+# Multi-provider API keys (optional, only for non-Claude models)
+# OPENAI_API_KEY=sk-...
+# MINIMAX_API_KEY=...
+# OPENROUTER_API_KEY=sk-or-... # for Google Gemini via OpenRouter
+
+# E2B custom template (pre-built sandbox with SDK installed)
+# E2B_TEMPLATE=sandcastle-runner
 
 # Database (empty = SQLite local mode)
 DATABASE_URL=
@@ -1218,7 +1299,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (277 passing)
+# Run tests (364 passing)
 uv run pytest
 
 # Type check backend
@@ -1241,11 +1322,9 @@ docker compose up -d
 
 ## Acknowledgements
 
-Sandcastle would not exist without [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr). Sandstorm is the core engine that powers every agent run in Sandcastle - we didn't reinvent it, we built on it. If you haven't already, go star the repo. It's one of the cleanest abstractions for sandboxed agent execution out there.
+Sandcastle's architecture was originally inspired by [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr) - one of the cleanest abstractions for sandboxed agent execution. While Sandcastle has since evolved its own runtime (Sandshore) with pluggable backends, the original design philosophy of "full system access, completely isolated" remains at the core.
 
 Created by [**Tomas Pflanzer**](https://github.com/gizmax) ([@gizmax](https://github.com/gizmax)).
-
-Sandcastle uses Sandstorm as a dependency and extends it with orchestration, persistence, and production infrastructure. All original Sandstorm code remains under its [MIT license](https://github.com/tomascupr/sandstorm/blob/main/LICENSE).
 
 ---
 
@@ -1256,6 +1335,5 @@ Sandcastle uses Sandstorm as a dependency and extends it with orchestration, per
 ---
 
 <p align="center">
-  <strong>Sandstorm</strong> gives you the storm.<br>
-  <strong>Sandcastle</strong> lets you build.
+  <strong>Define in YAML. Run anywhere. Ship to production.</strong>
 </p>

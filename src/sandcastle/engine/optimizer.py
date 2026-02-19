@@ -69,6 +69,11 @@ DEFAULT_MODEL_POOL = [
     ModelOption(id="thorough", model="opus", max_turns=20),
 ]
 
+EXTENDED_MODEL_POOL = DEFAULT_MODEL_POOL + [
+    ModelOption(id="minimax-m2.5", model="minimax/m2.5", max_turns=15),
+    ModelOption(id="openai-codex-mini", model="openai/codex-mini", max_turns=10),
+]
+
 
 # --- CostLatencyOptimizer ---
 
