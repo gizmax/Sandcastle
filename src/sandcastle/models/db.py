@@ -483,9 +483,38 @@ async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def init_db() -> None:
-    """Create all tables (for development; use Alembic in production)."""
+    """Create all tables and add missing columns for SQLite local mode.
+
+    ``create_all`` only creates new tables - it never alters existing ones.
+    For SQLite (local mode) we inspect each table and add any columns that
+    the ORM model defines but the on-disk schema is missing.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # Auto-add missing columns for SQLite (no Alembic in local mode)
+        if _build_engine_url().startswith("sqlite"):
+            await conn.run_sync(_add_missing_columns)
+
+
+def _add_missing_columns(connection, **_kw) -> None:
+    """Inspect SQLite tables and ALTER TABLE ADD COLUMN for any gaps."""
+    import logging
+    from sqlalchemy import inspect as sa_inspect, text
+
+    log = logging.getLogger(__name__)
+    inspector = sa_inspect(connection)
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in inspector.get_table_names():
+            continue
+        existing = {col["name"] for col in inspector.get_columns(table.name)}
+        for col in table.columns:
+            if col.name not in existing:
+                col_type = col.type.compile(dialect=connection.dialect)
+                stmt = f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {col_type}'
+                log.info("Auto-migrating: %s", stmt)
+                connection.execute(text(stmt))
 
 
 async def get_session():
