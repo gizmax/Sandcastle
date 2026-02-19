@@ -1951,6 +1951,11 @@ const routes: MockRoute[] = [
     },
   },
   {
+    match: /^\/runs\/compare$/,
+    method: "GET",
+    handler: () => MOCK_RUN_COMPARE,
+  },
+  {
     match: /^\/runs\/([^/]+)$/,
     handler: (params) => getRunDetail(params._1),
   },
@@ -2018,11 +2023,6 @@ const routes: MockRoute[] = [
     match: /^\/templates\/([^/]+)$/,
     method: "GET",
     handler: (params) => getTemplateDetail(params._1),
-  },
-  {
-    match: /^\/runs\/compare$/,
-    method: "GET",
-    handler: () => MOCK_RUN_COMPARE,
   },
   {
     match: /^\/workflows\/([^/]+)\/versions$/,
