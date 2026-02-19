@@ -430,34 +430,54 @@
       font-weight: 400;
     }
 
-    .pain-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+    .pain-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
     }
 
-    .pain-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 14px 18px;
+    .pain-card {
+      padding: 16px 18px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
-      font-size: 14px;
-      color: var(--text-muted);
-      line-height: 1.5;
+      transition: border-color 0.2s;
     }
 
-    .pain-list li .icon {
+    .pain-card:hover {
+      border-color: var(--border-light);
+    }
+
+    .pain-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .pain-card-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--accent-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
       flex-shrink: 0;
-      font-size: 16px;
-      margin-top: 1px;
     }
 
-    .pain-list li strong {
+    .pain-card-title {
+      font-size: 14px;
+      font-weight: 600;
       color: var(--text);
+    }
+
+    .pain-card-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.4;
+      font-style: italic;
     }
 
     /* ---- FEATURES ---- */
@@ -1010,6 +1030,10 @@
       .projects-grid {
         grid-template-columns: 1fr 1fr;
       }
+
+      .pain-grid {
+        grid-template-columns: 1fr 1fr;
+      }
     }
 
     @media (max-width: 600px) {
@@ -1021,7 +1045,8 @@
         padding: 64px 0;
       }
 
-      .features-grid {
+      .features-grid,
+      .pain-grid {
         grid-template-columns: 1fr;
       }
 
@@ -1167,16 +1192,64 @@
             <p><span class="dim">Define in YAML. Run anywhere. Ship to production.</span></p>
           </div>
         </div>
-        <ul class="pain-list">
-          <li><span class="icon">🔗</span><strong>Multi-step pipelines</strong> - "Step A scrapes, step B enriches, step C scores."</li>
-          <li><span class="icon">⚡</span><strong>Parallel fan-out</strong> - "Fan out over 50 leads, then merge results."</li>
-          <li><span class="icon">💰</span><strong>Cost tracking</strong> - "Bill per enrichment, track spend per run."</li>
-          <li><span class="icon">🔄</span><strong>Retry with backoff</strong> - "Alert me if it fails, retry automatically."</li>
-          <li><span class="icon">⏰</span><strong>Scheduling</strong> - "Run this every 6 hours, POST results to Slack."</li>
-          <li><span class="icon">👤</span><strong>Human approvals</strong> - "A human should review this before continuing."</li>
-          <li><span class="icon">🛡️</span><strong>Policy enforcement</strong> - "Block the output if it contains PII."</li>
-          <li><span class="icon">🎯</span><strong>Model routing</strong> - "Pick the cheapest model that meets quality SLOs."</li>
-        </ul>
+        <div class="pain-grid">
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">🔗</div>
+              <span class="pain-card-title">Multi-step pipelines</span>
+            </div>
+            <span class="pain-card-desc">"Step A scrapes, step B enriches, step C scores."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">⚡</div>
+              <span class="pain-card-title">Parallel fan-out</span>
+            </div>
+            <span class="pain-card-desc">"Fan out over 50 leads, then merge results."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">💰</div>
+              <span class="pain-card-title">Cost tracking</span>
+            </div>
+            <span class="pain-card-desc">"Bill per enrichment, track spend per run."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">🔄</div>
+              <span class="pain-card-title">Retry with backoff</span>
+            </div>
+            <span class="pain-card-desc">"Alert me if it fails, retry automatically."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">⏰</div>
+              <span class="pain-card-title">Scheduling</span>
+            </div>
+            <span class="pain-card-desc">"Run this every 6 hours, POST results to Slack."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">👤</div>
+              <span class="pain-card-title">Human approvals</span>
+            </div>
+            <span class="pain-card-desc">"A human should review this before continuing."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">🛡️</div>
+              <span class="pain-card-title">Policy enforcement</span>
+            </div>
+            <span class="pain-card-desc">"Block the output if it contains PII."</span>
+          </div>
+          <div class="pain-card">
+            <div class="pain-card-header">
+              <div class="pain-card-icon">🎯</div>
+              <span class="pain-card-title">Model routing</span>
+            </div>
+            <span class="pain-card-desc">"Pick the cheapest model that meets quality SLOs."</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
