@@ -6,8 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from sandcastle.__main__ import _build_parser, _cmd_doctor, main
-
+from sandcastle.__main__ import _build_parser, _cmd_doctor
 
 # ---------------------------------------------------------------------------
 # TestDoctorArgParsing

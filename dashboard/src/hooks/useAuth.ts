@@ -12,14 +12,15 @@ export function useAuth() {
   const tryConnect = useCallback(async (key: string | null): Promise<boolean> => {
     api.setApiKey(key);
     try {
-      const res = await fetch(`${API_BASE_URL}/health`, {
+      // Validate against a protected endpoint (/api/runtime) instead of the
+      // public /api/health. This ensures the key is actually checked by the
+      // auth middleware when AUTH_REQUIRED=true.
+      const res = await fetch(`${API_BASE_URL}/runtime`, {
         headers: key ? { "X-API-Key": key } : {},
         signal: AbortSignal.timeout(3000),
       });
       if (res.status === 401) return false;
-      // Any other response (including 200, 404, 502) means we can proceed.
-      // 404 = no backend (demo/GitHub Pages), 502 = proxy down - both should
-      // fall through to mock mode rather than blocking on the auth gate.
+      // 200 = key valid (or auth disabled), 404/502 = no backend (demo mode)
       return true;
     } catch {
       // Network error - backend unreachable, let the app handle it (mock mode)

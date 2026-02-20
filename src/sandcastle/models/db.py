@@ -500,7 +500,9 @@ async def init_db() -> None:
 def _add_missing_columns(connection, **_kw) -> None:
     """Inspect SQLite tables and ALTER TABLE ADD COLUMN for any gaps."""
     import logging
-    from sqlalchemy import inspect as sa_inspect, text
+
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
 
     log = logging.getLogger(__name__)
     inspector = sa_inspect(connection)
