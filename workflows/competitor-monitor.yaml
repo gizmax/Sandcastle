@@ -1,38 +1,31 @@
 name: "Competitor Monitor"
-description: "Track competitor websites for changes, analyze differences, and generate a summary report."
+description: "Analyze competitor positioning, pricing, and strategy based on known market data and generate a summary report."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
 
 input_schema:
-  required: ["company_url"]
+  required: ["company_name", "competitors"]
   properties:
-    company_url:
+    company_name:
       type: string
-      description: "URL of the company whose competitors to monitor"
+      description: "Name of the company whose competitors to analyze"
+    competitors:
+      type: array
+      items:
+        type: string
+      description: "List of competitor names to analyze"
 
 steps:
-  - id: "fetch-competitors"
-    prompt: |
-      For the company at {input.company_url}, identify their top 3 competitors.
-      Return a JSON array of competitor URLs.
-    output_schema:
-      type: object
-      properties:
-        competitors:
-          type: array
-          items: { type: string }
-
   - id: "analyze"
     prompt: |
-      Visit {input._item} and analyze:
-      - Current pricing structure
-      - New features or product changes
-      - Marketing messaging changes
-      Compare to previous known state if available.
-    depends_on:
-      - "fetch-competitors"
-    parallel_over: "steps.fetch-competitors.output.competitors"
+      Analyze the competitor "{input._item}" in the context of {input.company_name}.
+      Based on your knowledge, provide:
+      - Current pricing structure and tiers
+      - Key product features and recent changes
+      - Marketing positioning and messaging
+      - Strengths and weaknesses relative to {input.company_name}
+    parallel_over: "input.competitors"
     retry:
       max_attempts: 2
       backoff: exponential

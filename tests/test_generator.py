@@ -41,6 +41,15 @@ class TestSystemPrompt:
         assert "depends_on" in prompt
         assert "kebab-case" in prompt
 
+    def test_contains_sandbox_limitations(self):
+        """System prompt should warn about sandbox execution limitations."""
+        prompt = _build_system_prompt()
+        assert "Sandbox Execution Environment" in prompt
+        assert "CANNOT" in prompt
+        assert "WebSearch" in prompt
+        assert "social media" in prompt.lower()
+        assert "curl" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Template loading

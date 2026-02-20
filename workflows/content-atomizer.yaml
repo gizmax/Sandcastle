@@ -1,5 +1,5 @@
 name: "Content Atomizer"
-description: "Transform one content piece into dozens of formatted outputs for every channel - social posts, emails, blog variants, video scripts, and a content calendar."
+description: "Transform one content piece into dozens of formatted outputs for every channel - social posts, emails, blog variants, video scripts, and a content calendar. Paste the full content text for best results."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -9,7 +9,7 @@ input_schema:
   properties:
     content:
       type: string
-      description: "URL of the content piece or the full text to atomize"
+      description: "Full text of the content piece to atomize. Paste the complete article/blog/report text here. If a URL is provided, the agent will try to fetch it via curl but pasting the text directly is more reliable."
     brand_voice:
       type: string
       description: "Brand voice guidelines (optional, e.g. 'professional but approachable')"

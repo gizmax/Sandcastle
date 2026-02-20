@@ -1,5 +1,5 @@
 name: "talent-pipeline-builder"
-description: "Build a complete talent acquisition pipeline: role analysis, candidate persona definition, sourcing channel strategy, personalized outreach sequences, interview rubric design, and a unified hiring playbook."
+description: "Build a complete talent acquisition pipeline: role analysis, candidate persona definition, sourcing channel strategy, personalized outreach sequences, interview rubric design, and a unified hiring playbook. All analysis is based on AI knowledge - no external job board or LinkedIn access required."
 default_model: sonnet
 default_max_turns: 12
 default_timeout: 300

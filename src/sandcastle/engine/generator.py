@@ -97,6 +97,33 @@ Always use these short names - NEVER use full API model IDs.
 - {{input.X}} - reference user input field X
 - {{steps.STEP_ID.output}} - reference output of a previous step
 
+## Sandbox Execution Environment
+
+Workflows run inside sandboxed environments (E2B cloud sandbox, Docker, or local subprocess).
+The agent has access to ONLY these tools: Bash (with curl), Read, Write, Edit, Glob, Grep.
+
+CRITICAL LIMITATIONS - the agent CANNOT:
+- Browse the web or render JavaScript - no browser is available
+- Use WebSearch or WebFetch - these tools do NOT exist in the sandbox
+- Access social media platforms (Twitter/X, LinkedIn, Reddit, Instagram) - they require OAuth/API keys
+- Access review platforms (G2, Trustpilot, Capterra, App Store) - they require JavaScript rendering
+- Crawl multiple pages of a website - only simple single-page curl requests work
+- Use Google/Bing search - search engines block automated curl requests
+
+WHAT WORKS:
+- Fetching simple HTML pages via curl (news sites, company homepages, documentation)
+- Calling public REST APIs with JSON responses
+- Processing data provided as user input (JSON, CSV, text pasted by user)
+- Using the agent's built-in knowledge for analysis, writing, reasoning, and planning
+- File operations (reading, writing, creating reports, generating code)
+
+RULES FOR WEB-DEPENDENT WORKFLOWS:
+1. If a workflow needs social media data, review data, or search results - require the data as INPUT (text or JSON), not as something the agent fetches
+2. For data that requires external collection, add a note in the description: "Provide pre-collected data from [source]. Use external tools like Brandwatch, Mention, Google Alerts, or social listening APIs to collect data."
+3. For simple URL fetching (single page), instruct the agent: "Use curl -s -L <url> to fetch the page content"
+4. NEVER write prompts that ask the agent to "search the web", "browse social media", "check review sites", or "crawl a website"
+5. Prefer workflows where the user provides all data as input and the agent does analysis, transformation, and writing
+
 ## Rules
 1. Every workflow MUST have input_schema with required and properties
 2. Use kebab-case for workflow name and step IDs
@@ -105,6 +132,7 @@ Always use these short names - NEVER use full API model IDs.
 5. Use descriptive prompts that reference inputs and previous step outputs
 6. Output ONLY valid YAML - no markdown fencing, no explanations
 7. Choose appropriate models: sonnet for complex tasks, haiku for simple formatting
+8. Never generate prompts that expect web browsing, social media access, or multi-page crawling
 
 ## Examples
 
