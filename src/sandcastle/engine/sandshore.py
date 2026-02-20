@@ -12,10 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import AsyncIterator
-
-import re
 
 import httpx
 from httpx_sse import aconnect_sse
@@ -273,6 +272,14 @@ class SandshoreRuntime:
         except SandshoreError:
             raise
         except Exception as e:
+            import traceback
+            logger.error(
+                "Backend '%s' raised %s: %s\n%s",
+                self._backend.name,
+                type(e).__name__,
+                e,
+                traceback.format_exc(),
+            )
             raise SandshoreError(
                 f"Sandbox backend '{self._backend.name}' execution failed: {e}"
             ) from e

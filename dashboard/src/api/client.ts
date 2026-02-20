@@ -191,11 +191,17 @@ class ApiClient {
     }
   }
 
-  sseConnect(path: string): { url: string; headers: HeadersInit } {
-    return {
-      url: `${this.baseUrl}${path}`,
-      headers: this.headers(),
-    };
+  /**
+   * Build an SSE-compatible URL with token query parameter for auth.
+   * EventSource does not support custom headers, so the API key is passed
+   * as a query parameter instead.
+   */
+  sseUrl(path: string): string {
+    const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
+    if (this.apiKey) {
+      url.searchParams.set("token", this.apiKey);
+    }
+    return url.toString();
   }
 }
 

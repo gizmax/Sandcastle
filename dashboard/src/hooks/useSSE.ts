@@ -26,12 +26,11 @@ export function useSSE(path: string | null) {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const { url, headers } = api.sseConnect(path);
+    const url = api.sseUrl(path);
 
     (async () => {
       try {
         const res = await fetch(url, {
-          headers,
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {

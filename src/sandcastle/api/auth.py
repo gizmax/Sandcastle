@@ -81,6 +81,11 @@ async def auth_middleware(request: Request, call_next):
         if auth_header.startswith("Bearer "):
             api_key = auth_header[7:]
 
+    # Fallback: accept token as query parameter for SSE/EventSource which
+    # does not support custom headers.
+    if not api_key:
+        api_key = request.query_params.get("token")
+
     if not api_key:
         return _error_response(401, "UNAUTHORIZED", "API key required")
 

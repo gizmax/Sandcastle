@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { API_BASE_URL } from "@/lib/constants";
+import { api } from "@/api/client";
 
 export type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
@@ -58,7 +58,7 @@ export function useEventStream() {
 
     setStatus("connecting");
 
-    const url = `${API_BASE_URL}/events`;
+    const url = api.sseUrl("/events");
     const es = new EventSource(url);
     esRef.current = es;
 

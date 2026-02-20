@@ -556,9 +556,9 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
 
 def _cmd_doctor(args: argparse.Namespace) -> None:
     """Run local diagnostics - no running server needed."""
-    from pathlib import Path
     import importlib
     import socket
+    from pathlib import Path
 
     failures = 0
 

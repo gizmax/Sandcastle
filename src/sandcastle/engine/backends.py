@@ -158,10 +158,20 @@ class E2BBackend:
                     if use_claude_runner
                     else "openai"
                 )
-                await sandbox.commands.run(
-                    f"npm install {pkg} 2>/dev/null || true",
-                    timeout=60,
-                )
+                # Python-level timeout as safety net in case the E2B SDK
+                # timeout parameter does not trigger a client-side abort.
+                try:
+                    await asyncio.wait_for(
+                        sandbox.commands.run(
+                            f"npm install {pkg} 2>/dev/null || true",
+                            timeout=60,
+                        ),
+                        timeout=90,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "npm install timed out after 90s, proceeding anyway"
+                    )
 
             handle = await sandbox.commands.run(
                 f"node /home/user/{runner_file}",

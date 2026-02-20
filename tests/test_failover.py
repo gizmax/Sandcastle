@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +15,6 @@ from sandcastle.engine.providers import (
     get_failover,
 )
 from sandcastle.engine.sandshore import SandshoreError, SandshoreRuntime
-
 
 # ---------------------------------------------------------------------------
 # TestFailoverChains
