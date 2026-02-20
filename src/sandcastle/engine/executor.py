@@ -932,6 +932,49 @@ async def _execute_fallback(
         )
 
 
+def _is_cacheable_output(output: Any) -> bool:
+    """Check if a step output is worth caching.
+
+    Returns False for empty results or outputs that indicate the agent
+    could not complete the task (e.g. missing input, no data found).
+    """
+    if output is None or output == "" or output == [] or output == {}:
+        return False
+
+    # Check dict outputs for empty data indicators
+    if isinstance(output, dict):
+        result_val = output.get("result", "")
+        if isinstance(result_val, str) and len(result_val) < 200:
+            lower = result_val.lower()
+            if any(kw in lower for kw in _FAILED_OUTPUT_KEYWORDS):
+                return False
+        # Check for zero-data indicators like total_mentions: 0
+        if output.get("total_mentions") == 0 and output.get("mentions") == []:
+            return False
+
+    # Check string outputs
+    if isinstance(output, str) and len(output) < 200:
+        lower = output.lower()
+        if any(kw in lower for kw in _FAILED_OUTPUT_KEYWORDS):
+            return False
+
+    return True
+
+
+_FAILED_OUTPUT_KEYWORDS = [
+    "please provide",
+    "please paste",
+    "no article",
+    "no content was provided",
+    "i need you to provide",
+    "i don't have access",
+    "i can't access",
+    "i cannot visit",
+    "unable to access",
+    "cannot browse",
+]
+
+
 def _compute_cache_key(
     workflow_name: str,
     step_id: str,
@@ -1241,15 +1284,20 @@ async def _execute_step_once(
             except Exception as e:
                 logger.warning(f"Policy evaluation failed for step '{step.id}': {e}")
 
-        # Save to cache
-        await _save_to_cache(
-            cache_key=cache_key,
-            workflow_name=context.workflow_name,
-            step_id=step.id,
-            model=effective_model or step.model,
-            output=output,
-            cost_usd=result.total_cost_usd,
-        )
+        # Save to cache - skip empty or failed outputs
+        if _is_cacheable_output(output):
+            await _save_to_cache(
+                cache_key=cache_key,
+                workflow_name=context.workflow_name,
+                step_id=step.id,
+                model=effective_model or step.model,
+                output=output,
+                cost_usd=result.total_cost_usd,
+            )
+        else:
+            logger.info(
+                f"Step '{step.id}' output not cached (empty or failed)"
+            )
 
         return StepResult(
             step_id=step.id,
