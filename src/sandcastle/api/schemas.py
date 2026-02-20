@@ -61,6 +61,14 @@ class ScheduleUpdateRequest(BaseModel):
     input_data: dict[str, Any] | None = None
 
 
+class WorkflowGenerateRequest(BaseModel):
+    """Request to generate a workflow from natural language."""
+
+    description: str = Field(..., description="Natural language description of the workflow")
+    refine_from: str | None = Field(None, description="Existing YAML to refine")
+    refine_instruction: str | None = Field(None, description="What to change in the existing YAML")
+
+
 class WorkflowSaveRequest(BaseModel):
     """Request to save a workflow YAML file."""
 

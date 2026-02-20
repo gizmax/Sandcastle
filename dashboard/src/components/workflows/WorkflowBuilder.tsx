@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor, Layers, Wand2 } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -26,6 +26,7 @@ import {
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
+import { GenerateModal } from "@/components/workflows/GenerateModal";
 import { cn } from "@/lib/utils";
 
 const nodeTypes: NodeTypes = {
@@ -364,6 +365,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   );
   const [yamlOpen, setYamlOpen] = useState(false);
   const [templateBrowserOpen, setTemplateBrowserOpen] = useState(false);
+  const [generateModalOpen, setGenerateModalOpen] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{
     name: string;
@@ -552,6 +554,23 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     [nodes.length, parseTemplateSteps, applyTemplate]
   );
 
+  // Handle AI-generated workflow selection
+  const handleGenerateSelect = useCallback(
+    (template: { name: string; content: string; step_count: number }) => {
+      setGenerateModalOpen(false);
+      const parsedSteps = parseTemplateSteps(template.content);
+      const templateData = { name: template.name, content: template.content, steps: parsedSteps };
+
+      if (nodes.length > 0) {
+        setPendingTemplate(templateData);
+        setConfirmReplace(true);
+      } else {
+        applyTemplate(templateData);
+      }
+    },
+    [nodes.length, parseTemplateSteps, applyTemplate]
+  );
+
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const yaml = generateYaml(workflowName, steps, edges);
 
@@ -588,6 +607,17 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
           From Template
         </button>
 
+        <button
+          onClick={() => setGenerateModalOpen(true)}
+          className={cn(
+            "mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-accent/40 px-3 py-2.5",
+            "text-xs font-medium text-accent/70 hover:border-accent hover:text-accent transition-colors"
+          )}
+        >
+          <Wand2 className="h-3.5 w-3.5" />
+          AI Generate
+        </button>
+
         <div className="mt-6">
           <label className="mb-1 block text-xs font-medium text-muted">Workflow Name</label>
           <input
@@ -614,6 +644,12 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         className="absolute left-14 top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface shadow-sm text-muted hover:text-accent hover:border-accent transition-colors lg:hidden"
       >
         <Layers className="h-4 w-4" />
+      </button>
+      <button
+        onClick={() => setGenerateModalOpen(true)}
+        className="absolute left-[6.25rem] top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-accent/40 bg-surface shadow-sm text-accent/70 hover:text-accent hover:border-accent transition-colors lg:hidden"
+      >
+        <Wand2 className="h-4 w-4" />
       </button>
 
       {/* Canvas */}
@@ -693,6 +729,13 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         open={templateBrowserOpen}
         onClose={() => setTemplateBrowserOpen(false)}
         onSelect={handleTemplateSelect}
+      />
+
+      {/* AI Generate Modal */}
+      <GenerateModal
+        open={generateModalOpen}
+        onClose={() => setGenerateModalOpen(false)}
+        onSelect={handleGenerateSelect}
       />
 
       {/* Confirm replace dialog */}
