@@ -1311,7 +1311,7 @@
   <header class="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.9.0 - Pluggable Backends + Multi-Provider
+        v0.10.0 - Model Failover + Doctor CLI
       </div>
       <h1>
         Stop babysitting<br>
@@ -1370,7 +1370,7 @@
           <div class="quickstart-step">
             <div class="quickstart-step-num">3</div>
             <div class="quickstart-step-title">Run</div>
-            <div class="quickstart-step-desc">API + dashboard on one port. 23 workflow templates included. Ready to go.</div>
+            <div class="quickstart-step-desc">API + dashboard on one port. 28 workflow templates included. Ready to go.</div>
           </div>
         </div>
 
@@ -1520,8 +1520,8 @@
         </div>
         <div class="feature-card">
           <span class="feature-icon">📋</span>
-          <h3>23 Built-in Templates</h3>
-          <p>Marketing, sales, support, HR, legal, and product templates ready to use. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
+          <h3>28 Built-in Templates</h3>
+          <p>Marketing, sales, support, HR, legal, product, and operations templates ready to use. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">📂</span>
@@ -1542,6 +1542,16 @@
           <span class="feature-icon">🔌</span>
           <h3>MCP Server</h3>
           <p>Built-in Model Context Protocol server. Run workflows, check status, and manage schedules from Claude Desktop, Cursor, or Windsurf.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🔄</span>
+          <h3>Model Failover</h3>
+          <p>Automatic fallback when a provider returns 429 or 5xx. Per-key cooldown tracking, ordered failover chains across providers.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🩺</span>
+          <h3>Doctor CLI</h3>
+          <p><code>sandcastle doctor</code> validates your setup - config, API keys, sandbox backends, dependencies, and network. No running server needed.</p>
         </div>
       </div>
 
@@ -1753,7 +1763,7 @@
   <section class="templates-section">
     <div class="container fade-in">
       <span class="section-label">Templates</span>
-      <h2 class="section-title">23 workflow templates, ready to deploy</h2>
+      <h2 class="section-title">28 workflow templates, ready to deploy</h2>
       <p class="section-subtitle">Skip the blank page. Pick a template, tweak the prompts, and ship. Every category covers real production use cases.</p>
       <div class="templates-grid">
         <div class="template-category">
@@ -1762,9 +1772,9 @@
           <span class="template-examples">Hello World, Fan-out, Approval Gate, Retry Chain, Scheduled Digest</span>
         </div>
         <div class="template-category">
-          <span class="template-count">7</span>
+          <span class="template-count">8</span>
           <span class="template-name">Marketing</span>
-          <span class="template-examples">Blog to Social, SEO Audit, Newsletter Generator, Content Repurposer, Competitor Watch, Competitive Radar, Content Atomizer</span>
+          <span class="template-examples">Blog to Social, SEO Audit, Newsletter, Content Repurposer, Competitor Watch, Competitive Radar, Content Atomizer, Brand Reputation Scanner</span>
         </div>
         <div class="template-category">
           <span class="template-count">4</span>
@@ -1777,9 +1787,9 @@
           <span class="template-examples">Ticket Triage, Knowledge Base Updater</span>
         </div>
         <div class="template-category">
-          <span class="template-count">2</span>
+          <span class="template-count">3</span>
           <span class="template-name">HR</span>
-          <span class="template-examples">Resume Screener, Onboarding Checklist</span>
+          <span class="template-examples">Resume Screener, Onboarding Checklist, Talent Pipeline Builder</span>
         </div>
         <div class="template-category">
           <span class="template-count">1</span>
@@ -1790,6 +1800,11 @@
           <span class="template-count">2</span>
           <span class="template-name">Product</span>
           <span class="template-examples">Feedback Analyzer, Release Notes Generator</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">3</span>
+          <span class="template-name">Operations</span>
+          <span class="template-examples">Technical Debt Auditor, Incident Postmortem Generator, Market Entry Analyzer</span>
         </div>
       </div>
     </div>
