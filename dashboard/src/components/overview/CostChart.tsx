@@ -33,36 +33,7 @@ export function CostChart({ data }: CostChartProps) {
       <ResponsiveContainer width="100%" height={240}>
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-          <XAxis
-            dataKey="workflow"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            tick={(props: any) => {
-              const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
-              const name = payload.value;
-              const parts = name.length > 12
-                ? [name.slice(0, Math.ceil(name.length / 2)), name.slice(Math.ceil(name.length / 2))]
-                : [name];
-              return (
-                <g transform={`translate(${x},${y})`}>
-                  {parts.map((part, i) => (
-                    <text
-                      key={i}
-                      x={0}
-                      y={0}
-                      dy={12 + i * 13}
-                      textAnchor="middle"
-                      fill="var(--color-muted)"
-                      fontSize={11}
-                    >
-                      {part}
-                    </text>
-                  ))}
-                </g>
-              );
-            }}
-            height={50}
-            interval={0}
-          />
+          <XAxis dataKey="workflow" tick={false} height={5} />
           <YAxis
             tick={{ fontSize: 11, fill: "var(--color-muted)" }}
             tickFormatter={(v: number) => `$${v.toFixed(2)}`}
@@ -75,6 +46,7 @@ export function CostChart({ data }: CostChartProps) {
               fontSize: "12px",
             }}
             cursor={{ fill: "var(--color-border)", opacity: 0.3 }}
+            labelFormatter={(label) => String(label)}
             formatter={(value) => [`$${Number(value).toFixed(2)}`, "Cost"]}
           />
           <Bar dataKey="cost" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
