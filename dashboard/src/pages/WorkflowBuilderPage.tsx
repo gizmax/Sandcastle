@@ -52,7 +52,10 @@ export default function WorkflowBuilderPage() {
   );
 
   const runWorkflow = useCallback(
-    async (yaml: string, input: Record<string, unknown>) => {
+    async (yaml: string, name: string, input: Record<string, unknown>) => {
+      // Auto-save before running so the workflow persists
+      await api.post("/workflows", { name, content: yaml });
+
       const res = await api.post<{ run_id: string }>("/workflows/run", {
         workflow: yaml,
         input,
@@ -76,11 +79,11 @@ export default function WorkflowBuilderPage() {
         setRunModal({ yaml, name, inputSchema: schema });
       } else {
         // No schema - run directly
-        void runWorkflow(yaml, {});
+        void runWorkflow(yaml, name, {});
       }
     } catch {
       // YAML parse failed, run directly
-      void runWorkflow(yaml, {});
+      void runWorkflow(yaml, "workflow", {});
     }
   }, [runWorkflow]);
 
@@ -100,8 +103,9 @@ export default function WorkflowBuilderPage() {
           inputSchema={runModal.inputSchema}
           onClose={() => setRunModal(null)}
           onRun={(input) => {
+            const name = runModal.name;
             setRunModal(null);
-            void runWorkflow(runModal.yaml, input);
+            void runWorkflow(runModal.yaml, name, input);
           }}
         />
       )}
