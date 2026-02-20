@@ -67,6 +67,7 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [dlqCount, setDlqCount] = useState(0);
+  const [approvalsCount, setApprovalsCount] = useState(0);
   const [isDemo, setIsDemo] = useState(api.isMockMode);
   const navigate = useNavigate();
   const { subscribe } = useEventStreamContext();
@@ -76,6 +77,23 @@ export function Layout() {
 
   // Track mock mode changes
   useEffect(() => api.onMockChange(setIsDemo), []);
+
+  // Fetch pending approvals count on mount
+  useEffect(() => {
+    async function fetchApprovalsCount() {
+      try {
+        const res = await api.get<unknown[]>("/approvals", { status: "pending" });
+        if (res.data && Array.isArray(res.data)) {
+          setApprovalsCount(res.data.length);
+        } else if (res.meta?.total != null) {
+          setApprovalsCount(res.meta.total);
+        }
+      } catch {
+        // Ignore - approvals badge is non-critical
+      }
+    }
+    void fetchApprovalsCount();
+  }, []);
 
   // Subscribe to all events for notifications
   useEffect(() => {
@@ -109,6 +127,13 @@ export function Layout() {
       if (event.type === "dlq.new") {
         setDlqCount((prev) => prev + 1);
       }
+
+      // Update approvals badge
+      if (event.type === "approval.requested") {
+        setApprovalsCount((prev) => prev + 1);
+      } else if (event.type === "approval.resolved") {
+        setApprovalsCount((prev) => Math.max(0, prev - 1));
+      }
     });
 
     return unsubscribe;
@@ -132,7 +157,7 @@ export function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dlqCount={dlqCount} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dlqCount={dlqCount} approvalsCount={approvalsCount} />
       <div className="flex flex-1 flex-col overflow-hidden">
         {isDemo && (
           <div className="flex items-center justify-center gap-2 bg-warning/15 border-b border-warning/30 px-3 py-1.5 text-xs font-medium text-warning">

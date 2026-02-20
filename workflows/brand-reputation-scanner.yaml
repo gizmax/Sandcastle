@@ -1,0 +1,266 @@
+name: "brand-reputation-scanner"
+description: "Monitor brand mentions across platforms, analyze sentiment at scale, detect PR crisis signals, and generate a response playbook with prioritized action items."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 300
+
+input_schema:
+  required:
+    - brand_name
+    - industry
+    - time_period
+  properties:
+    brand_name:
+      type: string
+      description: "Brand or company name to monitor (e.g. 'Stripe', 'Notion', 'Tesla')"
+    industry:
+      type: string
+      description: "Industry vertical for context (e.g. 'fintech', 'SaaS productivity', 'electric vehicles')"
+    time_period:
+      type: string
+      description: "Time window to scan (e.g. 'last 7 days', 'last 30 days', 'last quarter')"
+    competitors:
+      type: array
+      items: { type: string }
+      description: "Optional list of competitor brands for comparative analysis"
+
+steps:
+  - id: "scan-mentions"
+    prompt: |
+      You are a brand intelligence analyst. Research and compile all notable mentions of "{input.brand_name}" from the {input.time_period}.
+
+      Search across these channels:
+      1. News articles and press coverage (major outlets and industry publications)
+      2. Social media (Twitter/X, LinkedIn, Reddit, HackerNews)
+      3. Review platforms (G2, Trustpilot, Capterra, App Store)
+      4. Industry forums, blogs, and community discussions
+      5. YouTube and podcast mentions
+
+      For each mention found, capture:
+      - source: Platform or outlet name
+      - url: Link to the mention (if available)
+      - date: Approximate date
+      - content_snippet: Key quote or summary (100-200 chars)
+      - author_type: journalist, customer, influencer, competitor, employee, analyst
+      - reach_estimate: low (<1K), medium (1K-50K), high (50K+), viral (500K+)
+
+      Industry context: {input.industry}
+
+      Return as JSON with a "mentions" array containing all found mentions.
+      Aim for at least 10-15 mentions across different channels.
+    output_schema:
+      type: object
+      properties:
+        mentions:
+          type: array
+          items:
+            type: object
+            properties:
+              source: { type: string }
+              url: { type: string }
+              date: { type: string }
+              content_snippet: { type: string }
+              author_type: { type: string }
+              reach_estimate: { type: string }
+        total_mentions: { type: integer }
+        channels_scanned: { type: array, items: { type: string } }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: continue
+
+  - id: "classify-sentiment"
+    depends_on: ["scan-mentions"]
+    parallel_over: "{steps.scan-mentions.output.mentions}"
+    model: haiku
+    prompt: |
+      Analyze the sentiment and classify this brand mention of "{input.brand_name}":
+
+      Source: {input._item.source}
+      Content: {input._item.content_snippet}
+      Author type: {input._item.author_type}
+      Reach: {input._item.reach_estimate}
+
+      Perform:
+      1. Sentiment classification: positive, negative, neutral, or mixed
+      2. Sentiment score: -1.0 (very negative) to +1.0 (very positive)
+      3. Emotion detection: anger, frustration, praise, excitement, indifference, concern, humor
+      4. Topic categorization: product quality, customer service, pricing, leadership, innovation, controversy, partnership, general
+      5. Virality risk: Will this spread? low / medium / high / critical
+      6. Response urgency: none, monitor, respond_24h, respond_asap, escalate_immediately
+
+      Return structured JSON with all classifications.
+    output_schema:
+      type: object
+      properties:
+        source: { type: string }
+        content_snippet: { type: string }
+        sentiment: { type: string }
+        sentiment_score: { type: number }
+        emotion: { type: string }
+        topic: { type: string }
+        virality_risk: { type: string }
+        response_urgency: { type: string }
+        author_type: { type: string }
+        reach_estimate: { type: string }
+
+  - id: "detect-crisis-signals"
+    depends_on: ["classify-sentiment"]
+    prompt: |
+      You are a PR crisis detection specialist. Analyze all classified brand mentions for "{input.brand_name}" to detect emerging crisis patterns.
+
+      Classified mentions: {steps.classify-sentiment.output}
+
+      Perform these analyses:
+
+      1. CRISIS SCORING (0-100):
+         - Volume spike: Are negative mentions increasing faster than normal?
+         - High-reach negatives: Any viral negative content from influencers/journalists?
+         - Cluster detection: Are multiple negatives about the SAME topic?
+         - Escalation trajectory: Is sentiment worsening over time?
+
+      2. PATTERN DETECTION:
+         - Recurring complaints (same issue from multiple sources)
+         - Coordinated attacks (similar language/timing suggesting organized campaign)
+         - Influencer pile-on (multiple high-reach accounts amplifying negatives)
+         - Employee signals (internal discontent leaking externally)
+
+      3. SENTIMENT DASHBOARD:
+         - Overall sentiment ratio (positive:negative:neutral)
+         - Sentiment trend (improving, stable, declining, crisis)
+         - Topic heatmap (which topics generate most negative sentiment)
+         - Channel breakdown (which platforms are most negative)
+
+      4. COMPETITIVE CONTEXT (if available):
+         - Is the sentiment shift industry-wide or brand-specific?
+         - Are competitors experiencing similar patterns?
+
+      Return a comprehensive crisis assessment JSON.
+    output_schema:
+      type: object
+      properties:
+        crisis_score: { type: integer }
+        crisis_level: { type: string }
+        sentiment_ratio:
+          type: object
+          properties:
+            positive: { type: number }
+            negative: { type: number }
+            neutral: { type: number }
+        sentiment_trend: { type: string }
+        top_risk_topics:
+          type: array
+          items:
+            type: object
+            properties:
+              topic: { type: string }
+              severity: { type: string }
+              mention_count: { type: integer }
+        patterns_detected:
+          type: array
+          items: { type: string }
+        requires_immediate_action: { type: boolean }
+
+  - id: "generate-responses"
+    depends_on: ["detect-crisis-signals", "classify-sentiment"]
+    prompt: |
+      You are a senior communications strategist. Based on the crisis assessment and sentiment data for "{input.brand_name}", generate a comprehensive response playbook.
+
+      Crisis Assessment: {steps.detect-crisis-signals.output}
+      Individual Mentions: {steps.classify-sentiment.output}
+      Industry: {input.industry}
+
+      Generate responses for EACH mention requiring action (response_urgency != "none"):
+
+      For each actionable mention, provide:
+      1. Response channel: Where to respond (same platform, official blog, press release)
+      2. Response tone: empathetic, factual, celebratory, corrective
+      3. Draft response: Ready-to-use response text (adapt to platform constraints)
+      4. Escalation path: Who should approve this? (social team, PR lead, C-suite, legal)
+      5. Timing: When to respond (immediately, within 2h, within 24h, next business day)
+
+      Also create:
+      - A holding statement template (for crisis scenarios)
+      - 3 proactive positive stories to push (to improve sentiment ratio)
+      - Social media response templates (positive reply, complaint acknowledgment, crisis response)
+
+      Return structured JSON with response playbook.
+    output_schema:
+      type: object
+      properties:
+        individual_responses:
+          type: array
+          items:
+            type: object
+            properties:
+              mention_source: { type: string }
+              response_channel: { type: string }
+              response_tone: { type: string }
+              draft_response: { type: string }
+              escalation_path: { type: string }
+              timing: { type: string }
+        holding_statement: { type: string }
+        proactive_stories:
+          type: array
+          items: { type: string }
+        templates:
+          type: object
+          properties:
+            positive_reply: { type: string }
+            complaint_ack: { type: string }
+            crisis_response: { type: string }
+
+  - id: "compile-dashboard"
+    depends_on: ["detect-crisis-signals", "generate-responses"]
+    prompt: |
+      IMPORTANT: Return the complete report as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
+
+      Compile a comprehensive Brand Reputation Dashboard for "{input.brand_name}" covering the {input.time_period}.
+
+      Crisis Assessment: {steps.detect-crisis-signals.output}
+      Response Playbook: {steps.generate-responses.output}
+
+      Structure the report as:
+
+      # Brand Reputation Dashboard - {input.brand_name}
+
+      ## Executive Summary
+      - Overall crisis score and level
+      - Sentiment trend in one sentence
+      - Number of mentions requiring immediate action
+      - Top 3 risk areas
+
+      ## Sentiment Overview
+      - Sentiment distribution (table: positive, negative, neutral with percentages)
+      - Trend indicator (improving/stable/declining/crisis)
+      - Channel-by-channel breakdown (table)
+
+      ## Crisis Signals
+      - Current crisis score: X/100
+      - Patterns detected (bulleted list)
+      - Risk topics (table: topic, severity, mention count)
+
+      ## Priority Action Items
+      - ESCALATE IMMEDIATELY (if any)
+      - Respond within 24h (list with draft responses)
+      - Monitor (list)
+
+      ## Response Playbook
+      - Holding statement
+      - Proactive story opportunities
+      - Response templates
+
+      ## Recommendations
+      - Short-term (next 48h)
+      - Medium-term (next 2 weeks)
+      - Long-term (next quarter)
+
+      Use markdown tables, headers, and bullet points. Make it presentation-ready.
+    max_turns: 1
+    pdf_report:
+      directory: ./output
+      language: en
+
+on_complete:
+  storage_path: "brand/{run_id}/reputation-dashboard.json"

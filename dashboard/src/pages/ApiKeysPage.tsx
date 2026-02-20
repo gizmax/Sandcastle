@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Key, KeyRound, Plus, Check, AlertCircle, Loader2 } from "lucide-react";
+import { Key, KeyRound, Plus, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ApiKeyTable, type ApiKeyItem } from "@/components/api-keys/ApiKeyTable";
 import { CreateApiKeyModal } from "@/components/api-keys/CreateApiKeyModal";
 import { KeyRevealModal } from "@/components/api-keys/KeyRevealModal";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { SectionCard, FieldLabel, HelperText, inputClass } from "@/components/ui/SectionCard";
 import { cn } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
@@ -17,75 +19,6 @@ interface SettingsData {
   minimax_api_key: string;
   openrouter_api_key: string;
   [key: string]: unknown;
-}
-
-// -- Sub-components ---------------------------------------------------------
-
-function SectionCard({
-  icon: Icon,
-  title,
-  description,
-  children,
-}: {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-surface p-5 sm:p-6 shadow-sm">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-          <Icon className="h-[18px] w-[18px] text-accent" />
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
-  return (
-    <label htmlFor={htmlFor} className="block text-sm font-medium text-foreground mb-1.5">
-      {children}
-    </label>
-  );
-}
-
-function HelperText({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-muted-foreground mt-1">{children}</p>;
-}
-
-const inputClass = cn(
-  "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground",
-  "placeholder:text-muted-foreground",
-  "focus:outline-none focus:ring-2 focus:ring-ring/30",
-  "transition-colors"
-);
-
-function Toast({ message, type }: { message: string; type: "success" | "error" }) {
-  return (
-    <div
-      className={cn(
-        "fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg",
-        "animate-[fadeIn_0.2s_ease-out]",
-        type === "success"
-          ? "bg-success/15 border border-success/30 text-success"
-          : "bg-error/15 border border-error/30 text-error"
-      )}
-    >
-      {type === "success" ? (
-        <Check className="h-4 w-4" />
-      ) : (
-        <AlertCircle className="h-4 w-4" />
-      )}
-      {message}
-    </div>
-  );
 }
 
 // -- Main component ---------------------------------------------------------
@@ -110,7 +43,6 @@ export default function ApiKeysPage() {
     openrouter_api_key: string;
   } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -143,13 +75,6 @@ export default function ApiKeysPage() {
     void fetchKeys();
     void fetchSettings();
   }, [fetchKeys, fetchSettings]);
-
-  // Toast auto-dismiss
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3000);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   const handleCreate = useCallback(
     async (data: { name: string; tenant_id: string; max_cost_per_run_usd?: number }) => {
@@ -197,7 +122,7 @@ export default function ApiKeysPage() {
     setSaving(false);
 
     if (res.error) {
-      setToast({ message: `Failed to save: ${res.error.message}`, type: "error" });
+      toast.error(`Failed to save: ${res.error.message}`);
     } else {
       originalRef.current = {
         anthropic_api_key: anthropicKey,
@@ -206,7 +131,7 @@ export default function ApiKeysPage() {
         minimax_api_key: minimaxKey,
         openrouter_api_key: openrouterKey,
       };
-      setToast({ message: "Credentials saved successfully", type: "success" });
+      toast.success("Credentials saved successfully");
     }
   }, [anthropicKey, e2bKey, openaiKey, minimaxKey, openrouterKey]);
 
@@ -340,7 +265,6 @@ export default function ApiKeysPage() {
         />
       )}
 
-      {toast && <Toast message={toast.message} type={toast.type} />}
     </div>
   );
 }

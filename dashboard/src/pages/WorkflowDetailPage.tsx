@@ -55,21 +55,12 @@ export default function WorkflowDetailPage() {
   const handleSelectVersion = useCallback(async (version: number) => {
     setSelectedVersion(version);
     if (!name) return;
-    const res = await api.get<WorkflowVersion & { yaml_content?: string }>(
-      `/workflows/${name}/versions/${version}`
-    );
-    // The YAML is in the full response - we get it from the versions list
-    const v = data?.versions.find((v) => v.version === version);
-    if (v) {
-      // Fetch full version with YAML
-      const fullRes = await api.get<Record<string, unknown>>(`/workflows/${name}/versions/${version}`);
-      if (fullRes.data && typeof fullRes.data === "object") {
-        // YAML might not be in the response schema directly, but steps are
-        setSelectedYaml(null); // Will show step info instead
-      }
+    const res = await api.get<Record<string, unknown>>(`/workflows/${name}/versions/${version}`);
+    if (res.data && typeof res.data === "object") {
+      // YAML might not be in the response schema directly, but steps are
+      setSelectedYaml(null); // Will show step info instead
     }
-    if (res.data) setSelectedYaml(null);
-  }, [name, data]);
+  }, [name]);
 
   const handlePromote = useCallback(async (version: number) => {
     if (!name) return;

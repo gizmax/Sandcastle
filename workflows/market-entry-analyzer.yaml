@@ -1,0 +1,416 @@
+name: "market-entry-analyzer"
+description: "Full market entry analysis for expanding into new geographies or verticals - market sizing, regulatory landscape, competitor mapping, localization requirements, GTM strategy, and financial projections."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 300
+
+input_schema:
+  required:
+    - product_description
+    - target_markets
+    - budget_usd
+  properties:
+    product_description:
+      type: string
+      description: "Detailed description of the product or service to launch (what it does, current market, pricing model)"
+    target_markets:
+      type: array
+      items: { type: string }
+      description: "Array of target markets to analyze (e.g. ['Germany', 'Japan', 'Brazil'])"
+    budget_usd:
+      type: integer
+      description: "Total available budget for market entry in USD"
+    current_markets:
+      type: array
+      items: { type: string }
+      description: "Markets where the product is already available (for reference)"
+    company_size:
+      type: string
+      description: "Company stage: startup, scaleup, enterprise (default: scaleup)"
+      default: scaleup
+
+steps:
+  - id: "market-sizing"
+    parallel_over: "input.target_markets"
+    prompt: |
+      You are a market research analyst. Perform a comprehensive market sizing analysis for this product in {input._item}:
+
+      Product: {input.product_description}
+      Company size: {input.company_size}
+
+      Analyze:
+
+      1. TAM (Total Addressable Market):
+         - Industry revenue in {input._item}
+         - Growth rate (CAGR) for the relevant sector
+         - Number of potential customer organizations
+
+      2. SAM (Serviceable Addressable Market):
+         - Segment that matches the product's target customer profile
+         - Realistic reach given distribution channels
+         - Price sensitivity in {input._item} vs current markets
+
+      3. SOM (Serviceable Obtainable Market):
+         - Realistic first-year capture (% of SAM)
+         - Benchmark against similar market entries in {input._item}
+         - Time to meaningful revenue (months)
+
+      4. MARKET DYNAMICS:
+         - Market maturity: nascent, growing, mature, declining
+         - Technology adoption curve position for {input._item}
+         - Key market trends and tailwinds
+         - Macro-economic factors (GDP growth, tech spending, digital adoption)
+
+      5. CUSTOMER PROFILE:
+         - Ideal customer in {input._item} (size, industry, pain points)
+         - Buying behavior and decision-making process
+         - Budget cycles and procurement patterns
+         - Language and cultural preferences in B2B/B2C buying
+
+      Return structured JSON with all market sizing data.
+    output_schema:
+      type: object
+      properties:
+        market: { type: string }
+        tam_usd: { type: number }
+        sam_usd: { type: number }
+        som_usd: { type: number }
+        cagr_percent: { type: number }
+        market_maturity: { type: string }
+        time_to_revenue_months: { type: integer }
+        customer_count_estimate: { type: integer }
+        key_trends: { type: array, items: { type: string } }
+        risk_level: { type: string }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: continue
+
+  - id: "regulatory-scan"
+    parallel_over: "input.target_markets"
+    prompt: |
+      You are a regulatory compliance specialist. Analyze the regulatory environment for launching this product in {input._item}:
+
+      Product: {input.product_description}
+
+      Cover these regulatory dimensions:
+
+      1. DATA PROTECTION & PRIVACY:
+         - Primary data protection law (GDPR, LGPD, APPI, PIPL, etc.)
+         - Data residency requirements
+         - Consent and opt-in requirements
+         - Cross-border data transfer rules
+         - DPO (Data Protection Officer) requirements
+
+      2. BUSINESS REGISTRATION:
+         - Local entity requirements (subsidiary, branch, representative office)
+         - Registration timeline and costs
+         - Minimum capital requirements
+         - Local director/representative requirements
+
+      3. INDUSTRY-SPECIFIC REGULATION:
+         - Licensing or permits needed
+         - Industry certifications required
+         - Compliance standards (ISO, SOC2, local equivalents)
+         - Regulated content or feature restrictions
+
+      4. TAX & FINANCIAL:
+         - Corporate tax rate
+         - VAT/GST implications
+         - Withholding tax on cross-border payments
+         - Transfer pricing considerations
+         - Tax incentives for tech companies
+
+      5. EMPLOYMENT LAW (if hiring locally):
+         - Mandatory benefits
+         - Termination protections
+         - Working hour restrictions
+         - Remote work regulations
+
+      6. BARRIERS & RISKS:
+         - Government restrictions on foreign tech companies
+         - Local content/hosting requirements
+         - Sanctions or trade restrictions
+         - IP protection strength
+
+      Rate overall regulatory complexity: low, medium, high, very_high.
+      Estimate compliance setup cost in USD.
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        market: { type: string }
+        regulatory_complexity: { type: string }
+        data_protection_law: { type: string }
+        entity_required: { type: boolean }
+        setup_cost_usd: { type: integer }
+        setup_time_months: { type: integer }
+        key_requirements:
+          type: array
+          items: { type: string }
+        blockers:
+          type: array
+          items: { type: string }
+        tax_rate_corporate: { type: number }
+        risk_score: { type: integer }
+
+  - id: "competitor-landscape"
+    depends_on: ["market-sizing"]
+    parallel_over: "input.target_markets"
+    prompt: |
+      Analyze the competitive landscape for this product in {input._item}:
+
+      Product: {input.product_description}
+      Market size data: {steps.market-sizing.output}
+
+      For {input._item}, identify and analyze:
+
+      1. TOP 5 COMPETITORS:
+         For each competitor:
+         - Company name and website
+         - Market share estimate (%)
+         - Pricing (tiers and currency)
+         - Key differentiators
+         - Strengths and weaknesses
+         - Customer reviews sentiment (positive/negative themes)
+         - Local vs international player
+
+      2. MARKET CONCENTRATION:
+         - HHI index estimate (fragmented vs concentrated)
+         - Presence of dominant player (>40% share)?
+         - Room for new entrant?
+
+      3. COMPETITIVE MOATS:
+         - Network effects
+         - Switching costs
+         - Brand loyalty
+         - Data advantages
+         - Regulatory moats (local certifications)
+
+      4. ENTRY BARRIERS:
+         - Established relationships
+         - Local language/culture requirements
+         - Distribution channel lock-in
+         - Price war risk
+
+      5. POSITIONING OPPORTUNITY:
+         - Underserved segments
+         - Feature gaps in existing solutions
+         - Price positioning opportunity (premium, value, disruptive)
+         - Partnership opportunities (local distributors, integrators)
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        market: { type: string }
+        competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              website: { type: string }
+              market_share_pct: { type: number }
+              pricing: { type: string }
+              strengths: { type: array, items: { type: string } }
+              weaknesses: { type: array, items: { type: string } }
+              local_player: { type: boolean }
+        market_concentration: { type: string }
+        entry_difficulty: { type: string }
+        positioning_opportunity: { type: string }
+
+  - id: "localization-requirements"
+    depends_on: ["competitor-landscape", "regulatory-scan"]
+    parallel_over: "input.target_markets"
+    model: haiku
+    prompt: |
+      Define localization requirements for launching the product in {input._item}:
+
+      Product: {input.product_description}
+      Regulatory context: {steps.regulatory-scan.output}
+      Competitive context: {steps.competitor-landscape.output}
+
+      Cover:
+
+      1. LANGUAGE:
+         - Primary language(s) required
+         - Content to translate (UI, docs, marketing, legal, support)
+         - Translation approach (professional, community, MT + review)
+         - Estimated word count and translation cost
+
+      2. CULTURAL ADAPTATION:
+         - UX/UI changes needed (layout direction, color meanings, icons)
+         - Marketing message adaptation (values, humor, formality level)
+         - Social proof requirements (local case studies, testimonials)
+         - Local holidays and business calendar
+
+      3. PAYMENT & PRICING:
+         - Local payment methods (credit cards, bank transfer, mobile payment)
+         - Local currency pricing
+         - Price point adjustment (purchasing power parity)
+         - Invoice and receipt requirements
+
+      4. TECHNICAL:
+         - CDN/hosting location for performance
+         - Local domain (ccTLD) needed?
+         - Local phone number for support
+         - Time zone support for SLAs
+
+      5. TEAM & SUPPORT:
+         - Local hire requirements (sales, support, marketing)
+         - Support hours in local time zone
+         - Local agency/partner needs
+
+      Estimate total localization cost in USD and timeline in weeks.
+    output_schema:
+      type: object
+      properties:
+        market: { type: string }
+        languages: { type: array, items: { type: string } }
+        localization_cost_usd: { type: integer }
+        timeline_weeks: { type: integer }
+        payment_methods: { type: array, items: { type: string } }
+        local_hires_needed: { type: integer }
+        priority_items:
+          type: array
+          items: { type: string }
+
+  - id: "go-to-market-plan"
+    depends_on: ["market-sizing", "competitor-landscape", "localization-requirements", "regulatory-scan"]
+    prompt: |
+      You are a VP of Growth. Create a go-to-market strategy for each target market.
+
+      Product: {input.product_description}
+      Budget: ${input.budget_usd} USD total
+      Markets: {input.target_markets}
+
+      Market Sizing: {steps.market-sizing.output}
+      Competitor Analysis: {steps.competitor-landscape.output}
+      Localization Needs: {steps.localization-requirements.output}
+      Regulatory Context: {steps.regulatory-scan.output}
+
+      For EACH market, define:
+
+      1. MARKET PRIORITY RANKING:
+         - Score each market on: size, growth, competition, regulatory ease, localization cost
+         - Recommend launch order (which market first?)
+
+      2. GTM MOTION:
+         - Primary channel: PLG (product-led), sales-led, partner-led, marketplace
+         - Customer acquisition strategy
+         - Key partnerships to establish
+         - Launch event/campaign concept
+
+      3. PRICING STRATEGY:
+         - Localized pricing per market
+         - Discount/promotion for market entry
+         - Freemium vs free trial vs paid-only
+
+      4. CHANNEL STRATEGY:
+         - Direct sales vs channel partners vs online
+         - Local marketplace listings (if applicable)
+         - Content marketing in local language
+         - Paid acquisition channels (Google, LinkedIn, local platforms)
+
+      5. MILESTONES (90-day plan):
+         - Month 1: Setup and soft launch
+         - Month 2: First customers and feedback
+         - Month 3: Scale what works
+
+      6. BUDGET ALLOCATION:
+         - Split ${input.budget_usd} across markets based on priority
+         - Breakdown: setup, marketing, hiring, operations
+
+      Return structured JSON with GTM plan per market.
+    output_schema:
+      type: object
+      properties:
+        market_priority_ranking:
+          type: array
+          items:
+            type: object
+            properties:
+              market: { type: string }
+              priority_score: { type: number }
+              recommended_order: { type: integer }
+        gtm_plans:
+          type: array
+          items:
+            type: object
+            properties:
+              market: { type: string }
+              gtm_motion: { type: string }
+              pricing_strategy: { type: string }
+              budget_allocation_usd: { type: integer }
+              month1_milestones: { type: array, items: { type: string } }
+              month2_milestones: { type: array, items: { type: string } }
+              month3_milestones: { type: array, items: { type: string } }
+
+  - id: "financial-projection"
+    depends_on: ["go-to-market-plan", "market-sizing"]
+    prompt: |
+      IMPORTANT: Return the complete report as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
+
+      Create a comprehensive financial projection and final market entry report.
+
+      Product: {input.product_description}
+      Total Budget: ${input.budget_usd} USD
+      Markets: {input.target_markets}
+
+      Market Sizing: {steps.market-sizing.output}
+      GTM Plans: {steps.go-to-market-plan.output}
+
+      Structure the report as:
+
+      # Market Entry Analysis Report
+
+      ## Executive Summary
+      - Recommended market entry order
+      - Total addressable opportunity across all markets
+      - Expected ROI timeline
+      - Go/No-Go recommendation per market
+
+      ## Market Comparison Matrix
+      | Market | TAM | Competition | Regulatory | Cost | Priority |
+      (filled for each market)
+
+      ## Financial Projections (per market)
+      For each market:
+      ### {Market Name}
+      | Metric | Month 3 | Month 6 | Month 12 | Month 24 |
+      |--------|---------|---------|----------|----------|
+      | Revenue | | | | |
+      | Customers | | | | |
+      | CAC | | | | |
+      | MRR | | | | |
+      | Burn Rate | | | | |
+      | Break-even | | | | |
+
+      ## Budget Allocation
+      - Pie chart description (%) per market
+      - Breakdown by category (setup, marketing, ops, hiring)
+
+      ## Risk Matrix
+      | Risk | Probability | Impact | Mitigation |
+      (top 10 risks across all markets)
+
+      ## Recommended Action Plan
+      1. Immediate (Week 1-2): Legal setup, team hiring
+      2. Short-term (Month 1): Localization, partnerships
+      3. Medium-term (Month 2-3): Launch, iterate
+      4. Long-term (Month 4-12): Scale, optimize
+
+      ## Go/No-Go Decision Matrix
+      For each market: GREEN (launch), YELLOW (launch with caution), RED (defer)
+
+      Use markdown tables, clear formatting, and specific numbers.
+    max_turns: 1
+    pdf_report:
+      directory: ./output
+      language: en
+
+on_complete:
+  storage_path: "market-entry/{run_id}/analysis-report.json"

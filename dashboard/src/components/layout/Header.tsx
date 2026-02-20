@@ -87,7 +87,7 @@ export function Header({
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => search(query), 150);
+    const t = setTimeout(() => search(query), 300);
     return () => clearTimeout(t);
   }, [query, search]);
 

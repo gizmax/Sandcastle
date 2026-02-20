@@ -42,7 +42,7 @@ const navItems = [
 
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
   const { info } = useRuntimeInfo();
-  const version = info?.version ?? "0.7.1";
+  const version = info?.version ?? "0.9.0";
 
   return (
     <>

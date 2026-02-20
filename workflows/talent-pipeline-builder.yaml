@@ -1,0 +1,474 @@
+name: "talent-pipeline-builder"
+description: "Build a complete talent acquisition pipeline: role analysis, candidate persona definition, sourcing channel strategy, personalized outreach sequences, interview rubric design, and a unified hiring playbook."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 300
+
+input_schema:
+  required:
+    - role_title
+    - company_description
+    - team_size
+  properties:
+    role_title:
+      type: string
+      description: "Job title to hire for (e.g. 'Senior Backend Engineer', 'Head of Product', 'ML Engineer')"
+    company_description:
+      type: string
+      description: "Company description including stage, product, culture, and mission"
+    team_size:
+      type: integer
+      description: "Current team size the hire will join"
+    location:
+      type: string
+      description: "Location constraint (e.g. 'Remote US', 'Berlin, Germany', 'Hybrid NYC')"
+      default: "Remote"
+    salary_range:
+      type: string
+      description: "Salary range (e.g. '$150K-$200K' or 'EUR 80K-100K')"
+    urgency:
+      type: string
+      description: "Hiring urgency: low (3+ months), medium (1-2 months), high (< 1 month)"
+      default: "medium"
+
+steps:
+  - id: "analyze-role"
+    prompt: |
+      You are a senior talent strategist. Perform a deep analysis of this role to build the foundation for a targeted hiring pipeline.
+
+      Role: {input.role_title}
+      Company: {input.company_description}
+      Team size: {input.team_size}
+      Location: {input.location}
+      Salary range: {input.salary_range}
+      Urgency: {input.urgency}
+
+      Analyze:
+
+      1. ROLE DEFINITION:
+         - Core responsibilities (5-8 bullet points)
+         - Must-have skills vs nice-to-have skills
+         - Years of experience range (minimum and ideal)
+         - Technical requirements (languages, frameworks, tools)
+         - Soft skills critical for this role and team size
+
+      2. MARKET INTELLIGENCE:
+         - Current market demand for this role (hot/warm/cool)
+         - Typical time-to-fill (days) for this role
+         - Salary benchmarks by market (compare to {input.salary_range})
+         - Competition for talent (which companies are also hiring this role?)
+         - Talent pool size estimate
+
+      3. SUCCESS PROFILE:
+         - What does a successful hire look like after 90 days?
+         - Key projects they should be able to tackle
+         - Cultural fit indicators
+         - Red flags to watch for
+         - Career trajectory that leads to this role
+
+      4. HIRING CHALLENGES:
+         - Why is this role hard to fill?
+         - Common reasons candidates reject offers for this type of role
+         - What makes your company attractive vs competitors?
+         - Dealbreakers that will filter out otherwise good candidates
+
+      Return structured JSON with complete role analysis.
+    output_schema:
+      type: object
+      properties:
+        core_responsibilities: { type: array, items: { type: string } }
+        must_have_skills: { type: array, items: { type: string } }
+        nice_to_have_skills: { type: array, items: { type: string } }
+        experience_range: { type: string }
+        market_demand: { type: string }
+        avg_time_to_fill_days: { type: integer }
+        talent_pool_size: { type: string }
+        success_90day_criteria: { type: array, items: { type: string } }
+        red_flags: { type: array, items: { type: string } }
+        salary_competitive: { type: boolean }
+        hiring_challenges: { type: array, items: { type: string } }
+
+  - id: "define-personas"
+    depends_on: ["analyze-role"]
+    prompt: |
+      Based on the role analysis, define 3 distinct candidate personas that represent the ideal hire for {input.role_title}.
+
+      Role Analysis: {steps.analyze-role.output}
+      Company: {input.company_description}
+      Team size: {input.team_size}
+
+      Create 3 candidate personas, each representing a different but viable path to this role:
+
+      PERSONA 1 - "The Direct Match":
+      - Currently in the exact same role at a similar company
+      - Lateral move motivation
+      - Where to find them, what to pitch
+
+      PERSONA 2 - "The Rising Star":
+      - One level below, ready for promotion
+      - Hungry for growth, may be overlooked at current company
+      - Where to find them, what to pitch
+
+      PERSONA 3 - "The Career Pivot":
+      - Adjacent role or industry, transferable skills
+      - Brings fresh perspective
+      - Where to find them, what to pitch
+
+      For EACH persona, define:
+      - persona_name: Catchy archetype name
+      - current_title: What their LinkedIn says now
+      - current_company_types: Types of companies they work at
+      - years_experience: Range
+      - key_skills: Top 5 skills they definitely have
+      - motivation_triggers: What would make them consider moving (3-5 triggers)
+      - objections: Top 3 objections they will raise
+      - pitch_angle: How to frame the opportunity for THIS persona
+      - where_to_find: Specific communities, platforms, events
+      - engagement_difficulty: easy, medium, hard
+
+      Return as JSON with a "personas" array containing exactly 3 personas.
+    output_schema:
+      type: object
+      properties:
+        personas:
+          type: array
+          items:
+            type: object
+            properties:
+              persona_name: { type: string }
+              current_title: { type: string }
+              current_company_types: { type: array, items: { type: string } }
+              years_experience: { type: string }
+              key_skills: { type: array, items: { type: string } }
+              motivation_triggers: { type: array, items: { type: string } }
+              objections: { type: array, items: { type: string } }
+              pitch_angle: { type: string }
+              where_to_find: { type: array, items: { type: string } }
+              engagement_difficulty: { type: string }
+
+  - id: "source-channels"
+    depends_on: ["define-personas"]
+    parallel_over: "steps.define-personas.output.personas"
+    model: haiku
+    prompt: |
+      Design a targeted sourcing strategy for this candidate persona:
+
+      Persona: {input._item.persona_name}
+      Current title: {input._item.current_title}
+      Where to find them: {input._item.where_to_find}
+      Engagement difficulty: {input._item.engagement_difficulty}
+
+      Role: {input.role_title}
+      Location: {input.location}
+      Urgency: {input.urgency}
+
+      Define sourcing channels:
+
+      1. LINKEDIN STRATEGY:
+         - Boolean search string (ready to paste into LinkedIn Recruiter)
+         - InMail approach (first message template)
+         - LinkedIn groups to join
+         - Content to engage with
+
+      2. DIRECT SOURCING:
+         - GitHub/GitLab: repos, contributions, languages to search
+         - Stack Overflow: tags and activity patterns
+         - Conference speaker lists to check
+         - Open source maintainers to target
+
+      3. COMMUNITY SOURCING:
+         - Slack/Discord communities where this persona hangs out
+         - Meetup groups (local and virtual)
+         - Reddit subreddits
+         - Twitter/X hashtags and accounts to follow
+
+      4. REFERRAL STRATEGY:
+         - Who in your network might know this persona?
+         - Referral bonus structure recommendation
+         - Warm intro request templates
+
+      5. JOB BOARD STRATEGY:
+         - Which boards this persona checks (general: LinkedIn, Indeed; niche: specific ones)
+         - Job posting title optimization (what they search for)
+         - Posting timing (best day/time)
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        persona_name: { type: string }
+        linkedin_boolean_search: { type: string }
+        linkedin_inmail_template: { type: string }
+        direct_sourcing_channels:
+          type: array
+          items:
+            type: object
+            properties:
+              channel: { type: string }
+              search_strategy: { type: string }
+              expected_yield: { type: string }
+        community_channels:
+          type: array
+          items: { type: string }
+        recommended_job_boards:
+          type: array
+          items: { type: string }
+        referral_template: { type: string }
+
+  - id: "create-outreach"
+    depends_on: ["define-personas", "source-channels"]
+    parallel_over: "steps.define-personas.output.personas"
+    prompt: |
+      Create a personalized multi-touch outreach sequence for this candidate persona:
+
+      Persona: {input._item.persona_name}
+      Current title: {input._item.current_title}
+      Motivation triggers: {input._item.motivation_triggers}
+      Objections: {input._item.objections}
+      Pitch angle: {input._item.pitch_angle}
+
+      Role: {input.role_title}
+      Company: {input.company_description}
+      Salary: {input.salary_range}
+      Location: {input.location}
+
+      Create a 5-touch outreach sequence:
+
+      TOUCH 1 - LinkedIn InMail (Day 1):
+      - Personalized opening (reference their work/company)
+      - One sentence about the role
+      - Soft ask (not "are you interested" - instead "curious about your perspective")
+      - Keep under 300 chars
+
+      TOUCH 2 - Follow-up InMail (Day 4):
+      - Reference Touch 1
+      - Share something valuable (industry insight, relevant article)
+      - Connect the value to why this role matters
+      - Slightly more direct ask
+
+      TOUCH 3 - Email (Day 7):
+      - Different channel to increase visibility
+      - Lead with the strongest motivation trigger for this persona
+      - Social proof (team, product, company achievements)
+      - Clear CTA: 15-min exploratory chat
+
+      TOUCH 4 - LinkedIn Engagement (Day 10):
+      - Comment on their recent post/article
+      - Share a relevant piece of content and tag them
+      - Build relationship, not pitch
+
+      TOUCH 5 - Final Direct Message (Day 14):
+      - Acknowledge you have been persistent
+      - One-line pitch with the single most compelling reason
+      - Graceful close: "If timing isn't right, I'd love to stay connected"
+      - Leave the door open
+
+      For each touch, provide:
+      - channel (linkedin_inmail, email, linkedin_comment, linkedin_dm)
+      - day (relative to first touch)
+      - subject (if email)
+      - message (full text, ready to send)
+      - personalization_placeholders (fields to customize per candidate)
+      - expected_response_rate (%)
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        persona_name: { type: string }
+        sequence:
+          type: array
+          items:
+            type: object
+            properties:
+              touch_number: { type: integer }
+              channel: { type: string }
+              day: { type: integer }
+              subject: { type: string }
+              message: { type: string }
+              personalization_placeholders: { type: array, items: { type: string } }
+              expected_response_rate_pct: { type: number }
+        overall_expected_response_rate_pct: { type: number }
+    csv_output:
+      directory: ./output
+      mode: append
+      filename: outreach-sequences
+
+  - id: "design-interview"
+    depends_on: ["analyze-role", "define-personas"]
+    prompt: |
+      Design a comprehensive interview process and evaluation rubric for {input.role_title}.
+
+      Role Analysis: {steps.analyze-role.output}
+      Candidate Personas: {steps.define-personas.output}
+      Team size: {input.team_size}
+      Company: {input.company_description}
+
+      Design the complete interview loop:
+
+      1. INTERVIEW STAGES:
+         Stage 1 - Recruiter Screen (30 min):
+         - Questions to ask (5-7)
+         - What to evaluate (motivation, salary alignment, logistics)
+         - Pass/fail criteria
+         - Red flags at this stage
+
+         Stage 2 - Hiring Manager Interview (45 min):
+         - Questions mapped to must-have skills
+         - Behavioral questions (STAR format prompts)
+         - Scenario-based questions specific to the role
+         - Culture fit assessment questions
+
+         Stage 3 - Technical Assessment (60-90 min):
+         - Take-home assignment OR live coding (recommend which and why)
+         - Assignment brief (detailed)
+         - Evaluation criteria and rubric (1-5 scale)
+         - Time limit and expectations
+
+         Stage 4 - Team Interview / Cross-functional (45 min):
+         - Panel composition recommendation
+         - Collaboration assessment questions
+         - Communication style evaluation
+         - "Reverse interview" facilitation tips
+
+         Stage 5 - Executive/Final (30 min):
+         - Strategic questions
+         - Vision alignment
+         - Closing and sell
+
+      2. EVALUATION RUBRIC:
+         For each must-have skill, create:
+         - Skill name
+         - How to evaluate (question or exercise)
+         - Score 1 (Does not meet): description
+         - Score 3 (Meets expectations): description
+         - Score 5 (Exceeds expectations): description
+         - Weight (how important is this skill, 1-3)
+
+      3. SCORECARD TEMPLATE:
+         - Overall recommendation: Strong Hire / Hire / No Hire / Strong No Hire
+         - Required minimum scores per skill
+         - How to handle split decisions
+
+      4. CANDIDATE EXPERIENCE:
+         - Communication templates (scheduling, rejection, offer)
+         - Timeline commitment (max days from first screen to offer)
+         - Feedback process
+
+      Return structured JSON with the complete interview framework.
+    output_schema:
+      type: object
+      properties:
+        stages:
+          type: array
+          items:
+            type: object
+            properties:
+              stage_number: { type: integer }
+              stage_name: { type: string }
+              duration_minutes: { type: integer }
+              interviewer_role: { type: string }
+              questions: { type: array, items: { type: string } }
+              evaluation_criteria: { type: array, items: { type: string } }
+              pass_criteria: { type: string }
+        rubric:
+          type: array
+          items:
+            type: object
+            properties:
+              skill: { type: string }
+              evaluation_method: { type: string }
+              score_1: { type: string }
+              score_3: { type: string }
+              score_5: { type: string }
+              weight: { type: integer }
+        total_process_days: { type: integer }
+        recommended_assessment_type: { type: string }
+
+  - id: "compile-playbook"
+    depends_on: ["analyze-role", "define-personas", "source-channels", "create-outreach", "design-interview"]
+    prompt: |
+      IMPORTANT: Return the complete playbook as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
+
+      Compile everything into a comprehensive Talent Acquisition Playbook.
+
+      Role Analysis: {steps.analyze-role.output}
+      Candidate Personas: {steps.define-personas.output}
+      Sourcing Strategy: {steps.source-channels.output}
+      Outreach Sequences: {steps.create-outreach.output}
+      Interview Process: {steps.design-interview.output}
+
+      Structure the playbook as:
+
+      # Talent Acquisition Playbook: {input.role_title}
+      **Company:** (from {input.company_description})
+      **Location:** {input.location}
+      **Salary Range:** {input.salary_range}
+      **Urgency:** {input.urgency}
+      **Team Size:** {input.team_size}
+
+      ---
+
+      ## 1. Role Overview
+      - Why we are hiring (business context)
+      - Success profile (what great looks like)
+      - Must-haves vs nice-to-haves (table)
+
+      ## 2. Market Intelligence
+      - Talent market conditions
+      - Salary benchmarks
+      - Expected time-to-fill
+      - Hiring competition
+
+      ## 3. Candidate Personas
+      For each of the 3 personas:
+      ### Persona: {Name}
+      - Profile summary
+      - Where to find them
+      - How to pitch the role
+      - Expected objections and rebuttals
+
+      ## 4. Sourcing Playbook
+      | Channel | Persona Target | Search Strategy | Expected Yield |
+      (table of all sourcing channels across personas)
+
+      ## 5. Outreach Sequences
+      For each persona, the 5-touch sequence with ready-to-use templates.
+      Highlight personalization placeholders in **bold**.
+
+      ## 6. Interview Process
+      ### Pipeline Overview
+      Stage 1 -> Stage 2 -> Stage 3 -> Stage 4 -> Stage 5
+
+      ### Per-Stage Guide
+      For each stage: questions, evaluation criteria, pass/fail.
+
+      ### Evaluation Rubric
+      | Skill | Method | 1 (Below) | 3 (Meets) | 5 (Exceeds) | Weight |
+      (complete rubric table)
+
+      ## 7. Pipeline Metrics to Track
+      - Applications per source
+      - Screen-to-interview conversion
+      - Interview-to-offer conversion
+      - Offer acceptance rate
+      - Time-to-fill
+      - Cost-per-hire
+
+      ## 8. Communication Templates
+      - Rejection email (after screen, after interview)
+      - Offer email
+      - Candidate nurture (for pipeline building)
+
+      ---
+      *Generated for {input.role_title} at team size {input.team_size}*
+
+      Make it professional, actionable, and ready to hand to a recruiting team.
+    max_turns: 1
+    pdf_report:
+      directory: ./output
+      language: en
+
+on_complete:
+  storage_path: "hiring/{run_id}/talent-playbook.json"

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -24,6 +24,21 @@ const ApiKeysPage = lazy(() => import("@/pages/ApiKeysPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
+
+function NotFound() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-4">
+      <h1 className="text-4xl font-bold text-foreground">404</h1>
+      <p className="text-muted">Page not found</p>
+      <Link
+        to="/"
+        className="text-sm font-medium text-accent hover:text-accent/80 transition-colors"
+      >
+        Back to Overview
+      </Link>
+    </div>
+  );
+}
 
 export default function App() {
   const { state, login } = useAuth();
@@ -69,6 +84,7 @@ export default function App() {
               <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
         </Suspense>

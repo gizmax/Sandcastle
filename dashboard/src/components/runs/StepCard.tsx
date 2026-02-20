@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { ChevronDown, ChevronRight, RotateCcw, GitFork, Copy, Check, FileText } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { API_BASE_URL } from "@/lib/constants";
 import { cn, formatDuration, formatCost, parseUTC } from "@/lib/utils";
 
 function ElapsedTimer({ since }: { since: string }) {
@@ -172,7 +173,7 @@ export function StepCard({
           {pdfArtifact && runId && (
             <div className="mt-2">
               <a
-                href={`/api/runs/${runId}/steps/${stepId}/pdf`}
+                href={`${API_BASE_URL}/runs/${runId}/steps/${stepId}/pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={cn(
