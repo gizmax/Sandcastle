@@ -144,7 +144,7 @@ class ApiClient {
     return res.json();
   }
 
-  async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+  async post<T>(path: string, body?: unknown, timeoutMs?: number): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {
       return this.mock<T>(path, undefined, "POST", body);
@@ -155,7 +155,7 @@ class ApiClient {
         method: "POST",
         headers: this.headers(),
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT),
       });
       return this.handleResponse<T>(res);
     } catch {
