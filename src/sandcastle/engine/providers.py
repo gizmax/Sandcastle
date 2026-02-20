@@ -43,7 +43,7 @@ PROVIDER_REGISTRY: dict[str, ModelInfo] = {
     ),
     # MiniMax
     "minimax/m2.5": ModelInfo(
-        "minimax", "MiniMax-M1-80k", "runner-openai.mjs",
+        "minimax", "MiniMax-M2.5", "runner-openai.mjs",
         "MINIMAX_API_KEY", "https://api.minimaxi.chat/v1", 0.30, 1.20,
     ),
     # OpenAI

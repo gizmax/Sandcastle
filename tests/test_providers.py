@@ -69,7 +69,7 @@ class TestResolveModel:
     def test_resolve_minimax(self):
         info = resolve_model("minimax/m2.5")
         assert info.provider == "minimax"
-        assert info.api_model_id == "MiniMax-M1-80k"
+        assert info.api_model_id == "MiniMax-M2.5"
         assert info.api_base_url == "https://api.minimaxi.chat/v1"
 
     def test_resolve_openai(self):
