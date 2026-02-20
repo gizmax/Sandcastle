@@ -131,3 +131,17 @@ class S3Storage:
         session = self._get_session()
         async with session.client("s3", endpoint_url=self.endpoint_url) as s3:
             await s3.delete_object(Bucket=self.bucket, Key=path)
+
+
+def create_storage() -> LocalStorage | S3Storage:
+    """Create the storage backend based on config."""
+    from sandcastle.config import settings
+
+    if settings.storage_backend == "s3":
+        return S3Storage(
+            bucket=settings.storage_bucket,
+            endpoint_url=settings.storage_endpoint or None,
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+        )
+    return LocalStorage()

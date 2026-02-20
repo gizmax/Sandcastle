@@ -1717,7 +1717,7 @@ async def execute_workflow(
         depth: Current nesting depth for hierarchical workflows.
     """
     from sandcastle.config import settings
-    from sandcastle.engine.storage import LocalStorage
+    from sandcastle.engine.storage import create_storage
 
     # Depth check for hierarchical workflows
     if depth >= settings.max_workflow_depth:
@@ -1733,7 +1733,7 @@ async def execute_workflow(
         run_id = str(uuid.uuid4())
 
     if storage is None:
-        storage = LocalStorage()
+        storage = create_storage()
 
     started_at = datetime.now(timezone.utc)
 
