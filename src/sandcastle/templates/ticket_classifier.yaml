@@ -5,10 +5,22 @@
 name: ticket-classifier
 description: Classify support ticket, assign priority, and draft response
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["subject", "body"]
+  properties:
+    subject:
+      type: string
+      description: "Support ticket subject line"
+    body:
+      type: string
+      description: "Support ticket body text"
+    customer_tier:
+      type: string
+      description: "Customer tier level (e.g. free, pro, enterprise)"
 
 steps:
   - id: classify
@@ -20,7 +32,7 @@ steps:
       Ticket subject: {input.subject}
       Ticket body: {input.body}
       Customer tier: {input.customer_tier}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 5
     output_schema:
       type: object
@@ -44,7 +56,7 @@ steps:
       P4 is low priority. Provide a brief justification for the priority.
       Classification: {steps.classify.output}
       Customer tier: {input.customer_tier}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 5
 
   - id: draft-response
@@ -58,7 +70,7 @@ steps:
       Original ticket: {input.body}
       Classification: {steps.classify.output}
       Priority: {steps.prioritize.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8
 
   - id: suggest-routing
@@ -72,5 +84,5 @@ steps:
       for the receiving team.
       Classification: {steps.classify.output}
       Priority: {steps.prioritize.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 5

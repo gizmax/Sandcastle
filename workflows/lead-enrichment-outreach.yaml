@@ -1,6 +1,5 @@
 name: "Lead Enrichment & Personalized Outreach"
 description: "Enrich leads with company data, identify decision makers, research pain points, and generate personalized multi-touch email sequences."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300

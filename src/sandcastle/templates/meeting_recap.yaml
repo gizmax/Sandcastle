@@ -5,10 +5,22 @@
 name: meeting-recap
 description: Transform meeting transcript into summary, action items, and follow-up email
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["transcript", "meeting_title", "sender_name"]
+  properties:
+    transcript:
+      type: string
+      description: "The meeting transcript text"
+    meeting_title:
+      type: string
+      description: "Title or subject of the meeting"
+    sender_name:
+      type: string
+      description: "Name of the person sending the follow-up email"
 
 steps:
   - id: summarize
@@ -19,7 +31,7 @@ steps:
       most important outcomes clearly.
       Transcript: {input.transcript}
       Meeting title: {input.meeting_title}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8
 
   - id: action-items
@@ -31,7 +43,7 @@ steps:
       Format as a structured checklist that can be imported into a task
       tracker.
       Meeting summary: {steps.summarize.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 5
 
   - id: follow-up-email
@@ -44,5 +56,5 @@ steps:
       Meeting summary: {steps.summarize.output}
       Action items: {steps.action-items.output}
       Sender name: {input.sender_name}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8

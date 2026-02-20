@@ -5,10 +5,16 @@
 name: research-agent
 description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["topic"]
+  properties:
+    topic:
+      type: string
+      description: "The research topic to investigate"
 
 steps:
   - id: search

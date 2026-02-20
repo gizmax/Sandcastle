@@ -1,6 +1,5 @@
 name: "market-entry-analyzer"
 description: "Full market entry analysis for expanding into new geographies or verticals - market sizing, regulatory landscape, competitor mapping, localization requirements, GTM strategy, and financial projections."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 12
 default_timeout: 300

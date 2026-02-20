@@ -1,6 +1,5 @@
 name: "technical-debt-auditor"
 description: "Deep-dive codebase analysis for technical debt: code complexity, outdated dependencies, security vulnerabilities, test coverage gaps, and architecture anti-patterns with a prioritized remediation plan."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 15
 default_timeout: 600

@@ -5,10 +5,16 @@
 name: competitor-analysis
 description: Analyze competitor positioning, strengths, weaknesses, and opportunities
 
-sandstorm_url: ${SANDSTORM_URL}
-default_model: claude-sonnet-4-20250514
+default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["competitor"]
+  properties:
+    competitor:
+      type: string
+      description: "Name of the competitor to analyze"
 
 steps:
   - id: gather-info
@@ -18,7 +24,7 @@ steps:
       target market segments, and overall market share. Identify their
       marketing channels and recent strategic moves.
       Competitor: {input.competitor}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: analyze-strengths
@@ -29,7 +35,7 @@ steps:
       perception, customer experience, market positioning, and technical
       capabilities. Rank each strength by impact on their market position.
       Research: {steps.gather-info.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: analyze-weaknesses
@@ -41,7 +47,7 @@ steps:
       strategic blind spots. Highlight areas that represent opportunities
       for differentiation.
       Research: {steps.gather-info.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: swot-report
@@ -54,5 +60,5 @@ steps:
       for competitive positioning.
       Strengths: {steps.analyze-strengths.output}
       Weaknesses: {steps.analyze-weaknesses.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10

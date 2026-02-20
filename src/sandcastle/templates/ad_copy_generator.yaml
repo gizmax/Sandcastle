@@ -5,10 +5,16 @@
 name: ad-copy-generator
 description: Generate ad copy variants for Google Ads and Meta Ads campaigns
 
-sandstorm_url: ${SANDSTORM_URL}
-default_model: claude-sonnet-4-20250514
+default_model: sonnet
 default_max_turns: 5
 default_timeout: 180
+
+input_schema:
+  required: ["product_brief"]
+  properties:
+    product_brief:
+      type: string
+      description: "Product brief describing features, target audience, and differentiators"
 
 steps:
   - id: analyze-product
@@ -18,7 +24,7 @@ steps:
       differentiators. Identify the primary emotional triggers and rational
       arguments that would drive conversions.
       Product brief: {input.product_brief}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: google-ads
@@ -30,7 +36,7 @@ steps:
       different angles for each variant - feature-focused, benefit-focused,
       urgency, social proof, and competitive comparison.
       Product analysis: {steps.analyze-product.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: meta-ads
@@ -43,7 +49,7 @@ steps:
       variants - storytelling, testimonial-style, direct response, question
       hook, and listicle format.
       Product analysis: {steps.analyze-product.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: compile-report
@@ -55,5 +61,5 @@ steps:
       a recommended budget split across the top-performing variants.
       Google Ads: {steps.google-ads.output}
       Meta Ads: {steps.meta-ads.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 3

@@ -1,6 +1,5 @@
 name: "eu-presidents"
-description: ""
-sandstorm_url: "${SANDSTORM_URL}"
+description: "Research all current EU member state presidents and compile a summary report in Czech."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -8,23 +7,23 @@ default_timeout: 300
 steps:
   - id: "research"
     prompt: |
-      najdi vsechny aktualni prezidenty clenskych zemi EU. 
+      najdi vsechny aktualni prezidenty clenskych zemi EU.
       name, role, country, term_start, term_end.
-      
+
 
   - id: "enrich"
     prompt: |
-      For each president in this list
+      For each president in this list: {steps.research.output}
       Add: political party (jinak dej bez strany), age at start of term, one key decision they made.
-      
+
     depends_on:
       - "research"
 
   - id: "summarize"
     prompt: |
-      Create a well-formatted summary report in Czech 
+      Create a well-formatted summary report in Czech based on: {steps.enrich.output}
       Include a markdown table and brief highlights.
-      
+
     depends_on:
       - "enrich"
 

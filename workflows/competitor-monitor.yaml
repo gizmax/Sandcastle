@@ -1,9 +1,15 @@
 name: "Competitor Monitor"
 description: "Track competitor websites for changes, analyze differences, and generate a summary report."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["company_url"]
+  properties:
+    company_url:
+      type: string
+      description: "URL of the company whose competitors to monitor"
 
 steps:
   - id: "fetch-competitors"

@@ -5,10 +5,19 @@
 name: review-and-approve
 description: Generates content, pauses for human review and approval, then publishes the approved content
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["brief", "audience"]
+  properties:
+    brief:
+      type: string
+      description: "The content brief describing what to generate"
+    audience:
+      type: string
+      description: "The target audience for the content"
 
 steps:
   - id: generate

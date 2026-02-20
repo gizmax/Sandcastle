@@ -5,10 +5,16 @@
 name: data-extractor
 description: Extract structured data from documents with validation and error handling
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["document_text"]
+  properties:
+    document_text:
+      type: string
+      description: "The document text to extract structured data from"
 
 steps:
   - id: analyze-document
@@ -17,7 +23,7 @@ steps:
       letter, etc.) and structure. Identify all extractable fields, their expected data
       types, and any repeating sections or tables. Note the document quality and any
       areas that may be difficult to extract accurately. Document: {input.document_text}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: extract-data
@@ -29,7 +35,7 @@ steps:
       by marking them as null with an explanation.
       Document analysis: {steps.analyze-document.output}
       Original document: {input.document_text}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
     output_schema:
       type: object
@@ -75,7 +81,7 @@ steps:
       cross-reference related fields for logical consistency (e.g., line items sum to total),
       and flag any values that appear anomalous or potentially incorrect.
       Extracted data: {steps.extract-data.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: format-output
@@ -87,5 +93,5 @@ steps:
       machine-readable JSON format ready for downstream processing.
       Validated data: {steps.validate.output}
       Original extraction: {steps.extract-data.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 3

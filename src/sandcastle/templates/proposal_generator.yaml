@@ -5,10 +5,25 @@
 name: proposal-generator
 description: Generate a customized business proposal from meeting notes and product info
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["meeting_notes", "client_name", "product_info", "pricing_tier"]
+  properties:
+    meeting_notes:
+      type: string
+      description: "Notes from the client meeting"
+    client_name:
+      type: string
+      description: "Name of the client"
+    product_info:
+      type: string
+      description: "Product catalog or feature descriptions"
+    pricing_tier:
+      type: string
+      description: "Pricing tier to use in the proposal"
 
 steps:
   - id: extract-requirements
@@ -19,7 +34,7 @@ steps:
       ambiguous or missing information that should be clarified.
       Meeting notes: {input.meeting_notes}
       Client name: {input.client_name}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8
 
   - id: match-solutions
@@ -31,7 +46,7 @@ steps:
       where custom work or integrations may be needed.
       Client requirements: {steps.extract-requirements.output}
       Product catalog: {input.product_info}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: write-proposal
@@ -44,7 +59,7 @@ steps:
       Solution mapping: {steps.match-solutions.output}
       Client name: {input.client_name}
       Pricing tier: {input.pricing_tier}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: review-gate
