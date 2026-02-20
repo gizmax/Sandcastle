@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers, Wand2 } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, RefreshCw } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -58,10 +58,16 @@ function generateYaml(
   // Check if any step uses directory input
   const hasDirInput = steps.some((s) => s.directoryInput.enabled);
 
+  // Determine the most common model across steps as default
+  const modelCounts = new Map<string, number>();
+  steps.forEach((s) => {
+    modelCounts.set(s.model, (modelCounts.get(s.model) || 0) + 1);
+  });
+  const defaultModel = [...modelCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "sonnet";
+
   let yaml = `name: "${workflowName}"\n`;
   yaml += `description: ""\n`;
-  yaml += `sandstorm_url: "\${SANDSTORM_URL}"\n`;
-  yaml += `default_model: sonnet\n`;
+  yaml += `default_model: ${defaultModel}\n`;
   yaml += `default_max_turns: 10\n`;
   yaml += `default_timeout: 300\n\n`;
 
@@ -97,7 +103,7 @@ function generateYaml(
       step.prompt.split("\n").forEach((line) => {
         yaml += `      ${line}\n`;
       });
-      if (step.model !== "sonnet") yaml += `    model: ${step.model}\n`;
+      if (step.model !== defaultModel) yaml += `    model: ${step.model}\n`;
       if (step.maxTurns !== 10) yaml += `    max_turns: ${step.maxTurns}\n`;
       if (step.timeout !== 300) yaml += `    timeout: ${step.timeout}\n`;
     }
@@ -571,6 +577,16 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     [nodes.length, parseTemplateSteps, applyTemplate]
   );
 
+  const setAllModels = useCallback(
+    (model: string) => {
+      setSteps((prev) => prev.map((s) => ({ ...s, model })));
+      setNodes((prev) =>
+        prev.map((n) => ({ ...n, data: { ...n.data, model } }))
+      );
+    },
+    [setNodes]
+  );
+
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const yaml = generateYaml(workflowName, steps, edges);
 
@@ -630,6 +646,45 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             )}
           />
         </div>
+
+        {steps.length > 0 && (
+          <div className="mt-4">
+            <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+              <RefreshCw className="h-3 w-3" />
+              Set All Models
+            </label>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  setAllModels(e.target.value);
+                  e.target.value = "";
+                }
+              }}
+              className={cn(
+                "h-8 w-full rounded-md border border-border bg-surface px-2 text-xs",
+                "focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-ring/30"
+              )}
+            >
+              <option value="" disabled>Select model...</option>
+              <optgroup label="Claude">
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </optgroup>
+              <optgroup label="OpenAI">
+                <option value="openai/codex-mini">Codex Mini</option>
+                <option value="openai/codex">Codex</option>
+              </optgroup>
+              <optgroup label="MiniMax">
+                <option value="minimax/m2.5">MiniMax M2.5</option>
+              </optgroup>
+              <optgroup label="Google">
+                <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Mobile add step button */}
