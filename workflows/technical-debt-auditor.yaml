@@ -1,5 +1,5 @@
 name: "technical-debt-auditor"
-description: "Deep-dive codebase analysis for technical debt: code complexity, outdated dependencies, security vulnerabilities, test coverage gaps, and architecture anti-patterns with a prioritized remediation plan."
+description: "Deep-dive codebase analysis for technical debt: code complexity, outdated dependencies, security vulnerabilities, test coverage gaps, and architecture anti-patterns with a prioritized remediation plan. Provide a local path to the repository - the agent reads and analyzes files directly."
 default_model: sonnet
 default_max_turns: 15
 default_timeout: 600
@@ -11,7 +11,7 @@ input_schema:
   properties:
     repo_url:
       type: string
-      description: "Git repository URL or local path to analyze (e.g. 'https://github.com/org/repo' or '/path/to/project')"
+      description: "Local path to the repository to analyze (e.g. '/path/to/project'). For remote repos, clone them first and provide the local path. The agent cannot clone git repositories directly."
     language:
       type: string
       description: "Primary programming language (e.g. 'python', 'typescript', 'go', 'java', 'rust')"

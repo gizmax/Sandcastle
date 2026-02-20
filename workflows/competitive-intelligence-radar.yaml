@@ -1,47 +1,55 @@
 name: "competitive-intelligence-radar"
-description: "Analyze top competitors - positioning, market signals, SWOT, strategic recommendations."
+description: "Analyze top competitors using AI knowledge - positioning, market signals, SWOT, strategic recommendations. Uses the agent's built-in knowledge for analysis rather than web scraping."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
 
 input_schema:
   required:
-    - company_url
+    - company_name
     - industry
     - country
   properties:
-    company_url:
+    company_name:
       type: string
-      description: "URL of the company to analyze (e.g. https://www.notino.cz)"
+      description: "Name of the company to analyze"
     industry:
       type: string
       description: "Industry context (e.g. online cosmetics and perfume retail)"
     country:
       type: string
       description: "Target market / country (e.g. Czech Republic, Germany, USA)"
+    competitors:
+      type: array
+      items:
+        type: string
+      description: "Optional list of known competitor names - if not provided, the agent will identify them based on its knowledge"
 
 steps:
   - id: "identify-competitors"
     prompt: |
-      For the company at {input.company_url}, identify the top 5 direct competitors in {input.country}.
-      Focus on competitors that are active and relevant in the {input.country} market.
-      For each competitor, find:
-      - Company name and website URL
-      - Social media profiles (LinkedIn, Twitter/X)
-      - Brief one-line description of what they do
+      Based on your knowledge, identify the top 5 direct competitors of {input.company_name} in the {input.country} market.
       Industry context: {input.industry}
       Target market: {input.country}
+
+      If the user provided a list of competitors ({input.competitors}), use those as the basis and supplement with your own knowledge if fewer than 5 are listed. If no competitors were provided, identify them yourself.
+
+      For each competitor, provide:
+      - Company name
+      - Brief one-line description of what they do
+      - Estimated market position in {input.country}
+
       Return as a JSON object with a "competitors" key containing an array of competitor objects.
-      
+
 
   - id: "analyze-positioning"
     prompt: |
-      Analyze the competitive positioning of {input._item.company_name} ({input._item.website}) in the {input.country} market:
+      Analyze the competitive positioning of {input._item.company_name} in the {input.country} market based on your knowledge:
       1. Pricing model and tiers (free, paid plans, enterprise) - specific to {input.country}
       2. Core messaging and value proposition
       3. Unique selling points (USP)
       4. Target audience and ideal customer profile in {input.country}
-      5. Tech stack and integrations (if visible)
+      5. Tech stack and integrations (if known)
       6. Content strategy (blog, docs, community)
       Return structured JSON with these categories.
 
@@ -51,12 +59,12 @@ steps:
 
   - id: "analyze-market-signals"
     prompt: |
-      Research recent market signals for {input._item.company_name} ({input._item.website}) in {input.country}:
-      1. Recent news and press releases (last 6 months) relevant to {input.country}
-      2. Hiring trends - what roles are they hiring for in {input.country}?
-      3. Funding history and recent rounds
-      4. Partnerships and integrations announced (especially in {input.country})
-      5. Product launches or major updates
+      Based on your knowledge, analyze recent market signals for {input._item.company_name} in {input.country}:
+      1. Known recent news and developments relevant to {input.country}
+      2. Hiring trends - what types of roles are they typically hiring for in {input.country}?
+      3. Funding history and known recent rounds
+      4. Known partnerships and integrations (especially in {input.country})
+      5. Notable product launches or major updates
       Return structured JSON with these signal categories.
 
     parallel_over: "steps.identify-competitors.output.competitors"
@@ -67,15 +75,15 @@ steps:
     prompt: |
       Using the competitive positioning data: {steps.analyze-positioning.output}
       And market signals: {steps.analyze-market-signals.output}
-      
-      Create a comprehensive SWOT matrix for the company at {input.company_url} relative to its competitors in the {input.country} market:
+
+      Create a comprehensive SWOT matrix for {input.company_name} relative to its competitors in the {input.country} market:
       - Strengths: Where we have clear advantages
       - Weaknesses: Where competitors outperform us
       - Opportunities: Market gaps we can exploit
       - Threats: Competitive moves that could hurt us
-      
+
       For each item, reference specific competitors and data points.
-      
+
     depends_on:
       - "analyze-positioning"
       - "analyze-market-signals"
@@ -83,18 +91,18 @@ steps:
   - id: "strategic-recommendations"
     prompt: |
       Based on this SWOT analysis: {steps.swot-matrix.output}
-      
+
       Generate actionable strategic recommendations:
       1. Immediate actions (next 30 days) - quick wins
       2. Short-term initiatives (1-3 months) - competitive responses
       3. Long-term strategy (3-12 months) - market positioning moves
-      
+
       For each recommendation, include:
       - Priority level (P0/P1/P2)
       - Expected impact (high/medium/low)
       - Effort estimate (high/medium/low)
       - Which competitor threat it addresses
-      
+
     depends_on:
       - "swot-matrix"
 
@@ -102,7 +110,7 @@ steps:
     prompt: |
       IMPORTANT: Return the complete report as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
 
-      Compile all competitive intelligence into a professional markdown report for {input.company_url} in {input.country}.
+      Compile all competitive intelligence into a professional markdown report for {input.company_name} in {input.country}.
 
       Competitors identified: {steps.identify-competitors.output}
       SWOT Matrix: {steps.swot-matrix.output}
@@ -120,6 +128,5 @@ steps:
     depends_on:
       - "strategic-recommendations"
     pdf_report:
-      directory: "/Users/gizmax/Documents"
+      directory: "./output"
       language: cs
-

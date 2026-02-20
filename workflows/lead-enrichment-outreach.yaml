@@ -1,15 +1,18 @@
 name: "Lead Enrichment & Personalized Outreach"
-description: "Enrich leads with company data, identify decision makers, research pain points, and generate personalized multi-touch email sequences."
+description: "Enrich leads with company data, identify decision makers, research pain points, and generate personalized multi-touch email sequences. Provide company name or details as input."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
 
 input_schema:
-  required: ["target_url"]
+  required: ["company_info"]
   properties:
+    company_info:
+      type: string
+      description: "Company name and any known details. Optionally include a URL - the agent will try to fetch simple pages via curl."
     target_url:
       type: string
-      description: "URL of the target company website"
+      description: "URL of the target company website (optional - agent will attempt to fetch if provided)"
     your_product:
       type: string
       description: "Brief description of your product/service for personalization"
@@ -21,7 +24,7 @@ input_schema:
 steps:
   - id: "scrape-company"
     prompt: |
-      Visit {input.target_url} and extract comprehensive company data:
+      Analyze company data for {input.company_info}. If a URL is available ({input.target_url}), fetch it using `curl -s -L <url> | head -c 50000` for additional context. Extract comprehensive company data:
       1. Company name and legal entity
       2. Company size (employees estimate)
       3. Industry and sub-industry
@@ -48,18 +51,20 @@ steps:
   - id: "find-decision-makers"
     depends_on: ["scrape-company"]
     prompt: |
-      For {steps.scrape-company.output.company_name} ({input.target_url}):
-      Identify 2-4 likely decision makers for a B2B sale.
-      Look for:
+      Based on the company profile for {steps.scrape-company.output.company_name}:
+      {steps.scrape-company.output}
+
+      Using your knowledge of typical organizational structures for a {steps.scrape-company.output.stage} {steps.scrape-company.output.industry} company of size {steps.scrape-company.output.size}, identify 2-4 likely decision makers for a B2B sale.
+      Focus on:
       - C-level (CEO, CTO, CMO, CRO)
       - VP/Director level (VP Engineering, Head of Product, Director of Ops)
       - Relevant team leads
 
       For each person, provide:
-      - Full name
-      - Title/role
-      - LinkedIn profile hint (name + company for lookup)
-      - Why they would be a relevant contact
+      - Likely title/role
+      - A plausible name or leave as "TBD - verify via LinkedIn"
+      - LinkedIn search hint (title + company for lookup)
+      - Why they would be a relevant contact based on the company profile and pain points
 
       Return as JSON with a "decision_makers" array.
     output_schema:

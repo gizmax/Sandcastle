@@ -1,5 +1,5 @@
 name: "market-entry-analyzer"
-description: "Full market entry analysis for expanding into new geographies or verticals - market sizing, regulatory landscape, competitor mapping, localization requirements, GTM strategy, and financial projections."
+description: "Full market entry analysis for expanding into new geographies or verticals - market sizing, regulatory landscape, competitor mapping, localization requirements, GTM strategy, and financial projections. Analysis is based on the AI model's built-in knowledge - provide detailed product and market context for best results."
 default_model: sonnet
 default_max_turns: 12
 default_timeout: 300

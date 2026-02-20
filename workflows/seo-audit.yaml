@@ -1,5 +1,5 @@
 name: "SEO Audit"
-description: "Crawl a website, analyze on-page SEO factors, and produce actionable recommendations."
+description: "Fetch a website homepage, analyze on-page SEO factors, and produce actionable recommendations. Note: analysis is limited to the homepage and any linked pages reachable via simple HTTP requests."
 default_model: sonnet
 default_max_turns: 15
 default_timeout: 600
@@ -9,36 +9,51 @@ input_schema:
   properties:
     target_url:
       type: string
-      description: "URL of the website to crawl and audit"
-    max_depth:
-      type: integer
-      description: "Maximum crawl depth (default: 3)"
-      default: 3
+      description: "URL of the website homepage to audit (the agent will fetch this single page via curl)"
 
 steps:
-  - id: "crawl"
+  - id: "fetch-page"
     prompt: |
-      Crawl {input.target_url} (max depth: {input.max_depth}).
-      For each page, extract:
+      Fetch the homepage at {input.target_url} using `curl -s -L {input.target_url} | head -c 100000`.
+      Parse the HTML and extract:
       - URL, title tag, meta description
       - H1/H2 headings
       - Internal/external link count
       - Image alt text coverage
-      Return as structured JSON array.
-    timeout: 600
+      - Canonical tag, robots meta
+      - Open Graph tags
+      - Structured data
+      Return as structured JSON.
+    output_schema:
+      type: object
+      properties:
+        url: { type: string }
+        title: { type: string }
+        meta_description: { type: string }
+        headings: { type: object }
+        internal_links: { type: integer }
+        external_links: { type: integer }
+        image_alt_coverage: { type: string }
+        canonical: { type: string }
+        robots_meta: { type: string }
+        open_graph: { type: object }
+        structured_data: { type: object }
 
   - id: "analyze-technical"
     prompt: |
-      Analyze this crawl data for technical SEO issues:
-      {steps.crawl.output}
+      Analyze this page data for technical SEO issues:
+      {steps.fetch-page.output}
       Check for:
       - Missing/duplicate title tags
-      - Missing meta descriptions
+      - Missing meta description
       - Broken heading hierarchy
       - Missing alt text
       - Internal linking opportunities
+      - Canonical tag issues
+      - Open Graph completeness
+      - Structured data validity
     depends_on:
-      - "crawl"
+      - "fetch-page"
 
   - id: "recommendations"
     prompt: |

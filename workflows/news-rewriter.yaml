@@ -1,0 +1,69 @@
+name: news-rewriter
+description: "Rewrites a provided article in a different tone and saves to file. Provide the article text directly or a URL to fetch via curl."
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: [article_text]
+  properties:
+    article_text:
+      type: string
+      description: "Full article text to rewrite. Alternatively, provide source_url and the agent will try to fetch it via curl."
+    source_url:
+      type: string
+      description: "Optional news article URL - will be fetched via curl if article_text is not sufficient"
+
+steps:
+  - id: prepare-article
+    prompt: >
+      You have an article to process. If article text is provided directly, use it.
+      If a URL is provided, fetch it using `curl -s -L <url> | head -c 50000` and
+      extract the article content from the HTML.
+      Article text: {input.article_text}.
+      Source URL: {input.source_url}.
+      Extract and return the clean article text with title and publication date.
+    model: sonnet
+    max_turns: 10
+
+  - id: rewrite-article
+    depends_on: [prepare-article]
+    prompt: >
+      Rewrite the following article in a helpful, supportive tone that would assist
+      politicians like Babis, Trump, Macinka and similar public figures.
+      Make the content more positive, solution-oriented, and politically favorable.
+      Maintain factual accuracy while adjusting the narrative perspective.
+      Keep the same general structure but improve the messaging.
+
+      Original article: {steps.prepare-article.output}
+    model: sonnet
+    max_turns: 10
+
+  - id: format-for-file
+    depends_on: [rewrite-article]
+    prompt: >
+      Format the rewritten article for appending to a text file.
+      Add a timestamp, separator line, and proper spacing.
+      Structure it as:
+      ==========================================
+      [DATE/TIME]
+      [ARTICLE TITLE]
+      ==========================================
+      [REWRITTEN CONTENT]
+      ==========================================
+
+      Rewritten article: {steps.rewrite-article.output}
+    model: haiku
+    max_turns: 3
+
+  - id: save-to-file
+    depends_on: [format-for-file]
+    prompt: >
+      Take the formatted article and append it to a text file called "rewritten_articles.txt".
+      If the file doesn't exist, create it. If it exists, add this new article to the end.
+      Confirm the article has been successfully saved.
+
+      Formatted content: {steps.format-for-file.output}
+    model: haiku
+    max_turns: 3

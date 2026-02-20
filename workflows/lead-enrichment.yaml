@@ -1,29 +1,23 @@
 name: "Lead Enrichment"
-description: "Scrape target websites, enrich with company data, and score leads for sales outreach priority."
+description: "Enrich company data with industry classification, decision makers, and score leads for sales outreach priority. Provide company name or basic info as input."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
 
 input_schema:
-  required: ["target_url"]
+  required: ["company_info"]
   properties:
-    target_url:
+    company_info:
       type: string
-      description: "URL of the company website to scrape and enrich"
-    max_depth:
-      type: integer
-      description: "Maximum crawl depth (default: 3)"
-      default: 3
+      description: "Company information to enrich - paste company name, website URL, or any known details. The agent will use curl for simple pages and its knowledge for enrichment."
 
 steps:
-  - id: "scrape"
+  - id: "extract-data"
     prompt: |
-      Visit {input.target_url} and extract:
-      - Company name
-      - Number of employees (estimate)
-      - Main product/service
-      - Contact information
-      Return as structured JSON.
+      Analyze the provided company information and extract key data.
+      If a URL is provided, try to fetch it using `curl -s -L URL | head -c 50000` to get additional context.
+      Extract: company name, employees estimate, main product/service, contact information.
+      Company info: {input.company_info}
     output_schema:
       type: object
       properties:
@@ -34,14 +28,14 @@ steps:
 
   - id: "enrich"
     prompt: |
-      Given this company data: {steps.scrape.output}
-      Research and enrich with:
+      Given this company data: {steps.extract-data.output}
+      Using your built-in knowledge, research and enrich with:
       - Estimated annual revenue
       - Industry classification
       - Key decision makers (names and roles)
       - Recent news or funding rounds
     depends_on:
-      - "scrape"
+      - "extract-data"
     retry:
       max_attempts: 3
       backoff: exponential

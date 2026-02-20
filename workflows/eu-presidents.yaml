@@ -1,8 +1,15 @@
 name: "eu-presidents"
-description: "Research all current EU member state presidents and compile a summary report in Czech."
+description: "Research all current EU member state presidents and compile a summary report in Czech. Uses AI knowledge - data accuracy depends on the model's training cutoff date."
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: []
+  properties:
+    additional_context:
+      type: string
+      description: "Optional additional context or specific countries to focus on"
 
 steps:
   - id: "research"
