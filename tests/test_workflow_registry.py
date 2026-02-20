@@ -14,7 +14,6 @@ client = TestClient(app)
 VALID_WORKFLOW = """
 name: test-registry
 description: Registry test workflow
-sandstorm_url: http://localhost:8000
 steps:
   - id: greet
     prompt: "Say hello to {input.name}"
@@ -25,7 +24,6 @@ steps:
 VALID_WORKFLOW_V2 = """
 name: test-registry
 description: Registry test workflow v2
-sandstorm_url: http://localhost:8000
 steps:
   - id: greet
     prompt: "Say hello to {input.name} with more detail"

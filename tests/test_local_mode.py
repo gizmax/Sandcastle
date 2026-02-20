@@ -182,7 +182,7 @@ class TestHealthLocalMode:
         data = response.json()
         health = data["data"]
         assert health["redis"] is None
-        assert health["sandstorm"] is True
+        assert health["runtime"] is True
 
 
 class TestRuntimeEndpoint:

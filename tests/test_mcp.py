@@ -335,7 +335,7 @@ class TestMcpResources:
         from sandcastle.mcp_server import _get_client, _json_result, _to_dict
 
         mock_client.health.return_value = HealthStatus(
-            status="ok", sandstorm=True, database=True, redis=True,
+            status="ok", runtime=True, database=True, redis=True,
         )
         client = _get_client()
         health = client.health()

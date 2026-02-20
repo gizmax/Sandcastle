@@ -659,7 +659,6 @@ const MOCK_TEMPLATES = [
 const TEMPLATE_YAMLS: Record<string, string> = {
   summarize: `name: "summarize"
 description: "Summarize text input with configurable detail level"
-sandstorm_url: "\${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -683,7 +682,6 @@ steps:
 `,
   translate: `name: "translate"
 description: "Detect language and translate to target language"
-sandstorm_url: "\${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -706,7 +704,6 @@ steps:
 `,
   research_agent: `name: "research_agent"
 description: "Multi-source research with parallel analysis and fact extraction"
-sandstorm_url: "\${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -749,7 +746,6 @@ steps:
 `,
   chain_of_thought: `name: "chain_of_thought"
 description: "Step-by-step reasoning through complex problems"
-sandstorm_url: "\${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -781,7 +777,6 @@ steps:
 `,
   review_and_approve: `name: "review_and_approve"
 description: "Content generation with human approval gate before publishing"
-sandstorm_url: "\${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -821,7 +816,6 @@ steps:
 name: blog-to-social
 description: Transform a blog post into platform-specific social media content
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: claude-sonnet-4-20250514
 default_max_turns: 5
 default_timeout: 180
@@ -889,7 +883,6 @@ steps:
 name: seo-content-writer
 description: Research keywords and create SEO-optimized article with meta tags
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: claude-sonnet-4-20250514
 default_max_turns: 10
 default_timeout: 300
@@ -947,7 +940,6 @@ steps:
 name: email-campaign-generator
 description: Generate email campaign with subject line variants and A/B copy
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: claude-sonnet-4-20250514
 default_max_turns: 5
 default_timeout: 180
@@ -1016,7 +1008,6 @@ steps:
 name: competitor-analysis
 description: Analyze competitor positioning, strengths, weaknesses, and opportunities
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: claude-sonnet-4-20250514
 default_max_turns: 10
 default_timeout: 300
@@ -1075,7 +1066,6 @@ steps:
 name: ad-copy-generator
 description: Generate ad copy variants for Google Ads and Meta Ads campaigns
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: claude-sonnet-4-20250514
 default_max_turns: 5
 default_timeout: 180
@@ -1135,7 +1125,6 @@ steps:
 name: lead-enrichment
 description: Research and enrich lead data with company info, scoring, and outreach angles
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1208,7 +1197,6 @@ steps:
 name: proposal-generator
 description: Generate a customized business proposal from meeting notes and product info
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1268,7 +1256,6 @@ steps:
 name: meeting-recap
 description: Transform meeting transcript into summary, action items, and follow-up email
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1317,7 +1304,6 @@ steps:
 name: ticket-classifier
 description: Classify support ticket, assign priority, and draft response
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1394,7 +1380,6 @@ steps:
 name: review-sentiment
 description: Analyze customer reviews to extract sentiment trends and actionable insights
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1455,7 +1440,6 @@ steps:
 name: job-description-generator
 description: Generate inclusive job description with requirements, benefits, and interview plan
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1507,7 +1491,6 @@ steps:
 name: resume-screener
 description: Screen resume against job description with match scoring and interview recommendations
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1599,7 +1582,6 @@ steps:
 name: contract-review
 description: Review contract for key terms, risks, and generate plain-language summary
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1696,7 +1678,6 @@ steps:
 name: release-notes-generator
 description: Generate user-facing release notes and internal changelog from commit history
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1751,7 +1732,6 @@ steps:
 name: data-extractor
 description: Extract structured data from documents with validation and error handling
 
-sandstorm_url: \${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -1883,7 +1863,6 @@ const MOCK_RUN_COMPARE = {
 };
 
 const MOCK_SETTINGS = {
-  sandstorm_url: "http://localhost:8080",
   anthropic_api_key: "****Qf8x",
   e2b_api_key: "****mN2k",
   openai_api_key: "****xK9m",
@@ -1915,7 +1894,7 @@ type MockRoute = {
 const routes: MockRoute[] = [
   {
     match: /^\/health$/,
-    handler: () => ({ status: "ok", sandstorm: true, redis: null, database: true }),
+    handler: () => ({ status: "ok", runtime: true, redis: null, database: true }),
   },
   {
     match: /^\/runtime$/,

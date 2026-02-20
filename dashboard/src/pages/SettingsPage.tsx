@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Settings,
-  Link,
   Shield,
   DollarSign,
   Webhook,
@@ -21,7 +20,6 @@ import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 // -- Types ------------------------------------------------------------------
 
 interface SettingsData {
-  sandstorm_url: string;
   anthropic_api_key: string;
   e2b_api_key: string;
   auth_required: boolean;
@@ -112,7 +110,6 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [savingSections, setSavingSections] = useState<Set<SectionName>>(new Set());
-  const [testingConnection, setTestingConnection] = useState(false);
   const { info: runtimeInfo } = useRuntimeInfo();
 
   // Keep a snapshot of the original values for dirty checking
@@ -147,7 +144,7 @@ export default function SettingsPage() {
     const o = originalRef.current;
     switch (section) {
       case "connections":
-        return settings.sandstorm_url !== o.sandstorm_url;
+        return false;
       case "security":
         return false;  // All security fields are immutable (env vars only)
       case "budget":
@@ -166,7 +163,7 @@ export default function SettingsPage() {
     const o = originalRef.current;
     switch (section) {
       case "connections":
-        return diffFields({ sandstorm_url: settings.sandstorm_url }, { sandstorm_url: o.sandstorm_url });
+        return {};
       case "security":
         return {};  // Immutable fields
       case "budget":
@@ -213,23 +210,6 @@ export default function SettingsPage() {
 
   // -- Connection test ------------------------------------------------------
 
-  const handleTestConnection = useCallback(async () => {
-    if (!settings) return;
-    setTestingConnection(true);
-    try {
-      const res = await fetch(`${settings.sandstorm_url}/health`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.ok) {
-        toast.success("Connection to Sandshore successful");
-      } else {
-        toast.error(`Sandshore returned HTTP ${res.status}`);
-      }
-    } catch {
-      toast.error("Could not reach Sandshore at this URL");
-    }
-    setTestingConnection(false);
-  }, [settings]);
 
   // -- Render ---------------------------------------------------------------
 
@@ -264,51 +244,6 @@ export default function SettingsPage() {
           Settings
         </h1>
       </div>
-
-      {/* Connections */}
-      <SectionCard
-        icon={Link}
-        title="Connections"
-        description="Configure the upstream Sandshore runtime URL"
-      >
-        <div className="space-y-3">
-          <div>
-            <FieldLabel htmlFor="sandstorm_url">Sandshore URL</FieldLabel>
-            <div className="flex gap-2">
-              <input
-                id="sandstorm_url"
-                type="text"
-                className={inputClass}
-                value={settings.sandstorm_url}
-                onChange={(e) => updateField("sandstorm_url", e.target.value)}
-                placeholder="http://localhost:8080"
-              />
-              <button
-                onClick={handleTestConnection}
-                disabled={testingConnection}
-                className={cn(
-                  "shrink-0 rounded-lg border border-border px-3 py-2 text-sm font-medium",
-                  "text-muted hover:text-foreground hover:bg-border/40 transition-colors",
-                  testingConnection && "opacity-50 cursor-not-allowed"
-                )}
-              >
-                {testingConnection ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Test"
-                )}
-              </button>
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <SaveButton
-              dirty={isSectionDirty("connections")}
-              saving={savingSections.has("connections")}
-              onClick={() => void handleSave("connections")}
-            />
-          </div>
-        </div>
-      </SectionCard>
 
       {/* Security */}
       <SectionCard

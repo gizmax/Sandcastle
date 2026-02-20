@@ -205,9 +205,9 @@ class TestInputParsing:
 class _FakeHealth:
     """Simple health object that works with _to_dict (has __dict__)."""
 
-    def __init__(self, status, sandstorm, database, redis=None):
+    def __init__(self, status, runtime, database, redis=None):
         self.status = status
-        self.sandstorm = sandstorm
+        self.runtime = runtime
         self.database = database
         self.redis = redis
 
@@ -215,7 +215,7 @@ class _FakeHealth:
 class TestHealthCommand:
     def test_health_command_prints_status(self):
         """health command should print status information from the SDK."""
-        mock_health = _FakeHealth(status="ok", sandstorm=True, database=True, redis=None)
+        mock_health = _FakeHealth(status="ok", runtime=True, database=True, redis=None)
 
         mock_client = MagicMock()
         mock_client.health.return_value = mock_health

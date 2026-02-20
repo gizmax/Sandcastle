@@ -4,26 +4,18 @@ This module is kept so that existing imports from ``sandcastle.engine.sandbox``
 continue to work.  All real logic lives in ``sandcastle.engine.sandshore``.
 """
 
-from sandcastle.engine.sandshore import (
-    SandshoreError as SandstormError,
-)
-from sandcastle.engine.sandshore import (
-    SandshoreResult as SandstormResult,
-)
-from sandcastle.engine.sandshore import (
-    SandshoreRuntime as SandstormClient,
-)
 from sandcastle.engine.sandshore import (  # noqa: F401
+    SandshoreError,
+    SandshoreResult,
+    SandshoreRuntime,
     SSEEvent,
-)
-from sandcastle.engine.sandshore import (
-    get_sandshore_runtime as get_sandstorm_client,
+    get_sandshore_runtime,
 )
 
 __all__ = [
     "SSEEvent",
-    "SandstormClient",
-    "SandstormResult",
-    "SandstormError",
-    "get_sandstorm_client",
+    "SandshoreRuntime",
+    "SandshoreResult",
+    "SandshoreError",
+    "get_sandshore_runtime",
 ]

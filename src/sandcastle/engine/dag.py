@@ -206,7 +206,6 @@ class WorkflowDefinition:
 
     name: str
     description: str
-    sandstorm_url: str
     default_model: str
     default_max_turns: int
     default_timeout: int
@@ -496,9 +495,6 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
 
 def _parse_raw(data: dict) -> WorkflowDefinition:
     """Parse a raw YAML dict into a WorkflowDefinition."""
-    sandstorm_url = _resolve_env_vars(
-        data.get("sandstorm_url", "http://localhost:8000")
-    )
     default_model = data.get("default_model", "sonnet")
     default_max_turns = data.get("default_max_turns", 10)
     default_timeout = data.get("default_timeout", 300)
@@ -536,7 +532,6 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
     return WorkflowDefinition(
         name=data["name"],
         description=data.get("description", ""),
-        sandstorm_url=sandstorm_url,
         default_model=default_model,
         default_max_turns=default_max_turns,
         default_timeout=default_timeout,

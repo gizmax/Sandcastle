@@ -22,7 +22,6 @@ from sandcastle.engine.optimizer import (
 SLO_WORKFLOW_YAML = """
 name: optimizer-test
 description: Workflow with SLO
-sandstorm_url: http://localhost:8000
 steps:
   - id: enrich
     prompt: "Enrich data"
@@ -52,7 +51,6 @@ steps:
 AUTO_POOL_YAML = """
 name: auto-pool-test
 description: Workflow with auto model pool
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Do something"
@@ -117,7 +115,6 @@ def test_step_without_slo():
     yaml = """
 name: no-slo-test
 description: No SLO
-sandstorm_url: http://localhost:8000
 steps:
   - id: basic
     prompt: "Basic step"
@@ -133,7 +130,6 @@ def test_validate_invalid_optimize_for():
     yaml = """
 name: invalid-slo
 description: Bad SLO
-sandstorm_url: http://localhost:8000
 steps:
   - id: bad
     prompt: "Bad step"

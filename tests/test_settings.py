@@ -34,7 +34,6 @@ def _restore_settings():
     """Save original settings values before each test and restore after."""
     original = {}
     for field in (
-        "sandstorm_url",
         "anthropic_api_key",
         "e2b_api_key",
         "openai_api_key",
@@ -66,7 +65,6 @@ class TestGetSettings:
         data = response.json()["data"]
 
         expected_keys = {
-            "sandstorm_url",
             "anthropic_api_key",
             "e2b_api_key",
             "openai_api_key",
