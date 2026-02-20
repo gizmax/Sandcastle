@@ -70,11 +70,11 @@ export function WorkflowCard({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           onClick={onRun}
           className={cn(
-            "flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
+            "flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-foreground",
             "hover:bg-accent-hover transition-all duration-200 shadow-sm"
           )}
         >
@@ -83,14 +83,14 @@ export function WorkflowCard({
         </button>
         <button
           onClick={onViewDag}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
         >
           <Eye className="h-3 w-3" />
           DAG
         </button>
         <button
           onClick={onEdit}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
         >
           <Pencil className="h-3 w-3" />
           Edit
@@ -98,10 +98,10 @@ export function WorkflowCard({
         {onViewVersions && (
           <button
             onClick={onViewVersions}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+            title="Versions"
+            className="flex items-center justify-center rounded-lg border border-border px-2 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
           >
             <History className="h-3 w-3" />
-            Versions
           </button>
         )}
       </div>
