@@ -158,20 +158,26 @@ class E2BBackend:
                     if use_claude_runner
                     else "openai"
                 )
-                # Python-level timeout as safety net in case the E2B SDK
-                # timeout parameter does not trigger a client-side abort.
+                # Run npm install in background mode to avoid E2B SDK
+                # gRPC hang - the SDK's foreground commands.run() can block
+                # indefinitely when the internal event stream stalls.
+                npm_handle = await sandbox.commands.run(
+                    f"npm install {pkg} 2>/dev/null || true",
+                    background=True,
+                    timeout=60,
+                )
                 try:
-                    await asyncio.wait_for(
-                        sandbox.commands.run(
-                            f"npm install {pkg} 2>/dev/null || true",
-                            timeout=60,
-                        ),
-                        timeout=90,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "npm install timed out after 90s, proceeding anyway"
-                    )
+                    deadline = asyncio.get_event_loop().time() + 90
+                    while npm_handle.exit_code is None:
+                        if asyncio.get_event_loop().time() > deadline:
+                            logger.warning(
+                                "npm install timed out after 90s, "
+                                "proceeding anyway"
+                            )
+                            break
+                        await asyncio.sleep(1.0)
+                except Exception as exc:
+                    logger.warning("npm install error: %s", exc)
 
             handle = await sandbox.commands.run(
                 f"node /home/user/{runner_file}",
@@ -199,7 +205,9 @@ class E2BBackend:
                 if event is not None:
                     yield event
 
-            await handle.wait()
+            # Don't call handle.wait() - it can hang due to E2B SDK
+            # gRPC internals. We already consumed all events above and
+            # checked exit_code, so the process is done.
 
         finally:
             if sandbox:

@@ -43,7 +43,7 @@ async def run_workflow_job(
     """
     from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
     from sandcastle.engine.executor import execute_workflow
-    from sandcastle.engine.storage import LocalStorage
+    from sandcastle.engine.storage import create_storage
     from sandcastle.models.db import Run, RunStatus, async_session
     from sandcastle.webhooks.dispatcher import dispatch_webhook
 
@@ -72,7 +72,7 @@ async def run_workflow_job(
             raise ValueError(f"Workflow validation failed: {'; '.join(errors)}")
 
         plan = build_plan(workflow)
-        storage = LocalStorage()
+        storage = create_storage()
 
         result = await execute_workflow(
             workflow=workflow,

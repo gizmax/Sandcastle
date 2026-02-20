@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import AsyncIterator
 
@@ -68,6 +69,10 @@ class SandshoreRuntime:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._http: httpx.AsyncClient | None = None
         self._sandbox_backend_type = sandbox_backend
+
+        # Cached health check result (value, timestamp)
+        self._health_cache: tuple[bool, float] = (False, 0.0)
+        self._health_cache_ttl = 60.0  # seconds
 
         # Create the pluggable backend
         self._backend: SandboxBackend = create_backend(
@@ -154,13 +159,22 @@ class SandshoreRuntime:
 
         return result
 
+    async def _cached_health(self) -> bool:
+        """Return cached health check, refreshing if stale."""
+        cached_result, cached_at = self._health_cache
+        if time.monotonic() - cached_at < self._health_cache_ttl:
+            return cached_result
+        result = await self._backend.health()
+        self._health_cache = (result, time.monotonic())
+        return result
+
     async def query_stream(
         self,
         request: dict,
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Execute a query and yield SSE events as they stream."""
-        backend_healthy = await self._backend.health()
+        backend_healthy = await self._cached_health()
 
         if backend_healthy:
             async for event in self._stream_backend(

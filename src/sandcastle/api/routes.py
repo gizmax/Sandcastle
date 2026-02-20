@@ -63,7 +63,7 @@ from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
 from sandcastle.engine.sandshore import SandshoreRuntime
-from sandcastle.engine.storage import LocalStorage
+from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
     ApiKey,
     ApprovalRequest,
@@ -810,7 +810,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                     data={"run_id": str(existing), "status": "existing", "idempotent": True},
                 )
 
-    storage = LocalStorage()
+    storage = create_storage()
 
     # Create DB record
     try:
@@ -3652,7 +3652,10 @@ async def update_settings(
     }
 
     # Block mutation of security-critical settings via API
-    immutable = {"auth_required", "webhook_secret", "database_url", "redis_url"}
+    immutable = {
+        "auth_required", "webhook_secret", "database_url", "redis_url",
+        "dashboard_origin",  # CORS origins are built at startup; runtime changes have no effect
+    }
     blocked = immutable & updates.keys()
     if blocked:
         raise HTTPException(

@@ -223,11 +223,11 @@ export default function SettingsPage() {
       case "connections":
         return settings.sandstorm_url !== o.sandstorm_url;
       case "security":
-        return settings.auth_required !== o.auth_required || settings.dashboard_origin !== o.dashboard_origin;
+        return false;  // All security fields are immutable (env vars only)
       case "budget":
         return settings.default_max_cost_usd !== o.default_max_cost_usd;
       case "webhooks":
-        return settings.webhook_secret !== o.webhook_secret;
+        return false;  // webhook_secret is immutable (env var only)
       case "system":
         return settings.log_level !== o.log_level || settings.max_workflow_depth !== o.max_workflow_depth;
     }
@@ -242,20 +242,14 @@ export default function SettingsPage() {
       case "connections":
         return diffFields({ sandstorm_url: settings.sandstorm_url }, { sandstorm_url: o.sandstorm_url });
       case "security":
-        return diffFields(
-          { auth_required: settings.auth_required, dashboard_origin: settings.dashboard_origin },
-          { auth_required: o.auth_required, dashboard_origin: o.dashboard_origin }
-        );
+        return {};  // Immutable fields
       case "budget":
         return diffFields(
           { default_max_cost_usd: settings.default_max_cost_usd },
           { default_max_cost_usd: o.default_max_cost_usd }
         );
       case "webhooks":
-        return diffFields(
-          { webhook_secret: settings.webhook_secret },
-          { webhook_secret: o.webhook_secret }
-        );
+        return {};  // Immutable field
       case "system":
         return diffFields(
           { log_level: settings.log_level, max_workflow_depth: settings.max_workflow_depth },
@@ -401,15 +395,12 @@ export default function SettingsPage() {
             <div>
               <p className="text-sm font-medium text-foreground">Auth Required</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Require API key authentication for all requests
+                Set via <code className="text-xs bg-muted px-1 rounded">AUTH_REQUIRED</code> environment variable
               </p>
             </div>
-            <button
-              role="switch"
-              aria-checked={settings.auth_required}
-              onClick={() => updateField("auth_required", !settings.auth_required)}
+            <div
               className={cn(
-                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent opacity-60 cursor-not-allowed",
                 settings.auth_required ? "bg-accent" : "bg-border"
               )}
             >
@@ -419,26 +410,19 @@ export default function SettingsPage() {
                   settings.auth_required ? "translate-x-5" : "translate-x-0"
                 )}
               />
-            </button>
+            </div>
           </div>
           <div>
             <FieldLabel htmlFor="dashboard_origin">Dashboard Origin</FieldLabel>
             <input
               id="dashboard_origin"
               type="text"
-              className={inputClass}
+              className={cn(inputClass, "opacity-60 cursor-not-allowed")}
               value={settings.dashboard_origin}
-              onChange={(e) => updateField("dashboard_origin", e.target.value)}
+              readOnly
               placeholder="http://localhost:5173"
             />
-            <HelperText>Allowed CORS origin for the dashboard</HelperText>
-          </div>
-          <div className="flex justify-end">
-            <SaveButton
-              dirty={isSectionDirty("security")}
-              saving={savingSections.has("security")}
-              onClick={() => void handleSave("security")}
-            />
+            <HelperText>Set via <code className="text-xs bg-muted px-1 rounded">DASHBOARD_ORIGIN</code> env var (CORS origins are built at startup)</HelperText>
           </div>
         </div>
       </SectionCard>
@@ -485,19 +469,11 @@ export default function SettingsPage() {
             <input
               id="webhook_secret"
               type="password"
-              className={inputClass}
+              className={cn(inputClass, "opacity-60 cursor-not-allowed")}
               value={settings.webhook_secret}
-              onChange={(e) => updateField("webhook_secret", e.target.value)}
-              placeholder={originalRef.current?.webhook_secret || "whsec_..."}
+              readOnly
             />
-            <HelperText>Used to sign outgoing webhook payloads (HMAC-SHA256)</HelperText>
-          </div>
-          <div className="flex justify-end">
-            <SaveButton
-              dirty={isSectionDirty("webhooks")}
-              saving={savingSections.has("webhooks")}
-              onClick={() => void handleSave("webhooks")}
-            />
+            <HelperText>Set via <code className="text-xs bg-muted px-1 rounded">WEBHOOK_SECRET</code> env var (immutable at runtime)</HelperText>
           </div>
         </div>
       </SectionCard>

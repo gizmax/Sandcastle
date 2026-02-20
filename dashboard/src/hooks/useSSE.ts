@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
+import { API_BASE_URL } from "@/lib/constants";
 
 interface SSEEvent {
   event: string;
@@ -26,11 +27,14 @@ export function useSSE(path: string | null) {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const url = api.sseUrl(path);
+    // Use fetch with auth headers instead of URL token parameter
+    // to avoid leaking the API key in access logs and browser history.
+    const url = `${API_BASE_URL}${path}`;
 
     (async () => {
       try {
         const res = await fetch(url, {
+          headers: api.authHeaders(),
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {

@@ -79,6 +79,18 @@ class ApiClient {
     return h;
   }
 
+  /**
+   * Auth headers only (no Content-Type). For SSE/streaming fetch requests
+   * where the API key should travel in headers, not URL parameters.
+   */
+  authHeaders(): HeadersInit {
+    const h: HeadersInit = {};
+    if (this.apiKey) {
+      h["X-API-Key"] = this.apiKey;
+    }
+    return h;
+  }
+
   private mock<T>(
     path: string,
     params?: Record<string, string>,
@@ -147,15 +159,14 @@ class ApiClient {
       });
       return this.handleResponse<T>(res);
     } catch {
-      this.setMock(true);
-      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+      return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
     }
   }
 
   async patch<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {
-      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+      return { data: null, error: { code: "MOCK_MODE", message: "Not available in demo mode" } };
     }
 
     try {
@@ -167,15 +178,14 @@ class ApiClient {
       });
       return this.handleResponse<T>(res);
     } catch {
-      this.setMock(true);
-      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+      return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
     }
   }
 
   async delete<T>(path: string): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {
-      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+      return { data: null, error: { code: "MOCK_MODE", message: "Not available in demo mode" } };
     }
 
     try {
@@ -186,15 +196,15 @@ class ApiClient {
       });
       return this.handleResponse<T>(res);
     } catch {
-      this.setMock(true);
-      return { data: { message: "Demo mode - action simulated" } as T, error: null };
+      return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
     }
   }
 
   /**
-   * Build an SSE-compatible URL with token query parameter for auth.
-   * EventSource does not support custom headers, so the API key is passed
-   * as a query parameter instead.
+   * Build an SSE URL with token query parameter for auth.
+   * Only needed for native EventSource API which cannot send headers.
+   * For fetch-based SSE streaming, use authHeaders() instead to avoid
+   * leaking the API key in server logs and browser history.
    */
   sseUrl(path: string): string {
     const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
