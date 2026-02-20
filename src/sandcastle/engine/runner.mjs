@@ -7,7 +7,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 const request = JSON.parse(process.env.SANDCASTLE_REQUEST);
 
 const options = {
-    allowedTools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
+    allowedTools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
     permissionMode: "bypassPermissions",
     model: request.model || "sonnet",
     maxTurns: request.max_turns || 10,
