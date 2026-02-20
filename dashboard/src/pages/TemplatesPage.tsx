@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layers, Search, Play, ArrowRight, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import jsYaml from "js-yaml";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -104,7 +105,30 @@ export default function TemplatesPage() {
 
   const handleUseInBuilder = useCallback(() => {
     if (!detail) return;
-    navigate("/workflows/builder", { state: { yaml: detail.content } });
+    try {
+      const parsed = jsYaml.load(detail.content) as Record<string, unknown>;
+      const rawSteps = (parsed.steps ?? []) as Array<Record<string, unknown>>;
+      const steps = rawSteps.map((s) => ({
+        id: String(s.id ?? ""),
+        model: s.model ? String(s.model) : undefined,
+        depends_on: Array.isArray(s.depends_on) ? s.depends_on.map(String) : undefined,
+        prompt: s.prompt ? String(s.prompt) : undefined,
+      }));
+      navigate("/workflows/builder", {
+        state: {
+          workflow: {
+            name: String(parsed.name ?? detail.name),
+            description: String(parsed.description ?? detail.description ?? ""),
+            steps_count: steps.length,
+            file_name: `${detail.name}.yaml`,
+            steps,
+            yaml_content: detail.content,
+          },
+        },
+      });
+    } catch {
+      navigate("/workflows/builder", { state: { yaml: detail.content } });
+    }
   }, [detail, navigate]);
 
   const handleRunNow = useCallback(() => {
