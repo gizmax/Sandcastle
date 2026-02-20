@@ -1,0 +1,373 @@
+name: "incident-postmortem-generator"
+description: "Generate a comprehensive blameless postmortem from raw incident data - timeline reconstruction, root cause analysis, impact assessment, action items, and a polished report ready for stakeholder distribution."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required:
+    - incident_description
+    - service_name
+    - severity
+  properties:
+    incident_description:
+      type: string
+      description: "Raw incident data: what happened, when alerts fired, what was observed, what actions were taken. Include timestamps, log snippets, Slack messages, or any raw data available."
+    service_name:
+      type: string
+      description: "Name of the affected service or system (e.g. 'payment-api', 'auth-service', 'main-database')"
+    severity:
+      type: string
+      description: "Incident severity: SEV1 (critical/revenue impact), SEV2 (major/degraded), SEV3 (minor/limited), SEV4 (negligible)"
+    incident_date:
+      type: string
+      description: "Date of the incident (e.g. '2026-02-18')"
+    team_name:
+      type: string
+      description: "Owning team name (e.g. 'Platform Engineering')"
+    sla_target:
+      type: string
+      description: "SLA target for the service (e.g. '99.95% uptime')"
+      default: "99.9%"
+
+steps:
+  - id: "parse-timeline"
+    prompt: |
+      You are an incident response specialist. Parse the raw incident data and reconstruct a precise, chronological timeline.
+
+      Raw incident data:
+      {input.incident_description}
+
+      Service: {input.service_name}
+      Severity: {input.severity}
+      Date: {input.incident_date}
+
+      Construct a timeline with these phases:
+
+      1. DETECTION:
+         - First alert or user report (exact timestamp if available)
+         - How was the incident detected? (monitoring, user report, automated alert, manual check)
+         - Detection latency: time between incident start and detection
+         - Which monitoring systems fired (or failed to fire)?
+
+      2. RESPONSE:
+         - When was the incident acknowledged?
+         - Who was the first responder?
+         - Time to first response action
+         - Communication: when were stakeholders notified?
+
+      3. INVESTIGATION:
+         - Debugging steps taken (in order)
+         - Hypotheses tested and ruled out
+         - Key diagnostic findings
+         - Tools and dashboards used
+
+      4. MITIGATION:
+         - What action stopped the bleeding?
+         - Was it a temporary fix (rollback, restart, feature flag) or permanent fix?
+         - Time from detection to mitigation
+         - Customer communication during mitigation
+
+      5. RESOLUTION:
+         - When was service fully restored?
+         - Verification steps taken
+         - Total incident duration
+         - When was the all-clear given?
+
+      For each timeline entry, include:
+      - timestamp (exact or estimated, in UTC)
+      - actor (person, system, or automated process)
+      - action taken
+      - outcome
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp: { type: string }
+              phase: { type: string }
+              actor: { type: string }
+              action: { type: string }
+              outcome: { type: string }
+        detection_method: { type: string }
+        time_to_detect_minutes: { type: integer }
+        time_to_mitigate_minutes: { type: integer }
+        time_to_resolve_minutes: { type: integer }
+        total_duration_minutes: { type: integer }
+
+  - id: "identify-root-cause"
+    depends_on: ["parse-timeline"]
+    prompt: |
+      Perform a thorough root cause analysis for this incident. Use multiple RCA methodologies.
+
+      Timeline: {steps.parse-timeline.output}
+      Service: {input.service_name}
+      Raw data: {input.incident_description}
+
+      Apply these methodologies:
+
+      1. 5 WHYS ANALYSIS:
+         Start with the observable symptom and ask "Why?" 5 times to drill to the root cause.
+         - Why 1: Direct cause
+         - Why 2: Why did that happen?
+         - Why 3: Deeper systemic cause
+         - Why 4: Process/organizational cause
+         - Why 5: Root cause (culture/architecture/process gap)
+
+      2. CONTRIBUTING FACTORS:
+         Categorize all factors that contributed to the incident:
+         - Technical: code bugs, infrastructure failures, capacity limits
+         - Process: missing runbooks, unclear ownership, deployment process gaps
+         - Human: knowledge gaps, communication failures, fatigue
+         - Organizational: insufficient staffing, training gaps, tooling deficits
+
+      3. FAILURE MODE ANALYSIS:
+         - What was the single point of failure?
+         - What redundancy was missing?
+         - What safeguards existed but failed?
+         - What safeguards should have existed?
+
+      4. TRIGGER vs ROOT CAUSE:
+         - Trigger: The immediate event that caused the incident
+         - Root cause: The underlying condition that allowed the trigger to cause an incident
+         - Distinguish clearly between the two
+
+      IMPORTANT: This must be BLAMELESS. Focus on systems and processes, never individuals.
+      Use phrases like "the process did not include..." rather than "person X failed to..."
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        root_cause: { type: string }
+        trigger: { type: string }
+        five_whys:
+          type: array
+          items:
+            type: object
+            properties:
+              level: { type: integer }
+              question: { type: string }
+              answer: { type: string }
+        contributing_factors:
+          type: object
+          properties:
+            technical: { type: array, items: { type: string } }
+            process: { type: array, items: { type: string } }
+            human: { type: array, items: { type: string } }
+            organizational: { type: array, items: { type: string } }
+        single_point_of_failure: { type: string }
+        missing_safeguards:
+          type: array
+          items: { type: string }
+
+  - id: "assess-impact"
+    depends_on: ["parse-timeline"]
+    prompt: |
+      Assess the full impact of this incident on the business, customers, and engineering organization.
+
+      Timeline: {steps.parse-timeline.output}
+      Service: {input.service_name}
+      Severity: {input.severity}
+      SLA Target: {input.sla_target}
+      Raw data: {input.incident_description}
+
+      Analyze impact across these dimensions:
+
+      1. CUSTOMER IMPACT:
+         - Number of users affected (estimate)
+         - Customer-facing symptoms (errors, latency, data loss, feature unavailability)
+         - Duration of customer-visible impact
+         - Customer complaints or escalations
+         - Support ticket volume increase
+
+      2. BUSINESS IMPACT:
+         - Revenue impact (lost transactions, failed signups, churned customers)
+         - Estimated revenue loss in USD (if calculable)
+         - Contractual SLA breach? (compare actual vs {input.sla_target})
+         - SLA credit liability
+         - Brand/reputation damage (social media mentions, press coverage)
+
+      3. ENGINEERING IMPACT:
+         - Engineer-hours spent on incident response
+         - Opportunity cost (what work was deferred)
+         - On-call burden and team morale impact
+         - Follow-up work required (cleanup, data reconciliation)
+
+      4. DATA IMPACT:
+         - Any data loss or corruption?
+         - Data consistency issues?
+         - Audit trail gaps?
+         - Recovery actions needed?
+
+      5. SLA ANALYSIS:
+         - SLA target: {input.sla_target}
+         - Downtime: {steps.parse-timeline.output.total_duration_minutes} minutes
+         - Monthly error budget consumed by this incident (%)
+         - Remaining error budget for the month
+
+      Return structured JSON with all impact metrics.
+    output_schema:
+      type: object
+      properties:
+        users_affected_estimate: { type: integer }
+        customer_symptoms: { type: array, items: { type: string } }
+        revenue_impact_usd: { type: number }
+        sla_breached: { type: boolean }
+        sla_actual: { type: string }
+        error_budget_consumed_pct: { type: number }
+        engineer_hours_spent: { type: number }
+        data_loss: { type: boolean }
+        severity_justified: { type: boolean }
+        impact_summary: { type: string }
+
+  - id: "generate-action-items"
+    depends_on: ["identify-root-cause", "assess-impact"]
+    prompt: |
+      Generate a comprehensive, prioritized list of action items to prevent recurrence and improve incident response.
+
+      Root Cause Analysis: {steps.identify-root-cause.output}
+      Impact Assessment: {steps.assess-impact.output}
+      Service: {input.service_name}
+      Team: {input.team_name}
+
+      Create action items in these categories:
+
+      1. PREVENT RECURRENCE (address root cause directly):
+         - Code fix or architecture change
+         - Configuration hardening
+         - Capacity/scaling improvements
+
+      2. IMPROVE DETECTION (catch it faster next time):
+         - New alerts or monitors to add
+         - Dashboard improvements
+         - Synthetic monitoring or canary deployments
+         - SLO/SLI refinements
+
+      3. IMPROVE RESPONSE (reduce MTTR):
+         - Runbook creation or updates
+         - Automation opportunities (auto-rollback, auto-scaling)
+         - Communication templates
+         - Escalation path improvements
+
+      4. SYSTEMIC IMPROVEMENTS (prevent similar incidents):
+         - Architecture resilience (circuit breakers, fallbacks, redundancy)
+         - Testing improvements (chaos engineering, load testing)
+         - Process changes (deployment practices, change management)
+         - Training or knowledge sharing
+
+      For EACH action item, include:
+      - title: Clear, actionable title
+      - description: What needs to be done specifically
+      - priority: P0 (this week), P1 (this sprint), P2 (this quarter), P3 (backlog)
+      - owner: Role or team responsible (not individual names)
+      - effort: S (< 1 day), M (1-3 days), L (1-2 weeks), XL (> 2 weeks)
+      - category: prevent, detect, respond, systemic
+      - ticket_title: Ready-to-file JIRA/Linear ticket title
+
+      Return structured JSON with action items array.
+    output_schema:
+      type: object
+      properties:
+        action_items:
+          type: array
+          items:
+            type: object
+            properties:
+              title: { type: string }
+              description: { type: string }
+              priority: { type: string }
+              owner: { type: string }
+              effort: { type: string }
+              category: { type: string }
+              ticket_title: { type: string }
+        total_action_items: { type: integer }
+        p0_count: { type: integer }
+        estimated_total_effort_days: { type: number }
+
+  - id: "compile-postmortem"
+    depends_on: ["parse-timeline", "identify-root-cause", "assess-impact", "generate-action-items"]
+    prompt: |
+      IMPORTANT: Return the complete postmortem as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
+
+      Compile all analysis into a polished, blameless postmortem document ready for stakeholder distribution.
+
+      Timeline: {steps.parse-timeline.output}
+      Root Cause: {steps.identify-root-cause.output}
+      Impact: {steps.assess-impact.output}
+      Action Items: {steps.generate-action-items.output}
+
+      Structure the postmortem using this template:
+
+      # Incident Postmortem: {input.service_name}
+      **Date:** {input.incident_date}
+      **Severity:** {input.severity}
+      **Duration:** {steps.parse-timeline.output.total_duration_minutes} minutes
+      **Team:** {input.team_name}
+      **Status:** Draft - Pending Review
+
+      ---
+
+      ## Summary
+      One paragraph: what happened, how long it lasted, who was affected, and current status.
+
+      ## Impact
+      - Users affected: X
+      - Revenue impact: $X
+      - SLA: X% (target: {input.sla_target})
+      - Error budget consumed: X%
+
+      ## Timeline (UTC)
+      | Time | Event |
+      |------|-------|
+      (chronological table of all events)
+
+      ## Root Cause
+      Clear explanation of what caused the incident (2-3 paragraphs).
+      Include the 5 Whys chain.
+
+      ## Contributing Factors
+      Bulleted list of technical, process, and organizational factors.
+
+      ## What Went Well
+      - Things that worked during incident response
+      - Effective monitoring, communication, or processes
+
+      ## What Went Wrong
+      - Gaps in detection, response, or prevention
+      - Process failures (NOT people failures)
+
+      ## Where We Got Lucky
+      - Things that could have made this worse
+      - Near-misses or cascading failures that were avoided
+
+      ## Action Items
+      | Priority | Title | Owner | Effort | Status |
+      |----------|-------|-------|--------|--------|
+      (table of all action items, sorted by priority)
+
+      ## Lessons Learned
+      3-5 key takeaways for the broader engineering organization.
+
+      ## Appendix
+      - Related incidents
+      - Relevant metrics/graphs description
+      - Glossary of terms
+
+      ---
+      *This postmortem follows blameless principles. Its purpose is to learn and improve, not to assign blame.*
+
+      Make the language professional, clear, and factual. Avoid jargon where possible.
+    max_turns: 1
+    pdf_report:
+      directory: ./output
+      language: en
+
+on_complete:
+  storage_path: "incidents/{run_id}/postmortem.json"

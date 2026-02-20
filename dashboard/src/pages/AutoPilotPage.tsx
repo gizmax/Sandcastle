@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { FlaskConical, TrendingUp, TrendingDown, Trophy, RotateCcw, Rocket } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -88,7 +89,12 @@ export default function AutoPilotPage() {
 
   const handleDeploy = useCallback(
     async (id: string, variantId: string) => {
-      await api.post(`/autopilot/experiments/${id}/deploy`, { variant_id: variantId });
+      const res = await api.post(`/autopilot/experiments/${id}/deploy`, { variant_id: variantId });
+      if (res.error) {
+        toast.error(`Failed to deploy variant: ${res.error.message}`);
+        return;
+      }
+      toast.success("Variant deployed successfully");
       void fetchData();
     },
     [fetchData]
@@ -96,7 +102,12 @@ export default function AutoPilotPage() {
 
   const handleReset = useCallback(
     async (id: string) => {
-      await api.post(`/autopilot/experiments/${id}/reset`);
+      const res = await api.post(`/autopilot/experiments/${id}/reset`);
+      if (res.error) {
+        toast.error(`Failed to reset experiment: ${res.error.message}`);
+        return;
+      }
+      toast.success("Experiment reset");
       void fetchData();
     },
     [fetchData]

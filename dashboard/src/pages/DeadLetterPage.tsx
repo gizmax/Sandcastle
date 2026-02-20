@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Inbox } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { DeadLetterTable, type DLQItem } from "@/components/dead-letter/DeadLetterTable";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -24,7 +25,12 @@ export default function DeadLetterPage() {
 
   const handleRetry = useCallback(
     async (id: string) => {
-      await api.post(`/dead-letter/${id}/retry`);
+      const res = await api.post(`/dead-letter/${id}/retry`);
+      if (res.error) {
+        toast.error(`Failed to retry: ${res.error.message}`);
+        return;
+      }
+      toast.success("Item queued for retry");
       fetchItems();
     },
     [fetchItems]
@@ -32,7 +38,12 @@ export default function DeadLetterPage() {
 
   const handleResolve = useCallback(
     async (id: string) => {
-      await api.post(`/dead-letter/${id}/resolve`);
+      const res = await api.post(`/dead-letter/${id}/resolve`);
+      if (res.error) {
+        toast.error(`Failed to resolve: ${res.error.message}`);
+        return;
+      }
+      toast.success("Item resolved");
       fetchItems();
     },
     [fetchItems]

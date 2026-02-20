@@ -1,0 +1,402 @@
+name: "technical-debt-auditor"
+description: "Deep-dive codebase analysis for technical debt: code complexity, outdated dependencies, security vulnerabilities, test coverage gaps, and architecture anti-patterns with a prioritized remediation plan."
+sandstorm_url: "${SANDSTORM_URL}"
+default_model: sonnet
+default_max_turns: 15
+default_timeout: 600
+
+input_schema:
+  required:
+    - repo_url
+    - language
+  properties:
+    repo_url:
+      type: string
+      description: "Git repository URL or local path to analyze (e.g. 'https://github.com/org/repo' or '/path/to/project')"
+    language:
+      type: string
+      description: "Primary programming language (e.g. 'python', 'typescript', 'go', 'java', 'rust')"
+    max_depth:
+      type: integer
+      description: "Max directory depth to scan (default: 5)"
+      default: 5
+    focus_areas:
+      type: array
+      items: { type: string }
+      description: "Optional focus areas (e.g. ['security', 'performance', 'testing'])"
+
+steps:
+  - id: "scan-structure"
+    prompt: |
+      Scan and map the complete structure of the repository at {input.repo_url}.
+
+      Perform a thorough structural analysis:
+      1. Directory tree (top 3 levels)
+      2. File count by extension (e.g. .py: 45, .ts: 23, .yaml: 8)
+      3. Total lines of code (estimate per directory)
+      4. Configuration files found (package.json, pyproject.toml, Dockerfile, CI configs, etc.)
+      5. Dependency manifest files (requirements.txt, package.json, go.mod, Cargo.toml, etc.)
+      6. Test directory structure and test file count
+      7. Documentation coverage (README, docs/, docstrings)
+      8. Build/deployment configuration (Dockerfile, CI/CD, IaC)
+
+      Primary language: {input.language}
+      Max scan depth: {input.max_depth}
+
+      Return structured JSON with the complete codebase map.
+    output_schema:
+      type: object
+      properties:
+        directory_tree: { type: string }
+        file_counts: { type: object }
+        total_loc_estimate: { type: integer }
+        config_files: { type: array, items: { type: string } }
+        dependency_files: { type: array, items: { type: string } }
+        test_file_count: { type: integer }
+        source_file_count: { type: integer }
+        has_ci: { type: boolean }
+        has_docker: { type: boolean }
+        has_docs: { type: boolean }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: "analyze-complexity"
+    depends_on: ["scan-structure"]
+    prompt: |
+      Analyze code complexity across the codebase at {input.repo_url}.
+      Codebase structure: {steps.scan-structure.output}
+
+      For the primary language ({input.language}), analyze:
+
+      1. CYCLOMATIC COMPLEXITY:
+         - Identify the 10 most complex functions/methods
+         - Flag any function with complexity > 15
+         - Calculate average complexity per module
+
+      2. CODE SMELLS:
+         - God classes/modules (>500 lines or >20 methods)
+         - Long parameter lists (>5 params)
+         - Deep nesting (>4 levels)
+         - Duplicate code patterns
+         - Magic numbers and hardcoded strings
+         - Dead code (unused imports, unreachable branches)
+
+      3. NAMING AND READABILITY:
+         - Inconsistent naming conventions
+         - Missing type hints/annotations
+         - Missing docstrings on public APIs
+         - Overly abbreviated variable names
+
+      4. MODULE COUPLING:
+         - Circular dependencies
+         - High fan-in/fan-out modules
+         - God modules that everything depends on
+         - Layer violations (e.g. UI importing DB directly)
+
+      Rate each finding: critical, high, medium, low.
+      Estimate effort to fix: hours (S: <2h, M: 2-8h, L: 8-24h, XL: 24h+).
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        complexity_score: { type: integer }
+        most_complex_functions:
+          type: array
+          items:
+            type: object
+            properties:
+              file: { type: string }
+              function: { type: string }
+              complexity: { type: integer }
+        code_smells:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              location: { type: string }
+              severity: { type: string }
+              effort: { type: string }
+              description: { type: string }
+        coupling_issues:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              modules: { type: array, items: { type: string } }
+              severity: { type: string }
+
+  - id: "check-dependencies"
+    depends_on: ["scan-structure"]
+    prompt: |
+      Audit all dependencies in the repository at {input.repo_url}.
+      Dependency files found: {steps.scan-structure.output.dependency_files}
+      Language: {input.language}
+
+      Analyze:
+
+      1. OUTDATED DEPENDENCIES:
+         - List all dependencies with available updates
+         - Classify: patch (safe), minor (review), major (breaking changes likely)
+         - Identify dependencies that are >2 major versions behind
+
+      2. ABANDONED/RISKY PACKAGES:
+         - Packages with no updates in >12 months
+         - Packages with <100 GitHub stars or limited community
+         - Packages with known maintainer issues
+         - Single-maintainer critical dependencies
+
+      3. DEPENDENCY BLOAT:
+         - Unused dependencies (imported but never used)
+         - Dependencies that overlap in functionality
+         - Heavy dependencies that could be replaced with lighter alternatives
+         - Dev dependencies accidentally in production
+
+      4. LICENSE COMPLIANCE:
+         - List all dependency licenses
+         - Flag GPL/AGPL in commercial projects
+         - Flag unknown or missing licenses
+         - Flag license incompatibilities
+
+      5. SUPPLY CHAIN RISK:
+         - Transitive dependency count
+         - Dependencies with install scripts
+         - Unpinned versions (using ranges vs exact)
+
+      Return structured JSON with all findings.
+    output_schema:
+      type: object
+      properties:
+        total_dependencies: { type: integer }
+        outdated:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              current: { type: string }
+              latest: { type: string }
+              update_type: { type: string }
+        abandoned:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              last_update: { type: string }
+              risk_level: { type: string }
+        license_issues:
+          type: array
+          items: { type: string }
+        supply_chain_risk_score: { type: integer }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: continue
+
+  - id: "security-audit"
+    depends_on: ["scan-structure", "check-dependencies"]
+    prompt: |
+      Perform a security vulnerability audit of the codebase at {input.repo_url}.
+      Structure: {steps.scan-structure.output}
+      Dependency audit: {steps.check-dependencies.output}
+      Language: {input.language}
+
+      Check for:
+
+      1. OWASP TOP 10 VULNERABILITIES:
+         - Injection flaws (SQL, command, LDAP, XPath)
+         - Broken authentication patterns
+         - Sensitive data exposure (hardcoded secrets, API keys in code)
+         - XXE/XML vulnerabilities
+         - Broken access control
+         - Security misconfiguration
+         - XSS (cross-site scripting)
+         - Insecure deserialization
+         - Known vulnerable components (from dependency audit)
+         - Insufficient logging/monitoring
+
+      2. SECRET SCANNING:
+         - Hardcoded API keys, tokens, passwords
+         - .env files committed to repo
+         - Private keys in codebase
+         - Database connection strings with credentials
+
+      3. INFRASTRUCTURE SECURITY:
+         - Dockerfile security (running as root, unpatched base images)
+         - CI/CD pipeline security (secret handling, artifact integrity)
+         - CORS configuration
+         - Rate limiting presence
+         - Input validation patterns
+
+      4. LANGUAGE-SPECIFIC CHECKS ({input.language}):
+         - Python: pickle usage, eval/exec, subprocess without shell=False
+         - JavaScript: prototype pollution, regex DoS, unsafe innerHTML
+         - Go: unchecked errors, race conditions
+         - Java: serialization, reflection abuse
+
+      Rate each finding by CVSS-like severity: Critical (9-10), High (7-8.9), Medium (4-6.9), Low (0-3.9).
+
+      Return structured JSON.
+    output_schema:
+      type: object
+      properties:
+        security_score: { type: integer }
+        critical_findings:
+          type: array
+          items:
+            type: object
+            properties:
+              vulnerability: { type: string }
+              location: { type: string }
+              severity: { type: string }
+              cvss_estimate: { type: number }
+              remediation: { type: string }
+        high_findings:
+          type: array
+          items:
+            type: object
+            properties:
+              vulnerability: { type: string }
+              location: { type: string }
+              severity: { type: string }
+              remediation: { type: string }
+        medium_findings:
+          type: array
+          items: { type: string }
+        secrets_found: { type: integer }
+        owasp_coverage:
+          type: object
+
+  - id: "test-coverage-analysis"
+    depends_on: ["scan-structure", "analyze-complexity"]
+    prompt: |
+      Analyze test coverage and testing practices in the codebase at {input.repo_url}.
+      Structure: {steps.scan-structure.output}
+      Complexity analysis: {steps.analyze-complexity.output}
+
+      Analyze:
+
+      1. COVERAGE GAPS:
+         - Identify modules/files with NO corresponding tests
+         - Map test files to source files
+         - Calculate test-to-code ratio (ideal: >0.8)
+         - Highlight complex functions (from complexity analysis) that lack tests
+
+      2. TEST QUALITY:
+         - Test naming conventions (descriptive vs cryptic)
+         - Assertion density (tests with no assertions)
+         - Mock/stub usage patterns (over-mocking vs under-mocking)
+         - Test isolation (shared state, order-dependent tests)
+         - Edge case coverage (boundary values, error paths, empty inputs)
+
+      3. TESTING ANTI-PATTERNS:
+         - Flaky test indicators (time-dependent, network-dependent)
+         - Tests that test implementation instead of behavior
+         - Overly brittle snapshot tests
+         - Missing integration/E2E tests
+         - Tests with hardcoded test data vs fixtures/factories
+
+      4. CI/CD TESTING:
+         - Are tests run in CI?
+         - Test execution time (slow test detection)
+         - Parallel test execution setup
+         - Coverage reporting configured?
+
+      Return structured JSON with coverage map and recommendations.
+    output_schema:
+      type: object
+      properties:
+        test_to_code_ratio: { type: number }
+        untested_modules:
+          type: array
+          items: { type: string }
+        untested_complex_functions:
+          type: array
+          items:
+            type: object
+            properties:
+              function: { type: string }
+              file: { type: string }
+              complexity: { type: integer }
+        anti_patterns:
+          type: array
+          items:
+            type: object
+            properties:
+              pattern: { type: string }
+              location: { type: string }
+              severity: { type: string }
+        coverage_score: { type: integer }
+
+  - id: "generate-remediation-plan"
+    depends_on: ["analyze-complexity", "check-dependencies", "security-audit", "test-coverage-analysis"]
+    prompt: |
+      IMPORTANT: Return the complete report as your direct text response. Do NOT use any tools, do NOT write to files, do NOT execute code. Simply output the full markdown text.
+
+      You are a principal engineer. Compile ALL audit findings into a prioritized Technical Debt Remediation Plan for the repository at {input.repo_url} ({input.language}).
+
+      Complexity Analysis: {steps.analyze-complexity.output}
+      Dependency Audit: {steps.check-dependencies.output}
+      Security Audit: {steps.security-audit.output}
+      Test Coverage: {steps.test-coverage-analysis.output}
+
+      Structure the report as:
+
+      # Technical Debt Audit Report
+      **Repository:** {input.repo_url}
+      **Language:** {input.language}
+
+      ## Executive Summary
+      - Overall tech debt score (A-F grade)
+      - Top 3 most critical issues
+      - Estimated total remediation effort
+      - Recommended sprint allocation (% of sprint for debt reduction)
+
+      ## Scorecard
+      | Category | Score | Grade | Trend |
+      |----------|-------|-------|-------|
+      | Code Complexity | X/100 | | |
+      | Dependency Health | X/100 | | |
+      | Security | X/100 | | |
+      | Test Coverage | X/100 | | |
+      | **Overall** | **X/100** | | |
+
+      ## Critical Issues (Fix Immediately)
+      For each: description, location, impact, fix steps, estimated effort
+
+      ## Sprint 1 Plan (Next 2 Weeks)
+      - Prioritized list of 5-8 items to tackle first
+      - Acceptance criteria for each
+      - Estimated story points
+
+      ## Sprint 2-3 Plan (Weeks 3-6)
+      - Medium-priority items
+      - Refactoring opportunities
+      - Test coverage improvements
+
+      ## Long-Term Roadmap (Months 2-6)
+      - Architecture improvements
+      - Dependency modernization
+      - Process improvements (linting, CI, code review)
+
+      ## Quick Wins (< 2 hours each)
+      - Bulleted list of easy fixes with high impact
+
+      ## Recommended Tools
+      - Linters, formatters, security scanners for {input.language}
+      - CI/CD additions
+      - Monitoring recommendations
+
+      Use markdown tables, code snippets, and clear formatting.
+    max_turns: 1
+    pdf_report:
+      directory: ./output
+      language: en
+
+on_complete:
+  storage_path: "audits/{run_id}/tech-debt-report.json"

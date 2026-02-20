@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Calendar, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ScheduleTable } from "@/components/schedules/ScheduleTable";
 import { CreateScheduleModal } from "@/components/schedules/CreateScheduleModal";
@@ -37,14 +38,24 @@ export default function Schedules() {
   }, [fetchSchedules]);
 
   const handleToggle = useCallback(async (id: string, enabled: boolean) => {
-    await api.patch(`/schedules/${id}`, { enabled });
+    const res = await api.patch(`/schedules/${id}`, { enabled });
+    if (res.error) {
+      toast.error(`Failed to toggle schedule: ${res.error.message}`);
+      return;
+    }
+    toast.success(`Schedule ${enabled ? "enabled" : "disabled"}`);
     setSchedules((prev) =>
       prev.map((s) => (s.id === id ? { ...s, enabled } : s))
     );
   }, []);
 
   const handleDelete = useCallback(async (id: string) => {
-    await api.delete(`/schedules/${id}`);
+    const res = await api.delete(`/schedules/${id}`);
+    if (res.error) {
+      toast.error(`Failed to delete schedule: ${res.error.message}`);
+      return;
+    }
+    toast.success("Schedule deleted");
     setSchedules((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
@@ -54,7 +65,12 @@ export default function Schedules() {
       cron_expression: string;
       input_data: Record<string, unknown>;
     }) => {
-      await api.post("/schedules", data);
+      const res = await api.post("/schedules", data);
+      if (res.error) {
+        toast.error(`Failed to create schedule: ${res.error.message}`);
+        return;
+      }
+      toast.success("Schedule created");
       setModalOpen(false);
       fetchSchedules();
     },
@@ -63,7 +79,12 @@ export default function Schedules() {
 
   const handleEdit = useCallback(
     async (id: string, data: { cron_expression: string; enabled: boolean }) => {
-      await api.patch(`/schedules/${id}`, data);
+      const res = await api.patch(`/schedules/${id}`, data);
+      if (res.error) {
+        toast.error(`Failed to update schedule: ${res.error.message}`);
+        return;
+      }
+      toast.success("Schedule updated");
       setSchedules((prev) =>
         prev.map((s) => (s.id === id ? { ...s, ...data } : s))
       );

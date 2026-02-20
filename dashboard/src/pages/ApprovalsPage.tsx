@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -35,6 +36,7 @@ export default function ApprovalsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -53,10 +55,21 @@ export default function ApprovalsPage() {
 
   const handleAction = useCallback(
     async (id: string, action: "approve" | "reject" | "skip") => {
-      await api.post(`/approvals/${id}/${action}`);
-      void fetchItems();
+      if (actionLoading) return;
+      setActionLoading(id);
+      try {
+        const res = await api.post(`/approvals/${id}/${action}`);
+        if (res.error) {
+          toast.error(`Failed to ${action}: ${res.error.message}`);
+          return;
+        }
+        toast.success(`Approval ${action}ed`);
+        void fetchItems();
+      } finally {
+        setActionLoading(null);
+      }
     },
-    [fetchItems]
+    [fetchItems, actionLoading]
   );
 
   const filters = [
@@ -181,39 +194,45 @@ export default function ApprovalsPage() {
                   {item.status === "pending" && (
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
+                        disabled={actionLoading === item.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAction(item.id, "approve");
                         }}
                         className={cn(
                           "flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium",
-                          "bg-success/10 text-success hover:bg-success/20 transition-colors"
+                          "bg-success/10 text-success hover:bg-success/20 transition-colors",
+                          "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         Approve
                       </button>
                       <button
+                        disabled={actionLoading === item.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAction(item.id, "reject");
                         }}
                         className={cn(
                           "flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium",
-                          "bg-error/10 text-error hover:bg-error/20 transition-colors"
+                          "bg-error/10 text-error hover:bg-error/20 transition-colors",
+                          "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
                         <XCircle className="h-3.5 w-3.5" />
                         Reject
                       </button>
                       <button
+                        disabled={actionLoading === item.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAction(item.id, "skip");
                         }}
                         className={cn(
                           "flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium",
-                          "text-muted hover:bg-border/40 transition-colors"
+                          "text-muted hover:bg-border/40 transition-colors",
+                          "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
                         <SkipForward className="h-3.5 w-3.5" />

@@ -29,9 +29,11 @@ export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
       const [statsRes, runsRes] = await Promise.all([
         api.get<Stats>("/stats"),
         api.get<RunItem[]>("/runs", { limit: "5" }),
@@ -39,7 +41,7 @@ export default function Overview() {
       if (statsRes.data) setStats(statsRes.data);
       if (runsRes.data) setRecentRuns(runsRes.data);
     } catch {
-      // API may not be available
+      setError("Could not connect to the API server");
     }
     setLoading(false);
   }, []);
@@ -52,6 +54,23 @@ export default function Overview() {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchData(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
