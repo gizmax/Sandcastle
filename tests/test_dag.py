@@ -21,7 +21,6 @@ SIMPLE_WORKFLOW_YAML = """
 name: test-workflow
 description: A simple test workflow
 
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -44,7 +43,6 @@ PARALLEL_WORKFLOW_YAML = """
 name: parallel-test
 description: Workflow with parallel steps
 
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 default_max_turns: 5
 default_timeout: 120
@@ -64,7 +62,6 @@ CYCLE_WORKFLOW_YAML = """
 name: cycle-test
 description: Workflow with a cycle
 
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 
 steps:
@@ -84,7 +81,6 @@ FULL_WORKFLOW_YAML = """
 name: lead-enrichment
 description: Enrich companies
 
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -177,18 +173,19 @@ class TestParse:
         assert workflow.on_failure.dead_letter is True
 
     def test_parse_env_var_interpolation(self):
-        os.environ["TEST_SANDSTORM_URL"] = "http://custom:9000"
+        os.environ["TEST_WEBHOOK_URL"] = "http://custom:9000/hook"
         yaml_content = """
 name: env-test
 description: test
-sandstorm_url: ${TEST_SANDSTORM_URL}
+on_complete:
+  webhook: ${TEST_WEBHOOK_URL}
 steps:
   - id: step1
     prompt: "hello"
 """
         workflow = parse_yaml_string(yaml_content)
-        assert workflow.sandstorm_url == "http://custom:9000"
-        del os.environ["TEST_SANDSTORM_URL"]
+        assert workflow.on_complete.webhook == "http://custom:9000/hook"
+        del os.environ["TEST_WEBHOOK_URL"]
 
     def test_get_step_not_found(self):
         workflow = parse_yaml_string(SIMPLE_WORKFLOW_YAML)
@@ -209,7 +206,6 @@ class TestValidate:
         yaml_content = """
 name: empty
 description: no steps
-sandstorm_url: http://localhost:8000
 steps: []
 """
         workflow = parse_yaml_string(yaml_content)
@@ -220,7 +216,6 @@ steps: []
         yaml_content = """
 name: duplicates
 description: duplicate IDs
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "first"
@@ -235,7 +230,6 @@ steps:
         yaml_content = """
 name: bad-dep
 description: unknown dep
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     depends_on: [nonexistent]
@@ -259,7 +253,6 @@ class TestBuildPlan:
         yaml_content = """
 name: linear
 description: linear workflow
-sandstorm_url: http://localhost:8000
 steps:
   - id: a
     prompt: "A"
@@ -298,7 +291,6 @@ steps:
         yaml_content = """
 name: single
 description: single step
-sandstorm_url: http://localhost:8000
 steps:
   - id: only
     prompt: "The only step"
@@ -311,7 +303,6 @@ steps:
         yaml_content = """
 name: independent
 description: all independent
-sandstorm_url: http://localhost:8000
 steps:
   - id: a
     prompt: "A"
@@ -334,7 +325,6 @@ class TestCsvOutput:
         yaml_content = """
 name: csv-test
 description: test csv output
-sandstorm_url: http://localhost:8000
 steps:
   - id: export
     prompt: "Generate data"
@@ -352,7 +342,6 @@ steps:
         yaml_content = """
 name: csv-append
 description: test append mode
-sandstorm_url: http://localhost:8000
 steps:
   - id: collect
     prompt: "Collect data"
@@ -372,7 +361,6 @@ steps:
         yaml_content = """
 name: no-csv
 description: no csv
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "No CSV"
@@ -385,7 +373,6 @@ steps:
         yaml_content = """
 name: full-step
 description: step with csv and retry
-sandstorm_url: http://localhost:8000
 steps:
   - id: analyze
     prompt: "Analyze data"

@@ -129,7 +129,6 @@ class TestDagValidationWithProviders:
         yaml_content = """
 name: multi-model-test
 description: Uses multiple models
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 steps:
   - id: research
@@ -154,7 +153,6 @@ steps:
         yaml_content = """
 name: bad-model-test
 description: Uses invalid model
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 steps:
   - id: step1
@@ -171,7 +169,6 @@ steps:
         yaml_content = """
 name: all-providers
 description: Uses all providers
-sandstorm_url: http://localhost:8000
 default_model: sonnet
 steps:
   - id: claude-step

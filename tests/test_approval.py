@@ -24,7 +24,6 @@ from sandcastle.engine.executor import (
 APPROVAL_WORKFLOW_YAML = """
 name: approval-test
 description: Workflow with approval gate
-sandstorm_url: http://localhost:8000
 steps:
   - id: prepare
     prompt: "Prepare data"
@@ -71,7 +70,6 @@ class TestApprovalParsing:
         yaml_content = """
 name: bad-approval
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: review
     type: approval
@@ -86,7 +84,6 @@ steps:
         yaml_content = """
 name: bad-approval
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: review
     type: approval
@@ -179,7 +176,6 @@ class TestApprovalWorkflow:
         yaml_content = """
 name: approval-flow
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: prepare
     prompt: "Prepare"

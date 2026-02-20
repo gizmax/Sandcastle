@@ -45,7 +45,7 @@ class TestSyncHealth:
             json_data={
                 "data": {
                     "status": "ok",
-                    "sandstorm": True,
+                    "runtime": True,
                     "database": True,
                     "redis": None,
                 },
@@ -60,7 +60,7 @@ class TestSyncHealth:
 
         assert isinstance(result, HealthStatus)
         assert result.status == "ok"
-        assert result.sandstorm is True
+        assert result.runtime is True
         assert result.database is True
         assert result.redis is None
 
@@ -370,7 +370,7 @@ class TestAsyncHealth:
             json_data={
                 "data": {
                     "status": "ok",
-                    "sandstorm": False,
+                    "runtime": False,
                     "database": True,
                     "redis": True,
                 },
@@ -387,7 +387,7 @@ class TestAsyncHealth:
 
         assert isinstance(result, HealthStatus)
         assert result.status == "ok"
-        assert result.sandstorm is False
+        assert result.runtime is False
         assert result.database is True
         assert result.redis is True
 

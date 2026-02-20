@@ -183,7 +183,7 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: str
-    sandstorm: bool
+    runtime: bool
     redis: bool | None = None  # None when Redis is not configured (local mode)
     database: bool
 
@@ -485,8 +485,6 @@ class OptimizerStatsResponse(BaseModel):
 class SettingsResponse(BaseModel):
     """Current server settings."""
 
-    # Connections
-    sandstorm_url: str = ""
     # Credentials (masked - only last 4 chars shown)
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
@@ -518,7 +516,6 @@ class SettingsResponse(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     """Update server settings. Only include fields you want to change."""
 
-    sandstorm_url: str | None = None
     anthropic_api_key: str | None = None
     e2b_api_key: str | None = None
     openai_api_key: str | None = None

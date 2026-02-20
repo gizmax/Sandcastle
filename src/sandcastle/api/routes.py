@@ -323,13 +323,13 @@ async def health_check() -> ApiResponse:
     runtime = SandshoreRuntime(
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
-        proxy_url=settings.sandstorm_url or None,
+        proxy_url=None,
         sandbox_backend=settings.sandbox_backend,
         docker_image=settings.docker_image,
         docker_url=settings.docker_url or None,
         cloudflare_worker_url=settings.cloudflare_worker_url,
     )
-    sandstorm_ok = await runtime.health()
+    runtime_ok = await runtime.health()
     await runtime.close()
 
     # Check database
@@ -355,15 +355,15 @@ async def health_check() -> ApiResponse:
         except Exception:
             pass
 
-    # In local mode, health is ok if sandstorm + db are fine (no Redis needed)
-    checks = [sandstorm_ok, db_ok]
+    # In local mode, health is ok if runtime + db are fine (no Redis needed)
+    checks = [runtime_ok, db_ok]
     if redis_ok is not None:
         checks.append(redis_ok)
 
     return ApiResponse(
         data=HealthResponse(
             status="ok" if all(checks) else "degraded",
-            sandstorm=sandstorm_ok,
+            runtime=runtime_ok,
             redis=redis_ok,
             database=db_ok,
         )
@@ -3609,7 +3609,6 @@ def _mask(value: str) -> str:
 def _build_settings_response() -> SettingsResponse:
     """Build a SettingsResponse from the current runtime settings."""
     return SettingsResponse(
-        sandstorm_url=settings.sandstorm_url or "",
         anthropic_api_key=_mask(settings.anthropic_api_key),
         e2b_api_key=_mask(settings.e2b_api_key),
         openai_api_key=_mask(settings.openai_api_key),

@@ -32,7 +32,6 @@ from sandcastle.engine.policy import (
 POLICY_WORKFLOW_YAML = """
 name: policy-test
 description: Workflow with policies
-sandstorm_url: http://localhost:8000
 policies:
   - id: pii-guard
     description: "Redact PII"
@@ -130,7 +129,6 @@ def test_parse_step_policies():
 INLINE_POLICY_YAML = """
 name: inline-test
 description: Workflow with inline policy
-sandstorm_url: http://localhost:8000
 steps:
   - id: sensitive
     prompt: "Process sensitive data"

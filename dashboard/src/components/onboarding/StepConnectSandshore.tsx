@@ -16,8 +16,8 @@ export function StepConnectSandshore({ onComplete }: StepConnectSandshoreProps) 
   async function handleTest() {
     setTesting(true);
     try {
-      const res = await api.get<{ status: string; sandstorm: boolean }>("/health");
-      if (res.data?.sandstorm) {
+      const res = await api.get<{ status: string; runtime: boolean }>("/health");
+      if (res.data?.runtime) {
         setConnected(true);
       }
     } catch {

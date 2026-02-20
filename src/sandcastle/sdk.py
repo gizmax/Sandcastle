@@ -113,7 +113,7 @@ class HealthStatus:
     """Health check result."""
 
     status: str
-    sandstorm: bool
+    runtime: bool
     database: bool
     redis: Optional[bool] = None
 
@@ -257,7 +257,7 @@ def _parse_health(data: dict[str, Any]) -> HealthStatus:
     """Build a HealthStatus from an API response dict."""
     return HealthStatus(
         status=data.get("status", "unknown"),
-        sandstorm=data.get("sandstorm", False),
+        runtime=data.get("runtime", False),
         database=data.get("database", False),
         redis=data.get("redis"),
     )

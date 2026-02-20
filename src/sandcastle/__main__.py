@@ -724,7 +724,7 @@ def _cmd_health(args: argparse.Namespace) -> None:
         data = _to_dict(h)
         status = data.get("status", "unknown")
         print(f"Status:    {_status_color(status)}")
-        print(f"Runtime:   {'ok' if data.get('sandstorm') else 'not configured'}")
+        print(f"Runtime:   {'ok' if data.get('runtime') else 'not configured'}")
         if data.get("redis") is not None:
             print(f"Redis:     {'ok' if data.get('redis') else 'unreachable'}")
         print(f"Database:  {'ok' if data.get('database') else 'unreachable'}")

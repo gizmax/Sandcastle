@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     """Sandcastle configuration."""
 
     # Runtime connection
-    sandstorm_url: str = ""  # Deprecated: legacy proxy URL (optional fallback)
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
 
@@ -81,7 +80,7 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "info"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @computed_field
     @property

@@ -366,11 +366,11 @@ class SandshoreRuntime:
         )
 
     # ------------------------------------------------------------------
-    # HTTP proxy fallback (Sandstorm-compatible)
+    # HTTP proxy fallback
     # ------------------------------------------------------------------
 
     async def _stream_proxy(self, request: dict) -> AsyncIterator[SSEEvent]:
-        """Stream events via HTTP proxy (legacy Sandstorm mode)."""
+        """Stream events via HTTP proxy (legacy fallback mode)."""
         payload = {
             "prompt": request["prompt"],
             "anthropic_api_key": self.anthropic_api_key,
@@ -478,13 +478,3 @@ def get_sandshore_runtime(
     return client
 
 
-# ------------------------------------------------------------------
-# Backward compatibility aliases
-# ------------------------------------------------------------------
-
-# These aliases let existing code (tests, imports) keep working
-# without changes. They will be removed in a future version.
-SandstormClient = SandshoreRuntime
-SandstormResult = SandshoreResult
-SandstormError = SandshoreError
-get_sandstorm_client = get_sandshore_runtime

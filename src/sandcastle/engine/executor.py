@@ -1847,7 +1847,7 @@ async def execute_workflow(
         except Exception as e:
             logger.warning(f"Could not load global policies: {e}")
 
-    proxy_url = workflow.sandstorm_url or settings.sandstorm_url or None
+    proxy_url = None
     logger.info(
         "Sandshore runtime: e2b_key=%s, proxy=%s",
         "set" if settings.e2b_api_key else "unset",

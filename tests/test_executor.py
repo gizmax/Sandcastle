@@ -248,7 +248,6 @@ class TestExecuteWorkflow:
         yaml_content = """
 name: simple
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Hello"
@@ -284,7 +283,6 @@ steps:
         yaml_content = """
 name: chain
 description: test chain
-sandstorm_url: http://localhost:8000
 steps:
   - id: first
     prompt: "First step"
@@ -324,7 +322,6 @@ steps:
         yaml_content = """
 name: fail-test
 description: test failure
-sandstorm_url: http://localhost:8000
 steps:
   - id: failing
     prompt: "This will fail"

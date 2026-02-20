@@ -25,7 +25,6 @@ from sandcastle.engine.dag import (
 AUTOPILOT_WORKFLOW_YAML = """
 name: autopilot-test
 description: Workflow with autopilot optimization
-sandstorm_url: http://localhost:8000
 steps:
   - id: enrich
     prompt: "Enrich {input.company}"
@@ -79,7 +78,6 @@ class TestAutoPilotParsing:
         yaml_content = """
 name: no-autopilot
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Hello"

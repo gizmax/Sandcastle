@@ -14,7 +14,6 @@ client = TestClient(app)
 VALID_WORKFLOW = """
 name: test-api
 description: API test workflow
-sandstorm_url: http://localhost:8000
 steps:
   - id: greet
     prompt: "Say hello to {input.name}"
@@ -58,7 +57,7 @@ class TestHealth:
         data = response.json()
         assert "data" in data
         health = data["data"]
-        assert "sandstorm" in health
+        assert "runtime" in health
         assert "redis" in health
         assert "database" in health
 
@@ -83,7 +82,6 @@ class TestSyncRun:
         empty_yaml = """
 name: empty
 description: no steps
-sandstorm_url: http://localhost:8000
 steps: []
 """
         response = client.post(
@@ -177,7 +175,6 @@ class TestRequestValidation:
         cycle_yaml = """
 name: cycle
 description: cyclic
-sandstorm_url: http://localhost:8000
 steps:
   - id: a
     depends_on: [b]

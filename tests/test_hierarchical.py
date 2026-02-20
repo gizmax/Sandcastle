@@ -27,7 +27,6 @@ from sandcastle.engine.sandshore import SandshoreResult
 SUB_WORKFLOW_YAML = """
 name: parent-workflow
 description: Workflow that calls sub-workflows
-sandstorm_url: http://localhost:8000
 steps:
   - id: prepare
     prompt: "Prepare data"
@@ -79,7 +78,6 @@ class TestSubWorkflowParsing:
         yaml_content = """
 name: bad-sub
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: sub
     type: sub_workflow
@@ -94,7 +92,6 @@ steps:
         yaml_content = """
 name: bad-sub
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: sub
     type: sub_workflow
@@ -122,7 +119,6 @@ class TestSubWorkflowExecution:
         yaml_content = """
 name: deep
 description: test
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Hello"
@@ -190,7 +186,6 @@ steps:
         child_yaml = """
 name: child
 description: test child
-sandstorm_url: http://localhost:8000
 steps:
   - id: child_step
     prompt: "Process {input.company}"

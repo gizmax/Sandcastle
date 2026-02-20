@@ -83,7 +83,6 @@ class TestBudgetExecution:
         yaml_content = """
 name: budget-test
 description: test budget
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Expensive step"
@@ -118,7 +117,6 @@ steps:
         yaml_content = """
 name: no-budget
 description: no budget limit
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Cheap step"
@@ -152,7 +150,6 @@ class TestCancelExecution:
         yaml_content = """
 name: cancel-test
 description: cancel test
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "This runs"
@@ -195,7 +192,6 @@ class TestReplayExecution:
         yaml_content = """
 name: replay-test
 description: replay test
-sandstorm_url: http://localhost:8000
 steps:
   - id: step1
     prompt: "Already completed"
