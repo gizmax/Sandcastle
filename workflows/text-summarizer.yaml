@@ -5,7 +5,6 @@
 name: text-summarizer
 description: Takes text input, summarizes it, and formats the summary for output
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 5
 default_timeout: 120

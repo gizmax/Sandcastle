@@ -5,10 +5,19 @@
 name: review-sentiment
 description: Analyze customer reviews to extract sentiment trends and actionable insights
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["reviews", "product_name"]
+  properties:
+    reviews:
+      type: string
+      description: "Batch of customer reviews to analyze"
+    product_name:
+      type: string
+      description: "Name of the product being reviewed"
 
 steps:
   - id: parse-reviews
@@ -19,7 +28,7 @@ steps:
       standardize the data for downstream analysis.
       Reviews data: {input.reviews}
       Product name: {input.product_name}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 5
 
   - id: sentiment-analysis
@@ -31,7 +40,7 @@ steps:
       themes (e.g. bugs, missing features, slow performance). Group reviews
       by sentiment tier and highlight representative quotes.
       Parsed reviews: {steps.parse-reviews.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: trend-detection
@@ -43,7 +52,7 @@ steps:
       over time. Flag urgent issues that appear in multiple negative reviews
       and highlight opportunities from positive feedback patterns.
       Sentiment results: {steps.sentiment-analysis.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8
 
   - id: insights-report
@@ -56,5 +65,5 @@ steps:
       recommendations for the product and support teams.
       Trend analysis: {steps.trend-detection.output}
       Product name: {input.product_name}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10

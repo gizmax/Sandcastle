@@ -5,10 +5,16 @@
 name: job-description-generator
 description: Generate inclusive job description with requirements, benefits, and interview plan
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["role_brief"]
+  properties:
+    role_brief:
+      type: string
+      description: "Brief describing the role, responsibilities, and requirements"
 
 steps:
   - id: analyze-role
@@ -17,7 +23,7 @@ steps:
       required and preferred skills, seniority level, team context, and reporting structure.
       Identify any implicit requirements and suggest a clear job title if not provided.
       Role brief: {input.role_brief}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: write-jd
@@ -27,7 +33,7 @@ steps:
       analysis. Include sections for About the Role, Responsibilities, Requirements (must-have
       vs nice-to-have), Benefits, and Growth Opportunities. Avoid gendered pronouns and
       unnecessary jargon. Role analysis: {steps.analyze-role.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: bias-check
@@ -37,7 +43,7 @@ steps:
       age-coded terms, unnecessary degree requirements, culturally exclusive phrases, and
       inflated experience requirements. Provide a corrected version with all issues fixed
       and a summary of changes made. Job description: {steps.write-jd.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: interview-plan
@@ -47,5 +53,5 @@ steps:
       screening questions, technical assessment criteria, behavioral interview questions
       mapped to key competencies, and a scoring rubric. Ensure questions are legal and
       non-discriminatory. Role analysis: {steps.analyze-role.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5

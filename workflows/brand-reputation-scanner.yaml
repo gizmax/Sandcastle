@@ -1,6 +1,5 @@
 name: "brand-reputation-scanner"
 description: "Monitor brand mentions across platforms, analyze sentiment at scale, detect PR crisis signals, and generate a response playbook with prioritized action items."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 12
 default_timeout: 300
@@ -72,7 +71,7 @@ steps:
 
   - id: "classify-sentiment"
     depends_on: ["scan-mentions"]
-    parallel_over: "{steps.scan-mentions.output.mentions}"
+    parallel_over: "steps.scan-mentions.output.mentions"
     model: haiku
     prompt: |
       Analyze the sentiment and classify this brand mention of "{input.brand_name}":

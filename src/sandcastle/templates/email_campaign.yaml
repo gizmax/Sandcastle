@@ -5,10 +5,16 @@
 name: email-campaign-generator
 description: Generate email campaign with subject line variants and A/B copy
 
-sandstorm_url: ${SANDSTORM_URL}
-default_model: claude-sonnet-4-20250514
+default_model: sonnet
 default_max_turns: 5
 default_timeout: 180
+
+input_schema:
+  required: ["campaign_brief"]
+  properties:
+    campaign_brief:
+      type: string
+      description: "The campaign brief describing target audience, goals, and brand guidelines"
 
 steps:
   - id: audience-brief
@@ -18,7 +24,7 @@ steps:
       action you want them to take. Define the tone of voice and any brand
       guidelines to follow.
       Campaign brief: {input.campaign_brief}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: subject-lines
@@ -29,7 +35,7 @@ steps:
       personalization, benefit-driven, social proof). Explain the reasoning
       behind each and predict which audience segment it would resonate with most.
       Audience brief: {steps.audience-brief.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 3
 
   - id: body-variant-a
@@ -40,7 +46,7 @@ steps:
       include one testimonial placeholder, and end with a clear CTA button
       text. Keep the email concise - under 200 words for the body copy.
       Audience brief: {steps.audience-brief.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 3
 
   - id: body-variant-b
@@ -51,7 +57,7 @@ steps:
       then transition to the product as the solution. End with a soft CTA
       that feels like a natural next step. Keep it under 250 words.
       Audience brief: {steps.audience-brief.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 3
 
   - id: review

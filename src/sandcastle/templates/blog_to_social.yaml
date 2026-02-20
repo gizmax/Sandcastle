@@ -5,10 +5,16 @@
 name: blog-to-social
 description: Transform a blog post into platform-specific social media content
 
-sandstorm_url: ${SANDSTORM_URL}
-default_model: claude-sonnet-4-20250514
+default_model: sonnet
 default_max_turns: 5
 default_timeout: 180
+
+input_schema:
+  required: ["blog_post"]
+  properties:
+    blog_post:
+      type: string
+      description: "The full blog post content to transform into social media posts"
 
 steps:
   - id: analyze-post
@@ -17,7 +23,7 @@ steps:
       target audience, and core message. Identify the most shareable insights
       and any statistics or quotes worth highlighting.
       Blog post: {input.blog_post}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: linkedin-post
@@ -28,7 +34,7 @@ steps:
       hook in the first line, add relevant line breaks for readability, and
       end with a call-to-action. Keep it under 1300 characters.
       Analysis: {steps.analyze-post.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 3
 
   - id: twitter-thread
@@ -39,7 +45,7 @@ steps:
       question. Each tweet must be under 280 characters. Number them 1/5
       through 5/5 and make the last tweet link back to the original post.
       Analysis: {steps.analyze-post.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 3
 
   - id: instagram-caption
@@ -50,7 +56,7 @@ steps:
       include relevant emojis sparingly, and end with 15-20 relevant hashtags
       grouped at the bottom. Keep the caption under 2200 characters.
       Analysis: {steps.analyze-post.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 3
 
   - id: compile
@@ -63,5 +69,5 @@ steps:
       LinkedIn: {steps.linkedin-post.output}
       Twitter: {steps.twitter-thread.output}
       Instagram: {steps.instagram-caption.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 3

@@ -5,10 +5,28 @@
 name: lead-enrichment
 description: Research and enrich lead data with company info, scoring, and outreach angles
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["company_name", "company_domain"]
+  properties:
+    company_name:
+      type: string
+      description: "Name of the company to research"
+    company_domain:
+      type: string
+      description: "Company website domain"
+    target_persona:
+      type: string
+      description: "Target persona or role to identify among contacts"
+    icp_criteria:
+      type: string
+      description: "Ideal Customer Profile criteria for lead scoring"
+    value_proposition:
+      type: string
+      description: "Your value proposition for outreach angle generation"
 
 steps:
   - id: research-company
@@ -18,7 +36,7 @@ steps:
       and any known funding rounds or financial milestones.
       Company: {input.company_name}
       Domain: {input.company_domain}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: research-contacts
@@ -30,7 +48,7 @@ steps:
       professional profile insights.
       Company info: {steps.research-company.output}
       Target persona: {input.target_persona}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8
 
   - id: score-lead
@@ -42,7 +60,7 @@ steps:
       scoring factors with individual scores and reasoning.
       Company info: {steps.research-company.output}
       ICP criteria: {input.icp_criteria}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 5
 
   - id: outreach-angles
@@ -55,7 +73,7 @@ steps:
       Company info: {steps.research-company.output}
       Key contacts: {steps.research-contacts.output}
       Our value prop: {input.value_proposition}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 8
 
   - id: compile-profile
@@ -68,5 +86,5 @@ steps:
       Contacts: {steps.research-contacts.output}
       Lead score: {steps.score-lead.output}
       Outreach angles: {steps.outreach-angles.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10

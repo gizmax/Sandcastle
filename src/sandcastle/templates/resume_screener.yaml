@@ -5,10 +5,19 @@
 name: resume-screener
 description: Screen resume against job description with match scoring and interview recommendations
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["resume_text", "job_description"]
+  properties:
+    resume_text:
+      type: string
+      description: "The candidate resume text to screen"
+    job_description:
+      type: string
+      description: "The job description to match the resume against"
 
 steps:
   - id: parse-resume
@@ -17,7 +26,7 @@ steps:
       experience (company, role, duration, achievements), technical and soft skills,
       education and certifications, notable projects, and any quantified accomplishments.
       Resume: {input.resume_text}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
     output_schema:
       type: object
@@ -65,7 +74,7 @@ steps:
       identify specific gaps, and highlight standout qualifications that exceed requirements.
       Parsed resume: {steps.parse-resume.output}
       Job description: {input.job_description}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: interview-questions
@@ -76,7 +85,7 @@ steps:
       career motivations, and assess cultural fit. Prioritize questions by importance.
       Parsed resume: {steps.parse-resume.output}
       Match analysis: {steps.match-analysis.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: summary-card
@@ -87,5 +96,5 @@ steps:
       interview focus areas, and a brief justification for the recommendation.
       Match analysis: {steps.match-analysis.output}
       Interview questions: {steps.interview-questions.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 3

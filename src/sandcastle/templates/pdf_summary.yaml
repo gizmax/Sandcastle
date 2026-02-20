@@ -5,7 +5,6 @@
 name: pdf-summary
 description: Scan a directory for PDF files, summarize each one in parallel, and create a final report
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: haiku
 default_max_turns: 5
 default_timeout: 300

@@ -5,10 +5,16 @@
 name: chain-of-thought-solver
 description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["problem"]
+  properties:
+    problem:
+      type: string
+      description: "The problem to decompose and solve"
 
 steps:
   - id: decompose

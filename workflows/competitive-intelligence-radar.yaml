@@ -1,6 +1,5 @@
 name: "competitive-intelligence-radar"
 description: "Analyze top competitors - positioning, market signals, SWOT, strategic recommendations."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
@@ -46,7 +45,7 @@ steps:
       6. Content strategy (blog, docs, community)
       Return structured JSON with these categories.
 
-    parallel_over: "{steps.identify-competitors.output.competitors}"
+    parallel_over: "steps.identify-competitors.output.competitors"
     depends_on:
       - "identify-competitors"
 
@@ -60,7 +59,7 @@ steps:
       5. Product launches or major updates
       Return structured JSON with these signal categories.
 
-    parallel_over: "{steps.identify-competitors.output.competitors}"
+    parallel_over: "steps.identify-competitors.output.competitors"
     depends_on:
       - "identify-competitors"
 

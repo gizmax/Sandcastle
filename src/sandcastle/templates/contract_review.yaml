@@ -5,10 +5,16 @@
 name: contract-review
 description: Review contract for key terms, risks, and generate plain-language summary
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["contract_text"]
+  properties:
+    contract_text:
+      type: string
+      description: "The contract document text to review"
 
 steps:
   - id: extract-terms
@@ -17,7 +23,7 @@ steps:
       effective and termination dates, core obligations for each party, payment terms and
       schedule, liability caps, indemnification clauses, intellectual property provisions,
       termination conditions, and governing law. Contract: {input.contract_text}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
     output_schema:
       type: object
@@ -68,7 +74,7 @@ steps:
       majeure, dispute resolution), auto-renewal traps, broad non-compete provisions,
       and any terms that deviate from market standards. Rate each risk as low, medium,
       or high severity. Extracted terms: {steps.extract-terms.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: compliance-check
@@ -79,7 +85,7 @@ steps:
       insurance and bonding clauses, accessibility and non-discrimination language,
       and record-keeping obligations. Flag any missing or insufficient provisions.
       Extracted terms: {steps.extract-terms.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: plain-summary
@@ -92,5 +98,5 @@ steps:
       Extracted terms: {steps.extract-terms.output}
       Risk analysis: {steps.risk-analysis.output}
       Compliance check: {steps.compliance-check.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10

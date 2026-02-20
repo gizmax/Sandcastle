@@ -1,6 +1,5 @@
 name: "Lead Enrichment"
 description: "Scrape target websites, enrich with company data, and score leads for sales outreach priority."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300

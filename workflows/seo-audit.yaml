@@ -1,9 +1,19 @@
 name: "SEO Audit"
 description: "Crawl a website, analyze on-page SEO factors, and produce actionable recommendations."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 15
 default_timeout: 600
+
+input_schema:
+  required: ["target_url"]
+  properties:
+    target_url:
+      type: string
+      description: "URL of the website to crawl and audit"
+    max_depth:
+      type: integer
+      description: "Maximum crawl depth (default: 3)"
+      default: 3
 
 steps:
   - id: "crawl"

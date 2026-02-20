@@ -1,6 +1,5 @@
 name: "incident-postmortem-generator"
 description: "Generate a comprehensive blameless postmortem from raw incident data - timeline reconstruction, root cause analysis, impact assessment, action items, and a polished report ready for stakeholder distribution."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300

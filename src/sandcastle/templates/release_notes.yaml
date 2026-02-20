@@ -5,10 +5,16 @@
 name: release-notes-generator
 description: Generate user-facing release notes and internal changelog from commit history
 
-sandstorm_url: ${SANDSTORM_URL}
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
+
+input_schema:
+  required: ["changelog"]
+  properties:
+    changelog:
+      type: string
+      description: "Git diff or changelog text to generate release notes from"
 
 steps:
   - id: parse-changes
@@ -18,7 +24,7 @@ steps:
       existing features), breaking changes (backwards-incompatible modifications), or
       internal (refactoring, dependencies, CI). For each change, extract a short summary,
       affected components, and severity. Changes: {input.changelog}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 5
 
   - id: user-release-notes
@@ -29,7 +35,7 @@ steps:
       helpful, clearly call out breaking changes with migration steps, and close with a
       thank-you note. Format with markdown headings and bullet points.
       Categorized changes: {steps.parse-changes.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: internal-changelog
@@ -40,7 +46,7 @@ steps:
       changes with code examples, infrastructure and dependency updates, performance
       impact notes, and known issues or follow-up tasks.
       Categorized changes: {steps.parse-changes.output}
-    model: claude-sonnet-4-20250514
+    model: sonnet
     max_turns: 10
 
   - id: social-announcement
@@ -50,5 +56,5 @@ steps:
       top 2-3 user-facing improvements, keep it under 280 characters for the main post,
       include relevant hashtags, and suggest an optional longer thread format for platforms
       that support it. Release notes: {steps.user-release-notes.output}
-    model: claude-haiku-4-5-20251001
+    model: haiku
     max_turns: 3

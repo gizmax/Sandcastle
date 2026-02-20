@@ -1,6 +1,5 @@
 name: "Content Atomizer"
 description: "Transform one content piece into dozens of formatted outputs for every channel - social posts, emails, blog variants, video scripts, and a content calendar."
-sandstorm_url: "${SANDSTORM_URL}"
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
