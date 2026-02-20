@@ -188,7 +188,16 @@ class E2BBackend:
                 timeout=int(timeout),
             )
 
+            # Python-side deadline as safety net - E2B SDK timeout
+            # on background commands may not reliably kill the process.
+            deadline = asyncio.get_event_loop().time() + timeout + 30
             while True:
+                if asyncio.get_event_loop().time() > deadline:
+                    logger.warning(
+                        "E2B execution exceeded deadline (%.0fs + 30s grace), "
+                        "stopping", timeout,
+                    )
+                    break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=2.0)
                     if event is None:
