@@ -175,6 +175,35 @@ class TestStepCache:
         key2 = _compute_cache_key("wf", "step1", "prompt", "opus")
         assert key1 != key2
 
+    def test_is_cacheable_valid_output(self):
+        from sandcastle.engine.executor import _is_cacheable_output
+        assert _is_cacheable_output("A detailed analysis of the market...") is True
+        assert _is_cacheable_output({"result": "Report content here with enough detail"}) is True
+        assert _is_cacheable_output({"data": [1, 2, 3]}) is True
+
+    def test_is_cacheable_rejects_empty(self):
+        from sandcastle.engine.executor import _is_cacheable_output
+        assert _is_cacheable_output(None) is False
+        assert _is_cacheable_output("") is False
+        assert _is_cacheable_output([]) is False
+        assert _is_cacheable_output({}) is False
+
+    def test_is_cacheable_rejects_failed_output(self):
+        from sandcastle.engine.executor import _is_cacheable_output
+        assert _is_cacheable_output("Please provide the article") is False
+        assert _is_cacheable_output("I can't access that website") is False
+        assert _is_cacheable_output({"result": "No article content was provided"}) is False
+
+    def test_is_cacheable_rejects_zero_mentions(self):
+        from sandcastle.engine.executor import _is_cacheable_output
+        assert _is_cacheable_output({"total_mentions": 0, "mentions": []}) is False
+
+    def test_is_cacheable_allows_long_text(self):
+        from sandcastle.engine.executor import _is_cacheable_output
+        # Long text with a keyword should still be cached (only short outputs are checked)
+        long_text = "Please provide " + "x" * 300
+        assert _is_cacheable_output(long_text) is True
+
 
 # ---- Rate Limiter Integration Test ----
 
