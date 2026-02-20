@@ -1,7 +1,7 @@
 # Sandcastle - Development Roadmap & Strategic Analysis
 
 **Author:** Tomas Pflanzer @gizmax
-**Date:** 2026-02-19
+**Date:** 2026-02-20 (updated for v0.10.0)
 
 ---
 
@@ -65,39 +65,52 @@
 
 ## 4. Feature Gaps - Prioritized Roadmap
 
-### Priority 1 - Critical (Q1 2026)
+### Completed (v0.7.0 - v0.10.0)
 
-#### 4.1 Replace Sandstorm with Direct E2B Integration ("Sandshore")
-- Remove Sandstorm dependency (~500 LOC Python wrapper)
-- Direct `e2b` SDK integration via `AsyncSandbox`
-- Bundle `runner.mjs` (Claude Agent SDK) in package
-- New module: `src/sandcastle/engine/sandshore.py` with `SandshoreRuntime` class
-- Same `query()` / `query_stream()` interface, zero breaking changes for users
-- **Impact:** Remove unnecessary dependency, simplify stack, reduce latency
+#### ~~4.1 Replace Sandstorm with Direct E2B Integration ("Sandshore")~~ DONE (v0.8.0)
+- Direct `e2b` SDK integration via `AsyncSandbox` - `SandshoreRuntime` class
+- Bundle `runner.mjs` (Claude Agent SDK) + `runner-openai.mjs` (OpenAI-compatible)
+- Same `query()` / `query_stream()` interface, zero breaking changes
 
-#### 4.2 MCP (Model Context Protocol) Support
-- 97M monthly SDK downloads - the standard for tool integration in 2026
-- Add `mcp_servers` config to workflow YAML
-- Step type `mcp_tool` for calling any MCP-compatible tool
-- Enables connection to databases, APIs, file systems without custom code
-- **Impact:** Instantly compatible with thousands of MCP servers
+#### ~~4.2 MCP (Model Context Protocol) Support~~ DONE (v0.9.0)
+- Built-in MCP server: `sandcastle mcp` command
+- 8 tools (run_workflow, run_workflow_yaml, get_run_status, list_runs, cancel_run, save_workflow, create_schedule, delete_schedule)
+- 3 resources (workflows, schedules, health)
+- Compatible with Claude Desktop, Cursor, Windsurf
 
-#### 4.3 Human-in-the-Loop (HITL) Approval Steps
+#### ~~4.3 Human-in-the-Loop (HITL) Approval Steps~~ DONE (v0.7.0)
 - `approval_required: true` flag on workflow steps
 - Step pause/resume API: `POST /api/runs/{id}/steps/{step_id}/approve`
 - Dashboard UI for pending approvals (approve/reject/modify)
-- Configurable timeout (auto-approve/reject after N minutes)
 - Webhook notification when approval needed
-- **Impact:** Unlocks enterprise use cases (finance, healthcare, legal)
 
-### Priority 2 - Important (Q2 2026)
+#### ~~4.4 Multi-Provider Model Routing~~ DONE (v0.9.0)
+- Per-step model selection: `model: sonnet`, `model: openai/codex-mini`, `model: minimax/m2.5`, `model: google/gemini-2.5-pro`
+- Provider registry with pricing, runners, API keys
+- Cost-based routing via CostLatencyOptimizer with EXTENDED_MODEL_POOL
 
-#### 4.4 Multi-Provider Model Routing
-- Per-step model selection in YAML: `model: gpt-4o` / `model: claude-sonnet`
-- LiteLLM or Portkey integration as optional dependency
-- Fallback chains: try Claude, fall back to GPT, fall back to Gemini
-- Cost-based routing via existing CostLatencyOptimizer
-- **Impact:** Removes "Anthropic-only" perception, 37% of enterprises use 5+ models
+#### ~~4.x Pluggable Sandbox Backends~~ DONE (v0.9.0)
+- `SandboxBackend` protocol in `backends.py`
+- E2B (default), Docker, Local (subprocess), Cloudflare Workers
+- Config via `SANDBOX_BACKEND=e2b|docker|local|cloudflare`
+
+#### ~~4.x Model Failover~~ DONE (v0.10.0)
+- Automatic failover on 429/5xx errors with per-key cooldown tracking
+- Ordered failover chains (same-provider cheaper first, then cross-provider)
+- `ProviderFailover` singleton with thread-safe cooldown management
+
+#### ~~4.x `sandcastle doctor` CLI~~ DONE (v0.10.0)
+- Local diagnostics: config, API keys, sandbox backends, dependencies, network
+- Color-coded output: [PASS] green, [WARN] yellow, [FAIL] red
+- No running server needed
+
+#### ~~4.x Dashboard UX/UI Polish~~ DONE (v0.10.0)
+- Sonner toast notifications across all pages
+- Error states with retry buttons
+- 404 catch-all route, shared SectionCard components
+- Approvals badge in sidebar, search debounce
+
+### Priority 1 - Critical (Q1-Q2 2026)
 
 #### 4.5 Agent Memory / Context Persistence
 - Per-workflow persistent memory store (key-value + vector)
@@ -113,7 +126,13 @@
 - Regression testing: compare current vs baseline output
 - **Impact:** Production readiness signal for enterprise
 
-### Priority 3 - Nice-to-Have (Q3 2026)
+#### 4.12 AI Workflow Generator
+- Conversational workflow builder: describe what you need, get a YAML workflow
+- Integrated into dashboard and CLI (`sandcastle generate`)
+- Suggests templates, models, and configurations based on use case
+- **Impact:** Lowers barrier to entry, differentiator over YAML-only competitors
+
+### Priority 2 - Important (Q2-Q3 2026)
 
 #### 4.7 A2A Protocol Support
 - Expose workflows as A2A-compatible agent endpoints
@@ -132,6 +151,15 @@
 - `type: condition` - if/else branching
 - `type: human` - HITL approval
 
+#### 4.13 CLI Completeness
+- `sandcastle replay <run_id>` / `sandcastle fork <run_id>` - time-travel from CLI
+- `sandcastle approve <run_id> <step_id>` / `sandcastle reject` - HITL from CLI
+- `sandcastle templates list/install` - template management
+- `--json` output mode for scripting and CI/CD integration
+- `sandcastle run <workflow>` - headless execution for pipelines
+
+### Priority 3 - Nice-to-Have (Q3-Q4 2026)
+
 #### 4.11 Workflow Template Registry
 - Public template catalog: curated collection of production-ready workflow templates
 - `sandcastle templates list` - browse available templates with descriptions and tags
@@ -145,15 +173,16 @@
 - Checkpoint/resume for long-running workflows (Temporal-style durable execution)
 - Workflow versioning (v1, v2, v3 with diff view)
 - Template marketplace (share workflow templates publicly)
-- `sandcastle run` CLI for headless execution (CI/CD pipelines)
 - Rate limiting per tenant
 - Audit log
+- ARIA accessibility for dashboard
+- Per-run violations/optimizer views in RunDetailPage
 
 ---
 
-## 5. Sandstorm Replacement Architecture
+## 5. Current Architecture (v0.10.0)
 
-### New Module: Sandshore (`src/sandcastle/engine/sandshore.py`)
+### Sandshore Runtime (`src/sandcastle/engine/sandshore.py`)
 
 ```
 Sandcastle Executor
@@ -161,29 +190,26 @@ Sandcastle Executor
        v
   SandshoreRuntime
        |
-       +-- AsyncSandbox.create() (E2B SDK)
-       +-- Upload runner.mjs (bundled)
-       +-- Run "node runner.mjs" (background)
-       +-- on_stdout -> asyncio.Queue -> AsyncIterator[SSEEvent]
-       +-- sandbox.kill() (cleanup)
+       +-- _build_env() -> resolve model, build env vars
+       +-- _stream_backend() -> failover wrapper
+       |      +-- _stream_backend_once() -> execute via backend
+       |      +-- On 429/5xx: mark_cooldown() + try alternatives
+       |
+       +-- SandboxBackend (Protocol)
+              +-- E2BBackend (default) - AsyncSandbox, background commands
+              +-- DockerBackend - aiodocker, tar upload
+              +-- LocalBackend - subprocess, no isolation
+              +-- CloudflareBackend - HTTP to CF Worker
 ```
 
 **Key design:**
-- `SandshoreRuntime.query(request)` - Full result (replaces `SandstormClient.query()`)
-- `SandshoreRuntime.query_stream(request)` - Async generator of SSE events (replaces httpx-sse streaming)
-- Same external interface, zero changes needed in executor.py beyond import swaps
-- `runner.mjs` bundled in package (installed at `sandcastle/engine/runner.mjs`)
-- E2B template configurable via env var `E2B_TEMPLATE` (default: "base")
-
-### Migration:
-
-```
-BEFORE:                          AFTER:
-pip: duvo-sandstorm>=0.4         pip: e2b>=1.4.0
-config: SANDSTORM_URL            config: E2B_API_KEY (already exists)
-runtime: SandstormClient         runtime: SandshoreRuntime
-streaming: httpx-sse over HTTP   streaming: E2B on_stdout + asyncio.Queue
-```
+- `SandshoreRuntime.query(request)` - Full result
+- `SandshoreRuntime.query_stream(request)` - Async generator of SSE events
+- `ProviderFailover` - per-key cooldown tracking, ordered fallback chains
+- `runner.mjs` (Claude) + `runner-openai.mjs` (OpenAI/MiniMax/Gemini) bundled in package
+- Backend selection via `SANDBOX_BACKEND` env var
+- Health check with 60s TTL cache
+- Proxy fallback to legacy Sandstorm server (backward compat)
 
 ---
 
@@ -211,23 +237,25 @@ Workflow template marketplace (free + paid), community plugins, revenue share
 
 ## 7. Technology Decisions
 
-### E2B SDK: Python v2.13.2
+### E2B SDK
 - `AsyncSandbox` for async operations
-- Streaming via `on_stdout` callback
+- Streaming via `on_stdout` callback with background commands
 - File ops: `sandbox.files.write()`, `sandbox.files.read()`
-- Lifecycle: `create()`, `kill()`, `set_timeout()`
+- npm install via `background=True` + manual polling (avoids gRPC hang)
+- Python-side deadline on event loop (timeout + 30s grace)
 
 ### Claude Agent SDK
-- **TypeScript:** `@anthropic-ai/claude-agent-sdk` v0.2.45 (npm) - used in runner.mjs
-- **Python:** `claude-agent-sdk` v0.1.38 (PyPI) - potential future use
-- Note: Python SDK still requires Node.js internally (wraps CLI binary)
-- Current approach (runner.mjs) remains optimal
+- **TypeScript:** `@anthropic-ai/claude-agent-sdk` (npm) - used in runner.mjs
+- Current approach (runner.mjs in E2B sandbox) remains optimal
+
+### OpenAI-Compatible Runner
+- `runner-openai.mjs` - supports any OpenAI-compatible API
+- Used by: MiniMax, OpenAI Codex, Google Gemini (via OpenRouter)
+- Env vars: `MODEL_API_KEY`, `MODEL_ID`, `MODEL_BASE_URL`, `MODEL_INPUT_PRICE`, `MODEL_OUTPUT_PRICE`
 
 ### Naming Decision
 Runtime module: **Sandshore** (`SandshoreRuntime`)
-- Fits "sand" theme
-- Represents interface between Sandcastle and cloud execution
-- Concise and memorable
+- Fits "sand" theme - interface between Sandcastle and cloud execution
 
 ---
 
