@@ -735,6 +735,83 @@ def _cmd_health(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cmd_generate(args: argparse.Namespace) -> None:
+    """Generate a workflow from a natural language description."""
+    from sandcastle.engine.generator import generate_workflow_sync
+
+    description = getattr(args, "description", None) or ""
+    if not description:
+        try:
+            description = input(f"{_color('Describe your workflow:', _C.CYAN)} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+    if not description:
+        print("No description provided.", file=sys.stderr)
+        sys.exit(1)
+
+    output_file = getattr(args, "output", None)
+    refine = getattr(args, "refine", False)
+
+    # Generate
+    _spinner_print("Generating workflow...")
+    try:
+        result = generate_workflow_sync(description)
+    except ValueError as exc:
+        print(f"\n  {_color('[FAIL]', _C.RED)} {exc}")
+        sys.exit(1)
+    except Exception as exc:
+        print(f"\n  {_color('[FAIL]', _C.RED)} Generation failed: {exc}")
+        sys.exit(1)
+
+    if result.validation_errors:
+        print(f"\r  {_color('[WARN]', _C.YELLOW)} Generated with {len(result.validation_errors)} validation issue(s)")
+        for err in result.validation_errors:
+            print(f"    - {err}")
+    else:
+        print(f"\r  {_color('[OK]', _C.GREEN)} Generated \"{result.name}\" ({result.steps_count} steps)")
+
+    # Refinement loop
+    if refine:
+        while True:
+            try:
+                instruction = input(f"\n{_color('Refine (empty to finish):', _C.CYAN)} ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not instruction:
+                break
+            _spinner_print("Refining workflow...")
+            try:
+                result = generate_workflow_sync(
+                    description,
+                    refine_from=result.yaml_content,
+                    refine_instruction=instruction,
+                )
+            except Exception as exc:
+                print(f"\n  {_color('[FAIL]', _C.RED)} Refinement failed: {exc}")
+                continue
+            if result.validation_errors:
+                print(f"\r  {_color('[WARN]', _C.YELLOW)} Refined with {len(result.validation_errors)} issue(s)")
+            else:
+                print(f"\r  {_color('[OK]', _C.GREEN)} Refined \"{result.name}\" ({result.steps_count} steps)")
+
+    # Output
+    if output_file:
+        from pathlib import Path
+        Path(output_file).write_text(result.yaml_content)
+        print(f"\n  Saved to {output_file}")
+    else:
+        print(f"\n{_color('--- Generated YAML ---', _C.DIM)}")
+        print(result.yaml_content)
+
+
+def _spinner_print(msg: str) -> None:
+    """Print a message with a spinner-like prefix."""
+    sys.stdout.write(f"  ... {msg}")
+    sys.stdout.flush()
+
+
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
@@ -967,6 +1044,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- doctor ---
     subparsers.add_parser("doctor", help="Run local diagnostics")
 
+    # --- generate ---
+    p_gen = subparsers.add_parser("generate", help="Generate workflow from natural language")
+    p_gen.add_argument("--description", "-d", help="What the workflow should do")
+    p_gen.add_argument("--output", "-o", metavar="FILE", help="Write YAML to file instead of stdout")
+    p_gen.add_argument("--refine", action="store_true", help="Enter refinement loop after generation")
+
     return parser
 
 
@@ -996,6 +1079,7 @@ def main() -> None:
         "health": _cmd_health,
         "mcp": _cmd_mcp,
         "doctor": _cmd_doctor,
+        "generate": _cmd_generate,
     }
 
     handler = dispatch.get(args.command)

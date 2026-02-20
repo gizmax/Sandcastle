@@ -2098,6 +2098,25 @@ const routes: MockRoute[] = [
     },
   },
   {
+    match: /^\/generate$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { description?: string } | undefined;
+      const desc = b?.description || "Generated workflow";
+      return {
+        yaml_content: `name: generated-workflow\ndescription: "${desc}"\n\ndefault_model: sonnet\ndefault_max_turns: 10\ndefault_timeout: 300\n\ninput_schema:\n  required: ["topic"]\n  properties:\n    topic:\n      type: string\n      description: "The main topic or subject"\n\nsteps:\n  - id: research\n    prompt: >\n      Research the following topic thoroughly.\n      Topic: {input.topic}\n    model: sonnet\n    max_turns: 10\n\n  - id: draft\n    depends_on: [research]\n    prompt: >\n      Based on the research, create a comprehensive draft.\n      Research: {steps.research.output}\n    model: sonnet\n    max_turns: 10\n\n  - id: polish\n    depends_on: [draft]\n    prompt: >\n      Polish and finalize the draft for publication.\n      Draft: {steps.draft.output}\n    model: haiku\n    max_turns: 5\n`,
+        name: "generated-workflow",
+        description: desc,
+        steps_count: 3,
+        validation_errors: [],
+        input_schema: {
+          required: ["topic"],
+          properties: { topic: { type: "string", description: "The main topic or subject" } },
+        },
+      };
+    },
+  },
+  {
     match: /^\/api-keys$/,
     method: "GET",
     handler: () => MOCK_API_KEYS,

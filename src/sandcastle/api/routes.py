@@ -6,9 +6,12 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import httpx
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -31,6 +34,7 @@ from sandcastle.api.schemas import (
     ExperimentResponse,
     ForkRequest,
     HealthResponse,
+    WorkflowGenerateRequest,
     OptimizerStatsResponse,
     PaginationMeta,
     PolicyViolationResponse,
@@ -606,6 +610,57 @@ async def get_stats(request: Request) -> ApiResponse:
             runs_by_day=runs_by_day,
             cost_by_workflow=cost_by_workflow,
         )
+    )
+
+
+# --- Generate ---
+
+
+@router.post("/generate")
+async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
+    """Generate a workflow YAML from a natural language description."""
+    from sandcastle.engine.generator import generate_workflow as _generate
+
+    if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        return ApiResponse(
+            error=ErrorResponse(
+                code="service_unavailable",
+                message="ANTHROPIC_API_KEY is required for workflow generation",
+            )
+        )
+
+    try:
+        result = await _generate(
+            request.description,
+            refine_from=request.refine_from,
+            refine_instruction=request.refine_instruction,
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.error(f"Anthropic API error: {exc}")
+        return ApiResponse(
+            error=ErrorResponse(
+                code="upstream_error",
+                message=f"Anthropic API returned {exc.response.status_code}",
+            )
+        )
+    except Exception as exc:
+        logger.error(f"Generation failed: {exc}")
+        return ApiResponse(
+            error=ErrorResponse(
+                code="generation_failed",
+                message=str(exc),
+            )
+        )
+
+    return ApiResponse(
+        data={
+            "yaml_content": result.yaml_content,
+            "name": result.name,
+            "description": result.description,
+            "steps_count": result.steps_count,
+            "validation_errors": result.validation_errors,
+            "input_schema": result.input_schema,
+        }
     )
 
 
