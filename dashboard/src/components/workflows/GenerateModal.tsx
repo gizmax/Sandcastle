@@ -34,7 +34,7 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
 
     const res = await api.post<GenerateResult>("/generate", {
       description: description.trim(),
-    });
+    }, 90_000);
 
     setLoading(false);
     if (res.error) {
@@ -55,7 +55,7 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
       description: description.trim(),
       refine_from: result.yaml_content,
       refine_instruction: refineText.trim(),
-    });
+    }, 90_000);
 
     setRefining(false);
     if (res.error) {
