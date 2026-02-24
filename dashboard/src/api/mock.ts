@@ -278,6 +278,221 @@ const MOCK_APPROVALS = [
   },
 ];
 
+const MOCK_EVAL_RUNS: EvalRun[] = [
+  {
+    id: "eval-001",
+    suite_name: "Summarize workflow regression tests",
+    workflow_name: "lead-enrichment",
+    status: "completed",
+    total_cases: 4,
+    passed_cases: 3,
+    failed_cases: 1,
+    pass_rate: 0.75,
+    total_cost_usd: 2.34,
+    total_duration_seconds: 48.2,
+    started_at: h(2),
+    completed_at: h(1.9),
+    created_at: h(2),
+    cases: [
+      {
+        case_name: "short text",
+        passed: true,
+        run_id: "a1b2c3d4-e001-4000-8000-000000000001",
+        cost_usd: 0.52,
+        duration_seconds: 12.3,
+        assertions: [
+          { type: "not_empty", passed: true, expected: "non-empty output", actual: "dict", message: "", score: null },
+          { type: "llm_judge", passed: true, expected: ">= 0.7", actual: "0.85", message: "", score: 0.85 },
+          { type: "max_cost", passed: true, expected: "<= $0.0500", actual: "$0.0420", message: "", score: null },
+        ],
+        output_summary: "Lead enrichment complete - 3 leads found",
+        error: null,
+      },
+      {
+        case_name: "long text",
+        passed: true,
+        run_id: "a1b2c3d4-e002-4000-8000-000000000002",
+        cost_usd: 0.89,
+        duration_seconds: 18.7,
+        assertions: [
+          { type: "contains", passed: true, expected: "lead", actual: "Lead enrichment data...", message: "", score: null },
+          { type: "max_duration", passed: true, expected: "<= 30s", actual: "18.7s", message: "", score: null },
+        ],
+        output_summary: "Detailed enrichment with 12 data points",
+        error: null,
+      },
+      {
+        case_name: "empty input",
+        passed: false,
+        run_id: "a1b2c3d4-e003-4000-8000-000000000003",
+        cost_usd: 0.41,
+        duration_seconds: 8.2,
+        assertions: [
+          { type: "not_empty", passed: false, expected: "non-empty output", actual: "None", message: "Output is empty or None", score: null },
+          { type: "llm_judge", passed: false, expected: ">= 0.7", actual: "0.20", message: "LLM judge score 0.20 below threshold 0.70", score: 0.2 },
+        ],
+        output_summary: null,
+        error: "Step 'scrape' returned empty result",
+      },
+      {
+        case_name: "special characters",
+        passed: true,
+        run_id: "a1b2c3d4-e004-4000-8000-000000000004",
+        cost_usd: 0.52,
+        duration_seconds: 9.0,
+        assertions: [
+          { type: "not_empty", passed: true, expected: "non-empty output", actual: "dict", message: "", score: null },
+          { type: "regex_match", passed: true, expected: "\\w+", actual: "Lead data found", message: "", score: null },
+        ],
+        output_summary: "Handled special characters correctly",
+        error: null,
+      },
+    ],
+  },
+  {
+    id: "eval-002",
+    suite_name: "SEO audit quality checks",
+    workflow_name: "seo-audit",
+    status: "completed",
+    total_cases: 3,
+    passed_cases: 3,
+    failed_cases: 0,
+    pass_rate: 1.0,
+    total_cost_usd: 1.87,
+    total_duration_seconds: 35.4,
+    started_at: h(24),
+    completed_at: h(23.8),
+    created_at: h(24),
+    cases: [
+      {
+        case_name: "basic site audit",
+        passed: true,
+        run_id: "a1b2c3d4-e010-4000-8000-000000000010",
+        cost_usd: 0.65,
+        duration_seconds: 12.1,
+        assertions: [
+          { type: "not_empty", passed: true, expected: "non-empty output", actual: "dict", message: "", score: null },
+          { type: "contains", passed: true, expected: "recommendation", actual: "SEO recommendations...", message: "", score: null },
+        ],
+        output_summary: "5 recommendations generated",
+        error: null,
+      },
+      {
+        case_name: "large site audit",
+        passed: true,
+        run_id: "a1b2c3d4-e011-4000-8000-000000000011",
+        cost_usd: 0.72,
+        duration_seconds: 15.3,
+        assertions: [
+          { type: "not_empty", passed: true, expected: "non-empty output", actual: "dict", message: "", score: null },
+          { type: "max_cost", passed: true, expected: "<= $1.0000", actual: "$0.7200", message: "", score: null },
+        ],
+        output_summary: "12 recommendations generated",
+        error: null,
+      },
+      {
+        case_name: "mobile-only audit",
+        passed: true,
+        run_id: "a1b2c3d4-e012-4000-8000-000000000012",
+        cost_usd: 0.50,
+        duration_seconds: 8.0,
+        assertions: [
+          { type: "contains", passed: true, expected: "mobile", actual: "Mobile optimization...", message: "", score: null },
+        ],
+        output_summary: "Mobile-specific audit complete",
+        error: null,
+      },
+    ],
+  },
+  {
+    id: "eval-003",
+    suite_name: "Competitor monitor regression",
+    workflow_name: "competitor-monitor",
+    status: "completed",
+    total_cases: 2,
+    passed_cases: 1,
+    failed_cases: 1,
+    pass_rate: 0.5,
+    total_cost_usd: 1.12,
+    total_duration_seconds: 22.8,
+    started_at: h(72),
+    completed_at: h(71.5),
+    created_at: h(72),
+    cases: [
+      {
+        case_name: "single competitor",
+        passed: true,
+        run_id: "a1b2c3d4-e020-4000-8000-000000000020",
+        cost_usd: 0.56,
+        duration_seconds: 11.2,
+        assertions: [
+          { type: "not_empty", passed: true, expected: "non-empty output", actual: "dict", message: "", score: null },
+        ],
+        output_summary: "Analysis complete",
+        error: null,
+      },
+      {
+        case_name: "multiple competitors",
+        passed: false,
+        run_id: "a1b2c3d4-e021-4000-8000-000000000021",
+        cost_usd: 0.56,
+        duration_seconds: 11.6,
+        assertions: [
+          { type: "not_empty", passed: true, expected: "non-empty output", actual: "dict", message: "", score: null },
+          { type: "max_duration", passed: false, expected: "<= 10s", actual: "11.6s", message: "Duration 11.6s exceeds limit 10.0s", score: null },
+        ],
+        output_summary: "Analysis complete but slow",
+        error: null,
+      },
+    ],
+  },
+];
+
+interface EvalRun {
+  id: string;
+  suite_name: string;
+  workflow_name: string;
+  status: string;
+  total_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  pass_rate: number;
+  total_cost_usd: number;
+  total_duration_seconds: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+  cases: {
+    case_name: string;
+    passed: boolean;
+    run_id: string | null;
+    cost_usd: number;
+    duration_seconds: number;
+    assertions: {
+      type: string;
+      passed: boolean;
+      expected: unknown;
+      actual: unknown;
+      message: string;
+      score: number | null;
+    }[];
+    output_summary: string | null;
+    error: string | null;
+  }[] | null;
+}
+
+const MOCK_EVAL_STATS = {
+  total_runs: 3,
+  avg_pass_rate: 0.75,
+  total_cost_usd: 5.33,
+  last_run_at: h(2),
+  pass_rate_trend: Array.from({ length: 14 }, (_, i) => ({
+    date: d(13 - i),
+    avg_pass_rate: 0.6 + Math.random() * 0.35,
+    runs: Math.floor(Math.random() * 3) + 1,
+  })),
+};
+
 const MOCK_AUTOPILOT_EXPERIMENTS = [
   {
     id: "exp-001",
@@ -2491,7 +2706,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.10.0", sandbox_backend: "e2b" }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.15.0", sandbox_backend: "e2b" }),
   },
   {
     match: /^\/stats$/,
@@ -2555,6 +2770,29 @@ const routes: MockRoute[] = [
       }
       return filtered;
     },
+  },
+  {
+    match: /^\/eval\/runs$/,
+    method: "GET",
+    handler: () => MOCK_EVAL_RUNS,
+  },
+  {
+    match: /^\/eval\/runs\/([^/]+)$/,
+    method: "GET",
+    handler: (params) => {
+      const run = MOCK_EVAL_RUNS.find((r) => r.id === params._1);
+      return run || null;
+    },
+  },
+  {
+    match: /^\/eval\/stats$/,
+    method: "GET",
+    handler: () => MOCK_EVAL_STATS,
+  },
+  {
+    match: /^\/eval\/run$/,
+    method: "POST",
+    handler: () => MOCK_EVAL_RUNS[0],
   },
   {
     match: /^\/autopilot\/experiments$/,

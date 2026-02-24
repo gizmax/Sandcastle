@@ -598,6 +598,69 @@ class ToolConnectionUpdateRequest(BaseModel):
     )
 
 
+# --- Evaluations ---
+
+
+class EvalSuiteRunRequest(BaseModel):
+    """Request to run an eval suite."""
+
+    suite_yaml: str = Field(..., description="Eval suite YAML content")
+    concurrency: int = Field(1, description="Max concurrent test cases", ge=1, le=20)
+
+
+class EvalAssertionResponse(BaseModel):
+    """Result of a single assertion."""
+
+    type: str
+    passed: bool
+    expected: Any | None = None
+    actual: Any | None = None
+    message: str = ""
+    score: float | None = None
+
+
+class EvalCaseResponse(BaseModel):
+    """Result of a single eval case."""
+
+    case_name: str
+    passed: bool
+    run_id: str | None = None
+    cost_usd: float = 0.0
+    duration_seconds: float = 0.0
+    assertions: list[EvalAssertionResponse] = []
+    output_summary: str | None = None
+    error: str | None = None
+
+
+class EvalRunResponse(BaseModel):
+    """Eval run details."""
+
+    id: str
+    suite_name: str
+    workflow_name: str
+    status: str
+    total_cases: int = 0
+    passed_cases: int = 0
+    failed_cases: int = 0
+    pass_rate: float = 0.0
+    total_cost_usd: float = 0.0
+    total_duration_seconds: float = 0.0
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    cases: list[EvalCaseResponse] | None = None
+
+
+class EvalStatsResponse(BaseModel):
+    """Aggregated eval statistics."""
+
+    total_runs: int = 0
+    avg_pass_rate: float = 0.0
+    total_cost_usd: float = 0.0
+    last_run_at: datetime | None = None
+    pass_rate_trend: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # --- Memory ---
 
 

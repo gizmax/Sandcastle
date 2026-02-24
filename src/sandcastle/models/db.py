@@ -413,6 +413,74 @@ class ToolConnection(Base):
     )
 
 
+class EvalRunStatus(str, enum.Enum):
+    """Possible statuses for an eval run."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class EvalRun(Base):
+    """A single evaluation suite execution."""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    suite_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[EvalRunStatus] = mapped_column(
+        Enum(EvalRunStatus), nullable=False, default=EvalRunStatus.RUNNING
+    )
+    total_cases: Mapped[int] = mapped_column(Integer, default=0)
+    passed_cases: Mapped[int] = mapped_column(Integer, default=0)
+    failed_cases: Mapped[int] = mapped_column(Integer, default=0)
+    pass_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    total_duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    suite_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    case_results: Mapped[list[EvalCaseResult]] = relationship(
+        back_populates="eval_run", cascade="all, delete-orphan"
+    )
+
+
+class EvalCaseResult(Base):
+    """Result of a single eval case within a run."""
+
+    __tablename__ = "eval_case_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    eval_run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("eval_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    case_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, default=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    assertions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    eval_run: Mapped[EvalRun] = relationship(back_populates="case_results")
+
+
 class Setting(Base):
     """Key-value configuration stored in the database."""
 

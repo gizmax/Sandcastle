@@ -806,6 +806,127 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         print(result.yaml_content)
 
 
+def _cmd_eval(args: argparse.Namespace) -> None:
+    """Run an eval suite against a workflow."""
+    import asyncio
+
+    from sandcastle.engine.eval import parse_eval_suite, run_eval_suite, save_eval_run
+
+    suite_path = args.suite
+    concurrency = getattr(args, "concurrency", 1)
+    tags = getattr(args, "tag", None)
+    verbose = getattr(args, "verbose", False)
+
+    try:
+        suite = parse_eval_suite(suite_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print()
+    print(
+        _color("  Eval Suite: ", _C.BOLD)
+        + (suite.description or suite.workflow)
+    )
+    print(
+        _color("  Workflow:   ", _C.BOLD)
+        + suite.workflow
+    )
+    case_count = len(suite.cases)
+    if tags:
+        tag_set = set(tags)
+        case_count = sum(1 for c in suite.cases if tag_set.intersection(c.tags))
+    print(
+        _color("  Cases:      ", _C.BOLD)
+        + str(case_count)
+    )
+    print()
+
+    _spinner_print("Running eval suite...")
+
+    try:
+        result = asyncio.run(run_eval_suite(suite, tag_filter=tags, concurrency=concurrency))
+    except Exception as exc:
+        print(f"\n  {_color('[FAIL]', _C.RED)} Eval suite failed: {exc}")
+        sys.exit(1)
+
+    # Clear spinner line
+    sys.stdout.write("\r" + " " * 60 + "\r")
+    sys.stdout.flush()
+
+    _print_eval_results(result, verbose=verbose)
+
+    # Try to save results to DB
+    try:
+        from pathlib import Path
+        suite_yaml = Path(suite_path).read_text()
+        asyncio.run(save_eval_run(result, suite_yaml=suite_yaml))
+    except Exception:
+        pass  # DB might not be available in CLI-only mode
+
+    # Exit with non-zero if any case failed
+    if result.failed > 0:
+        sys.exit(1)
+
+
+def _print_eval_results(result: Any, *, verbose: bool = False) -> None:
+    """Print eval suite results as an ASCII table."""
+    headers = ["CASE", "STATUS", "ASSERTIONS", "COST ($)", "DURATION (s)"]
+    rows: list[list[str]] = []
+
+    for case in result.cases:
+        status = _color("PASS", _C.GREEN) if case.passed else _color("FAIL", _C.RED)
+        passed_count = sum(1 for a in case.assertions if a.passed)
+        total_count = len(case.assertions)
+        assertion_str = f"{passed_count}/{total_count}"
+        if total_count > 0 and passed_count < total_count:
+            assertion_str = _color(assertion_str, _C.RED)
+        elif total_count > 0:
+            assertion_str = _color(assertion_str, _C.GREEN)
+
+        rows.append([
+            case.name,
+            status,
+            assertion_str,
+            f"{case.cost_usd:.4f}",
+            f"{case.duration_seconds:.1f}",
+        ])
+
+    print(_table(headers, rows))
+
+    # Verbose: show assertion details for failed cases
+    if verbose:
+        for case in result.cases:
+            if not case.passed:
+                print()
+                print(f"  {_color(case.name, _C.BOLD)} - assertions:")
+                for a in case.assertions:
+                    mark = _color("PASS", _C.GREEN) if a.passed else _color("FAIL", _C.RED)
+                    msg = f"    [{mark}] {a.type}"
+                    if a.message:
+                        msg += f" - {a.message}"
+                    print(msg)
+                if case.error:
+                    print(f"    {_color('Error:', _C.RED)} {case.error}")
+
+    # Summary line
+    print()
+    pass_str = _color(str(result.passed), _C.GREEN) if result.passed > 0 else "0"
+    fail_str = _color(str(result.failed), _C.RED) if result.failed > 0 else "0"
+    rate_color = _C.GREEN if result.pass_rate >= 0.8 else (_C.YELLOW if result.pass_rate >= 0.5 else _C.RED)
+    rate_str = _color(f"{result.pass_rate * 100:.0f}%", rate_color)
+
+    print(
+        f"  {result.total} cases | "
+        f"{pass_str} passed | "
+        f"{fail_str} failed | "
+        f"{rate_str} pass rate | "
+        f"${result.total_cost_usd:.4f} | "
+        f"{result.total_duration_seconds:.1f}s"
+    )
+    print()
+
+
 def _spinner_print(msg: str) -> None:
     """Print a message with a spinner-like prefix."""
     sys.stdout.write(f"  ... {msg}")
@@ -1044,6 +1165,16 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- doctor ---
     subparsers.add_parser("doctor", help="Run local diagnostics")
 
+    # --- eval ---
+    p_eval = subparsers.add_parser("eval", help="Run an eval suite against a workflow")
+    p_eval.add_argument("suite", help="Path to eval suite YAML file")
+    p_eval.add_argument("--concurrency", "-c", type=int, default=1,
+                         help="Max concurrent test cases (default: 1)")
+    p_eval.add_argument("--tag", "-t", action="append",
+                         help="Filter cases by tag (repeatable)")
+    p_eval.add_argument("--verbose", "-v", action="store_true",
+                         help="Show assertion details for failed cases")
+
     # --- generate ---
     p_gen = subparsers.add_parser("generate", help="Generate workflow from natural language")
     p_gen.add_argument("--description", "-d", help="What the workflow should do")
@@ -1080,6 +1211,7 @@ def main() -> None:
         "mcp": _cmd_mcp,
         "doctor": _cmd_doctor,
         "generate": _cmd_generate,
+        "eval": _cmd_eval,
     }
 
     handler = dispatch.get(args.command)
