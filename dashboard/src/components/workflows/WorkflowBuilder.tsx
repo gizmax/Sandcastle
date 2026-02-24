@@ -12,11 +12,12 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
   type StepConfig,
+  type StepType,
   type CsvOutputConfig,
   type PdfReportConfig,
   type RetryConfig,
@@ -44,6 +45,11 @@ const DEFAULT_AUTOPILOT = {
   sampleRate: 1.0, minSamples: 10, qualityThreshold: 0.7, autoDeploy: true, variants: [],
 };
 const DEFAULT_SLO = { enabled: false, qualityMin: 0.7, costMaxUsd: 0.10, latencyMaxSeconds: 30, optimizeFor: "balanced" as const };
+const DEFAULT_HTTP_CONFIG = { url: "", method: "GET", headers: {}, body: "", auth: "" };
+const DEFAULT_CODE_CONFIG = { code: "", language: "python" };
+const DEFAULT_CONDITION_CONFIG = { expression: "", thenSteps: [] as string[], elseSteps: [] as string[] };
+const DEFAULT_CLASSIFY_CONFIG = { categories: [] as string[], input: "", model: "haiku", branches: {} as Record<string, string[]> };
+const DEFAULT_LOOP_CONFIG = { over: "", stepIds: [] as string[], maxIterations: 100 };
 
 function generateYaml(
   workflowName: string,
@@ -94,6 +100,8 @@ function generateYaml(
   yaml += `steps:\n`;
 
   for (const step of steps) {
+    const sType = step.stepType || "standard";
+
     // Approval gate steps have a different type
     if (step.approval.enabled) {
       yaml += `  - id: "${step.id}"\n`;
@@ -103,6 +111,73 @@ function generateYaml(
       yaml += `      timeout_hours: ${step.approval.timeoutHours}\n`;
       yaml += `      on_timeout: ${step.approval.onTimeout}\n`;
       yaml += `      allow_edit: ${step.approval.allowEdit}\n`;
+    } else if (sType === "http") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: http\n`;
+      yaml += `    http_config:\n`;
+      yaml += `      url: "${step.httpConfig.url}"\n`;
+      yaml += `      method: ${step.httpConfig.method}\n`;
+      if (step.httpConfig.auth) {
+        yaml += `      auth: "${step.httpConfig.auth}"\n`;
+      }
+      if (step.httpConfig.body) {
+        yaml += `      body: |\n`;
+        step.httpConfig.body.split("\n").forEach((line) => {
+          yaml += `        ${line}\n`;
+        });
+      }
+    } else if (sType === "code") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: code\n`;
+      yaml += `    code_config:\n`;
+      yaml += `      language: ${step.codeConfig.language}\n`;
+      yaml += `      code: |\n`;
+      step.codeConfig.code.split("\n").forEach((line) => {
+        yaml += `        ${line}\n`;
+      });
+    } else if (sType === "condition") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: condition\n`;
+      yaml += `    condition_config:\n`;
+      yaml += `      expression: "${step.conditionConfig.expression}"\n`;
+      if (step.conditionConfig.thenSteps.length > 0) {
+        yaml += `      then: [${step.conditionConfig.thenSteps.join(", ")}]\n`;
+      }
+      if (step.conditionConfig.elseSteps.length > 0) {
+        yaml += `      else: [${step.conditionConfig.elseSteps.join(", ")}]\n`;
+      }
+    } else if (sType === "classify") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: classify\n`;
+      yaml += `    classify_config:\n`;
+      yaml += `      categories: [${step.classifyConfig.categories.join(", ")}]\n`;
+      yaml += `      input: "${step.classifyConfig.input}"\n`;
+      yaml += `      model: ${step.classifyConfig.model}\n`;
+      if (Object.keys(step.classifyConfig.branches).length > 0) {
+        yaml += `      branches:\n`;
+        for (const [cat, branchSteps] of Object.entries(step.classifyConfig.branches)) {
+          yaml += `        ${cat}: [${branchSteps.join(", ")}]\n`;
+        }
+      }
+    } else if (sType === "loop") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: loop\n`;
+      yaml += `    loop_config:\n`;
+      yaml += `      over: "${step.loopConfig.over}"\n`;
+      yaml += `      step_ids: [${step.loopConfig.stepIds.join(", ")}]\n`;
+      yaml += `      max_iterations: ${step.loopConfig.maxIterations}\n`;
+    } else if (sType === "llm") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: llm\n`;
+      yaml += `    prompt: |\n`;
+      step.prompt.split("\n").forEach((line) => {
+        yaml += `      ${line}\n`;
+      });
+      if (step.model !== defaultModel) yaml += `    model: ${step.model}\n`;
+      if (step.llmSystemPrompt) {
+        yaml += `    llm_config:\n`;
+        yaml += `      system_prompt: "${step.llmSystemPrompt}"\n`;
+      }
     } else {
       yaml += `  - id: "${step.id}"\n`;
       yaml += `    prompt: |\n`;
@@ -343,6 +418,7 @@ function buildInitialState(wf: InitialWorkflow) {
     const adv = parseAdvancedConfig(wf.yaml_content, s.id);
     return {
       id: s.id,
+      stepType: "standard" as StepType,
       prompt: s.prompt || "",
       model: s.model || "sonnet",
       maxTurns: 10,
@@ -358,6 +434,12 @@ function buildInitialState(wf: InitialWorkflow) {
       approval: { ...DEFAULT_APPROVAL },
       policies: adv.policies || [],
       slo: adv.slo || { ...DEFAULT_SLO },
+      llmSystemPrompt: "",
+      httpConfig: { ...DEFAULT_HTTP_CONFIG },
+      codeConfig: { ...DEFAULT_CODE_CONFIG },
+      conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
+      classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
+      loopConfig: { ...DEFAULT_LOOP_CONFIG },
     };
   });
 
@@ -365,7 +447,7 @@ function buildInitialState(wf: InitialWorkflow) {
     id: s.id,
     type: "step" as const,
     position: { x: 200 + (i % 3) * 220, y: 50 + Math.floor(i / 3) * 150 },
-    data: { label: s.id, model: s.model, toolNames: s.tools, hasTools: s.tools.length > 0 },
+    data: { label: s.id, model: s.model, stepType: s.stepType, toolNames: s.tools, hasTools: s.tools.length > 0 },
   }));
 
   const edges: Edge[] = [];
@@ -413,14 +495,20 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     [setEdges]
   );
 
-  const addStep = useCallback(() => {
-    const id = `step_${counter}`;
+  const addStep = useCallback((stepType: StepType = "standard") => {
+    const prefixes: Record<string, string> = {
+      standard: "step", llm: "llm", http: "http", code: "code",
+      condition: "check", classify: "route", loop: "loop",
+    };
+    const prefix = prefixes[stepType] || "step";
+    const id = `${prefix}_${counter}`;
     setCounter((c) => c + 1);
 
     const newStep: StepConfig = {
       id,
+      stepType,
       prompt: "",
-      model: "sonnet",
+      model: stepType === "classify" ? "haiku" : "sonnet",
       maxTurns: 10,
       timeout: 300,
       parallelOver: "",
@@ -434,13 +522,19 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       approval: { ...DEFAULT_APPROVAL },
       policies: [],
       slo: { ...DEFAULT_SLO },
+      llmSystemPrompt: "",
+      httpConfig: { ...DEFAULT_HTTP_CONFIG },
+      codeConfig: { ...DEFAULT_CODE_CONFIG },
+      conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
+      classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
+      loopConfig: { ...DEFAULT_LOOP_CONFIG },
     };
 
     const newNode: Node = {
       id,
       type: "step",
       position: { x: 200 + (nodes.length % 3) * 200, y: 50 + Math.floor(nodes.length / 3) * 150 },
-      data: { label: id, model: "sonnet" },
+      data: { label: id, model: stepType === "classify" ? "haiku" : "sonnet", stepType },
     };
 
     setSteps((prev) => [...prev, newStep]);
@@ -464,6 +558,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   ...n.data,
                   label: updated.id,
                   model: updated.model,
+                  stepType: updated.stepType,
                   hasRetry: updated.retry.enabled,
                   hasApproval: updated.approval.enabled,
                   hasAutoPilot: updated.autopilot.enabled,
@@ -631,7 +726,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       <div className="hidden lg:block w-48 shrink-0 border-r border-border bg-background/50 p-3">
         <p className="mb-3 text-xs font-semibold text-muted">PALETTE</p>
         <button
-          onClick={addStep}
+          onClick={() => addStep("standard")}
           className={cn(
             "flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5",
             "text-xs font-medium text-muted hover:border-accent hover:text-accent transition-colors"
@@ -640,6 +735,29 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
           <Plus className="h-3.5 w-3.5" />
           Agent Step
         </button>
+
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          {([
+            { type: "llm" as const, icon: MessageSquare, label: "LLM", color: "text-accent" },
+            { type: "http" as const, icon: Globe, label: "HTTP", color: "text-emerald-400" },
+            { type: "code" as const, icon: Code, label: "Code", color: "text-amber-400" },
+            { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
+            { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
+            { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },
+          ] as const).map(({ type, icon: Icon, label, color }) => (
+            <button
+              key={type}
+              onClick={() => addStep(type)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5",
+                "text-[11px] font-medium text-muted hover:border-accent hover:text-accent transition-colors"
+              )}
+            >
+              <Icon className={cn("h-3 w-3", color)} />
+              {label}
+            </button>
+          ))}
+        </div>
 
         <button
           onClick={() => setTemplateBrowserOpen(true)}
@@ -774,7 +892,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
       {/* Mobile add step button */}
       <button
-        onClick={addStep}
+        onClick={() => addStep("standard")}
         className="absolute left-3 top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface shadow-sm text-muted hover:text-accent hover:border-accent transition-colors lg:hidden"
       >
         <Plus className="h-4 w-4" />

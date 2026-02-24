@@ -15,6 +15,7 @@ from typing import Any
 
 from sandcastle.engine.dag import (
     ExecutionPlan,
+    NON_LLM_TYPES,
     StepDefinition,
     WorkflowDefinition,
 )
@@ -68,6 +69,7 @@ class RunContext:
     memories: list[dict] = field(default_factory=list)
     _memory_config: Any = field(default=None, repr=False)
     _memory_scope_id: str = field(default="", repr=False)
+    branch_skip_steps: set[str] = field(default_factory=set)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item."""
@@ -83,6 +85,7 @@ class RunContext:
             memories=self.memories,
             _memory_config=self._memory_config,
             _memory_scope_id=self._memory_scope_id,
+            branch_skip_steps=set(self.branch_skip_steps),
         )
 
     @property
@@ -1687,6 +1690,464 @@ async def _execute_sub_workflow_step(
         )
 
 
+async def _execute_llm_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Execute a lightweight LLM step - single API call, no sandbox."""
+    import time
+
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_model
+
+    started_at = time.monotonic()
+    model_info = resolve_model(step.model)
+    api_key = get_api_key(model_info)
+
+    prompt = resolve_templates(step.prompt, context, step.depends_on)
+    prompt = await resolve_storage_refs(prompt, storage)
+
+    system_prompt = _STEP_SYSTEM_PREFIX
+    if step.llm_config and step.llm_config.system_prompt:
+        system_prompt += step.llm_config.system_prompt
+
+    try:
+        if model_info.provider == "claude":
+            async with httpx.AsyncClient(timeout=step.timeout) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 4096,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                text = data["content"][0]["text"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                cost = (
+                    in_tok * model_info.input_price_per_m / 1_000_000
+                    + out_tok * model_info.output_price_per_m / 1_000_000
+                )
+        else:
+            base_url = model_info.api_base_url or "https://api.openai.com/v1"
+            async with httpx.AsyncClient(timeout=step.timeout) as client:
+                resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 4096,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt},
+                        ],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                text = data["choices"][0]["message"]["content"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+                cost = (
+                    in_tok * model_info.input_price_per_m / 1_000_000
+                    + out_tok * model_info.output_price_per_m / 1_000_000
+                )
+
+        # Try to parse as JSON
+        output: Any = text.strip()
+        if output.startswith("```"):
+            first_nl = output.find("\n")
+            if first_nl >= 0:
+                output = output[first_nl + 1:]
+            if output.endswith("```"):
+                output = output[:-3].rstrip()
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, (dict, list)):
+                output = parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=output, cost_usd=cost,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_http_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute an HTTP request step - $0 cost."""
+    import time
+
+    import httpx
+
+    started_at = time.monotonic()
+    cfg = step.http_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing http_config")
+
+    try:
+        url = resolve_templates(cfg.url, context, step.depends_on)
+        headers = {
+            k: resolve_templates(v, context, step.depends_on)
+            for k, v in cfg.headers.items()
+        }
+
+        # Auth handling
+        if cfg.auth:
+            auth_resolved = resolve_templates(cfg.auth, context, step.depends_on)
+            if auth_resolved.startswith("bearer:"):
+                headers["Authorization"] = f"Bearer {auth_resolved[7:]}"
+            else:
+                import os
+                token = os.environ.get(auth_resolved, auth_resolved)
+                headers["Authorization"] = f"Bearer {token}"
+
+        body = None
+        if cfg.body is not None:
+            if isinstance(cfg.body, str):
+                body = resolve_templates(cfg.body, context, step.depends_on)
+            else:
+                body = json.dumps(cfg.body)
+
+        async with httpx.AsyncClient(timeout=step.timeout) as client:
+            resp = await client.request(
+                method=cfg.method.upper(),
+                url=url,
+                headers=headers,
+                content=body if body else None,
+            )
+
+        # Try to parse as JSON
+        try:
+            output = resp.json()
+        except Exception:
+            output = {"status_code": resp.status_code, "text": resp.text[:5000]}
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=output, cost_usd=0.0,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_code_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute inline Python code. Uses restricted exec with injected context."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.code_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing code_config")
+
+    try:
+        code = cfg.code
+
+        # Inject context: _input and _steps
+        exec_globals: dict[str, Any] = {
+            "__builtins__": {
+                "len": len, "int": int, "float": float, "str": str,
+                "bool": bool, "list": list, "dict": dict, "set": set,
+                "tuple": tuple, "range": range, "enumerate": enumerate,
+                "zip": zip, "map": map, "filter": filter, "sorted": sorted,
+                "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+                "isinstance": isinstance, "type": type, "print": print,
+                "None": None, "True": True, "False": False,
+            },
+            "_input": context.input,
+            "_steps": context.step_outputs,
+            "json": json,
+            "result": None,
+        }
+
+        exec(code, exec_globals)  # noqa: S102
+
+        output = exec_globals.get("result", None)
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=output, cost_usd=0.0,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_condition_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a condition step - evaluate expression and populate skip_steps."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.condition_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing condition_config")
+
+    try:
+        expression = resolve_templates(cfg.expression, context, step.depends_on)
+
+        # Restricted eval namespace
+        eval_ns: dict[str, Any] = {
+            "__builtins__": {
+                "len": len, "int": int, "float": float, "str": str,
+                "bool": bool, "True": True, "False": False, "None": None,
+            },
+            "steps": context.step_outputs,
+            "input": context.input,
+        }
+        result = bool(eval(expression, eval_ns))  # noqa: S307
+
+        # Populate skip_steps based on result
+        if result:
+            context.branch_skip_steps.update(cfg.else_steps)
+        else:
+            context.branch_skip_steps.update(cfg.then_steps)
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            output={"condition": result, "expression": cfg.expression},
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_classify_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Execute a classify step - LLM-based routing to branches."""
+    import time
+
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_model
+
+    started_at = time.monotonic()
+    cfg = step.classify_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing classify_config")
+
+    try:
+        input_text = resolve_templates(cfg.input, context, step.depends_on)
+        input_text = await resolve_storage_refs(input_text, storage)
+
+        model_info = resolve_model(cfg.model)
+        api_key = get_api_key(model_info)
+
+        categories_str = ", ".join(cfg.categories)
+        classify_prompt = (
+            f"Classify the following text into exactly one of these categories: {categories_str}\n\n"
+            f"Text: {input_text}\n\n"
+            f"Respond with ONLY the category name, nothing else."
+        )
+
+        if model_info.provider == "claude":
+            async with httpx.AsyncClient(timeout=step.timeout) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 64,
+                        "messages": [{"role": "user", "content": classify_prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                raw_category = data["content"][0]["text"].strip().lower()
+                usage = data.get("usage", {})
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+        else:
+            base_url = model_info.api_base_url or "https://api.openai.com/v1"
+            async with httpx.AsyncClient(timeout=step.timeout) as client:
+                resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 64,
+                        "messages": [{"role": "user", "content": classify_prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                raw_category = data["choices"][0]["message"]["content"].strip().lower()
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+
+        cost = (
+            in_tok * model_info.input_price_per_m / 1_000_000
+            + out_tok * model_info.output_price_per_m / 1_000_000
+        )
+
+        # Fuzzy-match to category list
+        matched = None
+        for cat in cfg.categories:
+            if cat.lower() == raw_category:
+                matched = cat
+                break
+        if not matched:
+            for cat in cfg.categories:
+                if cat.lower() in raw_category or raw_category in cat.lower():
+                    matched = cat
+                    break
+        if not matched:
+            matched = cfg.categories[0]
+
+        # Skip non-matching branch steps
+        for cat, branch_steps in cfg.branches.items():
+            if cat != matched:
+                context.branch_skip_steps.update(branch_steps)
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            output={"category": matched, "raw": raw_category},
+            cost_usd=cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_loop_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+) -> StepResult:
+    """Execute a loop step - iterate over list, run sub-steps for each item."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.loop_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing loop_config")
+
+    try:
+        # Resolve the 'over' variable path
+        over_path = cfg.over.strip("{}")
+        items = resolve_variable(over_path, context)
+        if not isinstance(items, list):
+            items = [items]
+
+        # Limit iterations
+        items = items[:cfg.max_iterations]
+
+        results = []
+        total_cost = 0.0
+
+        for i, item in enumerate(items):
+            child_context = context.with_item(item, i)
+
+            for sub_step_id in cfg.step_ids:
+                try:
+                    sub_step = workflow.get_step(sub_step_id)
+                except ValueError:
+                    continue
+
+                sub_result = await execute_step_with_retry(
+                    sub_step, child_context, sandbox, storage,
+                )
+                child_context.step_outputs[sub_step_id] = sub_result.output
+                total_cost += sub_result.cost_usd
+
+            # Collect last sub-step output as the loop iteration result
+            last_step = cfg.step_ids[-1] if cfg.step_ids else None
+            iteration_output = child_context.step_outputs.get(last_step) if last_step else item
+            results.append(iteration_output)
+
+            # Check 'until' break condition
+            if cfg.until:
+                eval_ns: dict[str, Any] = {
+                    "__builtins__": {
+                        "len": len, "int": int, "float": float, "str": str,
+                        "bool": bool, "True": True, "False": False, "None": None,
+                    },
+                    "output": iteration_output,
+                    "index": i,
+                }
+                if bool(eval(cfg.until, eval_ns)):  # noqa: S307
+                    break
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=results, cost_usd=total_cost,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
 async def _prepare_and_run_step(
     step_id: str,
     workflow: WorkflowDefinition,
@@ -1734,10 +2195,125 @@ async def _prepare_and_run_step(
         except Exception as e:
             logger.warning(f"Could not resolve step policies: {e}")
 
+    # Skip steps that were excluded by condition/classify branching
+    if step_id in context.branch_skip_steps:
+        context.step_outputs[step_id] = None
+        await _save_run_step(
+            run_id=context.run_id, step_id=step.id,
+            status="skipped", output=None,
+        )
+        return
+
     # Approval gate
     if step.type == "approval":
         await _execute_approval_step(step, context, 0)
         return  # WorkflowPaused raised above
+
+    # --- Hybrid step types ---
+    if step.type == "llm":
+        result = await _execute_llm_step(step, context, storage)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                model=step.model,
+            )
+        else:
+            raise StepExecutionError(
+                f"LLM step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "http":
+        result = await _execute_http_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"HTTP step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "code":
+        result = await _execute_code_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Code step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "condition":
+        result = await _execute_condition_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Condition step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "classify":
+        result = await _execute_classify_step(step, context, storage)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Classify step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "loop":
+        result = await _execute_loop_step(
+            step, context, sandbox, storage, workflow, depth,
+        )
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Loop step '{step_id}' failed: {result.error}"
+            )
+        return
 
     # Sub-workflow
     if step.type == "sub_workflow":
@@ -1997,7 +2573,7 @@ async def execute_workflow(
             sid for sid in all_step_ids
             if sid not in done_steps
             and sid not in running
-            and step_deps[sid].issubset(done_steps)
+            and step_deps[sid].issubset(done_steps | context.branch_skip_steps)
         )
 
     def _cancel_running() -> None:
@@ -2079,6 +2655,11 @@ async def execute_workflow(
                     raise exc
 
                 done_steps.add(sid)
+                # Also mark branch-skipped steps as done so dependents unblock
+                for skip_sid in list(context.branch_skip_steps):
+                    if skip_sid not in done_steps:
+                        done_steps.add(skip_sid)
+                        context.step_outputs.setdefault(skip_sid, None)
                 checkpoint_counter += 1
                 await _save_checkpoint(
                     run_id, sid, checkpoint_counter, context,

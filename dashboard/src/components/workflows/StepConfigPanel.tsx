@@ -79,8 +79,43 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop";
+
+export interface HttpStepConfig {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string;
+  auth: string;
+}
+
+export interface CodeStepConfig {
+  code: string;
+  language: string;
+}
+
+export interface ConditionStepConfig {
+  expression: string;
+  thenSteps: string[];
+  elseSteps: string[];
+}
+
+export interface ClassifyStepConfig {
+  categories: string[];
+  input: string;
+  model: string;
+  branches: Record<string, string[]>;
+}
+
+export interface LoopStepConfig {
+  over: string;
+  stepIds: string[];
+  maxIterations: number;
+}
+
 export interface StepConfig {
   id: string;
+  stepType: StepType;
   prompt: string;
   model: string;
   maxTurns: number;
@@ -96,6 +131,12 @@ export interface StepConfig {
   approval: ApprovalConfig;
   policies: string[];
   slo: SloConfig;
+  llmSystemPrompt: string;
+  httpConfig: HttpStepConfig;
+  codeConfig: CodeStepConfig;
+  conditionConfig: ConditionStepConfig;
+  classifyConfig: ClassifyStepConfig;
+  loopConfig: LoopStepConfig;
 }
 
 interface StepConfigPanelProps {
@@ -195,16 +236,246 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted">Prompt</label>
-        <textarea
-          value={step.prompt}
-          onChange={(e) => onChange({ ...step, prompt: e.target.value })}
-          rows={6}
-          className={cn(inputClass, "h-auto py-2 resize-y")}
-        />
-        <p className="text-[11px] text-muted-foreground mt-0.5">{"Use {input.field} for workflow input or {steps.id.output} for previous step data."}</p>
+        <label className="mb-1 block text-xs font-medium text-muted">Step Type</label>
+        <select
+          value={step.stepType}
+          onChange={(e) => onChange({ ...step, stepType: e.target.value as StepType })}
+          className={inputClass}
+        >
+          <option value="standard">Standard (Agent)</option>
+          <option value="llm">LLM (Single Call)</option>
+          <option value="http">HTTP Request</option>
+          <option value="code">Code (Python)</option>
+          <option value="condition">Condition (If/Else)</option>
+          <option value="classify">Classify (Route)</option>
+          <option value="loop">Loop (For Each)</option>
+        </select>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
+          {step.stepType === "llm" && "Single LLM API call - no sandbox, no tools. Fast and cheap."}
+          {step.stepType === "http" && "Direct HTTP request - $0 cost, no LLM involved."}
+          {step.stepType === "code" && "Inline Python code execution - $0 cost."}
+          {step.stepType === "condition" && "If/else branching based on expression evaluation."}
+          {step.stepType === "classify" && "LLM-based classification into categories, routes to branches."}
+          {step.stepType === "loop" && "Iterate over a list, running sub-steps for each item."}
+        </p>
       </div>
 
+      {/* Prompt - shown for standard, llm, classify */}
+      {(step.stepType === "standard" || step.stepType === "llm") && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Prompt</label>
+          <textarea
+            value={step.prompt}
+            onChange={(e) => onChange({ ...step, prompt: e.target.value })}
+            rows={6}
+            className={cn(inputClass, "h-auto py-2 resize-y")}
+          />
+          <p className="text-[11px] text-muted-foreground mt-0.5">{"Use {input.field} for workflow input or {steps.id.output} for previous step data."}</p>
+        </div>
+      )}
+
+      {/* LLM System Prompt */}
+      {step.stepType === "llm" && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">System Prompt</label>
+          <textarea
+            value={step.llmSystemPrompt}
+            onChange={(e) => onChange({ ...step, llmSystemPrompt: e.target.value })}
+            rows={3}
+            placeholder="Optional system instructions..."
+            className={cn(inputClass, "h-auto py-2 resize-y")}
+          />
+        </div>
+      )}
+
+      {/* HTTP Config */}
+      {step.stepType === "http" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">URL</label>
+            <input
+              type="text"
+              value={step.httpConfig.url}
+              onChange={(e) => onChange({ ...step, httpConfig: { ...step.httpConfig, url: e.target.value } })}
+              placeholder="https://api.example.com/data/{input.id}"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Method</label>
+            <select
+              value={step.httpConfig.method}
+              onChange={(e) => onChange({ ...step, httpConfig: { ...step.httpConfig, method: e.target.value } })}
+              className={inputClass}
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Auth</label>
+            <input
+              type="text"
+              value={step.httpConfig.auth}
+              onChange={(e) => onChange({ ...step, httpConfig: { ...step.httpConfig, auth: e.target.value } })}
+              placeholder="bearer:{input.token} or ENV_VAR_NAME"
+              className={inputClass}
+            />
+          </div>
+          {(step.httpConfig.method === "POST" || step.httpConfig.method === "PUT" || step.httpConfig.method === "PATCH") && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Body</label>
+              <textarea
+                value={step.httpConfig.body}
+                onChange={(e) => onChange({ ...step, httpConfig: { ...step.httpConfig, body: e.target.value } })}
+                rows={4}
+                placeholder='{"key": "value"}'
+                className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Code Config */}
+      {step.stepType === "code" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Python Code</label>
+            <textarea
+              value={step.codeConfig.code}
+              onChange={(e) => onChange({ ...step, codeConfig: { ...step.codeConfig, code: e.target.value } })}
+              rows={10}
+              placeholder={'data = _steps["prev-step"]\nresult = [item["name"] for item in data]'}
+              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Available: _input (workflow input), _steps (previous outputs), json module. Set 'result' variable for output."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Condition Config */}
+      {step.stepType === "condition" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Expression</label>
+            <input
+              type="text"
+              value={step.conditionConfig.expression}
+              onChange={(e) => onChange({ ...step, conditionConfig: { ...step.conditionConfig, expression: e.target.value } })}
+              placeholder="steps['score']['value'] > 80"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Python expression. Available: steps (outputs dict), input (workflow input)."}
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Then (true) - Step IDs</label>
+            <input
+              type="text"
+              value={step.conditionConfig.thenSteps.join(", ")}
+              onChange={(e) => onChange({ ...step, conditionConfig: { ...step.conditionConfig, thenSteps: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
+              placeholder="step-a, step-b"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Else (false) - Step IDs</label>
+            <input
+              type="text"
+              value={step.conditionConfig.elseSteps.join(", ")}
+              onChange={(e) => onChange({ ...step, conditionConfig: { ...step.conditionConfig, elseSteps: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
+              placeholder="step-c, step-d"
+              className={inputClass}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Classify Config */}
+      {step.stepType === "classify" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Input Text</label>
+            <input
+              type="text"
+              value={step.classifyConfig.input}
+              onChange={(e) => onChange({ ...step, classifyConfig: { ...step.classifyConfig, input: e.target.value } })}
+              placeholder="{steps.parse.output.text}"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Categories</label>
+            <input
+              type="text"
+              value={step.classifyConfig.categories.join(", ")}
+              onChange={(e) => onChange({ ...step, classifyConfig: { ...step.classifyConfig, categories: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
+              placeholder="billing, technical, general"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Model</label>
+            <select
+              value={step.classifyConfig.model}
+              onChange={(e) => onChange({ ...step, classifyConfig: { ...step.classifyConfig, model: e.target.value } })}
+              className={inputClass}
+            >
+              <option value="haiku">Haiku (cheapest)</option>
+              <option value="sonnet">Sonnet</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Loop Config */}
+      {step.stepType === "loop" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Iterate Over</label>
+            <input
+              type="text"
+              value={step.loopConfig.over}
+              onChange={(e) => onChange({ ...step, loopConfig: { ...step.loopConfig, over: e.target.value } })}
+              placeholder="{steps.fetch.output.items}"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Sub-Step IDs</label>
+            <input
+              type="text"
+              value={step.loopConfig.stepIds.join(", ")}
+              onChange={(e) => onChange({ ...step, loopConfig: { ...step.loopConfig, stepIds: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
+              placeholder="enrich, score"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Max Iterations</label>
+            <input
+              type="number"
+              value={step.loopConfig.maxIterations}
+              onChange={(e) => onChange({ ...step, loopConfig: { ...step.loopConfig, maxIterations: Number(e.target.value) } })}
+              min={1}
+              max={1000}
+              className={inputClass}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Standard agent settings - only shown for standard/llm/classify */}
+      {(step.stepType === "standard" || step.stepType === "llm" || step.stepType === "classify") && (
+        <>
       {/* Directory Input */}
       <div className="rounded-lg border border-border">
         <button
@@ -338,6 +609,8 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
         />
         <p className="text-[11px] text-muted-foreground mt-0.5">JSONPath to a list. Step runs once per item in parallel.</p>
       </div>
+        </>
+      )}
 
       <div>
         <label className="mb-1 block text-xs font-medium text-muted">Depends On</label>
