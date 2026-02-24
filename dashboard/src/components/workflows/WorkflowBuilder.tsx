@@ -365,7 +365,7 @@ function buildInitialState(wf: InitialWorkflow) {
     id: s.id,
     type: "step" as const,
     position: { x: 200 + (i % 3) * 220, y: 50 + Math.floor(i / 3) * 150 },
-    data: { label: s.id, model: s.model },
+    data: { label: s.id, model: s.model, toolNames: s.tools, hasTools: s.tools.length > 0 },
   }));
 
   const edges: Edge[] = [];
@@ -470,6 +470,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   hasPdfReport: updated.pdfReport.enabled,
                   hasSlo: updated.slo.enabled,
                   hasTools: updated.tools.length > 0,
+                  toolNames: updated.tools,
                 },
               }
             : n
