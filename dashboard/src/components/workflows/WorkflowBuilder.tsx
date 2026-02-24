@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, RefreshCw } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -27,6 +27,7 @@ import {
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
 import { GenerateModal } from "@/components/workflows/GenerateModal";
+import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
 
 const nodeTypes: NodeTypes = {
@@ -47,7 +48,8 @@ const DEFAULT_SLO = { enabled: false, qualityMin: 0.7, costMaxUsd: 0.10, latency
 function generateYaml(
   workflowName: string,
   steps: StepConfig[],
-  edges: Edge[]
+  edges: Edge[],
+  defaultTools: string[] = []
 ): string {
   const depMap = new Map<string, string[]>();
   edges.forEach((e) => {
@@ -69,7 +71,11 @@ function generateYaml(
   yaml += `description: ""\n`;
   yaml += `default_model: ${defaultModel}\n`;
   yaml += `default_max_turns: 10\n`;
-  yaml += `default_timeout: 300\n\n`;
+  yaml += `default_timeout: 300\n`;
+  if (defaultTools.length > 0) {
+    yaml += `default_tools: [${defaultTools.join(", ")}]\n`;
+  }
+  yaml += `\n`;
 
   if (hasDirInput) {
     const dirStep = steps.find((s) => s.directoryInput.enabled)!;
@@ -117,6 +123,15 @@ function generateYaml(
     }
     if (step.parallelOver) {
       yaml += `    parallel_over: "${step.parallelOver}"\n`;
+    }
+
+    // Tools (only if step has tools different from default)
+    if (step.tools.length > 0) {
+      const sameAsDefault = defaultTools.length === step.tools.length &&
+        defaultTools.every((t) => step.tools.includes(t));
+      if (!sameAsDefault) {
+        yaml += `    tools: [${step.tools.join(", ")}]\n`;
+      }
     }
 
     // Retry config
@@ -258,6 +273,7 @@ function parseAdvancedConfig(yamlContent: string | undefined, stepId: string) {
     slo: SloConfig;
     autopilot: Partial<AutoPilotConfig>;
     policies: string[];
+    tools: string[];
   }> = {};
 
   // CSV output
@@ -313,6 +329,12 @@ function parseAdvancedConfig(yamlContent: string | undefined, stepId: string) {
     result.policies = [...policyLines].map((m) => m[1].trim());
   }
 
+  // Tools - inline format: tools: [slack, jira]
+  const toolsInline = block.match(/tools:\s*\[([^\]]+)\]/);
+  if (toolsInline) {
+    result.tools = toolsInline[1].split(",").map((t) => t.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  }
+
   return result;
 }
 
@@ -327,6 +349,7 @@ function buildInitialState(wf: InitialWorkflow) {
       timeout: 300,
       parallelOver: "",
       dependsOn: s.depends_on || [],
+      tools: adv.tools || [],
       directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
       csvOutput: adv.csvOutput || { ...DEFAULT_CSV_OUTPUT },
       pdfReport: adv.pdfReport || { ...DEFAULT_PDF_REPORT },
@@ -370,8 +393,10 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     initialWorkflow?.file_name.replace(".yaml", "") || "my-workflow"
   );
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [defaultTools, setDefaultTools] = useState<string[]>([]);
   const [templateBrowserOpen, setTemplateBrowserOpen] = useState(false);
   const [generateModalOpen, setGenerateModalOpen] = useState(false);
+  const [toolsPaletteOpen, setToolsPaletteOpen] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{
     name: string;
@@ -399,6 +424,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       timeout: 300,
       parallelOver: "",
       dependsOn: [],
+      tools: [],
       directoryInput: { ...DEFAULT_DIRECTORY_INPUT },
       csvOutput: { ...DEFAULT_CSV_OUTPUT },
       pdfReport: { ...DEFAULT_PDF_REPORT },
@@ -443,6 +469,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   hasCsvOutput: updated.csvOutput.enabled,
                   hasPdfReport: updated.pdfReport.enabled,
                   hasSlo: updated.slo.enabled,
+                  hasTools: updated.tools.length > 0,
                 },
               }
             : n
@@ -588,7 +615,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   );
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
-  const yaml = generateYaml(workflowName, steps, edges);
+  const yaml = generateYaml(workflowName, steps, edges, defaultTools);
 
   return (
     <div className="relative flex h-[calc(100vh-10rem)] gap-0 rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
@@ -685,6 +712,36 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             </select>
           </div>
         )}
+
+        <div className="mt-4">
+          <button
+            onClick={() => setToolsPaletteOpen(!toolsPaletteOpen)}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg border px-3 py-2.5",
+              "text-xs font-medium transition-colors",
+              defaultTools.length > 0
+                ? "border-accent/30 bg-accent/5 text-accent"
+                : "border-dashed border-border text-muted hover:border-accent hover:text-accent"
+            )}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+            Default Tools
+            {defaultTools.length > 0 && (
+              <span className="ml-auto rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold">
+                {defaultTools.length}
+              </span>
+            )}
+          </button>
+          {toolsPaletteOpen && (
+            <div className="mt-2 rounded-lg border border-border bg-background/50 p-2">
+              <ToolSelector
+                selected={defaultTools}
+                onChange={setDefaultTools}
+                compact
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Mobile add step button */}
