@@ -182,6 +182,25 @@ class ApiClient {
     }
   }
 
+  async put<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
+    await this.ensureInit();
+    if (this.useMock) {
+      return this.mock<T>(path, undefined, "PUT", body);
+    }
+
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: "PUT",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+      });
+      return this.handleResponse<T>(res);
+    } catch {
+      return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
+    }
+  }
+
   async delete<T>(path: string): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {

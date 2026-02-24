@@ -1884,6 +1884,173 @@ const MOCK_SETTINGS = {
   redis_url: "",
 };
 
+const MOCK_TOOLS = [
+  {
+    name: "slack",
+    description: "Send messages, create channels, and manage Slack workspace interactions",
+    category: "communication",
+    icon: "slack",
+    configured: true,
+    missing_credentials: [],
+    credential_env_vars: ["TOOL_SLACK_BOT_TOKEN"],
+    functions: [
+      { name: "send_message", description: "Send a message to a Slack channel", parameters: {} },
+      { name: "create_channel", description: "Create a new Slack channel", parameters: {} },
+      { name: "list_channels", description: "List all Slack channels", parameters: {} },
+    ],
+  },
+  {
+    name: "gmail",
+    description: "Send emails, manage drafts, and handle SMTP-based email delivery",
+    category: "communication",
+    icon: "mail",
+    configured: false,
+    missing_credentials: ["TOOL_SMTP_HOST", "TOOL_SMTP_PORT", "TOOL_SMTP_USER", "TOOL_SMTP_PASSWORD"],
+    credential_env_vars: ["TOOL_SMTP_HOST", "TOOL_SMTP_PORT", "TOOL_SMTP_USER", "TOOL_SMTP_PASSWORD"],
+    functions: [
+      { name: "send_email", description: "Send an email via SMTP", parameters: {} },
+      { name: "send_html_email", description: "Send an HTML-formatted email", parameters: {} },
+    ],
+  },
+  {
+    name: "teams",
+    description: "Post messages to Microsoft Teams channels via incoming webhooks",
+    category: "communication",
+    icon: "teams",
+    configured: false,
+    missing_credentials: ["TOOL_TEAMS_WEBHOOK_URL"],
+    credential_env_vars: ["TOOL_TEAMS_WEBHOOK_URL"],
+    functions: [
+      { name: "send_message", description: "Post a message to Teams channel", parameters: {} },
+    ],
+  },
+  {
+    name: "jira",
+    description: "Create and manage Jira issues, search tickets, and update statuses",
+    category: "project_management",
+    icon: "jira",
+    configured: true,
+    missing_credentials: [],
+    credential_env_vars: ["TOOL_JIRA_API_TOKEN", "TOOL_JIRA_BASE_URL", "TOOL_JIRA_EMAIL"],
+    functions: [
+      { name: "create_issue", description: "Create a new Jira issue", parameters: {} },
+      { name: "search_issues", description: "Search Jira issues with JQL", parameters: {} },
+      { name: "update_issue", description: "Update an existing Jira issue", parameters: {} },
+      { name: "get_issue", description: "Get details of a Jira issue", parameters: {} },
+    ],
+  },
+  {
+    name: "github",
+    description: "Manage GitHub repositories, issues, pull requests, and code reviews",
+    category: "project_management",
+    icon: "github",
+    configured: true,
+    missing_credentials: [],
+    credential_env_vars: ["TOOL_GITHUB_TOKEN"],
+    functions: [
+      { name: "create_issue", description: "Create a new GitHub issue", parameters: {} },
+      { name: "create_pull_request", description: "Create a pull request", parameters: {} },
+      { name: "list_repos", description: "List repositories", parameters: {} },
+    ],
+  },
+  {
+    name: "notion",
+    description: "Create pages, query databases, and manage content in Notion workspaces",
+    category: "project_management",
+    icon: "notion",
+    configured: false,
+    missing_credentials: ["TOOL_NOTION_API_KEY"],
+    credential_env_vars: ["TOOL_NOTION_API_KEY"],
+    functions: [
+      { name: "create_page", description: "Create a new Notion page", parameters: {} },
+      { name: "query_database", description: "Query a Notion database", parameters: {} },
+      { name: "update_page", description: "Update an existing Notion page", parameters: {} },
+    ],
+  },
+  {
+    name: "hubspot",
+    description: "Manage contacts, deals, and CRM pipelines in HubSpot",
+    category: "crm",
+    icon: "hubspot",
+    configured: false,
+    missing_credentials: ["TOOL_HUBSPOT_API_KEY"],
+    credential_env_vars: ["TOOL_HUBSPOT_API_KEY"],
+    functions: [
+      { name: "create_contact", description: "Create a new HubSpot contact", parameters: {} },
+      { name: "create_deal", description: "Create a new deal", parameters: {} },
+      { name: "search_contacts", description: "Search contacts", parameters: {} },
+    ],
+  },
+  {
+    name: "salesforce",
+    description: "Interact with Salesforce CRM - manage leads, opportunities, and accounts",
+    category: "crm",
+    icon: "salesforce",
+    configured: false,
+    missing_credentials: ["TOOL_SALESFORCE_CLIENT_ID", "TOOL_SALESFORCE_CLIENT_SECRET", "TOOL_SALESFORCE_REFRESH_TOKEN", "TOOL_SALESFORCE_INSTANCE_URL"],
+    credential_env_vars: ["TOOL_SALESFORCE_CLIENT_ID", "TOOL_SALESFORCE_CLIENT_SECRET", "TOOL_SALESFORCE_REFRESH_TOKEN", "TOOL_SALESFORCE_INSTANCE_URL"],
+    functions: [
+      { name: "query", description: "Execute a SOQL query", parameters: {} },
+      { name: "create_record", description: "Create a Salesforce record", parameters: {} },
+      { name: "update_record", description: "Update a Salesforce record", parameters: {} },
+    ],
+  },
+  {
+    name: "zendesk",
+    description: "Create and manage support tickets, search knowledge base in Zendesk",
+    category: "crm",
+    icon: "zendesk",
+    configured: false,
+    missing_credentials: ["TOOL_ZENDESK_SUBDOMAIN", "TOOL_ZENDESK_EMAIL", "TOOL_ZENDESK_API_TOKEN"],
+    credential_env_vars: ["TOOL_ZENDESK_SUBDOMAIN", "TOOL_ZENDESK_EMAIL", "TOOL_ZENDESK_API_TOKEN"],
+    functions: [
+      { name: "create_ticket", description: "Create a new support ticket", parameters: {} },
+      { name: "search_tickets", description: "Search support tickets", parameters: {} },
+      { name: "update_ticket", description: "Update a support ticket", parameters: {} },
+    ],
+  },
+  {
+    name: "gdrive",
+    description: "Upload, download, and manage files in Google Drive",
+    category: "data",
+    icon: "gdrive",
+    configured: false,
+    missing_credentials: ["TOOL_GOOGLE_SERVICE_ACCOUNT"],
+    credential_env_vars: ["TOOL_GOOGLE_SERVICE_ACCOUNT"],
+    functions: [
+      { name: "upload_file", description: "Upload a file to Google Drive", parameters: {} },
+      { name: "download_file", description: "Download a file from Google Drive", parameters: {} },
+      { name: "list_files", description: "List files in a folder", parameters: {} },
+    ],
+  },
+  {
+    name: "postgresql",
+    description: "Execute queries and manage data in PostgreSQL databases",
+    category: "data",
+    icon: "database",
+    configured: true,
+    missing_credentials: [],
+    credential_env_vars: ["TOOL_POSTGRESQL_URL"],
+    functions: [
+      { name: "query", description: "Execute a SQL query", parameters: {} },
+      { name: "execute", description: "Execute a SQL statement", parameters: {} },
+    ],
+  },
+  {
+    name: "webhook",
+    description: "Send HTTP requests to external webhooks and APIs",
+    category: "general",
+    icon: "webhook",
+    configured: true,
+    missing_credentials: [],
+    credential_env_vars: [],
+    functions: [
+      { name: "send", description: "Send an HTTP request to a webhook URL", parameters: {} },
+      { name: "send_batch", description: "Send multiple webhook requests", parameters: {} },
+    ],
+  },
+];
+
 // Route matcher
 type MockRoute = {
   match: RegExp;
@@ -2114,6 +2281,33 @@ const routes: MockRoute[] = [
         created_at: new Date().toISOString(),
         last_used_at: null,
       };
+    },
+  },
+  {
+    match: /^\/tools$/,
+    method: "GET",
+    handler: (params) => {
+      let filtered = MOCK_TOOLS;
+      if (params.category && params.category !== "all") {
+        filtered = filtered.filter((t) => t.category === params.category);
+      }
+      return { tools: filtered, total: filtered.length };
+    },
+  },
+  {
+    match: /^\/tools\/([^/]+)\/credentials$/,
+    method: "PUT",
+    handler: (params, body) => {
+      const toolName = params._1;
+      const tool = MOCK_TOOLS.find((t) => t.name === toolName);
+      if (!tool) return null;
+      const creds = (body as { credentials?: Record<string, string> })?.credentials || {};
+      // In mock mode, update the tool's configured status
+      const allVars = tool.credential_env_vars;
+      const nowConfigured = allVars.length === 0 || allVars.every((v) => creds[v]);
+      tool.configured = nowConfigured;
+      tool.missing_credentials = allVars.filter((v) => !creds[v]);
+      return { name: tool.name, configured: tool.configured, missing_credentials: tool.missing_credentials };
     },
   },
 ];
