@@ -918,15 +918,13 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <p className="text-[11px] text-muted-foreground mt-0.5">Reviewer can modify the step's output data before approving.</p>
         </CollapsibleSection>
 
-        {/* Tool Connectors */}
+        {/* Tool Connectors - always openable, checkbox clears selection */}
         <CollapsibleSection
           icon={Wrench}
-          title="Tool Connectors"
-          enabled={step.tools.length > 0}
+          title={`Tool Connectors${step.tools.length > 0 ? ` (${step.tools.length})` : ""}`}
+          enabled
           onToggle={() => {
             if (step.tools.length > 0) {
-              onChange({ ...step, tools: [] });
-            } else {
               onChange({ ...step, tools: [] });
             }
           }}
