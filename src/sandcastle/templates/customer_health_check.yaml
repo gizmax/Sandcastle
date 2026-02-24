@@ -1,0 +1,87 @@
+# name: Customer Health Check
+# description: Aggregate Salesforce account data and Zendesk tickets to assess customer health
+# tags: [Support, Salesforce, Zendesk, Analytics]
+# category: support
+
+name: customer-health-check
+description: Aggregate Salesforce account data and Zendesk tickets to assess customer health
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [salesforce, zendesk]
+
+input_schema:
+  required: ["account_name"]
+  properties:
+    account_name:
+      type: string
+      description: "Customer account name to analyze"
+
+steps:
+  - id: fetch-customer
+    prompt: |
+      Look up the customer account in Salesforce: {input.account_name}
+
+      Use the Salesforce tool:
+        node /home/user/tools/salesforce.mjs get_account '{input.account_name}'
+
+      Return account details: name, plan/tier, ARR, contract renewal date,
+      main contacts, last interaction date, and any notes.
+    model: haiku
+    max_turns: 5
+
+  - id: fetch-tickets
+    prompt: |
+      Fetch all Zendesk tickets for the customer: {input.account_name}
+      Look at the last 90 days of ticket history.
+
+      Use the Zendesk tool:
+        node /home/user/tools/zendesk.mjs search_tickets '{input.account_name}' 90
+
+      Return ticket count, average resolution time, open tickets, and recurring themes.
+    model: haiku
+    max_turns: 5
+
+  - id: analyze-health
+    depends_on: [fetch-customer, fetch-tickets]
+    prompt: |
+      Analyze the overall health of this customer account:
+
+      Account data: {steps.fetch-customer.output}
+      Support history: {steps.fetch-tickets.output}
+
+      Calculate a Health Score (1-100) based on:
+      - Support volume trend (fewer tickets = healthier): 0-25 points
+      - Resolution satisfaction (fast resolution = healthier): 0-25 points
+      - Engagement level (recent interactions, feature usage): 0-25 points
+      - Contract signals (renewal date proximity, plan tier): 0-25 points
+
+      Classify as:
+      - Healthy (80-100): Expand opportunity
+      - At Risk (50-79): Proactive outreach needed
+      - Critical (0-49): Immediate intervention required
+
+      Identify top 3 risk factors and top 3 positive signals.
+    model: sonnet
+    max_turns: 8
+
+  - id: report
+    depends_on: [analyze-health]
+    prompt: |
+      Generate a customer health report:
+
+      Health analysis: {steps.analyze-health.output}
+      Account data: {steps.fetch-customer.output}
+
+      Create a structured report with:
+      1. **Executive Summary** - 2-3 sentence overview
+      2. **Health Score** - score and classification with trend
+      3. **Key Metrics** - support volume, resolution time, engagement
+      4. **Risk Factors** - what to watch
+      5. **Positive Signals** - what's working
+      6. **Recommended Actions** - 3-5 specific next steps with owners
+
+      Format as a clear, actionable document suitable for a customer success review.
+    model: sonnet
+    max_turns: 8

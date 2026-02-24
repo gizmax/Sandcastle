@@ -1,6 +1,7 @@
 # name: Lead Enrichment
 # description: Research and enrich lead data with company info, scoring, and outreach angles
 # tags: [Sales, Research, Lead-Gen]
+# category: sales_crm
 
 name: lead-enrichment
 description: Research and enrich lead data with company info, scoring, and outreach angles

@@ -1,6 +1,7 @@
 # name: Review Sentiment
 # description: Analyze customer reviews to extract sentiment trends and actionable insights
 # tags: [Support, Analytics, Sentiment]
+# category: support
 
 name: review-sentiment
 description: Analyze customer reviews to extract sentiment trends and actionable insights

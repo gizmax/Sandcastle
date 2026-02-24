@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { X, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
+import { TEMPLATE_PACKS, resolveCategory } from "@/lib/templatePacks";
 
 interface Template {
   name: string;
   description: string;
   tags: string[];
   step_count: number;
+  category?: string | null;
 }
 
 interface TemplateDetail extends Template {
@@ -20,7 +22,6 @@ interface TemplateBrowserProps {
   onSelect: (template: TemplateDetail) => void;
 }
 
-// Stable tag color palette derived from tag name
 const TAG_COLORS = [
   "bg-accent/15 text-accent",
   "bg-running/15 text-running",
@@ -42,16 +43,26 @@ export function TemplateBrowser({ open, onClose, onSelect }: TemplateBrowserProp
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [selectedPack, setSelectedPack] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     setSelectedName(null);
+    setSelectedPack(null);
     api.get<Template[]>("/templates").then((res) => {
       setTemplates(res.data || []);
     }).finally(() => setLoading(false));
   }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!selectedPack) return templates;
+    return templates.filter((t) => {
+      const cat = t.category || resolveCategory(null, t.tags);
+      return cat === selectedPack;
+    });
+  }, [templates, selectedPack]);
 
   const handleUseTemplate = useCallback(async () => {
     if (!selectedName) return;
@@ -67,10 +78,8 @@ export function TemplateBrowser({ open, onClose, onSelect }: TemplateBrowserProp
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
 
-      {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[80vh]">
           {/* Header */}
@@ -87,19 +96,49 @@ export function TemplateBrowser({ open, onClose, onSelect }: TemplateBrowserProp
             </button>
           </div>
 
+          {/* Category pills */}
+          <div className="flex flex-wrap gap-1.5 border-b border-border px-6 py-3">
+            <button
+              onClick={() => setSelectedPack(null)}
+              className={cn(
+                "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                !selectedPack
+                  ? "bg-accent text-accent-foreground"
+                  : "bg-border/40 text-muted hover:text-foreground"
+              )}
+            >
+              All
+            </button>
+            {TEMPLATE_PACKS.map((pack) => (
+              <button
+                key={pack.id}
+                onClick={() => setSelectedPack(selectedPack === pack.id ? null : pack.id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                  selectedPack === pack.id
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-border/40 text-muted hover:text-foreground"
+                )}
+              >
+                <pack.icon className="h-3 w-3" />
+                {pack.name}
+              </button>
+            ))}
+          </div>
+
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-6">
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted" />
               </div>
-            ) : templates.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <p className="text-center text-sm text-muted py-12">
-                No templates available.
+                No templates in this category.
               </p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {templates.map((t) => (
+                {filtered.map((t) => (
                   <button
                     key={t.name}
                     type="button"

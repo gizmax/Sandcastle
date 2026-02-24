@@ -1,6 +1,7 @@
 # name: Language Translator
 # description: Detects the source language and translates text to the target language
 # tags: [translation, language, i18n]
+# category: general_ai
 
 name: language-translator
 description: Detects the source language and translates text to the target language

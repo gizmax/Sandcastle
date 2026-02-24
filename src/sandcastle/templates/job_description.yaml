@@ -1,6 +1,7 @@
 # name: Job Description Generator
 # description: Generate inclusive job description with requirements, benefits, and interview plan
 # tags: [HR, Recruiting, Content]
+# category: hr_legal
 
 name: job-description-generator
 description: Generate inclusive job description with requirements, benefits, and interview plan

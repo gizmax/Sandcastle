@@ -1,0 +1,100 @@
+# name: Sprint Standup
+# description: Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack
+# tags: [Engineering, Jira, GitHub, Standup]
+# category: engineering
+
+name: sprint-standup
+description: Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [jira, github, slack]
+
+input_schema:
+  required: ["jira_project", "github_repo"]
+  properties:
+    jira_project:
+      type: string
+      description: "Jira project key (e.g. 'PROJ')"
+    github_repo:
+      type: string
+      description: "GitHub repository (e.g. 'org/repo')"
+    slack_channel:
+      type: string
+      description: "Slack channel for the standup post (e.g. '#engineering')"
+      default: "#engineering"
+
+steps:
+  - id: fetch-sprint
+    prompt: |
+      Fetch the active sprint data for Jira project {input.jira_project}.
+
+      Use the Jira tool:
+        node /home/user/tools/jira.mjs get_sprint '{input.jira_project}'
+
+      Return:
+      - Sprint name and days remaining
+      - Issues completed since yesterday
+      - Issues in progress (with assignees)
+      - Issues blocked or flagged
+      - Sprint burndown status (ahead/on-track/behind)
+    model: haiku
+    max_turns: 5
+
+  - id: fetch-prs
+    prompt: |
+      Fetch recent pull request activity for {input.github_repo} from the last 24 hours.
+
+      Use the GitHub tool:
+        node /home/user/tools/github.mjs list_prs '{input.github_repo}' 24
+
+      Return:
+      - PRs merged yesterday (title, author, linked issues)
+      - PRs currently in review (title, author, reviewers, age)
+      - PRs with requested changes or stale reviews (>48h)
+    model: haiku
+    max_turns: 5
+
+  - id: synthesize
+    depends_on: [fetch-sprint, fetch-prs]
+    prompt: |
+      Create a daily standup summary combining sprint and PR data:
+
+      Sprint data: {steps.fetch-sprint.output}
+      PR activity: {steps.fetch-prs.output}
+
+      Synthesize into:
+      1. **Yesterday's Progress** - What got done (merged PRs, completed issues)
+      2. **Today's Focus** - What's in progress, key PRs in review
+      3. **Blockers** - Blocked issues, stale PRs, any risks
+      4. **Sprint Health** - Burndown status, days remaining, velocity trend
+
+      Keep it concise - each section 2-4 bullet points max.
+      Flag anything that needs immediate attention.
+    model: sonnet
+    max_turns: 8
+
+  - id: post-to-slack
+    depends_on: [synthesize]
+    prompt: |
+      Post the standup summary to Slack channel {input.slack_channel}.
+
+      Summary: {steps.synthesize.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Format with Slack markdown:
+      *Daily Standup - {input.jira_project}*
+
+      Include all sections with emoji prefixes:
+      - :white_check_mark: Yesterday's Progress
+      - :dart: Today's Focus
+      - :warning: Blockers
+      - :chart_with_upwards_trend: Sprint Health
+
+      Report whether the message was posted successfully.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

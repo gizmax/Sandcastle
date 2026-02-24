@@ -30,7 +30,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Overview", end: true },
   { to: "/runs", icon: PlayCircle, label: "Runs" },
   { to: "/workflows", icon: GitBranch, label: "Workflows" },
-  { to: "/templates", icon: Layers, label: "Templates" },
+  { to: "/templates", icon: Layers, label: "Template Hub" },
   { to: "/integrations", icon: Plug, label: "Integrations" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" as const },
   { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },

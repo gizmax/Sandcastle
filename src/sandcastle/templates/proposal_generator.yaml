@@ -1,6 +1,7 @@
 # name: Proposal Generator
 # description: Generate a customized business proposal from meeting notes and product info
 # tags: [Sales, Document, Proposal]
+# category: sales_crm
 
 name: proposal-generator
 description: Generate a customized business proposal from meeting notes and product info

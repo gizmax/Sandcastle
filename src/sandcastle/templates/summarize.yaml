@@ -1,6 +1,7 @@
 # name: Text Summarizer
 # description: Takes text input, summarizes it, and formats the summary for output
 # tags: [text, summarization, formatting]
+# category: general_ai
 
 name: text-summarizer
 description: Takes text input, summarizes it, and formats the summary for output

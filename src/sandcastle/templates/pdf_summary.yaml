@@ -1,6 +1,7 @@
 # name: PDF Summary
 # description: Scan a directory for PDF files, summarize each one in parallel, and create a final report
 # tags: [pdf, summarization, parallel, documents]
+# category: general_ai
 
 name: pdf-summary
 description: Scan a directory for PDF files, summarize each one in parallel, and create a final report

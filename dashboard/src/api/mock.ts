@@ -529,11 +529,13 @@ const MOCK_OPTIMIZER_STATS = {
 };
 
 const MOCK_TEMPLATES = [
+  // --- general_ai ---
   {
     name: "summarize",
     description: "Summarize text input with configurable detail level",
     tags: ["NLP", "Text"],
     step_count: 2,
+    category: "general_ai",
     input_schema: { required: ["text"], properties: { text: { type: "string", description: "Text to summarize" }, detail_level: { type: "string", description: "Detail level: brief, standard, detailed", default: "standard" } } },
   },
   {
@@ -541,6 +543,7 @@ const MOCK_TEMPLATES = [
     description: "Detect language and translate to target language",
     tags: ["NLP", "Translation"],
     step_count: 2,
+    category: "general_ai",
     input_schema: { required: ["text", "target_language"], properties: { text: { type: "string", description: "Text to translate" }, target_language: { type: "string", description: "Target language (e.g. en, cs, de)" } } },
   },
   {
@@ -548,6 +551,7 @@ const MOCK_TEMPLATES = [
     description: "Multi-source research with parallel analysis and fact extraction",
     tags: ["Research", "Multi-agent"],
     step_count: 4,
+    category: "general_ai",
     input_schema: { required: ["topic"], properties: { topic: { type: "string", description: "Research topic or question" }, depth: { type: "string", description: "Research depth: quick, standard, deep", default: "standard" } } },
   },
   {
@@ -555,36 +559,51 @@ const MOCK_TEMPLATES = [
     description: "Step-by-step reasoning through complex problems",
     tags: ["Reasoning", "Chain"],
     step_count: 3,
+    category: "general_ai",
   },
   {
     name: "review_and_approve",
     description: "Content generation with human approval gate before publishing",
     tags: ["Human-in-loop", "Content"],
     step_count: 3,
+    category: "general_ai",
   },
+  {
+    name: "pdf_summary",
+    description: "Upload a PDF document, extract text, and generate a structured summary",
+    tags: ["NLP", "PDF", "Document"],
+    step_count: 3,
+    category: "general_ai",
+    input_schema: { required: ["pdf_url"], properties: { pdf_url: { type: "string", description: "URL or path to the PDF file" } } },
+  },
+  // --- marketing ---
   {
     name: "blog_to_social",
     description: "Transform a blog post into platform-specific social media content",
     tags: ["Marketing", "Content", "Social"],
     step_count: 5,
+    category: "marketing",
   },
   {
     name: "seo_content",
     description: "Research keywords and create SEO-optimized article with meta tags",
     tags: ["Marketing", "SEO", "Content"],
     step_count: 4,
+    category: "marketing",
   },
   {
     name: "email_campaign",
     description: "Generate email campaign with subject line variants and A/B copy",
     tags: ["Marketing", "Email", "Campaign"],
     step_count: 5,
+    category: "marketing",
   },
   {
     name: "competitor_analysis",
     description: "Analyze competitor positioning, strengths, weaknesses, and opportunities",
     tags: ["Marketing", "Strategy", "Research"],
     step_count: 4,
+    category: "marketing",
     input_schema: { required: ["company_url"], properties: { company_url: { type: "string", description: "URL of your company website" }, industry: { type: "string", description: "Industry context (optional)" } } },
   },
   {
@@ -592,12 +611,15 @@ const MOCK_TEMPLATES = [
     description: "Generate ad copy variants for Google Ads and Meta Ads campaigns",
     tags: ["Marketing", "Advertising", "Copywriting"],
     step_count: 4,
+    category: "marketing",
   },
+  // --- sales_crm ---
   {
     name: "lead_enrichment",
     description: "Research and enrich lead data with company info, scoring, and outreach angles",
     tags: ["Sales", "Research", "Lead-Gen"],
     step_count: 5,
+    category: "sales_crm",
     input_schema: { required: ["company_name"], properties: { company_name: { type: "string", description: "Company name to research" }, contact_email: { type: "string", description: "Contact email (optional)" } } },
   },
   {
@@ -605,54 +627,130 @@ const MOCK_TEMPLATES = [
     description: "Generate a customized business proposal from meeting notes and product info",
     tags: ["Sales", "Document", "Proposal"],
     step_count: 4,
+    category: "sales_crm",
   },
   {
     name: "meeting_recap",
     description: "Transform meeting transcript into summary, action items, and follow-up email",
     tags: ["Sales", "Productivity", "Communication"],
     step_count: 3,
+    category: "sales_crm",
   },
+  {
+    name: "crm_enrichment",
+    description: "Enrich HubSpot contacts with research data and create follow-up deals",
+    tags: ["CRM", "HubSpot", "Sales", "Research"],
+    step_count: 4,
+    category: "sales_crm",
+    input_schema: { required: ["search_query"], properties: { search_query: { type: "string", description: "Search query for HubSpot contacts (name or email)" } } },
+  },
+  {
+    name: "sales_pipeline_autopilot",
+    description: "Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks",
+    tags: ["Sales", "Pipeline", "CRM", "Automation"],
+    step_count: 4,
+    category: "sales_crm",
+    input_schema: { required: ["pipeline_name"], properties: { pipeline_name: { type: "string", description: "HubSpot pipeline name to monitor" }, stale_days: { type: "number", description: "Days without activity before a deal is stalled", default: 7 }, alert_channel: { type: "string", description: "Slack channel for alerts", default: "#sales-alerts" } } },
+  },
+  {
+    name: "lead_scoring",
+    description: "Fetch leads from Salesforce, enrich with research data, score, and update CRM",
+    tags: ["Sales", "Salesforce", "Lead-Gen", "Scoring"],
+    step_count: 4,
+    category: "sales_crm",
+    input_schema: { required: ["lead_source"], properties: { lead_source: { type: "string", description: "Salesforce lead source filter (e.g. 'Web', 'Event')" }, min_company_size: { type: "number", description: "Minimum company size (employees)", default: 10 } } },
+  },
+  // --- support ---
   {
     name: "ticket_classifier",
     description: "Classify support ticket, assign priority, and draft response",
     tags: ["Support", "Classification", "Automation"],
     step_count: 4,
+    category: "support",
   },
   {
     name: "review_sentiment",
     description: "Analyze customer reviews to extract sentiment trends and actionable insights",
     tags: ["Support", "Analytics", "Sentiment"],
     step_count: 4,
+    category: "support",
   },
   {
-    name: "job_description",
-    description: "Generate inclusive job description with requirements, benefits, and interview plan",
-    tags: ["HR", "Recruiting", "Content"],
+    name: "support_ticket_triage",
+    description: "Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack",
+    tags: ["Support", "Zendesk", "Triage", "Automation"],
     step_count: 4,
+    category: "support",
+    input_schema: { required: ["hours_lookback"], properties: { hours_lookback: { type: "number", description: "Hours to look back for new tickets", default: 4 }, slack_channel: { type: "string", description: "Slack channel for notifications", default: "#support-triage" } } },
   },
   {
-    name: "resume_screener",
-    description: "Screen resume against job description with match scoring and interview recommendations",
-    tags: ["HR", "Recruiting", "Screening"],
+    name: "customer_health_check",
+    description: "Aggregate Salesforce account data and Zendesk tickets to assess customer health",
+    tags: ["Support", "Salesforce", "Zendesk", "Analytics"],
     step_count: 4,
+    category: "support",
+    input_schema: { required: ["account_name"], properties: { account_name: { type: "string", description: "Customer account name to analyze" } } },
   },
-  {
-    name: "contract_review",
-    description: "Review contract for key terms, risks, and generate plain-language summary",
-    tags: ["Legal", "Compliance", "Document"],
-    step_count: 4,
-  },
+  // --- engineering ---
   {
     name: "release_notes",
     description: "Generate user-facing release notes and internal changelog from commit history",
     tags: ["Product", "Engineering", "Documentation"],
     step_count: 4,
+    category: "engineering",
   },
   {
     name: "data_extractor",
     description: "Extract structured data from documents with validation and error handling",
     tags: ["Product", "Data", "Automation"],
     step_count: 4,
+    category: "engineering",
+  },
+  {
+    name: "jira_triage",
+    description: "Auto-triage new Jira issues with priority, labels, and assignment suggestions",
+    tags: ["Project Management", "Jira", "Triage"],
+    step_count: 3,
+    category: "engineering",
+    input_schema: { required: ["project"], properties: { project: { type: "string", description: "Jira project key (e.g. PROJ)" } } },
+  },
+  {
+    name: "slack_standup",
+    description: "Collect standup updates from Slack threads and compile a daily digest",
+    tags: ["Communication", "Slack", "Standup"],
+    step_count: 3,
+    category: "engineering",
+    input_schema: { required: ["channel"], properties: { channel: { type: "string", description: "Slack channel for standups (e.g. '#engineering')" } } },
+  },
+  {
+    name: "sprint_standup",
+    description: "Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack",
+    tags: ["Engineering", "Jira", "GitHub", "Standup"],
+    step_count: 4,
+    category: "engineering",
+    input_schema: { required: ["jira_project", "github_repo"], properties: { jira_project: { type: "string", description: "Jira project key (e.g. 'PROJ')" }, github_repo: { type: "string", description: "GitHub repository (e.g. 'org/repo')" }, slack_channel: { type: "string", description: "Slack channel for standup", default: "#engineering" } } },
+  },
+  // --- hr_legal ---
+  {
+    name: "job_description",
+    description: "Generate inclusive job description with requirements, benefits, and interview plan",
+    tags: ["HR", "Recruiting", "Content"],
+    step_count: 4,
+    category: "hr_legal",
+  },
+  {
+    name: "resume_screener",
+    description: "Screen resume against job description with match scoring and interview recommendations",
+    tags: ["HR", "Recruiting", "Screening"],
+    step_count: 4,
+    category: "hr_legal",
+  },
+  {
+    name: "contract_review",
+    description: "Review contract for key terms, risks, and generate plain-language summary",
+    tags: ["Legal", "Compliance", "Document"],
+    step_count: 4,
+    category: "hr_legal",
   },
 ];
 
@@ -1815,6 +1913,296 @@ steps:
       Original extraction: {steps.extract-data.output}
     model: claude-haiku-4-5-20251001
     max_turns: 3
+`,
+  sales_pipeline_autopilot: `# name: Sales Pipeline Autopilot
+# description: Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks
+# tags: [Sales, Pipeline, CRM, Automation]
+# category: sales_crm
+
+name: sales-pipeline-autopilot
+description: Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [hubspot, slack]
+
+input_schema:
+  required: ["pipeline_name"]
+  properties:
+    pipeline_name:
+      type: string
+      description: "HubSpot pipeline name to monitor"
+    stale_days:
+      type: number
+      description: "Days without activity before stalled (default: 7)"
+      default: 7
+    alert_channel:
+      type: string
+      description: "Slack channel for pipeline alerts"
+      default: "#sales-alerts"
+
+steps:
+  - id: fetch-deals
+    prompt: >
+      Fetch all open deals from the HubSpot pipeline: {input.pipeline_name}.
+      Return deal name, stage, amount, last activity date, and owner.
+    model: haiku
+    max_turns: 5
+
+  - id: analyze-stalled
+    depends_on: [fetch-deals]
+    prompt: >
+      Analyze deals for stalled progress. Stale threshold: {input.stale_days} days.
+      For each deal determine risk level, recommended action, and follow-up angle.
+      Deals: {steps.fetch-deals.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: draft-followups
+    depends_on: [analyze-stalled]
+    prompt: >
+      Draft personalized follow-up emails for High/Medium risk stalled deals.
+      Analysis: {steps.analyze-stalled.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: send-alerts
+    depends_on: [analyze-stalled]
+    prompt: >
+      Send pipeline health summary to Slack channel {input.alert_channel}.
+      Analysis: {steps.analyze-stalled.output}
+    model: haiku
+    max_turns: 5
+    tools: [slack]
+`,
+  lead_scoring: `# name: Lead Scoring
+# description: Fetch leads from Salesforce, enrich with research data, score, and update CRM
+# tags: [Sales, Salesforce, Lead-Gen, Scoring]
+# category: sales_crm
+
+name: lead-scoring
+description: Fetch leads from Salesforce, enrich with research data, score, and update CRM
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [salesforce]
+
+input_schema:
+  required: ["lead_source"]
+  properties:
+    lead_source:
+      type: string
+      description: "Salesforce lead source filter"
+    min_company_size:
+      type: number
+      description: "Minimum company size (employees)"
+      default: 10
+
+steps:
+  - id: fetch-leads
+    prompt: >
+      Query Salesforce for recent leads matching source: {input.lead_source}.
+      Return name, company, title, email, and creation date.
+    model: haiku
+    max_turns: 5
+
+  - id: enrich-data
+    depends_on: [fetch-leads]
+    prompt: >
+      Research and enrich leads with company data. Filter below {input.min_company_size} employees.
+      Leads: {steps.fetch-leads.output}
+    model: sonnet
+    max_turns: 10
+
+  - id: score-leads
+    depends_on: [enrich-data]
+    prompt: >
+      Score each lead 1-100. Classify as Hot (80+), Warm (50-79), Cold (0-49).
+      Enriched leads: {steps.enrich-data.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: update-crm
+    depends_on: [score-leads]
+    prompt: >
+      Update Salesforce lead records with scores. Move Hot leads to Qualified status.
+      Scored leads: {steps.score-leads.output}
+    model: haiku
+    max_turns: 15
+`,
+  support_ticket_triage: `# name: Support Ticket Triage
+# description: Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack
+# tags: [Support, Zendesk, Triage, Automation]
+# category: support
+
+name: support-ticket-triage
+description: Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [zendesk, slack]
+
+input_schema:
+  required: ["hours_lookback"]
+  properties:
+    hours_lookback:
+      type: number
+      description: "Hours to look back for new tickets"
+      default: 4
+    slack_channel:
+      type: string
+      description: "Slack channel for triage notifications"
+      default: "#support-triage"
+
+steps:
+  - id: fetch-tickets
+    prompt: >
+      Fetch new/open Zendesk tickets from the last {input.hours_lookback} hours.
+      Return ID, subject, description, requester, and priority.
+    model: haiku
+    max_turns: 5
+
+  - id: classify
+    depends_on: [fetch-tickets]
+    prompt: >
+      Classify each ticket by urgency (Critical/High/Normal/Low), category, and sentiment.
+      Tickets: {steps.fetch-tickets.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: draft-responses
+    depends_on: [classify]
+    prompt: >
+      Draft initial responses for each classified ticket with appropriate tone.
+      Classified tickets: {steps.classify.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: notify-slack
+    depends_on: [classify]
+    prompt: >
+      Post triage summary to Slack channel {input.slack_channel}.
+      Classification: {steps.classify.output}
+    model: haiku
+    max_turns: 5
+    tools: [slack]
+`,
+  customer_health_check: `# name: Customer Health Check
+# description: Aggregate Salesforce account data and Zendesk tickets to assess customer health
+# tags: [Support, Salesforce, Zendesk, Analytics]
+# category: support
+
+name: customer-health-check
+description: Aggregate Salesforce account data and Zendesk tickets to assess customer health
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [salesforce, zendesk]
+
+input_schema:
+  required: ["account_name"]
+  properties:
+    account_name:
+      type: string
+      description: "Customer account name to analyze"
+
+steps:
+  - id: fetch-customer
+    prompt: >
+      Look up customer account in Salesforce: {input.account_name}.
+      Return plan, ARR, renewal date, contacts, and last interaction.
+    model: haiku
+    max_turns: 5
+
+  - id: fetch-tickets
+    prompt: >
+      Fetch Zendesk tickets for {input.account_name} from the last 90 days.
+      Return ticket count, resolution times, and recurring themes.
+    model: haiku
+    max_turns: 5
+
+  - id: analyze-health
+    depends_on: [fetch-customer, fetch-tickets]
+    prompt: >
+      Calculate Health Score (1-100) based on support volume, resolution satisfaction,
+      engagement, and contract signals. Classify as Healthy/At Risk/Critical.
+      Account: {steps.fetch-customer.output}
+      Tickets: {steps.fetch-tickets.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: report
+    depends_on: [analyze-health]
+    prompt: >
+      Generate a customer health report with executive summary, metrics,
+      risk factors, positive signals, and recommended actions.
+      Analysis: {steps.analyze-health.output}
+    model: sonnet
+    max_turns: 8
+`,
+  sprint_standup: `# name: Sprint Standup
+# description: Synthesize Jira sprint progress and GitHub PRs into a daily standup summary
+# tags: [Engineering, Jira, GitHub, Standup]
+# category: engineering
+
+name: sprint-standup
+description: Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [jira, github, slack]
+
+input_schema:
+  required: ["jira_project", "github_repo"]
+  properties:
+    jira_project:
+      type: string
+      description: "Jira project key (e.g. 'PROJ')"
+    github_repo:
+      type: string
+      description: "GitHub repository (e.g. 'org/repo')"
+    slack_channel:
+      type: string
+      description: "Slack channel for the standup post"
+      default: "#engineering"
+
+steps:
+  - id: fetch-sprint
+    prompt: >
+      Fetch active sprint data for Jira project {input.jira_project}.
+      Return sprint name, days remaining, completed/in-progress/blocked issues.
+    model: haiku
+    max_turns: 5
+
+  - id: fetch-prs
+    prompt: >
+      Fetch PR activity for {input.github_repo} from the last 24 hours.
+      Return merged PRs, PRs in review, and stale PRs.
+    model: haiku
+    max_turns: 5
+
+  - id: synthesize
+    depends_on: [fetch-sprint, fetch-prs]
+    prompt: >
+      Create daily standup summary from sprint and PR data.
+      Sprint: {steps.fetch-sprint.output}
+      PRs: {steps.fetch-prs.output}
+    model: sonnet
+    max_turns: 8
+
+  - id: post-to-slack
+    depends_on: [synthesize]
+    prompt: >
+      Post standup summary to {input.slack_channel} with Slack formatting.
+      Summary: {steps.synthesize.output}
+    model: haiku
+    max_turns: 5
+    tools: [slack]
 `,
 };
 

@@ -1,6 +1,7 @@
 # name: Chain of Thought Solver
 # description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer
 # tags: [reasoning, chain-of-thought, problem-solving]
+# category: general_ai
 
 name: chain-of-thought-solver
 description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer

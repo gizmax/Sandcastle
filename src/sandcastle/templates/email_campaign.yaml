@@ -1,6 +1,7 @@
 # name: Email Campaign Generator
 # description: Generate email campaign with subject line variants and A/B copy
 # tags: [Marketing, Email, Campaign]
+# category: marketing
 
 name: email-campaign-generator
 description: Generate email campaign with subject line variants and A/B copy

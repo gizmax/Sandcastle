@@ -1,0 +1,100 @@
+# name: Support Ticket Triage
+# description: Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack
+# tags: [Support, Zendesk, Triage, Automation]
+# category: support
+
+name: support-ticket-triage
+description: Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [zendesk, slack]
+
+input_schema:
+  required: ["hours_lookback"]
+  properties:
+    hours_lookback:
+      type: number
+      description: "How many hours back to look for new tickets (default: 4)"
+      default: 4
+    slack_channel:
+      type: string
+      description: "Slack channel for triage notifications (e.g. '#support-triage')"
+      default: "#support-triage"
+
+steps:
+  - id: fetch-tickets
+    prompt: |
+      Fetch new/open Zendesk tickets from the last {input.hours_lookback} hours.
+
+      Use the Zendesk tool:
+        node /home/user/tools/zendesk.mjs list_tickets 'new' {input.hours_lookback}
+
+      Return each ticket's ID, subject, description, requester, creation time, and current priority.
+    model: haiku
+    max_turns: 5
+
+  - id: classify
+    depends_on: [fetch-tickets]
+    prompt: |
+      Classify each support ticket by urgency and category:
+
+      Tickets: {steps.fetch-tickets.output}
+
+      For each ticket, determine:
+      1. **Urgency** (Critical/High/Normal/Low):
+         - Critical: service down, data loss, security issue
+         - High: major feature broken, blocking customer
+         - Normal: feature request, how-to question, minor bug
+         - Low: feedback, cosmetic issue
+      2. **Category**: billing, technical, account, feature-request, bug, onboarding
+      3. **Sentiment**: positive, neutral, frustrated, angry
+      4. **Suggested tags**: 1-3 tags for routing
+
+      Return JSON array: ticket_id, subject, urgency, category, sentiment, tags, reasoning.
+    model: sonnet
+    max_turns: 8
+
+  - id: draft-responses
+    depends_on: [classify]
+    prompt: |
+      Draft initial responses for each classified ticket:
+
+      Classified tickets: {steps.classify.output}
+
+      For each ticket, write a response that:
+      - Acknowledges the customer's issue with empathy
+      - Matches tone to the sentiment (more empathetic for frustrated/angry)
+      - For Critical/High urgency: include escalation notice
+      - For technical issues: ask for relevant diagnostic info
+      - For billing: reference self-service options
+      - Keep responses concise (3-5 sentences)
+
+      Return: ticket_id, subject, urgency, draft_response, needs_human_review (boolean).
+      Mark needs_human_review=true for Critical urgency or angry sentiment.
+    model: sonnet
+    max_turns: 8
+
+  - id: notify-slack
+    depends_on: [classify]
+    prompt: |
+      Post a triage summary to Slack channel {input.slack_channel}.
+
+      Classification results: {steps.classify.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Format:
+      *Support Triage Summary* (last {input.hours_lookback}h)
+      - Total new tickets: <count>
+      - Critical: <count> (list ticket IDs)
+      - High: <count>
+      - Normal: <count>
+      - Low: <count>
+
+      List Critical and High tickets with subject and category for immediate attention.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

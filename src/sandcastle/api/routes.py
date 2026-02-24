@@ -483,6 +483,7 @@ async def list_templates() -> ApiResponse:
                 "tags": t.tags,
                 "step_count": t.step_count,
                 "input_schema": t.input_schema,
+                "category": t.category,
             }
             for t in templates
         ]
@@ -511,6 +512,7 @@ async def get_template(template_name: str) -> ApiResponse:
             "file_name": info.file_name,
             "content": content,
             "input_schema": info.input_schema,
+            "category": info.category,
         }
     )
 
