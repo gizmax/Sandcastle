@@ -246,6 +246,214 @@ def _strip_fencing(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Chat-based generation (multi-turn)
+# ---------------------------------------------------------------------------
+
+def _build_chat_system_prompt() -> str:
+    """Build the system prompt for multi-turn chat-based generation."""
+    models = ", ".join(sorted(KNOWN_MODELS))
+    examples = _load_example_templates()
+
+    return f"""\
+You are a workflow design assistant for Sandcastle, an AI agent orchestrator.
+You help users create and modify workflow YAML definitions through conversation.
+
+You respond in JSON format with one of two modes:
+
+MODE 1 - QUESTIONS (when you need more info):
+{{"mode": "questions", "message": "Your 2-4 clarifying questions as natural text"}}
+
+MODE 2 - YAML (when you have enough info to generate/update):
+{{"mode": "yaml", "message": "Brief explanation of what was generated/changed", "yaml": "<complete valid YAML>"}}
+
+Decision rules:
+- First user message, no existing workflow: ask 2-4 relevant questions (MODE 1)
+- User says "just generate" / "go ahead" / "skip questions": produce YAML immediately (MODE 2)
+- User answered your questions: produce YAML (MODE 2)
+- Existing workflow provided + clear instruction: update YAML (MODE 2)
+- Existing workflow provided + vague request: ask what to change (MODE 1)
+- After YAML already generated: new message = refinement -> updated YAML (MODE 2)
+
+## YAML Schema
+
+A workflow YAML has these top-level fields:
+- name: kebab-case identifier (required)
+- description: short description (required)
+- default_model: model name (optional, default: sonnet)
+- default_max_turns: integer (optional, default: 10)
+- default_timeout: seconds (optional, default: 300)
+- input_schema: JSON Schema for user inputs (required)
+  - required: list of required field names
+  - properties: object with field definitions (type, description)
+- steps: list of step objects (required)
+
+Each step has:
+- id: unique kebab-case identifier (required)
+- prompt: the instruction for the agent (required)
+- depends_on: list of step IDs this step waits for (optional)
+- model: model name (optional, overrides default_model)
+- max_turns: integer (optional)
+- type: "approval" for human-in-the-loop steps (optional)
+- approval_config: config for approval steps (optional)
+  - message: reviewer message
+  - show_data: variable path to show reviewer
+  - timeout_hours: float
+  - on_timeout: "abort" or "skip"
+  - allow_edit: boolean
+
+## Available Models
+{models}
+Always use these short names - NEVER use full API model IDs.
+
+## Variable Syntax
+- {{input.X}} - reference user input field X
+- {{steps.STEP_ID.output}} - reference output of a previous step
+
+## Sandbox Execution Environment
+
+Workflows run inside sandboxed environments (E2B cloud sandbox, Docker, or local subprocess).
+The agent has access to ONLY these tools: Bash (with curl), Read, Write, Edit, Glob, Grep.
+
+CRITICAL LIMITATIONS - the agent CANNOT:
+- Browse the web or render JavaScript - no browser is available
+- Use WebSearch or WebFetch - these tools do NOT exist in the sandbox
+- Access social media platforms (Twitter/X, LinkedIn, Reddit, Instagram) - they require OAuth/API keys
+- Access review platforms (G2, Trustpilot, Capterra, App Store) - they require JavaScript rendering
+- Crawl multiple pages of a website - only simple single-page curl requests work
+- Use Google/Bing search - search engines block automated curl requests
+
+WHAT WORKS:
+- Fetching simple HTML pages via curl (news sites, company homepages, documentation)
+- Calling public REST APIs with JSON responses
+- Processing data provided as user input (JSON, CSV, text pasted by user)
+- Using the agent's built-in knowledge for analysis, writing, reasoning, and planning
+- File operations (reading, writing, creating reports, generating code)
+
+RULES FOR WEB-DEPENDENT WORKFLOWS:
+1. If a workflow needs social media data, review data, or search results - require the data as INPUT
+2. NEVER write prompts that ask the agent to "search the web", "browse social media", or "crawl a website"
+3. Prefer workflows where the user provides all data as input and the agent does analysis
+
+## Rules
+1. Every workflow MUST have input_schema with required and properties
+2. Use kebab-case for workflow name and step IDs
+3. First step should have no depends_on
+4. Steps that run in parallel share the same depends_on
+5. Use descriptive prompts that reference inputs and previous step outputs
+6. Choose appropriate models: sonnet for complex tasks, haiku for simple formatting
+
+## Examples
+
+{examples}
+
+IMPORTANT: Output ONLY a valid JSON object. No markdown fencing, no extra text."""
+
+
+async def generate_chat(
+    messages: list[dict],
+    *,
+    existing_yaml: str | None = None,
+) -> dict:
+    """Multi-turn chat-based workflow generation.
+
+    Args:
+        messages: Conversation history [{role, content}, ...].
+        existing_yaml: Existing workflow YAML for edit mode.
+
+    Returns:
+        Dict with: mode, message, yaml_content?, name?, steps_count?,
+        validation_errors?, input_schema?
+    """
+    import json
+    import os
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        from sandcastle.config import settings
+        api_key = settings.anthropic_api_key
+    if not api_key:
+        raise ValueError(
+            "ANTHROPIC_API_KEY is required for workflow generation. "
+            "Set it in your .env file or environment."
+        )
+
+    system_prompt = _build_chat_system_prompt()
+
+    # Prepare messages - inject existing YAML context into the first user message
+    api_messages = []
+    for i, msg in enumerate(messages):
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if i == 0 and existing_yaml and role == "user":
+            content = (
+                f"[Existing workflow]\n{existing_yaml}\n\n"
+                f"[User request]\n{content}"
+            )
+        api_messages.append({"role": role, "content": content})
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.post(
+            _API_URL,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": _MODEL,
+                "max_tokens": _MAX_TOKENS,
+                "system": system_prompt,
+                "messages": api_messages,
+            },
+        )
+        resp.raise_for_status()
+
+    data = resp.json()
+    raw_text = data["content"][0]["text"]
+
+    # Parse JSON response
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        # Try to extract JSON from the response
+        json_match = re.search(r"\{[\s\S]*\}", raw_text)
+        if json_match:
+            parsed = json.loads(json_match.group())
+        else:
+            return {"mode": "questions", "message": raw_text}
+
+    mode = parsed.get("mode", "questions")
+    message = parsed.get("message", "")
+
+    if mode == "yaml":
+        yaml_content = _strip_fencing(parsed.get("yaml", ""))
+        result: dict = {
+            "mode": "yaml",
+            "message": message,
+            "yaml_content": yaml_content,
+        }
+
+        # Validate the generated YAML
+        try:
+            wf = parse_yaml_string(yaml_content)
+            result["name"] = wf.name
+            result["description"] = wf.description
+            result["steps_count"] = len(wf.steps)
+            result["input_schema"] = wf.input_schema
+            errors = validate(wf)
+            result["validation_errors"] = errors
+        except Exception as exc:
+            result["name"] = ""
+            result["steps_count"] = 0
+            result["validation_errors"] = [f"YAML parse error: {exc}"]
+
+        return result
+
+    # mode == "questions" or unknown
+    return {"mode": "questions", "message": message}
+
+
+# ---------------------------------------------------------------------------
 # Sync wrapper for CLI
 # ---------------------------------------------------------------------------
 

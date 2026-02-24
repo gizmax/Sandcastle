@@ -43,6 +43,7 @@ from sandcastle.api.schemas import (
     EvalRunResponse,
     EvalStatsResponse,
     EvalSuiteRunRequest,
+    GenerateChatRequest,
     WorkflowGenerateRequest,
     OptimizerStatsResponse,
     PaginationMeta,
@@ -683,6 +684,45 @@ async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
             "input_schema": result.input_schema,
         }
     )
+
+
+@router.post("/generate/chat")
+async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
+    """Chat-based workflow generation with multi-turn conversation."""
+    from sandcastle.engine.generator import generate_chat as _generate_chat
+
+    if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        return ApiResponse(
+            error=ErrorResponse(
+                code="service_unavailable",
+                message="ANTHROPIC_API_KEY is required for workflow generation",
+            )
+        )
+
+    try:
+        msgs = [{"role": m.role, "content": m.content} for m in request.messages]
+        result = await _generate_chat(
+            msgs,
+            existing_yaml=request.existing_yaml,
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.error(f"Anthropic API error: {exc}")
+        return ApiResponse(
+            error=ErrorResponse(
+                code="upstream_error",
+                message=f"Anthropic API returned {exc.response.status_code}",
+            )
+        )
+    except Exception as exc:
+        logger.error(f"Chat generation failed: {exc}")
+        return ApiResponse(
+            error=ErrorResponse(
+                code="generation_failed",
+                message=str(exc),
+            )
+        )
+
+    return ApiResponse(data=result)
 
 
 # --- Workflows ---
