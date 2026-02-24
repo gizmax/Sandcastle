@@ -216,7 +216,7 @@ Sandcastle Executor
 ## 6. Monetization Strategy
 
 ### Phase 1: Open-Source Foundation (Current)
-- Keep `sandcastle-ai` fully open-source (MIT)
+- Keep `sandcastle-ai` source-available (BSL 1.1, converts to Apache 2.0 after 4 years)
 - Build community, GitHub stars, adoption
 
 ### Phase 2: Sandcastle Cloud (SaaS)
