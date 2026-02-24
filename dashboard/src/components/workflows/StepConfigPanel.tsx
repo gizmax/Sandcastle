@@ -927,18 +927,30 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             if (step.tools.length > 0) {
               onChange({ ...step, tools: [] });
             } else {
-              onChange({ ...step, tools: ["slack"] });
+              onChange({ ...step, tools: [] });
             }
           }}
         >
-          <p className="text-[11px] text-muted-foreground">
-            Select which integrations this step can use. Credentials are managed in the Integrations page.
+          <p className="text-[11px] text-muted-foreground mb-1">
+            Click tools below to give this step access to external integrations.
+            The agent can call their functions during execution.
           </p>
+          {step.tools.length > 0 && (
+            <div className="rounded-md bg-accent/5 border border-accent/20 px-2.5 py-1.5 mb-2">
+              <p className="text-[10px] font-mono text-accent">
+                tools: [{step.tools.join(", ")}]
+              </p>
+            </div>
+          )}
           <ToolSelector
             selected={step.tools}
             onChange={(tools) => onChange({ ...step, tools })}
             compact
           />
+          <p className="text-[10px] text-muted-foreground/60 mt-1.5">
+            Use <code className="text-accent/70">tool:connection</code> for named connections (e.g. postgresql:analytics).
+            Manage credentials on the Integrations page.
+          </p>
         </CollapsibleSection>
 
         {/* Policies */}

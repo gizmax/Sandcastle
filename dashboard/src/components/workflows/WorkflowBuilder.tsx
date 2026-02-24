@@ -733,12 +733,22 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             )}
           </button>
           {toolsPaletteOpen && (
-            <div className="mt-2 rounded-lg border border-border bg-background/50 p-2">
+            <div className="mt-2 rounded-lg border border-border bg-background/50 p-2 space-y-2">
+              <p className="text-[10px] text-muted-foreground">
+                Tools available to all steps by default. Override per-step in step settings.
+              </p>
               <ToolSelector
                 selected={defaultTools}
                 onChange={setDefaultTools}
                 compact
               />
+              {defaultTools.length > 0 && (
+                <div className="rounded-md bg-accent/5 border border-accent/20 px-2 py-1">
+                  <p className="text-[10px] font-mono text-accent">
+                    default_tools: [{defaultTools.join(", ")}]
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
