@@ -555,6 +555,473 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="webhook.mjs",
         icon="webhook",
     ),
+    # --- Enterprise connectors ---
+    "sap": ToolDefinition(
+        name="sap",
+        description="Search business partners, manage sales orders, and query materials in SAP S/4HANA",
+        category="erp",
+        functions=[
+            ToolFunction(
+                name="get_business_partners",
+                description="Search business partners",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search by name"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_sales_orders",
+                description="List sales orders with optional filters",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string", "description": "Filter by customer (SoldToParty)"},
+                        "status": {"type": "string", "description": "Filter by process status"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="create_sales_order",
+                description="Create a new sales order",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string", "description": "Customer (SoldToParty)"},
+                        "items": {"type": "array", "description": "Order items [{material, quantity}]"},
+                    },
+                    "required": ["customer_id"],
+                },
+            ),
+            ToolFunction(
+                name="get_material",
+                description="Get material/product details by ID",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "material_id": {"type": "string", "description": "Material/product ID"},
+                    },
+                    "required": ["material_id"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_SAP_BASE_URL", "TOOL_SAP_API_KEY"],
+        connector_file="sap.mjs",
+        icon="sap",
+    ),
+    "servicenow": ToolDefinition(
+        name="servicenow",
+        description="Create, search, and manage incidents and change requests in ServiceNow",
+        category="project_management",
+        functions=[
+            ToolFunction(
+                name="get_incidents",
+                description="Search incidents",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search in short_description"},
+                        "state": {"type": "string", "description": "Filter by state"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="create_incident",
+                description="Create a new incident",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "short_description": {"type": "string", "description": "Incident title"},
+                        "description": {"type": "string", "description": "Detailed description"},
+                        "urgency": {"type": "string", "description": "Urgency: 1 (high), 2 (medium), 3 (low)", "default": "2"},
+                        "category": {"type": "string", "description": "Incident category"},
+                    },
+                    "required": ["short_description"],
+                },
+            ),
+            ToolFunction(
+                name="update_incident",
+                description="Update an existing incident",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "sys_id": {"type": "string", "description": "Incident sys_id"},
+                        "state": {"type": "string", "description": "New state"},
+                        "work_notes": {"type": "string", "description": "Work notes to add"},
+                    },
+                    "required": ["sys_id"],
+                },
+            ),
+            ToolFunction(
+                name="get_change_requests",
+                description="List change requests",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "state": {"type": "string", "description": "Filter by state"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_SERVICENOW_INSTANCE", "TOOL_SERVICENOW_USERNAME", "TOOL_SERVICENOW_PASSWORD"],
+        connector_file="servicenow.mjs",
+        icon="servicenow",
+    ),
+    "snowflake": ToolDefinition(
+        name="snowflake",
+        description="Execute SQL queries and explore schemas in Snowflake data warehouse",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="execute_query",
+                description="Run a SQL query",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "sql": {"type": "string", "description": "SQL statement to execute"},
+                        "database": {"type": "string", "description": "Target database"},
+                        "schema": {"type": "string", "description": "Target schema"},
+                        "limit": {"type": "integer", "description": "Max rows to return", "default": 100},
+                    },
+                    "required": ["sql"],
+                },
+            ),
+            ToolFunction(
+                name="list_databases",
+                description="List available databases",
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            ToolFunction(
+                name="list_tables",
+                description="List tables in a schema",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database name"},
+                        "schema": {"type": "string", "description": "Schema name", "default": "PUBLIC"},
+                    },
+                    "required": ["database"],
+                },
+            ),
+            ToolFunction(
+                name="describe_table",
+                description="Get table column definitions",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database name"},
+                        "schema": {"type": "string", "description": "Schema name", "default": "PUBLIC"},
+                        "table": {"type": "string", "description": "Table name"},
+                    },
+                    "required": ["database", "table"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_SNOWFLAKE_ACCOUNT", "TOOL_SNOWFLAKE_USERNAME", "TOOL_SNOWFLAKE_PASSWORD", "TOOL_SNOWFLAKE_WAREHOUSE"],
+        connector_file="snowflake.mjs",
+        icon="snowflake",
+    ),
+    "mongodb": ToolDefinition(
+        name="mongodb",
+        description="Query, insert, update, and aggregate documents in MongoDB via Atlas Data API",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="find_documents",
+                description="Query documents from a collection",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database name"},
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "filter": {"type": "object", "description": "MongoDB query filter"},
+                        "limit": {"type": "integer", "description": "Max documents to return", "default": 20},
+                    },
+                    "required": ["database", "collection"],
+                },
+            ),
+            ToolFunction(
+                name="insert_document",
+                description="Insert a document into a collection",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database name"},
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "document": {"type": "object", "description": "Document to insert"},
+                    },
+                    "required": ["database", "collection", "document"],
+                },
+            ),
+            ToolFunction(
+                name="update_document",
+                description="Update documents matching a filter",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database name"},
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "filter": {"type": "object", "description": "MongoDB query filter"},
+                        "update": {"type": "object", "description": "Update operations (e.g. {$set: {field: value}})"},
+                    },
+                    "required": ["database", "collection", "filter", "update"],
+                },
+            ),
+            ToolFunction(
+                name="aggregate",
+                description="Run an aggregation pipeline",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "database": {"type": "string", "description": "Database name"},
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "pipeline": {"type": "array", "description": "Aggregation pipeline stages"},
+                    },
+                    "required": ["database", "collection", "pipeline"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_MONGODB_URI", "TOOL_MONGODB_API_KEY"],
+        connector_file="mongodb.mjs",
+        icon="mongodb",
+    ),
+    "stripe": ToolDefinition(
+        name="stripe",
+        description="Manage customers, invoices, and subscriptions in Stripe",
+        category="payments",
+        functions=[
+            ToolFunction(
+                name="list_customers",
+                description="Search or list Stripe customers",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "email": {"type": "string", "description": "Filter by email"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_customer",
+                description="Get customer details with subscriptions",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string", "description": "Stripe customer ID (cus_...)"},
+                    },
+                    "required": ["customer_id"],
+                },
+            ),
+            ToolFunction(
+                name="list_invoices",
+                description="List invoices with optional filters",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string", "description": "Filter by customer ID"},
+                        "status": {"type": "string", "description": "Filter: draft, open, paid, void, uncollectible"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="create_invoice",
+                description="Create a draft invoice with line items",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string", "description": "Customer ID"},
+                        "items": {"type": "array", "description": "Line items [{amount, currency, description}]"},
+                        "description": {"type": "string", "description": "Invoice description"},
+                    },
+                    "required": ["customer_id"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_STRIPE_SECRET_KEY"],
+        connector_file="stripe.mjs",
+        icon="stripe",
+    ),
+    "twilio": ToolDefinition(
+        name="twilio",
+        description="Send SMS, make calls, and manage messaging via Twilio",
+        category="communication",
+        functions=[
+            ToolFunction(
+                name="send_sms",
+                description="Send an SMS message",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient phone number (+E.164 format)"},
+                        "body": {"type": "string", "description": "Message text"},
+                    },
+                    "required": ["to", "body"],
+                },
+            ),
+            ToolFunction(
+                name="list_messages",
+                description="List message history",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Filter by recipient"},
+                        "from": {"type": "string", "description": "Filter by sender"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_message",
+                description="Get message details by SID",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "message_sid": {"type": "string", "description": "Twilio message SID"},
+                    },
+                    "required": ["message_sid"],
+                },
+            ),
+            ToolFunction(
+                name="make_call",
+                description="Initiate a voice call",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient phone number"},
+                        "twiml_url": {"type": "string", "description": "URL returning TwiML instructions"},
+                    },
+                    "required": ["to", "twiml_url"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_TWILIO_ACCOUNT_SID", "TOOL_TWILIO_AUTH_TOKEN", "TOOL_TWILIO_FROM_NUMBER"],
+        connector_file="twilio.mjs",
+        icon="twilio",
+    ),
+    "sendgrid": ToolDefinition(
+        name="sendgrid",
+        description="Send transactional emails and manage marketing contacts via SendGrid",
+        category="communication",
+        functions=[
+            ToolFunction(
+                name="send_email",
+                description="Send a transactional email",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient email address"},
+                        "subject": {"type": "string", "description": "Email subject"},
+                        "html_content": {"type": "string", "description": "HTML email body"},
+                        "text_content": {"type": "string", "description": "Plain text email body"},
+                    },
+                    "required": ["to", "subject"],
+                },
+            ),
+            ToolFunction(
+                name="list_contacts",
+                description="Search marketing contacts",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search by email or name"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 50},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="add_contacts",
+                description="Add or update marketing contacts",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "contacts": {"type": "array", "description": "Contacts [{email, first_name, last_name}]"},
+                    },
+                    "required": ["contacts"],
+                },
+            ),
+            ToolFunction(
+                name="get_stats",
+                description="Get email delivery statistics",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                        "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                    },
+                    "required": ["start_date"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_SENDGRID_API_KEY", "TOOL_SENDGRID_FROM_EMAIL"],
+        connector_file="sendgrid.mjs",
+        icon="sendgrid",
+    ),
+    "intercom": ToolDefinition(
+        name="intercom",
+        description="Search contacts, manage conversations, and send replies via Intercom",
+        category="communication",
+        functions=[
+            ToolFunction(
+                name="search_contacts",
+                description="Search users and leads",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search by name or email"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="create_conversation",
+                description="Start a new conversation with a contact",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "contact_id": {"type": "string", "description": "Contact ID"},
+                        "body": {"type": "string", "description": "Message body"},
+                    },
+                    "required": ["contact_id", "body"],
+                },
+            ),
+            ToolFunction(
+                name="reply_conversation",
+                description="Reply to an existing conversation",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "conversation_id": {"type": "string", "description": "Conversation ID"},
+                        "body": {"type": "string", "description": "Reply body"},
+                        "type": {"type": "string", "description": "Reply type: admin or user", "default": "admin"},
+                    },
+                    "required": ["conversation_id", "body"],
+                },
+            ),
+            ToolFunction(
+                name="list_conversations",
+                description="List conversations",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "state": {"type": "string", "description": "Filter: open, closed, snoozed"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_INTERCOM_ACCESS_TOKEN"],
+        connector_file="intercom.mjs",
+        icon="intercom",
+    ),
 }
 
 # All known tool names (for YAML validation)

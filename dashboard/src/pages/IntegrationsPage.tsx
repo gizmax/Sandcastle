@@ -26,7 +26,7 @@ interface Tool {
   connections: ToolConnection[];
 }
 
-const CATEGORIES = ["all", "communication", "project_management", "crm", "data", "general"] as const;
+const CATEGORIES = ["all", "communication", "project_management", "crm", "data", "erp", "payments", "general"] as const;
 type Category = (typeof CATEGORIES)[number];
 
 const CATEGORY_TAB_LABELS: Record<Category, string> = {
@@ -35,6 +35,8 @@ const CATEGORY_TAB_LABELS: Record<Category, string> = {
   project_management: "Project Mgmt",
   crm: "CRM",
   data: "Data",
+  erp: "ERP",
+  payments: "Payments",
   general: "General",
 };
 
