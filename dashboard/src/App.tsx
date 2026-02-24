@@ -23,6 +23,7 @@ const DeadLetterPage = lazy(() => import("@/pages/DeadLetterPage"));
 const ApiKeysPage = lazy(() => import("@/pages/ApiKeysPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
+const IntegrationsPage = lazy(() => import("@/pages/IntegrationsPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 function NotFound() {
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
               <Route path="/workflows/:name" element={<WorkflowDetailPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/integrations" element={<IntegrationsPage />} />
               <Route path="/approvals" element={<ApprovalsPage />} />
               <Route path="/autopilot" element={<AutoPilotPage />} />
               <Route path="/violations" element={<ViolationsPage />} />
