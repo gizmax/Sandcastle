@@ -1311,7 +1311,7 @@
   <header class="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.11.0 - Agent Memory + AI Generator + Integrations Hub
+        v0.12.0 - Hybrid Step Types + Flow Control
       </div>
       <h1>
         Stop babysitting<br>
@@ -1579,6 +1579,11 @@
           <p>Claude, OpenAI, Gemini, Minimax, OpenRouter - all from one config. Use short names like <code>sonnet</code>, <code>opus</code>, <code>openai/gpt-4o</code> in your workflows.</p>
         </div>
         <div class="feature-card">
+          <span class="feature-icon">🧩</span>
+          <h3>Hybrid Step Types</h3>
+          <p>Mix AI agent steps with lightweight <code>http</code>, <code>code</code>, <code>condition</code>, <code>classify</code>, and <code>loop</code> steps. 10x cheaper, 5x faster for simple operations.</p>
+        </div>
+        <div class="feature-card">
           <span class="feature-icon">📦</span>
           <h3>Pluggable Sandboxes</h3>
           <p>Four backends: E2B cloud microVMs, Docker containers, Cloudflare Workers edge, or local subprocess. Switch with one env var.</p>
@@ -1659,53 +1664,47 @@
             <span class="yaml-dot yaml-dot--red"></span>
             <span class="yaml-dot yaml-dot--yellow"></span>
             <span class="yaml-dot yaml-dot--green"></span>
-            lead-enrichment.yaml
+            lead-enrichment.yaml <span style="color:var(--accent);font-size:11px;margin-left:8px;">hybrid</span>
           </div>
           <pre><code><span class="y-key">name:</span> <span class="y-str">"Lead Enrichment"</span>
 <span class="y-key">default_model:</span> <span class="y-str">sonnet</span>
-<span class="y-key">default_timeout:</span> <span class="y-num">300</span>
 
 <span class="y-key">steps:</span>
-  - <span class="y-key">id:</span> <span class="y-str">"scrape"</span>
-    <span class="y-key">prompt:</span> <span class="y-anchor">|</span>
-      <span class="y-str">Visit {input.target_url} and extract:</span>
-      <span class="y-str">company name, employees, product, contact.</span>
-    <span class="y-key">output_schema:</span>
-      <span class="y-key">type:</span> <span class="y-str">object</span>
-      <span class="y-key">properties:</span>
-        <span class="y-key">company_name:</span> { <span class="y-key">type:</span> <span class="y-str">string</span> }
-        <span class="y-key">employees:</span> { <span class="y-key">type:</span> <span class="y-str">integer</span> }
+  - <span class="y-key">id:</span> <span class="y-str">"fetch"</span>
+    <span class="y-key">type:</span> <span class="y-str">http</span>              <span class="y-comment"># $0 - no LLM needed</span>
+    <span class="y-key">http_config:</span>
+      <span class="y-key">url:</span> <span class="y-str">"https://api.example.com/company/{input.id}"</span>
+      <span class="y-key">method:</span> <span class="y-str">GET</span>
 
   - <span class="y-key">id:</span> <span class="y-str">"enrich"</span>
-    <span class="y-key">depends_on:</span> [<span class="y-str">"scrape"</span>]
-    <span class="y-key">prompt:</span> <span class="y-anchor">|</span>
-      <span class="y-str">Given: {steps.scrape.output}</span>
-      <span class="y-str">Research revenue, industry, decision makers.</span>
-    <span class="y-key">retry:</span>
-      <span class="y-key">max_attempts:</span> <span class="y-num">3</span>
-      <span class="y-key">backoff:</span> <span class="y-str">exponential</span>
+    <span class="y-key">type:</span> <span class="y-str">llm</span>               <span class="y-comment"># single API call, no sandbox</span>
+    <span class="y-key">depends_on:</span> [<span class="y-str">"fetch"</span>]
+    <span class="y-key">prompt:</span> <span class="y-str">"Research: {steps.fetch.output}"</span>
 
-  - <span class="y-key">id:</span> <span class="y-str">"score"</span>
+  - <span class="y-key">id:</span> <span class="y-str">"route"</span>
+    <span class="y-key">type:</span> <span class="y-str">classify</span>          <span class="y-comment"># LLM-based routing</span>
     <span class="y-key">depends_on:</span> [<span class="y-str">"enrich"</span>]
-    <span class="y-key">prompt:</span> <span class="y-str">"Score this lead 1-100: {steps.enrich.output}"</span>
-    <span class="y-key">model:</span> <span class="y-str">haiku</span>  <span class="y-comment"># cheaper for simple scoring</span>
-
-<span class="y-key">on_complete:</span>
-  <span class="y-key">storage_path:</span> <span class="y-str">"leads/{run_id}/result.json"</span></code></pre>
+    <span class="y-key">classify_config:</span>
+      <span class="y-key">categories:</span> [<span class="y-str">hot</span>, <span class="y-str">warm</span>, <span class="y-str">cold</span>]
+      <span class="y-key">input:</span> <span class="y-str">"{steps.enrich.output}"</span>
+      <span class="y-key">branches:</span>
+        <span class="y-key">hot:</span> [<span class="y-str">priority-outreach</span>]
+        <span class="y-key">warm:</span> [<span class="y-str">nurture-sequence</span>]
+        <span class="y-key">cold:</span> [<span class="y-str">archive</span>]</code></pre>
         </div>
         <div class="yaml-info">
-          <h3>Three steps. One file. Production-ready.</h3>
+          <h3>Mix agent + lightweight steps. One file.</h3>
           <p>
-            Each step runs inside an isolated sandbox - E2B cloud, Docker container,
-            or Cloudflare edge. Sandcastle handles the orchestration between them.
+            Not every step needs a full AI agent. Use <code>http</code> for API calls ($0), <code>code</code> for Python snippets,
+            <code>condition</code> and <code>classify</code> for branching, <code>loop</code> for iteration - and <code>llm</code> or full agent steps where you actually need AI.
           </p>
           <ul class="yaml-features">
-            <li><span class="check">&#10003;</span><strong>Dependencies</strong> - steps run in order or parallel based on <code>depends_on</code></li>
+            <li><span class="check">&#10003;</span><strong>9 step types</strong> - standard, llm, http, code, condition, classify, loop, approval, sub_workflow</li>
+            <li><span class="check">&#10003;</span><strong>Smart branching</strong> - <code>condition</code> and <code>classify</code> route to different paths</li>
+            <li><span class="check">&#10003;</span><strong>$0 steps</strong> - http, code, and condition cost nothing - no LLM call</li>
             <li><span class="check">&#10003;</span><strong>Data passing</strong> - reference prior outputs with <code>{steps.id.output}</code></li>
-            <li><span class="check">&#10003;</span><strong>Schema validation</strong> - enforce structured output per step</li>
-            <li><span class="check">&#10003;</span><strong>Automatic retries</strong> - exponential backoff on failure</li>
             <li><span class="check">&#10003;</span><strong>Per-step models</strong> - Claude, OpenAI, MiniMax, Gemini - mix per step</li>
-            <li><span class="check">&#10003;</span><strong>CSV export</strong> - write step output to CSV files, append or per-run</li>
+            <li><span class="check">&#10003;</span><strong>Automatic retries</strong> - exponential backoff on failure</li>
             <li><span class="check">&#10003;</span><strong>Persistent storage</strong> - results saved to disk (local) or S3 (production)</li>
           </ul>
         </div>
