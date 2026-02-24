@@ -529,5 +529,83 @@ class SettingsUpdateRequest(BaseModel):
     max_workflow_depth: int | None = None
 
 
+# --- Tool Registry ---
+
+
+class ToolFunctionResponse(BaseModel):
+    """A single function within a tool."""
+
+    name: str
+    description: str
+    parameters: dict = Field(default_factory=dict, description="JSON Schema for function parameters")
+
+
+class ToolResponse(BaseModel):
+    """Tool definition with credential status."""
+
+    name: str
+    description: str
+    category: str
+    functions: list[ToolFunctionResponse] = []
+    credential_env_vars: list[str] = []
+    connector_file: str = ""
+    icon: str = ""
+    # Credential status (populated at runtime)
+    configured: bool = False
+    missing_credentials: list[str] = []
+
+
+class ToolListResponse(BaseModel):
+    """List of all available tools."""
+
+    tools: list[ToolResponse] = []
+    total: int = 0
+
+
+class ToolCredentialUpdateRequest(BaseModel):
+    """Update credentials for a specific tool."""
+
+    credentials: dict[str, str] = Field(
+        ..., description="Mapping of env var name to value, e.g. {'TOOL_SLACK_BOT_TOKEN': 'xoxb-...'}"
+    )
+
+
+# --- Memory ---
+
+
+class MemoryAddRequest(BaseModel):
+    """Request to add a memory."""
+
+    scope: str = "workflow"       # workflow | agent | global
+    scope_id: str                 # workflow name, agent name, or "global"
+    content: str                  # Text to memorize
+    metadata: dict | None = None
+
+
+class MemorySearchRequest(BaseModel):
+    """Request to search memories by semantic query."""
+
+    scope_id: str
+    query: str
+    limit: int = 10
+
+
+class MemoryEntry(BaseModel):
+    """A single memory entry."""
+
+    id: str
+    memory: str
+    metadata: dict | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class MemoryListResponse(BaseModel):
+    """List of memories."""
+
+    memories: list[MemoryEntry]
+    total: int
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()

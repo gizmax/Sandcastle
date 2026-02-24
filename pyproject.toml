@@ -42,9 +42,13 @@ dependencies = [
     "e2b>=1.0",
     "fpdf2>=2.8",
     "matplotlib>=3.8",
+    "mem0ai>=0.1.0",
 ]
 
 [project.optional-dependencies]
+memory = [
+    "mem0ai>=0.1.0",
+]
 docker = [
     "aiodocker>=0.22",
 ]

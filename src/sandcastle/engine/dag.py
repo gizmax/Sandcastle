@@ -176,6 +176,24 @@ class PolicyDefinition:
 
 
 @dataclass
+class StepMemoryConfig:
+    """Memory read/write configuration for a single step."""
+
+    read: bool = True
+    write: bool = False
+
+
+@dataclass
+class MemoryConfig:
+    """Workflow-level memory configuration."""
+
+    agent: str = ""
+    scope: str = "workflow"       # workflow | agent | global
+    auto_inject: bool = True
+    max_inject: int = 10
+
+
+@dataclass
 class StepDefinition:
     """Definition of a single workflow step."""
 
@@ -198,6 +216,8 @@ class StepDefinition:
     policies: list[str | PolicyDefinition] | None = None  # Policy refs or inline defs
     slo: SLOConfig | None = None
     model_pool: list[ModelPoolOption] | None = None
+    tools: list[str] | None = None  # Tool connectors for this step (e.g. ["slack", "jira"])
+    memory: StepMemoryConfig | None = None
 
 
 @dataclass
@@ -215,6 +235,8 @@ class WorkflowDefinition:
     on_failure: FailureConfig | None = None
     schedule: str | None = None
     policies: list[PolicyDefinition] = field(default_factory=list)
+    default_tools: list[str] = field(default_factory=list)  # Workflow-level default tools
+    memory: MemoryConfig | None = None
 
     def get_step(self, step_id: str) -> StepDefinition:
         """Get a step by its ID."""
@@ -449,6 +471,30 @@ def _parse_model_pool(data) -> list[ModelPoolOption] | None:
     return None
 
 
+def _parse_step_memory(data) -> StepMemoryConfig | None:
+    """Parse step-level memory configuration from YAML data."""
+    if data is None:
+        return None
+    if isinstance(data, bool):
+        return StepMemoryConfig(read=data, write=data)
+    return StepMemoryConfig(
+        read=data.get("read", True),
+        write=data.get("write", False),
+    )
+
+
+def _parse_memory_config(data) -> MemoryConfig | None:
+    """Parse workflow-level memory configuration from YAML data."""
+    if data is None:
+        return None
+    return MemoryConfig(
+        agent=data.get("agent", ""),
+        scope=data.get("scope", "workflow"),
+        auto_inject=data.get("auto_inject", True),
+        max_inject=data.get("max_inject", 10),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -490,6 +536,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         policies=_parse_step_policies(data.get("policies")),
         slo=slo,
         model_pool=model_pool,
+        tools=data.get("tools"),
+        memory=_parse_step_memory(data.get("memory")),
     )
 
 
@@ -541,6 +589,8 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
         on_failure=on_failure,
         schedule=data.get("schedule"),
         policies=global_policies,
+        default_tools=data.get("default_tools", []),
+        memory=_parse_memory_config(data.get("memory")),
     )
 
 
@@ -622,6 +672,32 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         ):
             errors.append(
                 f"Step '{step.id}' has invalid SLO optimize_for: '{step.slo.optimize_for}'"
+            )
+
+    # Check tool names against tool registry
+    from sandcastle.engine.tools.registry import KNOWN_TOOLS
+
+    all_tools: set[str] = set(workflow.default_tools)
+    for step in workflow.steps:
+        if step.tools:
+            all_tools.update(step.tools)
+    for tool_name in all_tools:
+        if tool_name not in KNOWN_TOOLS:
+            errors.append(
+                f"Unknown tool '{tool_name}'. "
+                f"Available: {', '.join(sorted(KNOWN_TOOLS))}"
+            )
+
+    # Check memory configuration
+    if workflow.memory:
+        if workflow.memory.scope not in ("workflow", "agent", "global"):
+            errors.append(
+                f"Invalid memory scope '{workflow.memory.scope}'. "
+                "Must be 'workflow', 'agent', or 'global'"
+            )
+        if workflow.memory.scope == "agent" and not workflow.memory.agent:
+            errors.append(
+                "Memory scope 'agent' requires 'agent' name to be set"
             )
 
     # Check for cycles
