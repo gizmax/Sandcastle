@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { Layers, Search, Play, ArrowRight, X, Loader2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Layers, Search, ChevronRight, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import jsYaml from "js-yaml";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { cn } from "@/lib/utils";
+import { TEMPLATE_PACKS, resolveCategory, getPackById } from "@/lib/templatePacks";
+import { PackCard } from "@/components/templates/PackCard";
+import { TemplateCard } from "@/components/templates/TemplateCard";
+import { TemplateDetail } from "@/components/templates/TemplateDetail";
+import { RunModal } from "@/components/templates/RunModal";
 
 interface InputSchemaProperty {
   type: string;
@@ -24,38 +29,32 @@ interface Template {
   description: string;
   tags: string[];
   step_count: number;
+  category?: string | null;
   input_schema?: InputSchema | null;
 }
 
-interface TemplateDetail extends Template {
+interface TemplateDetailData extends Template {
   content: string;
 }
 
-const TAG_COLORS = [
-  "bg-accent/15 text-accent",
-  "bg-running/15 text-running",
-  "bg-success/15 text-success",
-  "bg-queued/15 text-queued",
-  "bg-error/15 text-error",
-  "bg-warning/15 text-warning",
+const FEATURED_TEMPLATES = [
+  "research_agent",
+  "sales_pipeline_autopilot",
+  "support_ticket_triage",
+  "blog_to_social",
 ];
-
-function tagColor(tag: string): string {
-  let hash = 0;
-  for (let i = 0; i < tag.length; i++) {
-    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
-}
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedPack = searchParams.get("pack");
+
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [detailName, setDetailName] = useState<string | null>(null);
-  const [detail, setDetail] = useState<TemplateDetail | null>(null);
+  const [detail, setDetail] = useState<TemplateDetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [runInput, setRunInput] = useState("{}");
@@ -68,32 +67,80 @@ export default function TemplatesPage() {
     }).finally(() => setLoading(false));
   }, []);
 
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    templates.forEach((t) => t.tags.forEach((tag) => tagSet.add(tag)));
-    return Array.from(tagSet).sort();
-  }, [templates]);
+  // Resolve category for templates that don't have one from the backend
+  const templatesWithCategory = useMemo(() =>
+    templates.map((t) => ({
+      ...t,
+      category: t.category || resolveCategory(null, t.tags),
+    })),
+    [templates]
+  );
 
+  // Pack template counts
+  const packCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const pack of TEMPLATE_PACKS) {
+      counts[pack.id] = templatesWithCategory.filter((t) => t.category === pack.id).length;
+    }
+    return counts;
+  }, [templatesWithCategory]);
+
+  // Filtered templates for drill-down view
   const filtered = useMemo(() => {
-    let result = templates;
+    let result = templatesWithCategory;
+    if (selectedPack) {
+      result = result.filter((t) => t.category === selectedPack);
+    }
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(
         (t) =>
           t.name.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q)
+          t.description.toLowerCase().includes(q) ||
+          t.tags.some((tag) => tag.toLowerCase().includes(q))
       );
     }
     if (selectedTag) {
       result = result.filter((t) => t.tags.includes(selectedTag));
     }
     return result;
-  }, [templates, search, selectedTag]);
+  }, [templatesWithCategory, selectedPack, search, selectedTag]);
+
+  // Tags for drill-down filter pills
+  const activeTags = useMemo(() => {
+    const source = selectedPack
+      ? templatesWithCategory.filter((t) => t.category === selectedPack)
+      : templatesWithCategory;
+    const tagSet = new Set<string>();
+    source.forEach((t) => t.tags.forEach((tag) => tagSet.add(tag)));
+    return Array.from(tagSet).sort();
+  }, [templatesWithCategory, selectedPack]);
+
+  // Featured templates for hub view
+  const featured = useMemo(() =>
+    FEATURED_TEMPLATES
+      .map((name) => templatesWithCategory.find((t) => t.name === name))
+      .filter(Boolean) as Template[],
+    [templatesWithCategory]
+  );
+
+  const isHubView = !selectedPack && !search;
+
+  const selectPack = useCallback((packId: string) => {
+    setSelectedTag(null);
+    setSearchParams({ pack: packId });
+  }, [setSearchParams]);
+
+  const goToHub = useCallback(() => {
+    setSelectedTag(null);
+    setSearch("");
+    setSearchParams({});
+  }, [setSearchParams]);
 
   const openDetail = useCallback(async (name: string) => {
     setDetailName(name);
     setDetailLoading(true);
-    const res = await api.get<TemplateDetail>(`/templates/${name}`);
+    const res = await api.get<TemplateDetailData>(`/templates/${name}`);
     if (res.data) setDetail(res.data);
     setDetailLoading(false);
   }, []);
@@ -183,293 +230,195 @@ export default function TemplatesPage() {
     );
   }
 
+  const currentPack = selectedPack ? getPackById(selectedPack) : null;
+
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
-          Templates
-        </h1>
-        <span className="text-sm text-muted">{templates.length} templates</span>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/15">
+              <Layers className="h-5 w-5 text-accent" />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+              Template Hub
+            </h1>
+          </div>
+          <span className="text-sm text-muted">{templates.length} templates</span>
+        </div>
+        {isHubView && (
+          <p className="text-sm text-muted ml-[46px]">
+            Ready-made AI workflows for every team
+          </p>
+        )}
       </div>
 
-      {/* Search + tag filters */}
-      <div className="space-y-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates..."
-            className={cn(
-              "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
-              "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-            )}
-          />
-        </div>
-        <div className="flex flex-wrap gap-1.5">
+      {/* Breadcrumb for drill-down */}
+      {!isHubView && (
+        <div className="flex items-center gap-1.5 text-sm">
           <button
-            onClick={() => setSelectedTag(null)}
-            className={cn(
-              "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-              !selectedTag
-                ? "bg-accent text-accent-foreground"
-                : "bg-border/40 text-muted hover:text-foreground"
-            )}
+            onClick={goToHub}
+            className="text-accent hover:text-accent-hover transition-colors font-medium"
           >
-            All
+            Template Hub
           </button>
-          {allTags.map((tag) => (
+          {currentPack && (
+            <>
+              <ChevronRight className="h-3.5 w-3.5 text-muted" />
+              <span className="text-foreground font-medium">{currentPack.name}</span>
+            </>
+          )}
+          {search && !selectedPack && (
+            <>
+              <ChevronRight className="h-3.5 w-3.5 text-muted" />
+              <span className="text-muted">Search results</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search templates..."
+          className={cn(
+            "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
+            "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+          )}
+        />
+      </div>
+
+      {isHubView ? (
+        <>
+          {/* Featured row */}
+          {featured.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-500" />
+                <h2 className="text-sm font-semibold text-foreground">Featured</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {featured.map((t) => (
+                  <TemplateCard
+                    key={t.name}
+                    template={t}
+                    isSelected={detailName === t.name}
+                    onClick={() => openDetail(t.name)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Browse by Category */}
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-foreground">Browse by Category</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {TEMPLATE_PACKS.map((pack) => (
+                <PackCard
+                  key={pack.id}
+                  pack={pack}
+                  count={packCounts[pack.id] || 0}
+                  onClick={() => selectPack(pack.id)}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Tag filter pills (drill-down view) */}
+          <div className="flex flex-wrap gap-1.5">
             <button
-              key={tag}
-              onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+              onClick={() => setSelectedTag(null)}
               className={cn(
                 "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                selectedTag === tag
+                !selectedTag
                   ? "bg-accent text-accent-foreground"
                   : "bg-border/40 text-muted hover:text-foreground"
               )}
             >
-              {tag}
+              All
             </button>
-          ))}
-        </div>
-      </div>
+            {activeTags.map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                  selectedTag === tag
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-border/40 text-muted hover:text-foreground"
+                )}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
 
-      {/* Grid */}
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon={Layers}
-          title="No templates found"
-          description="Try adjusting your search or tag filter."
-          action={
-            search || selectedTag
-              ? {
-                  label: "Reset filters",
-                  onClick: () => {
-                    setSearch("");
-                    setSelectedTag(null);
-                  },
-                }
-              : undefined
-          }
-        />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map((t) => (
-            <button
-              key={t.name}
-              type="button"
-              onClick={() => openDetail(t.name)}
-              className={cn(
-                "group rounded-xl border p-4 text-left transition-all duration-200",
-                detailName === t.name
-                  ? "border-accent ring-2 ring-accent/20 bg-accent/5"
-                  : "border-border bg-surface hover:border-border hover:shadow-md hover:bg-surface"
-              )}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-foreground">
-                  {t.name.replace(/_/g, " ")}
-                </span>
-                <ArrowRight className="h-4 w-4 text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-              <p className="text-xs text-muted leading-relaxed mb-3 line-clamp-2">
-                {t.description}
-              </p>
-              <div className="flex items-center justify-between">
-                <div className="flex flex-wrap gap-1.5">
-                  {t.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                        tagColor(tag)
-                      )}
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <span className="text-[11px] text-muted-foreground shrink-0 ml-2">
-                  {t.step_count} {t.step_count === 1 ? "step" : "steps"}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
+          {/* Template grid */}
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon={Layers}
+              title="No templates found"
+              description="Try adjusting your search or tag filter."
+              action={
+                search || selectedTag
+                  ? {
+                      label: "Reset filters",
+                      onClick: () => {
+                        setSearch("");
+                        setSelectedTag(null);
+                      },
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {filtered.map((t) => (
+                <TemplateCard
+                  key={t.name}
+                  template={t}
+                  isSelected={detailName === t.name}
+                  onClick={() => openDetail(t.name)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Detail slide-over */}
       {detailName && (
-        <>
-          <div className="fixed inset-0 z-40 bg-black/40" onClick={closeDetail} />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="text-lg font-semibold text-foreground">
-                {detailName.replace(/_/g, " ")}
-              </h2>
-              <button
-                onClick={closeDetail}
-                className="rounded-lg p-1 text-muted hover:text-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
-              {detailLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted" />
-                </div>
-              ) : detail ? (
-                <>
-                  <div>
-                    <p className="text-sm text-muted leading-relaxed">{detail.description}</p>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {detail.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className={cn(
-                            "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                            tagColor(tag)
-                          )}
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                      <span className="rounded-full bg-border/40 px-2.5 py-0.5 text-xs font-medium text-muted">
-                        {detail.step_count} {detail.step_count === 1 ? "step" : "steps"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-xs font-medium text-muted">YAML Definition</p>
-                    <pre className="max-h-96 overflow-auto rounded-lg bg-background p-4 font-mono text-xs text-foreground whitespace-pre-wrap">
-                      {detail.content}
-                    </pre>
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted">Template not found</p>
-              )}
-            </div>
-
-            {detail && (
-              <div className="flex items-center gap-2 border-t border-border px-5 py-4">
-                <button
-                  onClick={handleUseInBuilder}
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-2 rounded-lg border border-border px-4 py-2",
-                    "text-sm font-medium text-foreground",
-                    "hover:bg-border/40 transition-colors"
-                  )}
-                >
-                  <ArrowRight className="h-4 w-4" />
-                  Use in Builder
-                </button>
-                <button
-                  onClick={handleRunNow}
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2",
-                    "text-sm font-medium text-accent-foreground",
-                    "hover:bg-accent-hover transition-all duration-200 shadow-sm"
-                  )}
-                >
-                  <Play className="h-4 w-4" />
-                  Run Now
-                </button>
-              </div>
-            )}
-          </div>
-        </>
+        <TemplateDetail
+          template={detail}
+          loading={detailLoading}
+          detailName={detailName}
+          onClose={closeDetail}
+          onUseInBuilder={handleUseInBuilder}
+          onRunNow={handleRunNow}
+        />
       )}
 
       {/* Run modal */}
       {runModalOpen && detail && (
-        <>
-          <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setRunModalOpen(false)} />
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-foreground">
-                  Run {detail.name.replace(/_/g, " ")}
-                </h2>
-                <button
-                  onClick={() => setRunModalOpen(false)}
-                  className="rounded-lg p-1 text-muted hover:text-foreground"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="space-y-4">
-                {detail.input_schema?.properties ? (
-                  Object.entries(detail.input_schema.properties).map(([key, prop]) => (
-                    <div key={key}>
-                      <label className="mb-1 block text-xs font-medium text-muted">
-                        {key}
-                        {detail.input_schema?.required?.includes(key) && (
-                          <span className="text-error ml-0.5">*</span>
-                        )}
-                      </label>
-                      {prop.description && (
-                        <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
-                      )}
-                      <input
-                        type="text"
-                        value={fieldValues[key] || ""}
-                        onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                        placeholder={prop.default != null ? String(prop.default) : key}
-                        required={detail.input_schema?.required?.includes(key)}
-                        className={cn(
-                          "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                          "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-                        )}
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-muted">
-                      Input Data (JSON)
-                    </label>
-                    <textarea
-                      value={runInput}
-                      onChange={(e) => setRunInput(e.target.value)}
-                      rows={6}
-                      className={cn(
-                        "w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm",
-                        "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-                      )}
-                    />
-                  </div>
-                )}
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => setRunModalOpen(false)}
-                    className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleRunSubmit}
-                    disabled={running}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-                      "hover:bg-accent-hover transition-all duration-200 shadow-sm",
-                      running && "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    {running && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    <Play className="h-3.5 w-3.5" />
-                    Run
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
+        <RunModal
+          template={detail}
+          open={runModalOpen}
+          onClose={() => setRunModalOpen(false)}
+          onSubmit={handleRunSubmit}
+          running={running}
+          fieldValues={fieldValues}
+          onFieldChange={(key, value) => setFieldValues((prev) => ({ ...prev, [key]: value }))}
+          runInput={runInput}
+          onRunInputChange={setRunInput}
+        />
       )}
     </div>
   );

@@ -1,0 +1,96 @@
+# name: Sales Pipeline Autopilot
+# description: Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks
+# tags: [Sales, Pipeline, CRM, Automation]
+# category: sales_crm
+
+name: sales-pipeline-autopilot
+description: Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [hubspot, slack]
+
+input_schema:
+  required: ["pipeline_name"]
+  properties:
+    pipeline_name:
+      type: string
+      description: "HubSpot pipeline name to monitor (e.g. 'Sales Pipeline')"
+    stale_days:
+      type: number
+      description: "Days without activity before a deal is considered stalled (default: 7)"
+      default: 7
+    alert_channel:
+      type: string
+      description: "Slack channel for pipeline alerts (e.g. '#sales-alerts')"
+      default: "#sales-alerts"
+
+steps:
+  - id: fetch-deals
+    prompt: |
+      Fetch all open deals from the HubSpot pipeline: {input.pipeline_name}
+
+      Use the HubSpot tool to list deals:
+        node /home/user/tools/hubspot.mjs list_deals '{input.pipeline_name}' 50
+
+      Return deal name, stage, amount, last activity date, and owner for each deal.
+    model: haiku
+    max_turns: 5
+
+  - id: analyze-stalled
+    depends_on: [fetch-deals]
+    prompt: |
+      Analyze these deals for stalled progress:
+
+      Deals: {steps.fetch-deals.output}
+      Stale threshold: {input.stale_days} days
+
+      For each deal, determine:
+      1. Is it stalled? (no activity for more than the threshold)
+      2. Risk level (High/Medium/Low) based on deal size, stage, and inactivity duration
+      3. Recommended next action (follow-up call, send proposal, escalate, etc.)
+      4. Suggested follow-up message angle
+
+      Return as JSON array with deal_name, stage, amount, days_inactive, risk_level,
+      recommended_action, and followup_angle.
+    model: sonnet
+    max_turns: 8
+
+  - id: draft-followups
+    depends_on: [analyze-stalled]
+    prompt: |
+      Draft personalized follow-up emails for each stalled deal:
+
+      Stalled deals analysis: {steps.analyze-stalled.output}
+
+      For each High or Medium risk deal, write a brief follow-up email that:
+      - References the deal context and last interaction
+      - Uses the suggested followup angle
+      - Includes a clear call-to-action
+      - Keeps a professional but warm tone
+      - Is 3-5 sentences max
+
+      Return each draft with deal_name, recipient, subject_line, and email_body.
+    model: sonnet
+    max_turns: 8
+
+  - id: send-alerts
+    depends_on: [analyze-stalled]
+    prompt: |
+      Send a pipeline health summary to Slack channel {input.alert_channel}.
+
+      Analysis: {steps.analyze-stalled.output}
+
+      Use the Slack tool to post a formatted message:
+        node /home/user/tools/slack.mjs post_message '{input.alert_channel}' '<message>'
+
+      Format the message as:
+      *Pipeline Health Report - {input.pipeline_name}*
+      - Total stalled deals: <count>
+      - High risk: <count> ($<total_amount>)
+      - Medium risk: <count> ($<total_amount>)
+      Then list each high-risk deal with name, amount, and days inactive.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

@@ -1,6 +1,7 @@
 # name: Review and Approve
 # description: Generates content, pauses for human review and approval, then publishes the approved content
 # tags: [approval, human-in-the-loop, content, review]
+# category: general_ai
 
 name: review-and-approve
 description: Generates content, pauses for human review and approval, then publishes the approved content

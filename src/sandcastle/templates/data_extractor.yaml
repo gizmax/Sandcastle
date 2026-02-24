@@ -1,6 +1,7 @@
 # name: Data Extractor
 # description: Extract structured data from documents with validation and error handling
 # tags: [Product, Data, Automation]
+# category: engineering
 
 name: data-extractor
 description: Extract structured data from documents with validation and error handling

@@ -1,6 +1,7 @@
 # name: Meeting Recap
 # description: Transform meeting transcript into summary, action items, and follow-up email
 # tags: [Sales, Productivity, Communication]
+# category: sales_crm
 
 name: meeting-recap
 description: Transform meeting transcript into summary, action items, and follow-up email

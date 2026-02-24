@@ -1,6 +1,7 @@
 # name: Resume Screener
 # description: Screen resume against job description with match scoring and interview recommendations
 # tags: [HR, Recruiting, Screening]
+# category: hr_legal
 
 name: resume-screener
 description: Screen resume against job description with match scoring and interview recommendations

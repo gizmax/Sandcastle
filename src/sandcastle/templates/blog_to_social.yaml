@@ -1,6 +1,7 @@
 # name: Blog to Social Media
 # description: Transform a blog post into platform-specific social media content
 # tags: [Marketing, Content, Social]
+# category: marketing
 
 name: blog-to-social
 description: Transform a blog post into platform-specific social media content

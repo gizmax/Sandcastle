@@ -1,0 +1,105 @@
+# name: Jira Issue Triage
+# description: Auto-triage new Jira issues with priority, labels, and assignment suggestions
+# tags: [Project Management, Jira, Triage]
+# category: engineering
+
+name: jira-issue-triage
+description: Auto-triage new Jira issues with priority, labels, and assignment suggestions
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [jira]
+
+input_schema:
+  required: ["project"]
+  properties:
+    project:
+      type: string
+      description: "Jira project key (e.g. PROJ)"
+    jql_filter:
+      type: string
+      description: "Additional JQL filter (default: untriaged issues from last 24h)"
+    team_context:
+      type: string
+      description: "Context about team members and their areas of expertise"
+
+steps:
+  - id: fetch-issues
+    prompt: |
+      Search for untriaged Jira issues in project {input.project}.
+
+      Use this JQL query with the Jira tool:
+        node /home/user/tools/jira.mjs search_issues 'project = {input.project} AND status = "To Do" AND priority = None ORDER BY created DESC' 20
+
+      If a custom filter was provided, use: {input.jql_filter}
+
+      Return the list of issues found.
+    model: haiku
+    max_turns: 5
+
+  - id: analyze-issues
+    depends_on: [fetch-issues]
+    prompt: |
+      Analyze these Jira issues and provide triage recommendations:
+
+      Issues: {steps.fetch-issues.output}
+
+      Team context: {input.team_context}
+
+      For each issue, determine:
+      1. **Priority** (Critical/High/Medium/Low) based on:
+         - Impact scope (how many users affected)
+         - Severity (workaround available?)
+         - Business urgency
+      2. **Labels** - suggest 1-3 relevant labels (bug, feature, tech-debt, ux, performance, security)
+      3. **Assignment suggestion** - who should work on it based on team context
+      4. **Estimated effort** - T-shirt size (XS/S/M/L/XL)
+
+      Return as structured JSON array with issue_key, priority, labels, assignee_suggestion, effort, reasoning.
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        triage_results:
+          type: array
+          items:
+            type: object
+            properties:
+              issue_key:
+                type: string
+              priority:
+                type: string
+              labels:
+                type: array
+                items:
+                  type: string
+              assignee_suggestion:
+                type: string
+              effort:
+                type: string
+              reasoning:
+                type: string
+
+  - id: apply-triage
+    depends_on: [analyze-issues]
+    prompt: |
+      Apply the triage results to the Jira issues by adding comments with the recommendations.
+
+      Triage results: {steps.analyze-issues.output}
+
+      For each issue, add a comment using the Jira tool:
+        node /home/user/tools/jira.mjs add_comment '<issue_key>' '<comment>'
+
+      Format each comment as:
+      **Auto-Triage Results**
+      - Priority: <priority>
+      - Labels: <labels>
+      - Suggested assignee: <assignee>
+      - Estimated effort: <effort>
+      - Reasoning: <reasoning>
+
+      Report which issues were successfully updated.
+    model: haiku
+    max_turns: 15

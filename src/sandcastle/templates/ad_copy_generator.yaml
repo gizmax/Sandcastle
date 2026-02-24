@@ -1,6 +1,7 @@
 # name: Ad Copy Generator
 # description: Generate ad copy variants for Google Ads and Meta Ads campaigns
 # tags: [Marketing, Advertising, Copywriting]
+# category: marketing
 
 name: ad-copy-generator
 description: Generate ad copy variants for Google Ads and Meta Ads campaigns

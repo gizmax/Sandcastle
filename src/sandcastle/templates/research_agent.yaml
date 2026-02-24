@@ -1,6 +1,7 @@
 # name: Research Agent
 # description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results
 # tags: [research, parallel, analysis, extraction]
+# category: general_ai
 
 name: research-agent
 description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results

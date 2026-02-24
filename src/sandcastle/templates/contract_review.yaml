@@ -1,6 +1,7 @@
 # name: Contract Review
 # description: Review contract for key terms, risks, and generate plain-language summary
 # tags: [Legal, Compliance, Document]
+# category: hr_legal
 
 name: contract-review
 description: Review contract for key terms, risks, and generate plain-language summary

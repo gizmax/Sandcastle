@@ -1,6 +1,7 @@
 # name: Ticket Classifier
 # description: Classify support ticket, assign priority, and draft response
 # tags: [Support, Classification, Automation]
+# category: support
 
 name: ticket-classifier
 description: Classify support ticket, assign priority, and draft response

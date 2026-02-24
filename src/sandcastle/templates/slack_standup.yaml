@@ -1,0 +1,71 @@
+# name: Slack Standup Summary
+# description: Collect daily standup updates from Slack and post a summary
+# tags: [Communication, Slack, Team]
+# category: engineering
+
+name: slack-standup-summary
+description: Collect daily standup updates from Slack and post a summary
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack]
+
+input_schema:
+  required: ["standup_channel"]
+  properties:
+    standup_channel:
+      type: string
+      description: "Slack channel to read standups from (e.g. #daily-standup)"
+    summary_channel:
+      type: string
+      description: "Slack channel to post summary to (defaults to standup_channel)"
+    lookback_hours:
+      type: number
+      description: "Hours to look back for messages (default: 24)"
+
+steps:
+  - id: collect-updates
+    prompt: |
+      Read the recent messages from the Slack channel {input.standup_channel}.
+      Get messages from the last {input.lookback_hours} hours (default 24 if not specified).
+
+      Use the Slack tool to fetch the messages:
+        node /home/user/tools/slack.mjs get_messages '{input.standup_channel}' 50
+
+      Return the raw messages as a JSON array.
+    model: haiku
+    max_turns: 5
+
+  - id: summarize-standup
+    depends_on: [collect-updates]
+    prompt: |
+      Analyze these standup messages from {input.standup_channel}:
+
+      {steps.collect-updates.output}
+
+      Create a concise standup summary with these sections:
+      1. **Completed Yesterday** - what was finished
+      2. **In Progress Today** - what people are working on
+      3. **Blockers** - any blockers or issues mentioned
+      4. **Key Highlights** - notable achievements or decisions
+
+      Format using Slack mrkdwn syntax (*bold*, _italic_, bullet points).
+      Keep it brief and actionable.
+    model: sonnet
+    max_turns: 5
+
+  - id: post-summary
+    depends_on: [summarize-standup]
+    prompt: |
+      Post the following standup summary to the Slack channel.
+      Use the summary channel if provided: {input.summary_channel}
+      Otherwise post to the standup channel: {input.standup_channel}
+
+      Summary to post:
+      {steps.summarize-standup.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs send_message '<channel>' '<summary>'
+    model: haiku
+    max_turns: 5

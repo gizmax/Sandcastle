@@ -1,0 +1,98 @@
+# name: CRM Contact Enrichment
+# description: Enrich HubSpot contacts with research data and create follow-up deals
+# tags: [CRM, HubSpot, Sales, Research]
+# category: sales_crm
+
+name: crm-contact-enrichment
+description: Enrich HubSpot contacts with research data and create follow-up deals
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [hubspot]
+
+input_schema:
+  required: ["search_query"]
+  properties:
+    search_query:
+      type: string
+      description: "Search query for HubSpot contacts (name or email)"
+    enrichment_focus:
+      type: string
+      description: "What to focus enrichment on (e.g. 'company size and revenue', 'technology stack')"
+    create_deals:
+      type: boolean
+      description: "Whether to create deals for qualified contacts (default: false)"
+    deal_pipeline:
+      type: string
+      description: "HubSpot pipeline for new deals (default: 'default')"
+
+steps:
+  - id: fetch-contacts
+    prompt: |
+      Search for contacts in HubSpot matching: {input.search_query}
+
+      Use the HubSpot tool:
+        node /home/user/tools/hubspot.mjs get_contacts '{input.search_query}' 20
+
+      Return the list of contacts found with their details.
+    model: haiku
+    max_turns: 5
+
+  - id: research-contacts
+    depends_on: [fetch-contacts]
+    prompt: |
+      Research and enrich these HubSpot contacts:
+
+      {steps.fetch-contacts.output}
+
+      Focus on: {input.enrichment_focus}
+
+      For each contact, research:
+      1. Company information (size, industry, funding)
+      2. Professional background and role
+      3. Recent company news or events
+      4. Potential business fit and engagement opportunities
+
+      Return structured enrichment data for each contact as JSON.
+    model: sonnet
+    max_turns: 10
+
+  - id: score-and-summarize
+    depends_on: [research-contacts]
+    prompt: |
+      Score and summarize the enriched contacts:
+
+      Enrichment data: {steps.research-contacts.output}
+
+      For each contact:
+      1. Assign a lead score (1-100) based on:
+         - Company fit
+         - Role relevance
+         - Engagement potential
+         - Timing signals
+      2. Write a 2-3 sentence summary of why this contact is valuable
+      3. Suggest a personalized outreach angle
+
+      Return as structured JSON with contact_id, score, summary, outreach_angle.
+    model: sonnet
+    max_turns: 8
+
+  - id: create-deals
+    depends_on: [score-and-summarize]
+    tools: [hubspot]
+    prompt: |
+      Based on the scored contacts, create HubSpot deals for contacts with a score >= 70.
+
+      Scored contacts: {steps.score-and-summarize.output}
+
+      Only create deals if enabled: {input.create_deals}
+      Pipeline: {input.deal_pipeline}
+
+      For qualified contacts, use the HubSpot tool:
+        node /home/user/tools/hubspot.mjs create_deal '<dealname>' '<amount>' '<pipeline>'
+
+      If deal creation is not enabled, just report which contacts would qualify.
+      Report the results of all deal creations or qualifications.
+    model: haiku
+    max_turns: 15

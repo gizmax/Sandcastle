@@ -1,6 +1,7 @@
 # name: Release Notes Generator
 # description: Generate user-facing release notes and internal changelog from commit history
 # tags: [Product, Engineering, Documentation]
+# category: engineering
 
 name: release-notes-generator
 description: Generate user-facing release notes and internal changelog from commit history
