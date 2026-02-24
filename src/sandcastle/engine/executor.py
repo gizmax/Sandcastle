@@ -64,6 +64,10 @@ class RunContext:
     error: str | None = None
     max_cost_usd: float | None = None
     workflow_name: str = ""
+    default_tools: list[str] = field(default_factory=list)
+    memories: list[dict] = field(default_factory=list)
+    _memory_config: Any = field(default=None, repr=False)
+    _memory_scope_id: str = field(default="", repr=False)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item."""
@@ -75,6 +79,10 @@ class RunContext:
             status=self.status,
             max_cost_usd=self.max_cost_usd,
             workflow_name=self.workflow_name,
+            default_tools=self.default_tools,
+            memories=self.memories,
+            _memory_config=self._memory_config,
+            _memory_scope_id=self._memory_scope_id,
         )
 
     @property
@@ -145,6 +153,10 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
                 else:
                     return None
             return obj
+
+    if parts[0] == "memory":
+        from sandcastle.engine.memory import format_memories_for_prompt
+        return format_memories_for_prompt(context.memories)
 
     if var_path == "run_id":
         return context.run_id
@@ -1119,28 +1131,62 @@ async def _execute_step_once(
             except Exception as e:
                 logger.warning(f"Optimizer failed for step '{step.id}', using default: {e}")
 
-        # Step result cache - check before executing
-        cache_key = _compute_cache_key(
-            context.workflow_name, step.id, step.prompt, effective_model or step.model
+        # Determine if this step uses memory (skip cache if so)
+        _step_reads_memory = (
+            context._memory_config
+            and context._memory_scope_id
+            and (
+                context._memory_config.auto_inject
+                or (step.memory and step.memory.read)
+            )
         )
-        cached = await _get_cached_result(cache_key)
-        if cached:
-            duration = (datetime.now(timezone.utc) - started_at).total_seconds()
-            logger.info(
-                f"Step '{step.id}' cache HIT (key={cache_key[:12]}...)"
+
+        # Step result cache - check before executing (skip for memory steps)
+        cache_key = ""
+        if not _step_reads_memory:
+            cache_key = _compute_cache_key(
+                context.workflow_name, step.id, step.prompt, effective_model or step.model
             )
-            return StepResult(
-                step_id=step.id,
-                parallel_index=parallel_index,
-                output=cached["output"],
-                cost_usd=0.0,  # No cost for cached results
-                duration_seconds=duration,
-                status="completed",
-                attempt=attempt,
-            )
+            cached = await _get_cached_result(cache_key)
+            if cached:
+                duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+                logger.info(
+                    f"Step '{step.id}' cache HIT (key={cache_key[:12]}...)"
+                )
+                return StepResult(
+                    step_id=step.id,
+                    parallel_index=parallel_index,
+                    output=cached["output"],
+                    cost_usd=0.0,  # No cost for cached results
+                    duration_seconds=duration,
+                    status="completed",
+                    attempt=attempt,
+                )
 
         prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
+
+        # Inject agent memories into the prompt (semantic search with step prompt)
+        if _step_reads_memory:
+            try:
+                from sandcastle.engine.memory import (
+                    format_memories_for_prompt,
+                    load_memories,
+                )
+                step_memories = await load_memories(
+                    context._memory_scope_id,
+                    query=prompt[:500],
+                    limit=context._memory_config.max_inject,
+                )
+                mem_block = format_memories_for_prompt(step_memories)
+                if mem_block:
+                    prompt = mem_block + "\n\n" + prompt
+                    logger.info(
+                        "Injected %d memories into step '%s'",
+                        len(step_memories), step.id,
+                    )
+            except Exception as e:
+                logger.warning(f"Memory injection failed for step '{step.id}': {e}")
 
         if step.pdf_report:
             # PDF report steps need verbose, structured output - skip the terse
@@ -1161,6 +1207,11 @@ async def _execute_step_once(
                 "type": "json_schema",
                 "schema": step.output_schema,
             }
+
+        # Resolve effective tools: step-level override or workflow defaults
+        effective_tools = step.tools if step.tools is not None else context.default_tools
+        if effective_tools:
+            request["tools"] = effective_tools
 
         idx_str = f" [{parallel_index}]" if parallel_index is not None else ""
         logger.info(
@@ -1202,6 +1253,27 @@ async def _execute_step_once(
             except (json.JSONDecodeError, ValueError):
                 pass
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+
+        # Auto-inject credential redaction policy when tools are used
+        if effective_tools:
+            try:
+                from sandcastle.engine.policy import create_tool_credential_policy
+                cred_policy = create_tool_credential_policy(effective_tools)
+                if cred_policy:
+                    from sandcastle.engine.policy import PolicyEngine as _CredPE
+                    cred_engine = _CredPE([cred_policy])
+                    cred_result = await cred_engine.evaluate(
+                        step_id=step.id, output=output,
+                        context={"step_id": step.id, "run_id": context.run_id},
+                    )
+                    if cred_result.violations:
+                        output = cred_result.modified_output
+                        logger.warning(
+                            "Step '%s': redacted %d credential pattern(s) from output",
+                            step.id, len(cred_result.violations),
+                        )
+            except Exception as e:
+                logger.warning("Credential redaction failed for step '%s': %s", step.id, e)
 
         # Policy evaluation
         if hasattr(step, "policies") and step.policies is not None:
@@ -1284,8 +1356,8 @@ async def _execute_step_once(
             except Exception as e:
                 logger.warning(f"Policy evaluation failed for step '{step.id}': {e}")
 
-        # Save to cache - skip empty or failed outputs
-        if _is_cacheable_output(output):
+        # Save to cache - skip empty, failed, or memory-injected outputs
+        if not _step_reads_memory and _is_cacheable_output(output):
             await _save_to_cache(
                 cache_key=cache_key,
                 workflow_name=context.workflow_name,
@@ -1294,10 +1366,30 @@ async def _execute_step_once(
                 output=output,
                 cost_usd=result.total_cost_usd,
             )
-        else:
+        elif not _step_reads_memory:
             logger.info(
                 f"Step '{step.id}' output not cached (empty or failed)"
             )
+
+        # Write step output to agent memory if configured
+        if (
+            context._memory_scope_id
+            and step.memory
+            and step.memory.write
+            and output
+        ):
+            try:
+                from sandcastle.engine.memory import save_memory
+                content = json.dumps(output) if isinstance(output, (dict, list)) else str(output)
+                await save_memory(
+                    context._memory_scope_id,
+                    content,
+                    metadata={"step_id": step.id, "workflow": context.workflow_name},
+                    run_id=context.run_id,
+                )
+                logger.info("Saved memory from step '%s'", step.id)
+            except Exception as e:
+                logger.warning(f"Memory write failed for step '{step.id}': {e}")
 
         return StepResult(
             step_id=step.id,
@@ -1796,7 +1888,28 @@ async def execute_workflow(
     context = RunContext(
         run_id=run_id, input=merged_input, max_cost_usd=max_cost_usd,
         workflow_name=workflow.name,
+        default_tools=getattr(workflow, "default_tools", []),
     )
+
+    # Initialize agent memory if configured
+    if workflow.memory:
+        try:
+            from sandcastle.config import settings as _mem_settings
+            if _mem_settings.memory_enabled:
+                from sandcastle.engine.memory import load_memories, resolve_scope_id
+                context._memory_config = workflow.memory
+                context._memory_scope_id = resolve_scope_id(
+                    workflow.memory, workflow.name,
+                )
+                context.memories = await load_memories(
+                    context._memory_scope_id, limit=workflow.memory.max_inject,
+                )
+                logger.info(
+                    "Loaded %d memories for scope '%s'",
+                    len(context.memories), context._memory_scope_id,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to initialize memory: {e}")
 
     # Restore context from checkpoint if doing replay/fork
     if initial_context:
@@ -1847,16 +1960,14 @@ async def execute_workflow(
         except Exception as e:
             logger.warning(f"Could not load global policies: {e}")
 
-    proxy_url = None
     logger.info(
-        "Sandshore runtime: e2b_key=%s, proxy=%s",
+        "Sandshore runtime: e2b_key=%s, backend=%s",
         "set" if settings.e2b_api_key else "unset",
-        proxy_url or "none",
+        settings.sandbox_backend,
     )
     sandbox = get_sandshore_runtime(
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
-        proxy_url=proxy_url,
         template=settings.e2b_template,
         max_concurrent=settings.max_concurrent_sandboxes,
         sandbox_backend=settings.sandbox_backend,

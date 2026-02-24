@@ -34,6 +34,10 @@ from sandcastle.api.schemas import (
     ExperimentResponse,
     ForkRequest,
     HealthResponse,
+    MemoryAddRequest,
+    MemoryEntry,
+    MemoryListResponse,
+    MemorySearchRequest,
     WorkflowGenerateRequest,
     OptimizerStatsResponse,
     PaginationMeta,
@@ -53,6 +57,10 @@ from sandcastle.api.schemas import (
     StatsResponse,
     StepDiff,
     StepStatusResponse,
+    ToolCredentialUpdateRequest,
+    ToolFunctionResponse,
+    ToolListResponse,
+    ToolResponse,
     WorkflowInfoResponse,
     WorkflowPromoteRequest,
     WorkflowRollbackRequest,
@@ -323,7 +331,6 @@ async def health_check() -> ApiResponse:
     runtime = SandshoreRuntime(
         anthropic_api_key=settings.anthropic_api_key,
         e2b_api_key=settings.e2b_api_key,
-        proxy_url=None,
         sandbox_backend=settings.sandbox_backend,
         docker_image=settings.docker_image,
         docker_url=settings.docker_url or None,
@@ -4115,3 +4122,194 @@ async def diff_workflow_versions(
     )
 
 
+# ---------------------------------------------------------------------------
+# Tool Registry endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/tools")
+async def list_tools(category: str | None = Query(None)) -> ApiResponse:
+    """List all available tool connectors with credential status."""
+    from sandcastle.engine.tools.registry import list_tools as _list_tools
+    from sandcastle.engine.tools.credentials import validate_tool_credentials
+
+    tools = _list_tools(category=category)
+    tool_names = [t.name for t in tools]
+    cred_status = validate_tool_credentials(tool_names)
+
+    result = []
+    for tool in tools:
+        status = cred_status.get(tool.name, {})
+        result.append(ToolResponse(
+            name=tool.name,
+            description=tool.description,
+            category=tool.category,
+            functions=[
+                ToolFunctionResponse(
+                    name=f.name, description=f.description, parameters=f.parameters,
+                )
+                for f in tool.functions
+            ],
+            credential_env_vars=tool.credential_env_vars,
+            connector_file=tool.connector_file,
+            icon=tool.icon,
+            configured=status.get("configured", False),
+            missing_credentials=status.get("missing", []),
+        ))
+
+    return ApiResponse(data=ToolListResponse(tools=result, total=len(result)))
+
+
+@router.get("/tools/{tool_name}")
+async def get_tool(tool_name: str) -> ApiResponse:
+    """Get details of a specific tool connector."""
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+    from sandcastle.engine.tools.credentials import validate_tool_credentials
+
+    try:
+        tool = _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    status = validate_tool_credentials([tool_name]).get(tool_name, {})
+
+    return ApiResponse(data=ToolResponse(
+        name=tool.name,
+        description=tool.description,
+        category=tool.category,
+        functions=[
+            ToolFunctionResponse(
+                name=f.name, description=f.description, parameters=f.parameters,
+            )
+            for f in tool.functions
+        ],
+        credential_env_vars=tool.credential_env_vars,
+        connector_file=tool.connector_file,
+        icon=tool.icon,
+        configured=status.get("configured", False),
+        missing_credentials=status.get("missing", []),
+    ))
+
+
+@router.put("/tools/{tool_name}/credentials")
+async def update_tool_credentials(
+    tool_name: str, body: ToolCredentialUpdateRequest, req: Request,
+) -> ApiResponse:
+    """Save or update credentials for a specific tool connector."""
+    _require_admin(req)
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+    from sandcastle.engine.tools.credentials import validate_tool_credentials
+
+    try:
+        tool = _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    # Only allow setting env vars that belong to this tool
+    allowed = set(tool.credential_env_vars)
+    rejected = set(body.credentials.keys()) - allowed
+    if rejected:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_CREDENTIALS",
+                    message=f"Unknown credential keys for {tool_name}: {', '.join(sorted(rejected))}",
+                )
+            ).model_dump(),
+        )
+
+    # Persist to DB and apply to runtime environment
+    async with async_session() as session:
+        for env_key, env_value in body.credentials.items():
+            existing = await session.get(Setting, env_key)
+            if existing:
+                existing.value = env_value
+            else:
+                session.add(Setting(key=env_key, value=env_value))
+            # Apply to runtime so tools work immediately
+            os.environ[env_key] = env_value
+            # Also update settings object if the field exists
+            config_key = env_key.lower()
+            if hasattr(settings, config_key):
+                setattr(settings, config_key, env_value)
+        await session.commit()
+
+    # Return updated status
+    status = validate_tool_credentials([tool_name]).get(tool_name, {})
+    return ApiResponse(data=ToolResponse(
+        name=tool.name,
+        description=tool.description,
+        category=tool.category,
+        functions=[
+            ToolFunctionResponse(
+                name=f.name, description=f.description, parameters=f.parameters,
+            )
+            for f in tool.functions
+        ],
+        credential_env_vars=tool.credential_env_vars,
+        connector_file=tool.connector_file,
+        icon=tool.icon,
+        configured=status.get("configured", False),
+        missing_credentials=status.get("missing", []),
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Memory endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/memories")
+async def list_memories(
+    scope_id: str = Query(..., description="Scope ID (e.g. 'workflow:my-wf', 'agent:bot', 'global')"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List all memories for a given scope."""
+    from sandcastle.engine.memory import load_memories
+    memories = await load_memories(scope_id, limit=limit)
+    entries = [MemoryEntry(**m) for m in memories]
+    return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
+
+
+@router.post("/memories")
+async def add_memory(body: MemoryAddRequest):
+    """Add a new memory. Mem0 auto-extracts facts and deduplicates."""
+    from sandcastle.engine.memory import save_memory
+    result = await save_memory(
+        scope_id=body.scope_id,
+        content=body.content,
+        metadata=body.metadata,
+    )
+    return ApiResponse(data={"added": len(result), "results": result})
+
+
+@router.post("/memories/search")
+async def search_memories(body: MemorySearchRequest):
+    """Semantic search over memories."""
+    from sandcastle.engine.memory import load_memories
+    memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
+    entries = [MemoryEntry(**m) for m in memories]
+    return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
+
+
+@router.delete("/memories/{memory_id}")
+async def remove_memory(memory_id: str):
+    """Delete a specific memory by ID."""
+    from sandcastle.engine.memory import delete_memory
+    ok = await delete_memory(memory_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Memory not found or delete failed")
+    return ApiResponse(data={"deleted": True})
+
+
+@router.delete("/memories")
+async def remove_all_memories(
+    scope_id: str = Query(..., description="Scope ID to clear"),
+):
+    """Delete all memories for a given scope."""
+    from sandcastle.engine.memory import delete_all_memories
+    ok = await delete_all_memories(scope_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to delete memories")
+    return ApiResponse(data={"deleted_all": True, "scope_id": scope_id})

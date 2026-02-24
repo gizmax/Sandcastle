@@ -77,6 +77,32 @@ class Settings(BaseSettings):
     # Model failover
     failover_cooldown_seconds: float = 60.0
 
+    # Tool connector credentials
+    tool_slack_bot_token: str = ""
+    tool_jira_api_token: str = ""
+    tool_jira_base_url: str = ""
+    tool_jira_email: str = ""
+    tool_github_token: str = ""
+    tool_notion_api_key: str = ""
+    tool_hubspot_api_key: str = ""
+    tool_salesforce_client_id: str = ""
+    tool_salesforce_client_secret: str = ""
+    tool_salesforce_refresh_token: str = ""
+    tool_salesforce_instance_url: str = ""
+    tool_zendesk_subdomain: str = ""
+    tool_zendesk_email: str = ""
+    tool_zendesk_api_token: str = ""
+    tool_teams_webhook_url: str = ""
+    tool_google_service_account: str = ""
+    tool_postgresql_url: str = ""
+    tool_smtp_host: str = ""
+    tool_smtp_port: str = "587"
+    tool_smtp_user: str = ""
+    tool_smtp_password: str = ""
+
+    # Memory
+    memory_enabled: bool = True
+
     # Logging
     log_level: str = "info"
 
