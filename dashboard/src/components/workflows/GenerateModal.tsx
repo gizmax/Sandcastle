@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
-import { X, Wand2, Loader2, CheckCircle, AlertTriangle, RefreshCw } from "lucide-react";
+import { X, Wand2, Loader2, CheckCircle, AlertTriangle, RefreshCw, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
+import { ToolSelector } from "@/components/workflows/ToolSelector";
 
 interface GenerateResult {
   yaml_content: string;
@@ -25,6 +26,8 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [refineText, setRefineText] = useState("");
   const [refining, setRefining] = useState(false);
+  const [selectedTools, setSelectedTools] = useState<string[]>([]);
+  const [showTools, setShowTools] = useState(false);
 
   const handleGenerate = useCallback(async () => {
     if (!description.trim()) return;
@@ -32,9 +35,9 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
     setError(null);
     setResult(null);
 
-    const res = await api.post<GenerateResult>("/generate", {
-      description: description.trim(),
-    }, 90_000);
+    const payload: Record<string, unknown> = { description: description.trim() };
+    if (selectedTools.length > 0) payload.tools = selectedTools;
+    const res = await api.post<GenerateResult>("/generate", payload, 90_000);
 
     setLoading(false);
     if (res.error) {
@@ -87,6 +90,8 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
     setResult(null);
     setError(null);
     setRefineText("");
+    setSelectedTools([]);
+    setShowTools(false);
     onClose();
   }, [onClose]);
 
@@ -141,6 +146,34 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
                 }}
               />
             </div>
+
+            {/* Tool hints */}
+            {!result && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowTools(!showTools)}
+                  className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
+                >
+                  <Wrench className="h-3 w-3" />
+                  {showTools ? "Hide tools" : "Select tools (optional)"}
+                  {selectedTools.length > 0 && (
+                    <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                      {selectedTools.length}
+                    </span>
+                  )}
+                </button>
+                {showTools && (
+                  <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-border bg-background/50 p-2">
+                    <ToolSelector
+                      selected={selectedTools}
+                      onChange={setSelectedTools}
+                      compact
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Generate button */}
             {!result && (

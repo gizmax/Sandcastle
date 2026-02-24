@@ -540,6 +540,16 @@ class ToolFunctionResponse(BaseModel):
     parameters: dict = Field(default_factory=dict, description="JSON Schema for function parameters")
 
 
+class ToolConnectionResponse(BaseModel):
+    """Named connection for a tool."""
+
+    name: str
+    tool_name: str
+    credentials_configured: list[str] = []
+    credentials_missing: list[str] = []
+    created_at: datetime | None = None
+
+
 class ToolResponse(BaseModel):
     """Tool definition with credential status."""
 
@@ -553,6 +563,7 @@ class ToolResponse(BaseModel):
     # Credential status (populated at runtime)
     configured: bool = False
     missing_credentials: list[str] = []
+    connections: list[ToolConnectionResponse] = []
 
 
 class ToolListResponse(BaseModel):
@@ -567,6 +578,23 @@ class ToolCredentialUpdateRequest(BaseModel):
 
     credentials: dict[str, str] = Field(
         ..., description="Mapping of env var name to value, e.g. {'TOOL_SLACK_BOT_TOKEN': 'xoxb-...'}"
+    )
+
+
+class ToolConnectionCreateRequest(BaseModel):
+    """Create a named connection for a tool."""
+
+    name: str = Field(..., description="Connection name (e.g. 'analytics', 'staging')")
+    credentials: dict[str, str] = Field(
+        ..., description="Mapping of env var name to value"
+    )
+
+
+class ToolConnectionUpdateRequest(BaseModel):
+    """Update credentials for a named connection."""
+
+    credentials: dict[str, str] = Field(
+        ..., description="Mapping of env var name to value"
     )
 
 

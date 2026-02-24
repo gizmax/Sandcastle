@@ -57,6 +57,9 @@ from sandcastle.api.schemas import (
     StatsResponse,
     StepDiff,
     StepStatusResponse,
+    ToolConnectionCreateRequest,
+    ToolConnectionResponse,
+    ToolConnectionUpdateRequest,
     ToolCredentialUpdateRequest,
     ToolFunctionResponse,
     ToolListResponse,
@@ -91,6 +94,7 @@ from sandcastle.models.db import (
     RunStatus,
     Schedule,
     Setting,
+    ToolConnection,
     WorkflowVersion,
     WorkflowVersionStatus,
     async_session,
@@ -4127,53 +4131,38 @@ async def diff_workflow_versions(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/tools")
-async def list_tools(category: str | None = Query(None)) -> ApiResponse:
-    """List all available tool connectors with credential status."""
-    from sandcastle.engine.tools.registry import list_tools as _list_tools
-    from sandcastle.engine.tools.credentials import validate_tool_credentials
-
-    tools = _list_tools(category=category)
-    tool_names = [t.name for t in tools]
-    cred_status = validate_tool_credentials(tool_names)
-
-    result = []
-    for tool in tools:
-        status = cred_status.get(tool.name, {})
-        result.append(ToolResponse(
-            name=tool.name,
-            description=tool.description,
-            category=tool.category,
-            functions=[
-                ToolFunctionResponse(
-                    name=f.name, description=f.description, parameters=f.parameters,
-                )
-                for f in tool.functions
-            ],
-            credential_env_vars=tool.credential_env_vars,
-            connector_file=tool.connector_file,
-            icon=tool.icon,
-            configured=status.get("configured", False),
-            missing_credentials=status.get("missing", []),
-        ))
-
-    return ApiResponse(data=ToolListResponse(tools=result, total=len(result)))
-
-
-@router.get("/tools/{tool_name}")
-async def get_tool(tool_name: str) -> ApiResponse:
-    """Get details of a specific tool connector."""
+async def _get_tool_connections(tool_name: str) -> list[ToolConnectionResponse]:
+    """Load named connections for a tool from the database."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ToolConnection).where(ToolConnection.tool_name == tool_name)
+        )
+        rows = result.scalars().all()
     from sandcastle.engine.tools.registry import get_tool as _get_tool
-    from sandcastle.engine.tools.credentials import validate_tool_credentials
-
     try:
         tool = _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        return []
+    required_vars = set(tool.credential_env_vars)
+    connections: list[ToolConnectionResponse] = []
+    for row in rows:
+        present = [k for k in required_vars if row.credentials.get(k)]
+        missing = [k for k in required_vars if not row.credentials.get(k)]
+        connections.append(ToolConnectionResponse(
+            name=row.connection_name,
+            tool_name=row.tool_name,
+            credentials_configured=sorted(present),
+            credentials_missing=sorted(missing),
+            created_at=row.created_at,
+        ))
+    return connections
 
-    status = validate_tool_credentials([tool_name]).get(tool_name, {})
 
-    return ApiResponse(data=ToolResponse(
+async def _build_tool_response(
+    tool, status: dict, connections: list[ToolConnectionResponse] | None = None,
+) -> ToolResponse:
+    """Build a ToolResponse from a ToolDefinition, cred status, and connections."""
+    return ToolResponse(
         name=tool.name,
         description=tool.description,
         category=tool.category,
@@ -4188,7 +4177,65 @@ async def get_tool(tool_name: str) -> ApiResponse:
         icon=tool.icon,
         configured=status.get("configured", False),
         missing_credentials=status.get("missing", []),
-    ))
+        connections=connections or [],
+    )
+
+
+@router.get("/tools")
+async def list_tools(category: str | None = Query(None)) -> ApiResponse:
+    """List all available tool connectors with credential status."""
+    from sandcastle.engine.tools.registry import list_tools as _list_tools
+    from sandcastle.engine.tools.credentials import validate_tool_credentials
+
+    tools = _list_tools(category=category)
+    tool_names = [t.name for t in tools]
+    cred_status = validate_tool_credentials(tool_names)
+
+    # Batch-load all connections
+    all_connections: dict[str, list[ToolConnectionResponse]] = {}
+    async with async_session() as session:
+        result = await session.execute(select(ToolConnection))
+        rows = result.scalars().all()
+    for row in rows:
+        all_connections.setdefault(row.tool_name, [])
+        tool_def = next((t for t in tools if t.name == row.tool_name), None)
+        required_vars = set(tool_def.credential_env_vars) if tool_def else set()
+        present = [k for k in required_vars if row.credentials.get(k)]
+        missing = [k for k in required_vars if not row.credentials.get(k)]
+        all_connections[row.tool_name].append(ToolConnectionResponse(
+            name=row.connection_name,
+            tool_name=row.tool_name,
+            credentials_configured=sorted(present),
+            credentials_missing=sorted(missing),
+            created_at=row.created_at,
+        ))
+
+    result_list = []
+    for tool in tools:
+        status = cred_status.get(tool.name, {})
+        resp = await _build_tool_response(
+            tool, status, all_connections.get(tool.name, []),
+        )
+        result_list.append(resp)
+
+    return ApiResponse(data=ToolListResponse(tools=result_list, total=len(result_list)))
+
+
+@router.get("/tools/{tool_name}")
+async def get_tool(tool_name: str) -> ApiResponse:
+    """Get details of a specific tool connector."""
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+    from sandcastle.engine.tools.credentials import validate_tool_credentials
+
+    try:
+        tool = _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    status = validate_tool_credentials([tool_name]).get(tool_name, {})
+    connections = await _get_tool_connections(tool_name)
+
+    return ApiResponse(data=await _build_tool_response(tool, status, connections))
 
 
 @router.put("/tools/{tool_name}/credentials")
@@ -4237,22 +4284,180 @@ async def update_tool_credentials(
 
     # Return updated status
     status = validate_tool_credentials([tool_name]).get(tool_name, {})
-    return ApiResponse(data=ToolResponse(
-        name=tool.name,
-        description=tool.description,
-        category=tool.category,
-        functions=[
-            ToolFunctionResponse(
-                name=f.name, description=f.description, parameters=f.parameters,
+    connections = await _get_tool_connections(tool_name)
+    return ApiResponse(data=await _build_tool_response(tool, status, connections))
+
+
+# --- Named connection CRUD ---
+
+
+@router.get("/tools/{tool_name}/connections")
+async def list_tool_connections(tool_name: str) -> ApiResponse:
+    """List all named connections for a tool."""
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+
+    try:
+        _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    connections = await _get_tool_connections(tool_name)
+    return ApiResponse(data=connections)
+
+
+@router.post("/tools/{tool_name}/connections")
+async def create_tool_connection(
+    tool_name: str, body: ToolConnectionCreateRequest, req: Request,
+) -> ApiResponse:
+    """Create a named connection for a tool."""
+    _require_admin(req)
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+
+    try:
+        tool = _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    # Validate credential keys
+    allowed = set(tool.credential_env_vars)
+    rejected = set(body.credentials.keys()) - allowed
+    if rejected:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_CREDENTIALS",
+                    message=f"Unknown credential keys for {tool_name}: {', '.join(sorted(rejected))}",
+                )
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        # Check for duplicate
+        existing = await session.execute(
+            select(ToolConnection).where(
+                ToolConnection.tool_name == tool_name,
+                ToolConnection.connection_name == body.name,
             )
-            for f in tool.functions
-        ],
-        credential_env_vars=tool.credential_env_vars,
-        connector_file=tool.connector_file,
-        icon=tool.icon,
-        configured=status.get("configured", False),
-        missing_credentials=status.get("missing", []),
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="DUPLICATE_CONNECTION",
+                        message=f"Connection '{body.name}' already exists for {tool_name}",
+                    )
+                ).model_dump(),
+            )
+
+        conn = ToolConnection(
+            tool_name=tool_name,
+            connection_name=body.name,
+            credentials=body.credentials,
+        )
+        session.add(conn)
+        await session.commit()
+        await session.refresh(conn)
+
+    required_vars = set(tool.credential_env_vars)
+    present = [k for k in required_vars if conn.credentials.get(k)]
+    missing = [k for k in required_vars if not conn.credentials.get(k)]
+
+    return ApiResponse(data=ToolConnectionResponse(
+        name=conn.connection_name,
+        tool_name=conn.tool_name,
+        credentials_configured=sorted(present),
+        credentials_missing=sorted(missing),
+        created_at=conn.created_at,
     ))
+
+
+@router.put("/tools/{tool_name}/connections/{conn_name}")
+async def update_tool_connection(
+    tool_name: str, conn_name: str, body: ToolConnectionUpdateRequest, req: Request,
+) -> ApiResponse:
+    """Update credentials for a named connection."""
+    _require_admin(req)
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+
+    try:
+        tool = _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    allowed = set(tool.credential_env_vars)
+    rejected = set(body.credentials.keys()) - allowed
+    if rejected:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_CREDENTIALS",
+                    message=f"Unknown credential keys for {tool_name}: {', '.join(sorted(rejected))}",
+                )
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(ToolConnection).where(
+                ToolConnection.tool_name == tool_name,
+                ToolConnection.connection_name == conn_name,
+            )
+        )
+        conn = result.scalar_one_or_none()
+        if not conn:
+            raise HTTPException(404, f"Connection '{conn_name}' not found for {tool_name}")
+
+        # Merge new credentials into existing
+        merged = dict(conn.credentials)
+        merged.update(body.credentials)
+        conn.credentials = merged
+        await session.commit()
+        await session.refresh(conn)
+
+    required_vars = set(tool.credential_env_vars)
+    present = [k for k in required_vars if conn.credentials.get(k)]
+    missing = [k for k in required_vars if not conn.credentials.get(k)]
+
+    return ApiResponse(data=ToolConnectionResponse(
+        name=conn.connection_name,
+        tool_name=conn.tool_name,
+        credentials_configured=sorted(present),
+        credentials_missing=sorted(missing),
+        created_at=conn.created_at,
+    ))
+
+
+@router.delete("/tools/{tool_name}/connections/{conn_name}")
+async def delete_tool_connection(
+    tool_name: str, conn_name: str, req: Request,
+) -> ApiResponse:
+    """Delete a named connection."""
+    _require_admin(req)
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
+
+    try:
+        _get_tool(tool_name)
+    except KeyError:
+        raise HTTPException(404, f"Tool '{tool_name}' not found")
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(ToolConnection).where(
+                ToolConnection.tool_name == tool_name,
+                ToolConnection.connection_name == conn_name,
+            )
+        )
+        conn = result.scalar_one_or_none()
+        if not conn:
+            raise HTTPException(404, f"Connection '{conn_name}' not found for {tool_name}")
+
+        await session.delete(conn)
+        await session.commit()
+
+    return ApiResponse(data={"deleted": True})
 
 
 # ---------------------------------------------------------------------------

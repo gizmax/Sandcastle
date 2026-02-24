@@ -6,6 +6,14 @@ import { ToolConfigPanel } from "@/components/integrations/ToolConfigPanel";
 import { TOOL_ICON_MAP, CATEGORY_COLORS, CATEGORY_LABELS } from "@/components/integrations/toolIcons";
 import { cn } from "@/lib/utils";
 
+interface ToolConnection {
+  name: string;
+  tool_name: string;
+  credentials_configured: string[];
+  credentials_missing: string[];
+  created_at: string | null;
+}
+
 interface Tool {
   name: string;
   description: string;
@@ -15,6 +23,7 @@ interface Tool {
   missing_credentials: string[];
   credential_env_vars: string[];
   functions: { name: string; description: string }[];
+  connections: ToolConnection[];
 }
 
 const CATEGORIES = ["all", "communication", "project_management", "crm", "data", "general"] as const;
@@ -184,6 +193,11 @@ export default function IntegrationsPage() {
                     <span className="text-[10px] text-muted">
                       {tool.functions?.length ?? 0} function{(tool.functions?.length ?? 0) !== 1 ? "s" : ""}
                     </span>
+                    {(tool.connections?.length ?? 0) > 0 && (
+                      <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                        {tool.connections.length} connection{tool.connections.length !== 1 ? "s" : ""}
+                      </span>
+                    )}
                   </div>
                 </div>
               </button>

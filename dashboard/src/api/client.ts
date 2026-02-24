@@ -204,7 +204,7 @@ class ApiClient {
   async delete<T>(path: string): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {
-      return { data: null, error: { code: "MOCK_MODE", message: "Not available in demo mode" } };
+      return this.mock<T>(path, undefined, "DELETE");
     }
 
     try {

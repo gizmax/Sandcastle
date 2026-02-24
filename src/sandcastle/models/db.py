@@ -391,6 +391,28 @@ class StepCache(Base):
     )
 
 
+class ToolConnection(Base):
+    """Named connection instance for a tool (e.g. postgresql:analytics)."""
+
+    __tablename__ = "tool_connections"
+    __table_args__ = (
+        UniqueConstraint("tool_name", "connection_name", name="uq_tool_connection"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    connection_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    credentials: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Setting(Base):
     """Key-value configuration stored in the database."""
 
