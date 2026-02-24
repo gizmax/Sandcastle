@@ -674,17 +674,18 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 f"Step '{step.id}' has invalid SLO optimize_for: '{step.slo.optimize_for}'"
             )
 
-    # Check tool names against tool registry
-    from sandcastle.engine.tools.registry import KNOWN_TOOLS
+    # Check tool names against tool registry (supports tool:connection syntax)
+    from sandcastle.engine.tools.registry import KNOWN_TOOLS, parse_tool_ref
 
     all_tools: set[str] = set(workflow.default_tools)
     for step in workflow.steps:
         if step.tools:
             all_tools.update(step.tools)
-    for tool_name in all_tools:
-        if tool_name not in KNOWN_TOOLS:
+    for tool_ref in all_tools:
+        base_name, _ = parse_tool_ref(tool_ref)
+        if base_name not in KNOWN_TOOLS:
             errors.append(
-                f"Unknown tool '{tool_name}'. "
+                f"Unknown tool '{base_name}'. "
                 f"Available: {', '.join(sorted(KNOWN_TOOLS))}"
             )
 

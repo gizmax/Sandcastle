@@ -1884,7 +1884,27 @@ const MOCK_SETTINGS = {
   redis_url: "",
 };
 
-const MOCK_TOOLS = [
+interface MockToolConnection {
+  name: string;
+  tool_name: string;
+  credentials_configured: string[];
+  credentials_missing: string[];
+  created_at: string;
+}
+
+interface MockTool {
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  configured: boolean;
+  missing_credentials: string[];
+  credential_env_vars: string[];
+  functions: { name: string; description: string; parameters: Record<string, never> }[];
+  connections: MockToolConnection[];
+}
+
+const MOCK_TOOLS: MockTool[] = [
   {
     name: "slack",
     description: "Send messages, create channels, and manage Slack workspace interactions",
@@ -1897,6 +1917,10 @@ const MOCK_TOOLS = [
       { name: "send_message", description: "Send a message to a Slack channel", parameters: {} },
       { name: "create_channel", description: "Create a new Slack channel", parameters: {} },
       { name: "list_channels", description: "List all Slack channels", parameters: {} },
+    ],
+    connections: [
+      { name: "engineering", tool_name: "slack", credentials_configured: ["TOOL_SLACK_BOT_TOKEN"], credentials_missing: [], created_at: h(48) },
+      { name: "support", tool_name: "slack", credentials_configured: ["TOOL_SLACK_BOT_TOKEN"], credentials_missing: [], created_at: h(24) },
     ],
   },
   {
@@ -1911,6 +1935,7 @@ const MOCK_TOOLS = [
       { name: "send_email", description: "Send an email via SMTP", parameters: {} },
       { name: "send_html_email", description: "Send an HTML-formatted email", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "teams",
@@ -1923,6 +1948,7 @@ const MOCK_TOOLS = [
     functions: [
       { name: "send_message", description: "Post a message to Teams channel", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "jira",
@@ -1938,6 +1964,7 @@ const MOCK_TOOLS = [
       { name: "update_issue", description: "Update an existing Jira issue", parameters: {} },
       { name: "get_issue", description: "Get details of a Jira issue", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "github",
@@ -1952,6 +1979,7 @@ const MOCK_TOOLS = [
       { name: "create_pull_request", description: "Create a pull request", parameters: {} },
       { name: "list_repos", description: "List repositories", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "notion",
@@ -1966,6 +1994,7 @@ const MOCK_TOOLS = [
       { name: "query_database", description: "Query a Notion database", parameters: {} },
       { name: "update_page", description: "Update an existing Notion page", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "hubspot",
@@ -1980,6 +2009,7 @@ const MOCK_TOOLS = [
       { name: "create_deal", description: "Create a new deal", parameters: {} },
       { name: "search_contacts", description: "Search contacts", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "salesforce",
@@ -1994,6 +2024,7 @@ const MOCK_TOOLS = [
       { name: "create_record", description: "Create a Salesforce record", parameters: {} },
       { name: "update_record", description: "Update a Salesforce record", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "zendesk",
@@ -2008,6 +2039,7 @@ const MOCK_TOOLS = [
       { name: "search_tickets", description: "Search support tickets", parameters: {} },
       { name: "update_ticket", description: "Update a support ticket", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "gdrive",
@@ -2022,6 +2054,7 @@ const MOCK_TOOLS = [
       { name: "download_file", description: "Download a file from Google Drive", parameters: {} },
       { name: "list_files", description: "List files in a folder", parameters: {} },
     ],
+    connections: [],
   },
   {
     name: "postgresql",
@@ -2034,6 +2067,10 @@ const MOCK_TOOLS = [
     functions: [
       { name: "query", description: "Execute a SQL query", parameters: {} },
       { name: "execute", description: "Execute a SQL statement", parameters: {} },
+    ],
+    connections: [
+      { name: "analytics", tool_name: "postgresql", credentials_configured: ["TOOL_POSTGRESQL_URL"], credentials_missing: [], created_at: h(72) },
+      { name: "staging", tool_name: "postgresql", credentials_configured: [], credentials_missing: ["TOOL_POSTGRESQL_URL"], created_at: h(48) },
     ],
   },
   {
@@ -2048,6 +2085,7 @@ const MOCK_TOOLS = [
       { name: "send", description: "Send an HTTP request to a webhook URL", parameters: {} },
       { name: "send_batch", description: "Send multiple webhook requests", parameters: {} },
     ],
+    connections: [],
   },
 ];
 
@@ -2308,6 +2346,61 @@ const routes: MockRoute[] = [
       tool.configured = nowConfigured;
       tool.missing_credentials = allVars.filter((v) => !creds[v]);
       return { name: tool.name, configured: tool.configured, missing_credentials: tool.missing_credentials };
+    },
+  },
+  {
+    match: /^\/tools\/([^/]+)\/connections$/,
+    method: "GET",
+    handler: (params) => {
+      const tool = MOCK_TOOLS.find((t) => t.name === params._1);
+      return tool?.connections || [];
+    },
+  },
+  {
+    match: /^\/tools\/([^/]+)\/connections$/,
+    method: "POST",
+    handler: (params, body) => {
+      const tool = MOCK_TOOLS.find((t) => t.name === params._1);
+      if (!tool) return null;
+      const b = body as { name?: string; credentials?: Record<string, string> };
+      const name = b?.name || "default";
+      const creds = b?.credentials || {};
+      const allVars = tool.credential_env_vars;
+      const conn = {
+        name,
+        tool_name: tool.name,
+        credentials_configured: allVars.filter((v) => creds[v]),
+        credentials_missing: allVars.filter((v) => !creds[v]),
+        created_at: new Date().toISOString(),
+      };
+      tool.connections = tool.connections || [];
+      tool.connections.push(conn);
+      return conn;
+    },
+  },
+  {
+    match: /^\/tools\/([^/]+)\/connections\/([^/]+)$/,
+    method: "PUT",
+    handler: (params, body) => {
+      const tool = MOCK_TOOLS.find((t) => t.name === params._1);
+      if (!tool) return null;
+      const conn = tool.connections?.find((c) => c.name === params._2);
+      if (!conn) return null;
+      const creds = (body as { credentials?: Record<string, string> })?.credentials || {};
+      const allVars = tool.credential_env_vars;
+      conn.credentials_configured = allVars.filter((v) => creds[v]);
+      conn.credentials_missing = allVars.filter((v) => !creds[v]);
+      return conn;
+    },
+  },
+  {
+    match: /^\/tools\/([^/]+)\/connections\/([^/]+)$/,
+    method: "DELETE",
+    handler: (params) => {
+      const tool = MOCK_TOOLS.find((t) => t.name === params._1);
+      if (!tool) return null;
+      tool.connections = (tool.connections || []).filter((c) => c.name !== params._2);
+      return { deleted: true };
     },
   },
 ];

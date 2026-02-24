@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Eye, EyeOff, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import { X, Eye, EyeOff, CheckCircle2, AlertTriangle, Loader2, Plus, Trash2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { TOOL_ICON_MAP, CATEGORY_COLORS, CATEGORY_LABELS } from "./toolIcons";
+
+interface ToolConnection {
+  name: string;
+  tool_name: string;
+  credentials_configured: string[];
+  credentials_missing: string[];
+  created_at: string | null;
+}
 
 interface Tool {
   name: string;
@@ -14,6 +22,7 @@ interface Tool {
   missing_credentials: string[];
   credential_env_vars: string[];
   functions: { name: string; description: string }[];
+  connections?: ToolConnection[];
 }
 
 interface ToolConfigPanelProps {
@@ -194,6 +203,11 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
             </div>
           )}
 
+          {/* Named Connections */}
+          {hasVars && (
+            <ConnectionsSection tool={tool} onSaved={onSaved} />
+          )}
+
           {/* Functions list */}
           {tool.functions.length > 0 && (
             <div className="space-y-2">
@@ -241,5 +255,172 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
         )}
       </div>
     </>
+  );
+}
+
+
+// --- Named Connections Sub-component ---
+
+function ConnectionsSection({ tool, onSaved }: { tool: Tool; onSaved: () => void }) {
+  const [connections, setConnections] = useState<ToolConnection[]>(tool.connections || []);
+  const [showForm, setShowForm] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCreds, setNewCreds] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  useEffect(() => {
+    setConnections(tool.connections || []);
+  }, [tool]);
+
+  const handleCreate = useCallback(async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    const res = await api.post<ToolConnection>(`/tools/${tool.name}/connections`, {
+      name: newName.trim(),
+      credentials: newCreds,
+    });
+    setSaving(false);
+    if (res.error) {
+      toast.error(res.error.message);
+      return;
+    }
+    if (res.data) {
+      setConnections((prev) => [...prev, res.data!]);
+      setNewName("");
+      setNewCreds({});
+      setShowForm(false);
+      onSaved();
+      toast.success(`Connection "${newName.trim()}" created`);
+    }
+  }, [tool.name, newName, newCreds, onSaved]);
+
+  const handleDelete = useCallback(async (connName: string) => {
+    setDeleting(connName);
+    const res = await api.delete(`/tools/${tool.name}/connections/${connName}`);
+    setDeleting(null);
+    if (res.error) {
+      toast.error(res.error.message);
+      return;
+    }
+    setConnections((prev) => prev.filter((c) => c.name !== connName));
+    onSaved();
+    toast.success(`Connection "${connName}" deleted`);
+  }, [tool.name, onSaved]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
+          <Link2 className="h-3.5 w-3.5" />
+          Named Connections
+        </h3>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-accent hover:bg-accent/10 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          Add
+        </button>
+      </div>
+
+      {connections.length === 0 && !showForm && (
+        <p className="text-xs text-muted">
+          No named connections. Use <code className="text-accent">{tool.name}:name</code> syntax in workflows.
+        </p>
+      )}
+
+      {/* Existing connections */}
+      {connections.map((conn) => (
+        <div
+          key={conn.name}
+          className="flex items-center gap-3 rounded-lg border border-border bg-background/50 px-3 py-2"
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <code className="text-xs font-mono text-accent">{tool.name}:{conn.name}</code>
+              {conn.credentials_missing.length === 0 ? (
+                <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+              ) : (
+                <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
+              )}
+            </div>
+            {conn.credentials_missing.length > 0 && (
+              <p className="mt-0.5 text-[10px] text-amber-500">
+                Missing: {conn.credentials_missing.join(", ")}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => handleDelete(conn.name)}
+            disabled={deleting === conn.name}
+            className="rounded p-1 text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          >
+            {deleting === conn.name ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </div>
+      ))}
+
+      {/* New connection form */}
+      {showForm && (
+        <div className="space-y-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-foreground">Connection Name</label>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g. analytics, staging..."
+              className={cn(
+                "w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground",
+                "placeholder:text-muted-foreground/50",
+                "focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
+              )}
+            />
+          </div>
+          {tool.credential_env_vars.map((envVar) => (
+            <div key={envVar}>
+              <label className="mb-1 block text-xs font-medium text-foreground">{envVar}</label>
+              <input
+                type="password"
+                value={newCreds[envVar] ?? ""}
+                onChange={(e) => setNewCreds((prev) => ({ ...prev, [envVar]: e.target.value }))}
+                placeholder="Enter value..."
+                className={cn(
+                  "w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground",
+                  "placeholder:text-muted-foreground/50",
+                  "focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
+                )}
+              />
+            </div>
+          ))}
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => { setShowForm(false); setNewName(""); setNewCreds({}); }}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={!newName.trim() || saving}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                newName.trim() && !saving
+                  ? "bg-accent text-white hover:bg-accent/90"
+                  : "bg-accent/30 text-white/50 cursor-not-allowed"
+              )}
+            >
+              {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+              Create Connection
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

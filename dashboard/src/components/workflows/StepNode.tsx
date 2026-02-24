@@ -15,6 +15,7 @@ type StepNodeData = {
   hasPdfReport?: boolean;
   hasSlo?: boolean;
   hasTools?: boolean;
+  toolNames?: string[];
 };
 
 type StepNodeType = Node<StepNodeData, "step">;
@@ -53,7 +54,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       )}
 
       {showBadges && (
-        <div className="mt-1.5 flex items-center gap-1.5">
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {data.hasRetry && (
             <RefreshCw className="h-3 w-3 text-running" />
           )}
@@ -72,9 +73,24 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           {data.hasSlo && (
             <Gauge className="h-3 w-3 text-success" />
           )}
-          {data.hasTools && (
+          {data.hasTools && !data.toolNames?.length && (
             <Wrench className="h-3 w-3 text-blue-400" />
           )}
+        </div>
+      )}
+
+      {/* Tool chips */}
+      {data.toolNames && data.toolNames.length > 0 && (
+        <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+          <Wrench className="h-2.5 w-2.5 text-blue-400 shrink-0" />
+          {data.toolNames.map((name) => (
+            <span
+              key={name}
+              className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-medium text-blue-400 leading-none"
+            >
+              {name}
+            </span>
+          ))}
         </div>
       )}
 
