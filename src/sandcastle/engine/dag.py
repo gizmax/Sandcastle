@@ -117,6 +117,61 @@ class SubWorkflowConfig:
 
 
 @dataclass
+class LlmConfig:
+    """Configuration for a lightweight LLM step (no sandbox)."""
+
+    system_prompt: str = ""
+
+
+@dataclass
+class HttpConfig:
+    """Configuration for an HTTP request step."""
+
+    url: str = ""
+    method: str = "GET"
+    headers: dict[str, str] = field(default_factory=dict)
+    body: str | dict | None = None
+    auth: str | None = None  # "bearer:{token}" or env var ref
+
+
+@dataclass
+class CodeConfig:
+    """Configuration for inline code execution."""
+
+    code: str = ""
+    language: str = "python"
+
+
+@dataclass
+class ConditionConfig:
+    """Configuration for if/else branching."""
+
+    expression: str = ""
+    then_steps: list[str] = field(default_factory=list)
+    else_steps: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ClassifyConfig:
+    """Configuration for LLM-based routing."""
+
+    categories: list[str] = field(default_factory=list)
+    input: str = ""
+    model: str = "haiku"
+    branches: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass
+class LoopConfig:
+    """Configuration for for-each iteration."""
+
+    over: str = ""
+    step_ids: list[str] = field(default_factory=list)
+    max_iterations: int = 100
+    until: str | None = None
+
+
+@dataclass
 class SLOConfig:
     """Service Level Objective for optimizer-driven model selection."""
 
@@ -193,12 +248,24 @@ class MemoryConfig:
     max_inject: int = 10
 
 
+VALID_STEP_TYPES = frozenset({
+    "standard", "approval", "sub_workflow",
+    "llm", "http", "code", "condition", "classify", "loop",
+})
+
+# Types that don't need a prompt
+NON_PROMPT_TYPES = frozenset({"http", "code", "condition", "loop"})
+
+# Types that don't use an LLM model (skip model validation)
+NON_LLM_TYPES = frozenset({"http", "code", "condition", "loop"})
+
+
 @dataclass
 class StepDefinition:
     """Definition of a single workflow step."""
 
     id: str
-    prompt: str
+    prompt: str = ""
     depends_on: list[str] = field(default_factory=list)
     model: str = "sonnet"
     max_turns: int = 10
@@ -207,7 +274,7 @@ class StepDefinition:
     output_schema: dict | None = None
     retry: RetryConfig | None = None
     fallback: FallbackConfig | None = None
-    type: str = "standard"  # "standard" | "approval" | "sub_workflow"
+    type: str = "standard"  # "standard" | "approval" | "sub_workflow" | "llm" | "http" | "code" | "condition" | "classify" | "loop"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -218,6 +285,12 @@ class StepDefinition:
     model_pool: list[ModelPoolOption] | None = None
     tools: list[str] | None = None  # Tool connectors for this step (e.g. ["slack", "jira"])
     memory: StepMemoryConfig | None = None
+    llm_config: LlmConfig | None = None
+    http_config: HttpConfig | None = None
+    code_config: CodeConfig | None = None
+    condition_config: ConditionConfig | None = None
+    classify_config: ClassifyConfig | None = None
+    loop_config: LoopConfig | None = None
 
 
 @dataclass
@@ -495,6 +568,71 @@ def _parse_memory_config(data) -> MemoryConfig | None:
     )
 
 
+def _parse_llm_config(data: dict | None) -> LlmConfig | None:
+    """Parse LLM step configuration from YAML data."""
+    if data is None:
+        return None
+    return LlmConfig(system_prompt=data.get("system_prompt", ""))
+
+
+def _parse_http_config(data: dict | None) -> HttpConfig | None:
+    """Parse HTTP step configuration from YAML data."""
+    if data is None:
+        return None
+    return HttpConfig(
+        url=data.get("url", ""),
+        method=data.get("method", "GET"),
+        headers=data.get("headers", {}),
+        body=data.get("body"),
+        auth=data.get("auth"),
+    )
+
+
+def _parse_code_config(data: dict | None) -> CodeConfig | None:
+    """Parse code step configuration from YAML data."""
+    if data is None:
+        return None
+    return CodeConfig(
+        code=data.get("code", ""),
+        language=data.get("language", "python"),
+    )
+
+
+def _parse_condition_config(data: dict | None) -> ConditionConfig | None:
+    """Parse condition step configuration from YAML data."""
+    if data is None:
+        return None
+    return ConditionConfig(
+        expression=data.get("expression", ""),
+        then_steps=data.get("then", []),
+        else_steps=data.get("else", []),
+    )
+
+
+def _parse_classify_config(data: dict | None) -> ClassifyConfig | None:
+    """Parse classify step configuration from YAML data."""
+    if data is None:
+        return None
+    return ClassifyConfig(
+        categories=data.get("categories", []),
+        input=data.get("input", ""),
+        model=data.get("model", "haiku"),
+        branches=data.get("branches", {}),
+    )
+
+
+def _parse_loop_config(data: dict | None) -> LoopConfig | None:
+    """Parse loop step configuration from YAML data."""
+    if data is None:
+        return None
+    return LoopConfig(
+        over=data.get("over", ""),
+        step_ids=data.get("step_ids", []),
+        max_iterations=data.get("max_iterations", 100),
+        until=data.get("until"),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -507,6 +645,9 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     if step_type == "sub_workflow" and not prompt:
         sw = data.get("sub_workflow", {})
         prompt = f"Sub-workflow: {sw.get('workflow', 'unknown')}"
+    # Non-prompt types get a placeholder prompt
+    if step_type in NON_PROMPT_TYPES and not prompt:
+        prompt = f"{step_type} step"
 
     # Parse SLO config
     slo = _parse_slo_config(data.get("slo"))
@@ -538,6 +679,12 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         model_pool=model_pool,
         tools=data.get("tools"),
         memory=_parse_step_memory(data.get("memory")),
+        llm_config=_parse_llm_config(data.get("llm_config")),
+        http_config=_parse_http_config(data.get("http_config")),
+        code_config=_parse_code_config(data.get("code_config")),
+        condition_config=_parse_condition_config(data.get("condition_config")),
+        classify_config=_parse_classify_config(data.get("classify_config")),
+        loop_config=_parse_loop_config(data.get("loop_config")),
     )
 
 
@@ -633,6 +780,14 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
             if dep not in step_ids:
                 errors.append(f"Step '{step.id}' depends on unknown step '{dep}'")
 
+    # Reject unknown step types
+    for step in workflow.steps:
+        if step.type not in VALID_STEP_TYPES:
+            errors.append(
+                f"Step '{step.id}' has unknown type '{step.type}'. "
+                f"Valid types: {', '.join(sorted(VALID_STEP_TYPES))}"
+            )
+
     # Check approval steps have required config
     for step in workflow.steps:
         if step.type == "approval":
@@ -646,18 +801,69 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Sub-workflow step '{step.id}' must have sub_workflow.workflow"
                 )
 
+    # Validate hybrid step types
+    for step in workflow.steps:
+        if step.type == "http":
+            if not step.http_config or not step.http_config.url:
+                errors.append(
+                    f"HTTP step '{step.id}' must have http_config with a url"
+                )
+        elif step.type == "code":
+            if not step.code_config or not step.code_config.code:
+                errors.append(
+                    f"Code step '{step.id}' must have code_config with code"
+                )
+        elif step.type == "condition":
+            if not step.condition_config or not step.condition_config.expression:
+                errors.append(
+                    f"Condition step '{step.id}' must have condition_config with an expression"
+                )
+            if step.condition_config:
+                for sid in step.condition_config.then_steps:
+                    if sid not in step_ids:
+                        errors.append(
+                            f"Condition step '{step.id}' then references unknown step '{sid}'"
+                        )
+                for sid in step.condition_config.else_steps:
+                    if sid not in step_ids:
+                        errors.append(
+                            f"Condition step '{step.id}' else references unknown step '{sid}'"
+                        )
+        elif step.type == "classify":
+            if not step.classify_config or not step.classify_config.categories:
+                errors.append(
+                    f"Classify step '{step.id}' must have classify_config with categories"
+                )
+            if step.classify_config:
+                for cat, branch_steps in step.classify_config.branches.items():
+                    for sid in branch_steps:
+                        if sid not in step_ids:
+                            errors.append(
+                                f"Classify step '{step.id}' branch '{cat}' references unknown step '{sid}'"
+                            )
+        elif step.type == "loop":
+            if not step.loop_config or not step.loop_config.over:
+                errors.append(
+                    f"Loop step '{step.id}' must have loop_config with over"
+                )
+
     # Check model names against provider registry
     from sandcastle.engine.providers import KNOWN_MODELS
 
     all_models = {workflow.default_model}
     for step in workflow.steps:
-        all_models.add(step.model)
+        # Skip model validation for step types that don't use LLMs
+        if step.type not in NON_LLM_TYPES:
+            all_models.add(step.model)
         if step.fallback:
             all_models.add(step.fallback.model)
         if step.autopilot:
             for variant in step.autopilot.variants:
                 if variant.model:
                     all_models.add(variant.model)
+        # Validate classify config model
+        if step.classify_config and step.classify_config.model:
+            all_models.add(step.classify_config.model)
     for model_name in all_models:
         if model_name not in KNOWN_MODELS:
             errors.append(

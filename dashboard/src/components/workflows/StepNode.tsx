@@ -1,13 +1,16 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Cpu, FileSpreadsheet, FileText, FlaskConical, Gauge, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
+import { Code, Cpu, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, RefreshCw, Repeat, ShieldCheck, Tag, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
+
+type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow";
 
 type StepNodeData = {
   label: string;
   model?: string;
   status?: string;
+  stepType?: StepType;
   hasRetry?: boolean;
   hasApproval?: boolean;
   hasAutoPilot?: boolean;
@@ -20,16 +23,53 @@ type StepNodeData = {
 
 type StepNodeType = Node<StepNodeData, "step">;
 
+const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
+  standard: Cpu,
+  llm: MessageSquare,
+  http: Globe,
+  code: Code,
+  condition: GitBranch,
+  classify: Tag,
+  loop: Repeat,
+  approval: ShieldCheck,
+};
+
+const STEP_TYPE_COLORS: Record<string, string> = {
+  standard: "text-muted",
+  llm: "text-accent",
+  http: "text-emerald-400",
+  code: "text-amber-400",
+  condition: "text-violet-400",
+  classify: "text-pink-400",
+  loop: "text-cyan-400",
+  approval: "text-warning",
+};
+
+const STEP_TYPE_BORDER: Record<string, string> = {
+  http: "border-l-emerald-400/50",
+  code: "border-l-amber-400/50",
+  condition: "border-l-violet-400/50",
+  classify: "border-l-pink-400/50",
+  loop: "border-l-cyan-400/50",
+  llm: "border-l-accent/50",
+};
+
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const status = data.status || "pending";
   const dotColor = STATUS_DOT_COLORS[status] || "bg-muted";
   const showBadges = data.hasRetry || data.hasApproval || data.hasAutoPilot || data.hasCsvOutput || data.hasPdfReport || data.hasSlo || data.hasTools;
+  const stepType = data.stepType || "standard";
+  const TypeIcon = STEP_TYPE_ICONS[stepType] || Cpu;
+  const iconColor = STEP_TYPE_COLORS[stepType] || "text-muted";
+  const leftBorder = STEP_TYPE_BORDER[stepType] || "";
 
   return (
     <div
       className={cn(
         "rounded-lg border bg-surface px-4 py-3 shadow-sm min-w-[140px]",
         "transition-all duration-200",
+        leftBorder && "border-l-2",
+        leftBorder,
         selected ? "border-accent shadow-md ring-2 ring-accent/20" : "border-border"
       )}
     >
@@ -41,17 +81,22 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
 
       <div className="flex items-center gap-2">
         <div className={cn("h-2 w-2 rounded-full", dotColor)} />
-        <Cpu className="h-3.5 w-3.5 text-muted" />
+        <TypeIcon className={cn("h-3.5 w-3.5", iconColor)} />
         <span className="text-xs font-medium text-foreground">{data.label}</span>
       </div>
 
-      {data.model && (
-        <div className="mt-1.5">
+      <div className="mt-1.5 flex items-center gap-1">
+        {stepType !== "standard" && (
+          <span className={cn("rounded-md px-1.5 py-0.5 text-[10px] font-medium", iconColor, "bg-current/10")}>
+            {stepType}
+          </span>
+        )}
+        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && (
           <span className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
             {data.model}
           </span>
-        </div>
-      )}
+        )}
+      </div>
 
       {showBadges && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
