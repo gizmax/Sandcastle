@@ -1884,7 +1884,27 @@ const MOCK_SETTINGS = {
   redis_url: "",
 };
 
-const MOCK_TOOLS = [
+interface MockToolConnection {
+  name: string;
+  tool_name: string;
+  credentials_configured: string[];
+  credentials_missing: string[];
+  created_at: string;
+}
+
+interface MockTool {
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  configured: boolean;
+  missing_credentials: string[];
+  credential_env_vars: string[];
+  functions: { name: string; description: string; parameters: Record<string, never> }[];
+  connections: MockToolConnection[];
+}
+
+const MOCK_TOOLS: MockTool[] = [
   {
     name: "slack",
     description: "Send messages, create channels, and manage Slack workspace interactions",
@@ -2364,12 +2384,12 @@ const routes: MockRoute[] = [
     handler: (params, body) => {
       const tool = MOCK_TOOLS.find((t) => t.name === params._1);
       if (!tool) return null;
-      const conn = tool.connections?.find((c: { name: string }) => c.name === params._2);
+      const conn = tool.connections?.find((c) => c.name === params._2);
       if (!conn) return null;
       const creds = (body as { credentials?: Record<string, string> })?.credentials || {};
       const allVars = tool.credential_env_vars;
-      conn.credentials_configured = allVars.filter((v: string) => creds[v]);
-      conn.credentials_missing = allVars.filter((v: string) => !creds[v]);
+      conn.credentials_configured = allVars.filter((v) => creds[v]);
+      conn.credentials_missing = allVars.filter((v) => !creds[v]);
       return conn;
     },
   },
@@ -2379,7 +2399,7 @@ const routes: MockRoute[] = [
     handler: (params) => {
       const tool = MOCK_TOOLS.find((t) => t.name === params._1);
       if (!tool) return null;
-      tool.connections = (tool.connections || []).filter((c: { name: string }) => c.name !== params._2);
+      tool.connections = (tool.connections || []).filter((c) => c.name !== params._2);
       return { deleted: true };
     },
   },
