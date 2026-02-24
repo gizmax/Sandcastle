@@ -26,7 +26,7 @@ import {
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
-import { GenerateModal } from "@/components/workflows/GenerateModal";
+import { GenerateChatModal } from "@/components/workflows/GenerateChatModal";
 import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
 
@@ -396,6 +396,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   const [defaultTools, setDefaultTools] = useState<string[]>([]);
   const [templateBrowserOpen, setTemplateBrowserOpen] = useState(false);
   const [generateModalOpen, setGenerateModalOpen] = useState(false);
+  const [editWithAiYaml, setEditWithAiYaml] = useState<string | undefined>();
   const [toolsPaletteOpen, setToolsPaletteOpen] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{
@@ -652,7 +653,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         </button>
 
         <button
-          onClick={() => setGenerateModalOpen(true)}
+          onClick={() => { setEditWithAiYaml(undefined); setGenerateModalOpen(true); }}
           className={cn(
             "mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-accent/40 px-3 py-2.5",
             "text-xs font-medium text-accent/70 hover:border-accent hover:text-accent transition-colors"
@@ -661,6 +662,22 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
           <Wand2 className="h-3.5 w-3.5" />
           AI Generate
         </button>
+
+        {steps.length > 0 && (
+          <button
+            onClick={() => {
+              setEditWithAiYaml(generateYaml(workflowName, steps, edges, defaultTools));
+              setGenerateModalOpen(true);
+            }}
+            className={cn(
+              "mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-accent/40 px-3 py-2.5",
+              "text-xs font-medium text-accent/70 hover:border-accent hover:text-accent transition-colors"
+            )}
+          >
+            <Wand2 className="h-3.5 w-3.5" />
+            Edit with AI
+          </button>
+        )}
 
         <div className="mt-6">
           <label className="mb-1 block text-xs font-medium text-muted">Workflow Name</label>
@@ -769,7 +786,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         <Layers className="h-4 w-4" />
       </button>
       <button
-        onClick={() => setGenerateModalOpen(true)}
+        onClick={() => { setEditWithAiYaml(undefined); setGenerateModalOpen(true); }}
         className="absolute left-[6.25rem] top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-accent/40 bg-surface shadow-sm text-accent/70 hover:text-accent hover:border-accent transition-colors lg:hidden"
       >
         <Wand2 className="h-4 w-4" />
@@ -854,11 +871,12 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         onSelect={handleTemplateSelect}
       />
 
-      {/* AI Generate Modal */}
-      <GenerateModal
+      {/* AI Generate / Edit Modal */}
+      <GenerateChatModal
         open={generateModalOpen}
-        onClose={() => setGenerateModalOpen(false)}
+        onClose={() => { setGenerateModalOpen(false); setEditWithAiYaml(undefined); }}
         onSelect={handleGenerateSelect}
+        existingYaml={editWithAiYaml}
       />
 
       {/* Confirm replace dialog */}

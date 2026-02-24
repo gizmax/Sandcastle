@@ -69,6 +69,20 @@ class WorkflowGenerateRequest(BaseModel):
     refine_instruction: str | None = Field(None, description="What to change in the existing YAML")
 
 
+class GenerateChatMessage(BaseModel):
+    """A single message in a chat-based generation conversation."""
+
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+
+
+class GenerateChatRequest(BaseModel):
+    """Request for chat-based workflow generation."""
+
+    messages: list[GenerateChatMessage] = Field(..., description="Conversation history")
+    existing_yaml: str | None = Field(None, description="Existing workflow YAML for edit mode")
+
+
 class WorkflowSaveRequest(BaseModel):
     """Request to save a workflow YAML file."""
 

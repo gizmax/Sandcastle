@@ -3055,6 +3055,39 @@ const routes: MockRoute[] = [
     },
   },
   {
+    match: /^\/generate\/chat$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { messages?: Array<{ role: string; content: string }>; existing_yaml?: string } | undefined;
+      const msgs = b?.messages || [];
+      const hasExisting = !!b?.existing_yaml;
+      // Heuristic: ask questions on first message if no existing YAML, otherwise generate YAML
+      const hasYamlInHistory = msgs.some((m) => m.role === "assistant" && m.content.includes("steps"));
+      const userText = msgs.filter((m) => m.role === "user").map((m) => m.content).join(" ").toLowerCase();
+      const skipQuestions = userText.includes("just generate") || userText.includes("go ahead") || userText.includes("skip");
+
+      if (msgs.length <= 1 && !hasExisting && !skipQuestions && !hasYamlInHistory) {
+        return {
+          mode: "questions",
+          message: "Great idea! Let me ask a few questions to design the best workflow for you:\n\n1. What data sources or inputs will this workflow need?\n2. How many processing steps do you envision (simple 2-3 steps, or a more complex pipeline)?\n3. Do you need any approval gates or human review before certain steps?\n4. What should the final output look like (report, notification, data file)?",
+        };
+      }
+
+      return {
+        mode: "yaml",
+        message: "Here's your workflow based on our discussion. You can refine it further or use it as-is.",
+        yaml_content: `name: generated-workflow\ndescription: "AI-generated workflow"\n\ndefault_model: sonnet\ndefault_max_turns: 10\ndefault_timeout: 300\n\ninput_schema:\n  required: ["topic"]\n  properties:\n    topic:\n      type: string\n      description: "The main topic or subject"\n\nsteps:\n  - id: research\n    prompt: >\n      Research the following topic thoroughly.\n      Topic: {input.topic}\n    model: sonnet\n    max_turns: 10\n\n  - id: draft\n    depends_on: [research]\n    prompt: >\n      Based on the research, create a comprehensive draft.\n      Research: {steps.research.output}\n    model: sonnet\n    max_turns: 10\n\n  - id: polish\n    depends_on: [draft]\n    prompt: >\n      Polish and finalize the draft for publication.\n      Draft: {steps.draft.output}\n    model: haiku\n    max_turns: 5\n`,
+        name: "generated-workflow",
+        steps_count: 3,
+        validation_errors: [],
+        input_schema: {
+          required: ["topic"],
+          properties: { topic: { type: "string", description: "The main topic or subject" } },
+        },
+      };
+    },
+  },
+  {
     match: /^\/api-keys$/,
     method: "GET",
     handler: () => MOCK_API_KEYS,
