@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Cpu, FileSpreadsheet, FileText, FlaskConical, Gauge, RefreshCw, ShieldCheck } from "lucide-react";
+import { Cpu, FileSpreadsheet, FileText, FlaskConical, Gauge, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
@@ -14,6 +14,7 @@ type StepNodeData = {
   hasCsvOutput?: boolean;
   hasPdfReport?: boolean;
   hasSlo?: boolean;
+  hasTools?: boolean;
 };
 
 type StepNodeType = Node<StepNodeData, "step">;
@@ -21,7 +22,7 @@ type StepNodeType = Node<StepNodeData, "step">;
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const status = data.status || "pending";
   const dotColor = STATUS_DOT_COLORS[status] || "bg-muted";
-  const showBadges = data.hasRetry || data.hasApproval || data.hasAutoPilot || data.hasCsvOutput || data.hasPdfReport || data.hasSlo;
+  const showBadges = data.hasRetry || data.hasApproval || data.hasAutoPilot || data.hasCsvOutput || data.hasPdfReport || data.hasSlo || data.hasTools;
 
   return (
     <div
@@ -70,6 +71,9 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           )}
           {data.hasSlo && (
             <Gauge className="h-3 w-3 text-success" />
+          )}
+          {data.hasTools && (
+            <Wrench className="h-3 w-3 text-blue-400" />
           )}
         </div>
       )}

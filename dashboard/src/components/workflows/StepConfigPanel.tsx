@@ -12,9 +12,11 @@ import {
   ShieldAlert,
   ShieldCheck,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import { DirectoryBrowser } from "@/components/workflows/DirectoryBrowser";
+import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
 
 export interface RetryConfig {
@@ -85,6 +87,7 @@ export interface StepConfig {
   timeout: number;
   parallelOver: string;
   dependsOn: string[];
+  tools: string[];
   directoryInput: DirectoryInputConfig;
   csvOutput: CsvOutputConfig;
   pdfReport: PdfReportConfig;
@@ -913,6 +916,29 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             <span className="text-xs">Allow reviewer edits</span>
           </label>
           <p className="text-[11px] text-muted-foreground mt-0.5">Reviewer can modify the step's output data before approving.</p>
+        </CollapsibleSection>
+
+        {/* Tool Connectors */}
+        <CollapsibleSection
+          icon={Wrench}
+          title="Tool Connectors"
+          enabled={step.tools.length > 0}
+          onToggle={() => {
+            if (step.tools.length > 0) {
+              onChange({ ...step, tools: [] });
+            } else {
+              onChange({ ...step, tools: ["slack"] });
+            }
+          }}
+        >
+          <p className="text-[11px] text-muted-foreground">
+            Select which integrations this step can use. Credentials are managed in the Integrations page.
+          </p>
+          <ToolSelector
+            selected={step.tools}
+            onChange={(tools) => onChange({ ...step, tools })}
+            compact
+          />
         </CollapsibleSection>
 
         {/* Policies */}
