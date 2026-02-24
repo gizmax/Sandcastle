@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import {
   Calendar,
   Castle,
+  ClipboardCheck,
   FlaskConical,
   Gauge,
   GitBranch,
@@ -33,6 +34,7 @@ const navItems = [
   { to: "/templates", icon: Layers, label: "Template Hub" },
   { to: "/integrations", icon: Plug, label: "Integrations" },
   { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" as const },
+  { to: "/evaluations", icon: ClipboardCheck, label: "Evaluations" },
   { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
   { to: "/violations", icon: ShieldAlert, label: "Violations" },
   { to: "/optimizer", icon: Gauge, label: "Optimizer" },
@@ -44,7 +46,7 @@ const navItems = [
 
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
   const { info } = useRuntimeInfo();
-  const version = info?.version ?? "0.10.0";
+  const version = info?.version ?? "0.15.0";
 
   return (
     <>

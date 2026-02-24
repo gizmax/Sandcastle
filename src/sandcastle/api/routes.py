@@ -38,6 +38,11 @@ from sandcastle.api.schemas import (
     MemoryEntry,
     MemoryListResponse,
     MemorySearchRequest,
+    EvalCaseResponse,
+    EvalAssertionResponse,
+    EvalRunResponse,
+    EvalStatsResponse,
+    EvalSuiteRunRequest,
     WorkflowGenerateRequest,
     OptimizerStatsResponse,
     PaginationMeta,
@@ -86,6 +91,9 @@ from sandcastle.models.db import (
     AutoPilotExperiment,
     AutoPilotSample,
     DeadLetterItem,
+    EvalCaseResult,
+    EvalRun,
+    EvalRunStatus,
     ExperimentStatus,
     PolicyViolation,
     RoutingDecision,
@@ -4460,6 +4468,310 @@ async def delete_tool_connection(
         await session.commit()
 
     return ApiResponse(data={"deleted": True})
+
+
+# ---------------------------------------------------------------------------
+# Evaluations
+# ---------------------------------------------------------------------------
+
+
+@router.post("/eval/run")
+async def run_eval_suite_endpoint(body: EvalSuiteRunRequest) -> ApiResponse:
+    """Run an eval suite from YAML and return results."""
+    from sandcastle.engine.eval import (
+        parse_eval_suite_string,
+        run_eval_suite,
+        save_eval_run,
+    )
+
+    try:
+        suite = parse_eval_suite_string(body.suite_yaml)
+    except (ValueError, Exception) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_SUITE", message=str(exc))
+            ).model_dump(),
+        )
+
+    # Create a running eval_run record
+    eval_run_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    async with async_session() as session:
+        eval_run = EvalRun(
+            id=eval_run_id,
+            suite_name=suite.description or suite.workflow,
+            workflow_name=suite.workflow,
+            status=EvalRunStatus.RUNNING,
+            total_cases=len(suite.cases),
+            suite_yaml=body.suite_yaml,
+            started_at=now,
+        )
+        session.add(eval_run)
+        await session.commit()
+
+    # Run the suite
+    try:
+        result = await run_eval_suite(suite, concurrency=body.concurrency)
+    except Exception as exc:
+        # Mark as failed
+        async with async_session() as session:
+            run = await session.get(EvalRun, eval_run_id)
+            if run:
+                run.status = EvalRunStatus.FAILED
+                run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="EVAL_FAILED", message=str(exc))
+            ).model_dump(),
+        )
+
+    # Persist results
+    completed_at = datetime.now(timezone.utc)
+    async with async_session() as session:
+        run = await session.get(EvalRun, eval_run_id)
+        if run:
+            run.status = EvalRunStatus.COMPLETED
+            run.passed_cases = result.passed
+            run.failed_cases = result.failed
+            run.pass_rate = result.pass_rate
+            run.total_cost_usd = result.total_cost_usd
+            run.total_duration_seconds = result.total_duration_seconds
+            run.completed_at = completed_at
+
+            from sandcastle.models.db import EvalCaseResult as EvalCaseResultModel
+            for cr in result.cases:
+                assertion_data = [
+                    {
+                        "type": ar.type,
+                        "passed": ar.passed,
+                        "expected": ar.expected,
+                        "actual": ar.actual,
+                        "message": ar.message,
+                        "score": ar.score,
+                    }
+                    for ar in cr.assertions
+                ]
+                session.add(EvalCaseResultModel(
+                    eval_run_id=eval_run_id,
+                    case_name=cr.name,
+                    passed=cr.passed,
+                    run_id=uuid.UUID(cr.run_id) if cr.run_id else None,
+                    cost_usd=cr.cost_usd,
+                    duration_seconds=cr.duration_seconds,
+                    assertions=assertion_data,
+                    output_summary=str(cr.output)[:500] if cr.output else None,
+                    error=cr.error,
+                ))
+            await session.commit()
+
+    # Build response
+    cases_data = [
+        EvalCaseResponse(
+            case_name=cr.name,
+            passed=cr.passed,
+            run_id=cr.run_id,
+            cost_usd=cr.cost_usd,
+            duration_seconds=cr.duration_seconds,
+            assertions=[
+                EvalAssertionResponse(
+                    type=ar.type,
+                    passed=ar.passed,
+                    expected=ar.expected,
+                    actual=ar.actual,
+                    message=ar.message,
+                    score=ar.score,
+                )
+                for ar in cr.assertions
+            ],
+            output_summary=str(cr.output)[:500] if cr.output else None,
+            error=cr.error,
+        )
+        for cr in result.cases
+    ]
+
+    return ApiResponse(
+        data=EvalRunResponse(
+            id=str(eval_run_id),
+            suite_name=result.suite_name,
+            workflow_name=result.workflow,
+            status="completed",
+            total_cases=result.total,
+            passed_cases=result.passed,
+            failed_cases=result.failed,
+            pass_rate=result.pass_rate,
+            total_cost_usd=result.total_cost_usd,
+            total_duration_seconds=result.total_duration_seconds,
+            started_at=now,
+            completed_at=completed_at,
+            cases=cases_data,
+        )
+    )
+
+
+@router.get("/eval/runs")
+async def list_eval_runs(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List eval run history."""
+    async with async_session() as session:
+        count_stmt = select(func.count(EvalRun.id))
+        total = await session.scalar(count_stmt)
+
+        stmt = (
+            select(EvalRun)
+            .order_by(EvalRun.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+    data = [
+        EvalRunResponse(
+            id=str(r.id),
+            suite_name=r.suite_name,
+            workflow_name=r.workflow_name,
+            status=r.status.value if hasattr(r.status, "value") else r.status,
+            total_cases=r.total_cases,
+            passed_cases=r.passed_cases,
+            failed_cases=r.failed_cases,
+            pass_rate=r.pass_rate,
+            total_cost_usd=r.total_cost_usd,
+            total_duration_seconds=r.total_duration_seconds,
+            started_at=r.started_at,
+            completed_at=r.completed_at,
+            created_at=r.created_at,
+        )
+        for r in items
+    ]
+
+    return ApiResponse(
+        data=data,
+        meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+@router.get("/eval/runs/{eval_run_id}")
+async def get_eval_run(eval_run_id: str) -> ApiResponse:
+    """Get eval run details with case results."""
+    try:
+        run_uuid = uuid.UUID(eval_run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid eval run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = (
+            select(EvalRun)
+            .options(selectinload(EvalRun.case_results))
+            .where(EvalRun.id == run_uuid)
+        )
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Eval run not found")
+            ).model_dump(),
+        )
+
+    cases_data = [
+        EvalCaseResponse(
+            case_name=cr.case_name,
+            passed=cr.passed,
+            run_id=str(cr.run_id) if cr.run_id else None,
+            cost_usd=cr.cost_usd,
+            duration_seconds=cr.duration_seconds,
+            assertions=[
+                EvalAssertionResponse(**a) for a in (cr.assertions or [])
+            ],
+            output_summary=cr.output_summary,
+            error=cr.error,
+        )
+        for cr in run.case_results
+    ]
+
+    return ApiResponse(
+        data=EvalRunResponse(
+            id=str(run.id),
+            suite_name=run.suite_name,
+            workflow_name=run.workflow_name,
+            status=run.status.value if hasattr(run.status, "value") else run.status,
+            total_cases=run.total_cases,
+            passed_cases=run.passed_cases,
+            failed_cases=run.failed_cases,
+            pass_rate=run.pass_rate,
+            total_cost_usd=run.total_cost_usd,
+            total_duration_seconds=run.total_duration_seconds,
+            started_at=run.started_at,
+            completed_at=run.completed_at,
+            created_at=run.created_at,
+            cases=cases_data,
+        )
+    )
+
+
+@router.get("/eval/stats")
+async def eval_stats() -> ApiResponse:
+    """Get aggregated eval statistics with 30-day trend."""
+    async with async_session() as session:
+        total_runs = await session.scalar(select(func.count(EvalRun.id)))
+        avg_pass_rate = await session.scalar(select(func.avg(EvalRun.pass_rate)))
+        total_cost = await session.scalar(select(func.sum(EvalRun.total_cost_usd)))
+
+        # Last run
+        last_run_stmt = select(EvalRun.completed_at).order_by(
+            EvalRun.created_at.desc()
+        ).limit(1)
+        last_run_at = await session.scalar(last_run_stmt)
+
+        # 30-day pass rate trend
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        trend_stmt = (
+            select(EvalRun)
+            .where(EvalRun.created_at >= thirty_days_ago)
+            .order_by(EvalRun.created_at.asc())
+        )
+        trend_result = await session.execute(trend_stmt)
+        trend_runs = trend_result.scalars().all()
+
+    # Group by date for trend
+    trend_by_date: dict[str, list[float]] = {}
+    for r in trend_runs:
+        date_str = r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
+        if date_str not in trend_by_date:
+            trend_by_date[date_str] = []
+        trend_by_date[date_str].append(r.pass_rate)
+
+    pass_rate_trend = [
+        {
+            "date": date,
+            "avg_pass_rate": sum(rates) / len(rates),
+            "runs": len(rates),
+        }
+        for date, rates in trend_by_date.items()
+    ]
+
+    return ApiResponse(
+        data=EvalStatsResponse(
+            total_runs=total_runs or 0,
+            avg_pass_rate=round(avg_pass_rate or 0.0, 4),
+            total_cost_usd=round(total_cost or 0.0, 4),
+            last_run_at=last_run_at,
+            pass_rate_trend=pass_rate_trend,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
