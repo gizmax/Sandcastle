@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
@@ -34,6 +35,16 @@ class SSEEvent:
 
     event: str  # "system", "assistant", "user", "result", "error"
     data: dict
+
+
+def _validate_runner_file(runner_file: str) -> None:
+    """Validate runner_file path to prevent path traversal attacks.
+
+    Raises ``ValueError`` if the path contains directory traversal
+    sequences or is an absolute path.
+    """
+    if ".." in runner_file or runner_file.startswith("/"):
+        raise ValueError(f"Invalid runner file path: {runner_file}")
 
 
 # ---------------------------------------------------------------------------
@@ -82,16 +93,28 @@ class E2BBackend:
         e2b_api_key: str,
         template: str = "",
         timeout: float = 300.0,
+        event_queue_size: int = 1000,
+        npm_install_timeout: int = 60,
+        npm_poll_deadline: float = 90.0,
+        execution_grace_period: float = 30.0,
     ) -> None:
         self._api_key = e2b_api_key
         self._template = template
         self._timeout = timeout
+        self._event_queue_size = event_queue_size
+        self._npm_install_timeout = npm_install_timeout
+        self._npm_poll_deadline = npm_poll_deadline
+        self._execution_grace_period = execution_grace_period
 
     @property
     def name(self) -> str:
         return "e2b"
 
     async def health(self) -> bool:
+        """Check if the E2B SDK is importable and an API key is set.
+
+        This is a cheap in-process check - no network call needed.
+        """
         if not self._api_key:
             return False
         try:
@@ -101,7 +124,7 @@ class E2BBackend:
             return False
 
     async def close(self) -> None:
-        pass  # E2B sandboxes are ephemeral - nothing to clean up
+        """No-op - E2B sandboxes are ephemeral and cleaned up after each run."""
 
     async def start(
         self,
@@ -110,9 +133,13 @@ class E2BBackend:
         use_claude_runner: bool,
         timeout: float,
     ) -> AsyncIterator[SSEEvent]:
+        _validate_runner_file(runner_file)
+
         from e2b import AsyncSandbox
 
-        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue(maxsize=1000)
+        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue(
+            maxsize=self._event_queue_size
+        )
         sandbox = None
 
         def on_stdout(data: Any) -> None:
@@ -150,32 +177,48 @@ class E2BBackend:
                 if not runner_code:
                     raise RuntimeError(f"Runner script not found: {runner_file}")
 
-                await sandbox.files.write(
-                    f"/home/user/{runner_file}", runner_code
-                )
                 pkg = (
                     "@anthropic-ai/claude-agent-sdk"
                     if use_claude_runner
                     else "openai"
                 )
-                # Run npm install in background mode to avoid E2B SDK
+
+                # Upload runner file and start npm install in parallel.
+                # npm install runs in background mode to avoid E2B SDK
                 # gRPC hang - the SDK's foreground commands.run() can block
                 # indefinitely when the internal event stream stalls.
-                npm_handle = await sandbox.commands.run(
+                upload_coro = sandbox.files.write(
+                    f"/home/user/{runner_file}", runner_code
+                )
+                npm_coro = sandbox.commands.run(
                     f"npm install {pkg} 2>/dev/null || true",
                     background=True,
-                    timeout=60,
+                    timeout=self._npm_install_timeout,
                 )
+                _, npm_handle = await asyncio.gather(upload_coro, npm_coro)
+
+                # Wait for npm to finish using event-based polling with a
+                # hard deadline instead of a naive sleep loop.
                 try:
-                    deadline = asyncio.get_event_loop().time() + 90
+                    start_ts = time.monotonic()
                     while npm_handle.exit_code is None:
-                        if asyncio.get_event_loop().time() > deadline:
+                        elapsed = time.monotonic() - start_ts
+                        if elapsed > self._npm_poll_deadline:
                             logger.warning(
-                                "npm install timed out after 90s, "
-                                "proceeding anyway"
+                                "npm install timed out after %.0fs, "
+                                "proceeding anyway",
+                                self._npm_poll_deadline,
                             )
                             break
-                        await asyncio.sleep(1.0)
+                        # Progressively back off: 0.5s, 1s, 2s, capped at 3s
+                        wait_time = min(0.5 * (2 ** min(int(elapsed / 5), 3)), 3.0)
+                        await asyncio.sleep(wait_time)
+
+                    if npm_handle.exit_code is not None and npm_handle.exit_code != 0:
+                        logger.warning(
+                            "npm install exited with code %d",
+                            npm_handle.exit_code,
+                        )
                 except Exception as exc:
                     logger.warning("npm install error: %s", exc)
 
@@ -190,12 +233,14 @@ class E2BBackend:
 
             # Python-side deadline as safety net - E2B SDK timeout
             # on background commands may not reliably kill the process.
-            deadline = asyncio.get_event_loop().time() + timeout + 30
+            deadline = time.monotonic() + timeout + self._execution_grace_period
             while True:
-                if asyncio.get_event_loop().time() > deadline:
+                if time.monotonic() > deadline:
                     logger.warning(
-                        "E2B execution exceeded deadline (%.0fs + 30s grace), "
-                        "stopping", timeout,
+                        "E2B execution exceeded deadline (%.0fs + %.0fs grace), "
+                        "stopping",
+                        timeout,
+                        self._execution_grace_period,
                     )
                     break
                 try:
@@ -232,53 +277,40 @@ class E2BBackend:
 
 
 class DockerBackend:
-    """Local Docker containers via aiodocker."""
+    """Local Docker containers via aiodocker.
+
+    Maintains a pooled Docker client to avoid reconnecting on every
+    ``health()`` or ``start()`` call.
+    """
 
     def __init__(
         self,
         docker_image: str = "sandcastle-runner:latest",
         docker_url: str | None = None,
         timeout: float = 300.0,
+        memory_limit: int = 512 * 1024 * 1024,
     ) -> None:
         self._image = docker_image
         self._url = docker_url
         self._timeout = timeout
+        self._memory_limit = memory_limit
+        self._client: Any = None  # aiodocker.Docker | None
+        # Health cache: (result, timestamp)
+        self._health_cache: tuple[bool, float] = (False, 0.0)
+        self._health_cache_ttl: float = 30.0
 
     @property
     def name(self) -> str:
         return "docker"
 
-    async def health(self) -> bool:
-        try:
-            import aiodocker
-            kwargs: dict[str, Any] = {}
-            if self._url:
-                kwargs["url"] = self._url
-            docker = aiodocker.Docker(**kwargs)
-            try:
-                await docker.version()
-                return True
-            finally:
-                await docker.close()
-        except ImportError:
-            logger.error(
-                "aiodocker not installed. "
-                "Install with: pip install sandcastle-ai[docker]"
-            )
-            return False
-        except Exception:
-            return False
+    def _get_client(self) -> Any:
+        """Return the pooled aiodocker client, creating it on first use.
 
-    async def close(self) -> None:
-        pass
+        Raises ``RuntimeError`` if aiodocker is not installed.
+        """
+        if self._client is not None:
+            return self._client
 
-    async def start(
-        self,
-        runner_file: str,
-        envs: dict[str, str],
-        use_claude_runner: bool,
-        timeout: float,
-    ) -> AsyncIterator[SSEEvent]:
         try:
             import aiodocker
         except ImportError:
@@ -287,13 +319,65 @@ class DockerBackend:
                 "Install with: pip install sandcastle-ai[docker]"
             )
 
-        import io
-        import tarfile
-
         kwargs: dict[str, Any] = {}
         if self._url:
             kwargs["url"] = self._url
-        docker = aiodocker.Docker(**kwargs)
+        self._client = aiodocker.Docker(**kwargs)
+        return self._client
+
+    async def health(self) -> bool:
+        """Check Docker daemon connectivity (cached for 30s)."""
+        cached_result, cached_at = self._health_cache
+        if time.monotonic() - cached_at < self._health_cache_ttl:
+            return cached_result
+
+        result = await self._health_uncached()
+        self._health_cache = (result, time.monotonic())
+        return result
+
+    async def _health_uncached(self) -> bool:
+        """Perform the actual Docker health check."""
+        try:
+            docker = self._get_client()
+        except RuntimeError:
+            logger.error(
+                "aiodocker not installed. "
+                "Install with: pip install sandcastle-ai[docker]"
+            )
+            return False
+
+        try:
+            await docker.version()
+            return True
+        except Exception as exc:
+            logger.warning("Docker health check failed: %s", exc)
+            # Reset client on connection failure so next call retries
+            self._client = None
+            return False
+
+    async def close(self) -> None:
+        """Close the pooled Docker client and release the connection."""
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception as exc:
+                logger.debug("Error closing Docker client: %s", exc)
+            finally:
+                self._client = None
+
+    async def start(
+        self,
+        runner_file: str,
+        envs: dict[str, str],
+        use_claude_runner: bool,
+        timeout: float,
+    ) -> AsyncIterator[SSEEvent]:
+        _validate_runner_file(runner_file)
+
+        import io
+        import tarfile
+
+        docker = self._get_client()
         container = None
 
         try:
@@ -303,7 +387,10 @@ class DockerBackend:
             if not runner_code:
                 raise RuntimeError(f"Runner script not found: {runner_file}")
 
-            # Create container
+            # Create container with AutoRemove to avoid orphaned containers.
+            # Note: AutoRemove requires the container to be started, and
+            # prevents manual deletion via delete(force=True). We use it
+            # only when we plan to let the container exit naturally.
             config = {
                 "Image": self._image,
                 "Cmd": ["node", f"/home/user/{runner_file}"],
@@ -312,8 +399,8 @@ class DockerBackend:
                 "User": "1000:1000",
                 "NetworkMode": "bridge",
                 "HostConfig": {
-                    "AutoRemove": False,
-                    "Memory": 512 * 1024 * 1024,  # 512MB limit
+                    "AutoRemove": True,
+                    "Memory": self._memory_limit,
                 },
             }
 
@@ -351,10 +438,16 @@ class DockerBackend:
         finally:
             if container:
                 try:
+                    # With AutoRemove=True the container is cleaned up by
+                    # Docker after it exits. Force-delete handles the case
+                    # where the container is still running (e.g. timeout).
                     await container.delete(force=True)
-                except Exception:
-                    pass
-            await docker.close()
+                except Exception as exc:
+                    # Expected when AutoRemove already cleaned up the
+                    # container, or when the container was never started.
+                    logger.debug(
+                        "Container cleanup (expected with AutoRemove): %s", exc
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -373,10 +466,14 @@ class LocalBackend:
         return "local"
 
     async def health(self) -> bool:
+        """Check if Node.js is available on the PATH.
+
+        This is a cheap in-process check - no caching needed.
+        """
         return shutil.which("node") is not None
 
     async def close(self) -> None:
-        pass
+        """No-op - local backend holds no persistent resources."""
 
     async def start(
         self,
@@ -385,6 +482,8 @@ class LocalBackend:
         use_claude_runner: bool,
         timeout: float,
     ) -> AsyncIterator[SSEEvent]:
+        _validate_runner_file(runner_file)
+
         import os
 
         runner_path = _RUNNER_DIR / runner_file
@@ -447,7 +546,11 @@ class LocalBackend:
 
 
 class CloudflareBackend:
-    """Edge sandboxes via a deployed Cloudflare Worker."""
+    """Edge sandboxes via a deployed Cloudflare Worker.
+
+    Maintains a pooled httpx client to avoid reconnecting on every
+    ``health()`` or ``start()`` call.
+    """
 
     def __init__(
         self,
@@ -456,27 +559,60 @@ class CloudflareBackend:
     ) -> None:
         self._worker_url = worker_url.rstrip("/") if worker_url else ""
         self._timeout = timeout
+        self._client: Any = None  # httpx.AsyncClient | None
+        # Health cache: (result, timestamp)
+        self._health_cache: tuple[bool, float] = (False, 0.0)
+        self._health_cache_ttl: float = 30.0
 
     @property
     def name(self) -> str:
         return "cloudflare"
 
-    async def health(self) -> bool:
-        if not self._worker_url:
-            return False
+    def _get_client(self) -> Any:
+        """Return the pooled httpx client, creating it on first use."""
+        if self._client is not None:
+            return self._client
 
         import httpx
 
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self._timeout)
+        )
+        return self._client
+
+    async def health(self) -> bool:
+        """Check Cloudflare Worker health endpoint (cached for 30s)."""
+        if not self._worker_url:
+            return False
+
+        cached_result, cached_at = self._health_cache
+        if time.monotonic() - cached_at < self._health_cache_ttl:
+            return cached_result
+
+        result = await self._health_uncached()
+        self._health_cache = (result, time.monotonic())
+        return result
+
+    async def _health_uncached(self) -> bool:
+        """Perform the actual Cloudflare Worker health check."""
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(f"{self._worker_url}/health")
-                data = resp.json()
-                return data.get("ok", False)
-        except Exception:
+            client = self._get_client()
+            resp = await client.get(f"{self._worker_url}/health")
+            data = resp.json()
+            return data.get("ok", False)
+        except Exception as exc:
+            logger.warning("Cloudflare health check failed: %s", exc)
             return False
 
     async def close(self) -> None:
-        pass
+        """Close the pooled httpx client and release connections."""
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            except Exception as exc:
+                logger.debug("Error closing Cloudflare httpx client: %s", exc)
+            finally:
+                self._client = None
 
     async def start(
         self,
@@ -485,12 +621,12 @@ class CloudflareBackend:
         use_claude_runner: bool,
         timeout: float,
     ) -> AsyncIterator[SSEEvent]:
+        _validate_runner_file(runner_file)
+
         if not self._worker_url:
             raise RuntimeError(
                 "CLOUDFLARE_WORKER_URL is required for the cloudflare backend"
             )
-
-        import httpx
 
         # Read runner script to send to CF Worker
         runner_path = _RUNNER_DIR / runner_file
@@ -504,10 +640,15 @@ class CloudflareBackend:
             "envs": envs,
         }
 
+        import httpx
+
+        # Use a dedicated client with the per-request timeout for the /run
+        # call, since the pooled client uses the default backend timeout
+        # which may differ from the step-level timeout.
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout)
-        ) as client:
-            resp = await client.post(
+        ) as run_client:
+            resp = await run_client.post(
                 f"{self._worker_url}/run",
                 json=payload,
             )
@@ -552,8 +693,13 @@ def create_backend(
     template: str = "",
     docker_image: str = "sandcastle-runner:latest",
     docker_url: str | None = None,
+    docker_memory_limit: int = 512 * 1024 * 1024,
     cloudflare_worker_url: str = "",
     timeout: float = 300.0,
+    e2b_event_queue_size: int = 1000,
+    e2b_npm_install_timeout: int = 60,
+    e2b_npm_poll_deadline: float = 90.0,
+    e2b_execution_grace_period: float = 30.0,
 ) -> SandboxBackend:
     """Create the appropriate sandbox backend.
 
@@ -570,12 +716,17 @@ def create_backend(
             e2b_api_key=e2b_api_key,
             template=template,
             timeout=timeout,
+            event_queue_size=e2b_event_queue_size,
+            npm_install_timeout=e2b_npm_install_timeout,
+            npm_poll_deadline=e2b_npm_poll_deadline,
+            execution_grace_period=e2b_execution_grace_period,
         )
     if backend_type == "docker":
         return DockerBackend(
             docker_image=docker_image,
             docker_url=docker_url,
             timeout=timeout,
+            memory_limit=docker_memory_limit,
         )
     if backend_type == "local":
         return LocalBackend(timeout=timeout)
