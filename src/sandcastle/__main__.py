@@ -1356,6 +1356,253 @@ def _run_migrations() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Community Hub commands
+# ---------------------------------------------------------------------------
+
+_HUB_REGISTRY_URL = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+
+
+def _fetch_hub_registry() -> dict:
+    """Fetch the community hub registry."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(_HUB_REGISTRY_URL, timeout=10) as resp:
+            return json.loads(resp.read())
+    except Exception as exc:
+        print(
+            f"{_color('Error', _C.RED)}: Failed to fetch hub registry: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _cmd_hub_search(args: argparse.Namespace) -> None:
+    """Search community workflows by query."""
+    registry = _fetch_hub_registry()
+    templates = registry.get("templates", [])
+    query = getattr(args, "query", "").lower()
+
+    # Filter by query - match name, description, tags
+    results = []
+    for t in templates:
+        name = t.get("name", "").lower()
+        desc = t.get("description", "").lower()
+        tags = [tag.lower() for tag in t.get("tags", [])]
+        if query in name or query in desc or any(query in tag for tag in tags):
+            results.append(t)
+
+    # Filter by category
+    category = getattr(args, "category", None)
+    if category:
+        results = [
+            t for t in results
+            if t.get("category", "").lower() == category.lower()
+        ]
+
+    if getattr(args, "json", False):
+        print(json.dumps(results, indent=2))
+        return
+
+    if not results:
+        print(f"No workflows found for query '{query}'.")
+        return
+
+    headers = ["SLUG", "NAME", "CATEGORY", "STEPS", "AUTHOR"]
+    rows: list[list[str]] = []
+    for t in results:
+        rows.append([
+            t.get("slug", ""),
+            t.get("name", ""),
+            t.get("category", ""),
+            str(t.get("step_count", "")),
+            t.get("author", ""),
+        ])
+    print(_table(headers, rows))
+    print(f"\n{_color(str(len(results)), _C.CYAN)} result(s) found.")
+
+
+def _cmd_hub_install(args: argparse.Namespace) -> None:
+    """Install a community workflow by slug."""
+    import urllib.request
+    from pathlib import Path
+
+    registry = _fetch_hub_registry()
+    templates = registry.get("templates", [])
+    slug = getattr(args, "slug", "")
+
+    # Find template by slug
+    template = None
+    for t in templates:
+        if t.get("slug") == slug:
+            template = t
+            break
+
+    if template is None:
+        print(
+            f"{_color('Error', _C.RED)}: Workflow '{slug}' not found in the community hub.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    download_url = template.get("download_url")
+    if not download_url:
+        print(
+            f"{_color('Error', _C.RED)}: No download URL for '{slug}'.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Fetch the YAML content
+    try:
+        with urllib.request.urlopen(download_url, timeout=10) as resp:
+            yaml_content = resp.read().decode("utf-8")
+    except Exception as exc:
+        print(
+            f"{_color('Error', _C.RED)}: Failed to download workflow: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Save to target directory
+    target_dir = Path(getattr(args, "dir", None) or "./workflows/")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = slug.split("/")[-1] + ".yaml"
+    target_path = target_dir / filename
+
+    try:
+        target_path.write_text(yaml_content)
+    except OSError as exc:
+        print(
+            f"{_color('Error', _C.RED)}: Failed to write file: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"{_color('Installed', _C.GREEN)}: {slug} -> {target_path}")
+    print(f"  Name: {template.get('name', '')}")
+    print(f"  Steps: {template.get('step_count', '?')}")
+    print(f"  Category: {template.get('category', '')}")
+
+
+def _cmd_hub_list(args: argparse.Namespace) -> None:
+    """List community workflows."""
+    registry = _fetch_hub_registry()
+    templates = registry.get("templates", [])
+
+    # Filter by category
+    category = getattr(args, "category", None)
+    if category:
+        templates = [
+            t for t in templates
+            if t.get("category", "").lower() == category.lower()
+        ]
+
+    limit = getattr(args, "limit", 20)
+    templates = templates[:limit]
+
+    if getattr(args, "json", False):
+        print(json.dumps(templates, indent=2))
+        return
+
+    if not templates:
+        print("No community workflows found.")
+        return
+
+    headers = ["SLUG", "NAME", "CATEGORY", "STEPS", "AUTHOR"]
+    rows: list[list[str]] = []
+    for t in templates:
+        rows.append([
+            t.get("slug", ""),
+            t.get("name", ""),
+            t.get("category", ""),
+            str(t.get("step_count", "")),
+            t.get("author", ""),
+        ])
+    print(_table(headers, rows))
+
+    stats = registry.get("stats", {})
+    total = stats.get("total_templates", len(templates))
+    categories = registry.get("categories", [])
+    print(f"\n{_color(str(total), _C.CYAN)} total workflows in {len(categories)} categories.")
+
+
+def _cmd_hub_publish(args: argparse.Namespace) -> None:
+    """Publish a workflow to the community hub."""
+    import webbrowser
+    from pathlib import Path
+
+    import yaml
+
+    file_path = Path(getattr(args, "file", ""))
+    if not file_path.exists():
+        print(
+            f"{_color('Error', _C.RED)}: File '{file_path}' not found.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    content = file_path.read_text()
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        print(
+            f"{_color('Error', _C.RED)}: Invalid YAML: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not data or not isinstance(data, dict):
+        print(
+            f"{_color('Error', _C.RED)}: YAML file must contain a mapping with name, description, and steps.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    name = data.get("name") or file_path.stem
+    steps = data.get("steps", [])
+    if not steps:
+        print(
+            f"{_color('Warning', _C.YELLOW)}: Workflow has no steps defined.",
+            file=sys.stderr,
+        )
+
+    slug = file_path.stem.replace("_", "-")
+    print(f"{_color('Workflow details', _C.BOLD)}:")
+    print(f"  Name: {name}")
+    print(f"  Slug: {slug}")
+    print(f"  Steps: {len(steps)}")
+    print()
+    print("To publish your workflow to the community hub:")
+    print(f"  1. Fork {_color('github.com/gizmax/Sandcastle', _C.CYAN)}")
+    print(f"  2. Add your workflow to {_color('hub/community/<your-username>/', _C.CYAN)}")
+    print("  3. Open a pull request")
+
+    try:
+        webbrowser.open("https://github.com/gizmax/Sandcastle")
+    except Exception:
+        pass
+
+
+def _cmd_hub(args: argparse.Namespace) -> None:
+    """Route hub sub-commands."""
+    action = getattr(args, "hub_action", None)
+    hub_dispatch: dict[str, Any] = {
+        "search": _cmd_hub_search,
+        "install": _cmd_hub_install,
+        "list": _cmd_hub_list,
+        "publish": _cmd_hub_publish,
+    }
+    handler = hub_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle hub {search,install,list,publish}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -1542,6 +1789,27 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Max number of results (default: 20)")
     _add_connection_args(p_runs)
 
+    # --- hub ---
+    p_hub = subparsers.add_parser("hub", help="Community workflow hub")
+    hub_sub = p_hub.add_subparsers(dest="hub_action")
+
+    hub_search = hub_sub.add_parser("search", help="Search community workflows")
+    hub_search.add_argument("query", help="Search query")
+    hub_search.add_argument("--category", "-c", help="Filter by category")
+
+    hub_install = hub_sub.add_parser("install", help="Install a community workflow")
+    hub_install.add_argument("slug", help="Workflow slug (e.g. gizmax/lead-scoring)")
+    hub_install.add_argument("--dir", "-d", default=None,
+                             help="Target directory (default: ./workflows/)")
+
+    hub_list = hub_sub.add_parser("list", help="List community workflows")
+    hub_list.add_argument("--category", "-c", help="Filter by category")
+    hub_list.add_argument("--limit", "-n", type=int, default=20,
+                          help="Max results")
+
+    hub_publish = hub_sub.add_parser("publish", help="Publish a workflow to the community hub")
+    hub_publish.add_argument("file", help="Path to workflow YAML file")
+
     return parser
 
 
@@ -1579,6 +1847,7 @@ def main() -> None:
         "approve": _cmd_approve,
         "reject": _cmd_reject,
         "runs": _cmd_runs,
+        "hub": _cmd_hub,
     }
 
     handler = dispatch.get(args.command)

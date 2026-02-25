@@ -30,7 +30,8 @@ class TestToolRegistry:
             assert tool.name == name
             assert tool.description
             assert tool.category in (
-                "communication", "project_management", "crm", "data", "general"
+                "communication", "project_management", "crm", "data",
+                "general", "erp", "payments"
             )
             assert tool.connector_file.endswith(".mjs")
             assert len(tool.functions) > 0

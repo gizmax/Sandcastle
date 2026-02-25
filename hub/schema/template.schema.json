@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sandcastle Hub Template Metadata",
+  "description": "Schema for validating template entries in the Sandcastle Community Hub registry",
+  "type": "object",
+  "required": ["name", "slug", "description", "author", "version", "category"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Human-readable template name"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9_/-]+$",
+      "description": "Unique identifier in author/template-name format"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Short description of what the template does"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name or GitHub username"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version (e.g. 1.0.0)"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["sales_crm", "marketing", "support", "engineering", "hr_legal", "general_ai"],
+      "description": "Primary category for the template"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Searchable tags for discovery"
+    },
+    "models_used": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of model short names used in steps (e.g. sonnet, haiku)"
+    },
+    "tools_used": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of tool connector names used (e.g. salesforce, slack)"
+    },
+    "step_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of steps in the workflow"
+    },
+    "license": {
+      "type": "string",
+      "default": "MIT",
+      "description": "License for the template (defaults to MIT)"
+    }
+  }
+}
