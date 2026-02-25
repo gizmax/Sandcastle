@@ -337,6 +337,67 @@ def _resolve_policy_template(template: str, output: Any, context: dict[str, Any]
     return re.sub(r"\{([^}]+)\}", _replace, template)
 
 
+# Common credential patterns for tool connectors
+_CREDENTIAL_PATTERNS: dict[str, list[str]] = {
+    "slack": [r"xoxb-[0-9A-Za-z\-]+", r"xoxp-[0-9A-Za-z\-]+"],
+    "github": [r"ghp_[A-Za-z0-9]{20,40}", r"gho_[A-Za-z0-9]{20,40}"],
+    "hubspot": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "salesforce": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "stripe": [r"sk_live_[A-Za-z0-9]+", r"sk_test_[A-Za-z0-9]+"],
+    "aws": [r"AKIA[0-9A-Z]{16}"],
+    "openai": [r"sk-[A-Za-z0-9]{48}"],
+}
+
+
+def create_tool_credential_policy(
+    tools: list[str],
+) -> PolicyDefinition | None:
+    """Create auto-redaction policy for tool credential patterns.
+
+    Returns None if no tools are provided.
+    """
+    if not tools:
+        return None
+
+    patterns: list[PolicyPattern] = []
+    for tool in tools:
+        tool_key = tool.split(":")[0].lower()
+        if tool_key in _CREDENTIAL_PATTERNS:
+            for regex in _CREDENTIAL_PATTERNS[tool_key]:
+                patterns.append(
+                    PolicyPattern(type="regex", pattern=regex)
+                )
+        # Always add generic Bearer token pattern
+        patterns.append(
+            PolicyPattern(
+                type="regex", pattern=r"Bearer\s+[A-Za-z0-9_\-\.]+"
+            )
+        )
+
+    # Deduplicate
+    seen: set[str] = set()
+    unique: list[PolicyPattern] = []
+    for p in patterns:
+        key = f"{p.type}:{p.pattern}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+
+    return PolicyDefinition(
+        id="auto-credential-redact",
+        trigger=PolicyTrigger(
+            type="output_contains", patterns=unique
+        ),
+        action=PolicyAction(
+            type="redact",
+            replacement="[CREDENTIAL_REDACTED]",
+            apply_to=["storage", "webhook", "output"],
+        ),
+        description="Auto-redact tool credentials from outputs",
+        severity="high",
+    )
+
+
 def resolve_step_policies(
     step_policies: list | None,
     global_policies: list[PolicyDefinition],

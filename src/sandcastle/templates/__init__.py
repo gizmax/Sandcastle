@@ -7,7 +7,7 @@ and use as starting points for their own workflows.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -149,6 +149,4 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
             return content, info
 
     available = [p.stem for p in _TEMPLATES_DIR.glob("*.yaml")]
-    raise FileNotFoundError(
-        f"Template '{name}' not found. Available: {', '.join(available)}"
-    )
+    raise FileNotFoundError(f"Template '{name}' not found. Available: {', '.join(available)}")

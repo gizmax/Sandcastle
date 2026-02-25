@@ -38,9 +38,7 @@ def bundle_tool_files(tool_names: list[str]) -> dict[str, str]:
         if filepath.exists():
             files[tool.connector_file] = filepath.read_text()
         else:
-            logger.warning(
-                "Connector file not found: %s (tool: %s)", filepath, name
-            )
+            logger.warning("Connector file not found: %s (tool: %s)", filepath, name)
     return files
 
 
@@ -83,16 +81,20 @@ def generate_tool_docs(tool_names: list[str]) -> str:
             cli_args = " ".join(args_parts)
             sections.append(f"### {func.name}")
             sections.append(f"{func.description}")
-            sections.append(f"```bash")
+            sections.append("```bash")
             sections.append(f"node /home/user/tools/{tool.connector_file} {func.name} {cli_args}")
-            sections.append(f"```")
+            sections.append("```")
 
             # Parameter details
             props = func.parameters.get("properties", {})
             if props:
                 sections.append("Parameters:")
                 for pname, pdef in props.items():
-                    required = "(required)" if pname in func.parameters.get("required", []) else "(optional)"
+                    required = (
+                        "(required)"
+                        if pname in func.parameters.get("required", [])
+                        else "(optional)"
+                    )
                     desc = pdef.get("description", "")
                     sections.append(f"  - {pname} {required}: {desc}")
 
@@ -117,14 +119,16 @@ def generate_tool_schemas(tool_names: list[str]) -> list[dict]:
             continue
 
         for func in tool.functions:
-            schemas.append({
-                "type": "function",
-                "function": {
-                    "name": f"{tool.name}_{func.name}",
-                    "description": f"[{tool.name}] {func.description}",
-                    "parameters": func.parameters,
-                },
-            })
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": f"{tool.name}_{func.name}",
+                        "description": f"[{tool.name}] {func.description}",
+                        "parameters": func.parameters,
+                    },
+                }
+            )
 
     return schemas
 

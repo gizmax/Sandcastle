@@ -244,7 +244,9 @@ async def check_assertion(
             passed=passed,
             expected=f"<= ${assertion.value:.4f}",
             actual=f"${actual_cost:.4f}",
-            message="" if passed else f"Cost ${actual_cost:.4f} exceeds limit ${assertion.value:.4f}",
+            message=""
+            if passed
+            else f"Cost ${actual_cost:.4f} exceeds limit ${assertion.value:.4f}",
         )
 
     if atype == "max_duration":
@@ -255,7 +257,9 @@ async def check_assertion(
             passed=passed,
             expected=f"<= {assertion.value}s",
             actual=f"{actual_dur:.1f}s",
-            message="" if passed else f"Duration {actual_dur:.1f}s exceeds limit {assertion.value}s",
+            message=""
+            if passed
+            else f"Duration {actual_dur:.1f}s exceeds limit {assertion.value}s",
         )
 
     return AssertionResult(
@@ -284,7 +288,9 @@ async def _check_llm_judge(assertion: AssertionDef, output: Any) -> AssertionRes
             expected=f">= {assertion.threshold}",
             actual=f"{score:.2f}",
             score=score,
-            message="" if passed else f"LLM judge score {score:.2f} below threshold {assertion.threshold}",
+            message=""
+            if passed
+            else f"LLM judge score {score:.2f} below threshold {assertion.threshold}",
         )
     except Exception as exc:
         logger.warning("LLM judge failed: %s", exc)
@@ -328,7 +334,6 @@ async def run_eval_case(
     run_id = str(uuid.uuid4())
 
     try:
-        from sandcastle.config import settings
         from sandcastle.engine.dag import build_plan, load_workflow
         from sandcastle.engine.executor import execute_workflow
         from sandcastle.engine.storage import create_storage

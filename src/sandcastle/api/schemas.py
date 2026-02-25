@@ -22,9 +22,7 @@ class WorkflowRunRequest(BaseModel):
     callback_url: str | None = Field(None, description="Webhook URL for completion notification")
     idempotency_key: str | None = Field(None, description="Unique key to prevent duplicate runs")
     max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run")
-    version: int | str | None = Field(
-        None, description="Workflow version (int, 'latest', or None)"
-    )
+    version: int | str | None = Field(None, description="Workflow version (int, 'latest', or None)")
 
 
 class ReplayRequest(BaseModel):
@@ -108,17 +106,13 @@ class DeadLetterResolveRequest(BaseModel):
 class WorkflowPromoteRequest(BaseModel):
     """Request to promote a workflow version (draft->staging->production)."""
 
-    version: int | None = Field(
-        None, description="Version to promote (default: latest)"
-    )
+    version: int | None = Field(None, description="Version to promote (default: latest)")
 
 
 class WorkflowRollbackRequest(BaseModel):
     """Request to rollback a workflow to a previous version."""
 
-    target_version: int | None = Field(
-        None, description="Target version (default: previous)"
-    )
+    target_version: int | None = Field(None, description="Target version (default: previous)")
 
 
 class ApprovalRespondRequest(BaseModel):
@@ -553,7 +547,9 @@ class ToolFunctionResponse(BaseModel):
 
     name: str
     description: str
-    parameters: dict = Field(default_factory=dict, description="JSON Schema for function parameters")
+    parameters: dict = Field(
+        default_factory=dict, description="JSON Schema for function parameters"
+    )
 
 
 class ToolConnectionResponse(BaseModel):
@@ -593,7 +589,8 @@ class ToolCredentialUpdateRequest(BaseModel):
     """Update credentials for a specific tool."""
 
     credentials: dict[str, str] = Field(
-        ..., description="Mapping of env var name to value, e.g. {'TOOL_SLACK_BOT_TOKEN': 'xoxb-...'}"
+        ...,
+        description="Mapping of env var name to value, e.g. {'TOOL_SLACK_BOT_TOKEN': 'xoxb-...'}",
     )
 
 
@@ -601,17 +598,13 @@ class ToolConnectionCreateRequest(BaseModel):
     """Create a named connection for a tool."""
 
     name: str = Field(..., description="Connection name (e.g. 'analytics', 'staging')")
-    credentials: dict[str, str] = Field(
-        ..., description="Mapping of env var name to value"
-    )
+    credentials: dict[str, str] = Field(..., description="Mapping of env var name to value")
 
 
 class ToolConnectionUpdateRequest(BaseModel):
     """Update credentials for a named connection."""
 
-    credentials: dict[str, str] = Field(
-        ..., description="Mapping of env var name to value"
-    )
+    credentials: dict[str, str] = Field(..., description="Mapping of env var name to value")
 
 
 # --- Evaluations ---
@@ -683,9 +676,9 @@ class EvalStatsResponse(BaseModel):
 class MemoryAddRequest(BaseModel):
     """Request to add a memory."""
 
-    scope: str = "workflow"       # workflow | agent | global
-    scope_id: str                 # workflow name, agent name, or "global"
-    content: str                  # Text to memorize
+    scope: str = "workflow"  # workflow | agent | global
+    scope_id: str  # workflow name, agent name, or "global"
+    content: str  # Text to memorize
     metadata: dict | None = None
 
 

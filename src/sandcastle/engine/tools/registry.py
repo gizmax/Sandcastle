@@ -8,7 +8,7 @@ loader, and dashboard UI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,14 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "channel": {"type": "string", "description": "Channel name or ID (e.g. '#general')"},
-                        "text": {"type": "string", "description": "Message text (supports Slack mrkdwn)"},
+                        "channel": {
+                            "type": "string",
+                            "description": "Channel name or ID (e.g. '#general')",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Message text (supports Slack mrkdwn)",
+                        },
                     },
                     "required": ["channel", "text"],
                 },
@@ -61,7 +67,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "limit": {"type": "integer", "description": "Max channels to return", "default": 100},
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max channels to return",
+                            "default": 100,
+                        },
                     },
                 },
             ),
@@ -72,7 +82,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "channel": {"type": "string", "description": "Channel name or ID"},
-                        "limit": {"type": "integer", "description": "Max messages to return", "default": 20},
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max messages to return",
+                            "default": 20,
+                        },
                     },
                     "required": ["channel"],
                 },
@@ -96,7 +110,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "project": {"type": "string", "description": "Project key (e.g. 'PROJ')"},
                         "summary": {"type": "string", "description": "Issue title"},
                         "description": {"type": "string", "description": "Issue description"},
-                        "issue_type": {"type": "string", "description": "Issue type (Bug, Task, Story)", "default": "Task"},
+                        "issue_type": {
+                            "type": "string",
+                            "description": "Issue type (Bug, Task, Story)",
+                            "default": "Task",
+                        },
                     },
                     "required": ["project", "summary"],
                 },
@@ -107,7 +125,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "issue_key": {"type": "string", "description": "Issue key (e.g. 'PROJ-123')"},
+                        "issue_key": {
+                            "type": "string",
+                            "description": "Issue key (e.g. 'PROJ-123')",
+                        },
                     },
                     "required": ["issue_key"],
                 },
@@ -119,7 +140,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "jql": {"type": "string", "description": "JQL query string"},
-                        "max_results": {"type": "integer", "description": "Max results", "default": 20},
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Max results",
+                            "default": 20,
+                        },
                     },
                     "required": ["jql"],
                 },
@@ -167,7 +192,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "repo": {"type": "string", "description": "Repository (owner/repo)"},
-                        "state": {"type": "string", "description": "Filter: open, closed, all", "default": "open"},
+                        "state": {
+                            "type": "string",
+                            "description": "Filter: open, closed, all",
+                            "default": "open",
+                        },
                         "limit": {"type": "integer", "description": "Max results", "default": 20},
                     },
                     "required": ["repo"],
@@ -183,7 +212,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "title": {"type": "string", "description": "PR title"},
                         "body": {"type": "string", "description": "PR description"},
                         "head": {"type": "string", "description": "Source branch"},
-                        "base": {"type": "string", "description": "Target branch", "default": "main"},
+                        "base": {
+                            "type": "string",
+                            "description": "Target branch",
+                            "default": "main",
+                        },
                     },
                     "required": ["repo", "title", "head"],
                 },
@@ -206,8 +239,15 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "to": {"type": "string", "description": "Recipient email address"},
                         "subject": {"type": "string", "description": "Email subject"},
-                        "body": {"type": "string", "description": "Email body (plain text or HTML)"},
-                        "html": {"type": "boolean", "description": "Whether body is HTML", "default": False},
+                        "body": {
+                            "type": "string",
+                            "description": "Email body (plain text or HTML)",
+                        },
+                        "html": {
+                            "type": "boolean",
+                            "description": "Whether body is HTML",
+                            "default": False,
+                        },
                     },
                     "required": ["to", "subject", "body"],
                 },
@@ -225,7 +265,12 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 },
             ),
         ],
-        credential_env_vars=["TOOL_SMTP_HOST", "TOOL_SMTP_PORT", "TOOL_SMTP_USER", "TOOL_SMTP_PASSWORD"],
+        credential_env_vars=[
+            "TOOL_SMTP_HOST",
+            "TOOL_SMTP_PORT",
+            "TOOL_SMTP_USER",
+            "TOOL_SMTP_PASSWORD",
+        ],
         connector_file="gmail.mjs",
         icon="mail",
     ),
@@ -241,7 +286,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
-                        "filter_type": {"type": "string", "description": "Filter: page or database"},
+                        "filter_type": {
+                            "type": "string",
+                            "description": "Filter: page or database",
+                        },
                     },
                     "required": ["query"],
                 },
@@ -263,7 +311,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "parent_id": {"type": "string", "description": "Parent page or database ID"},
+                        "parent_id": {
+                            "type": "string",
+                            "description": "Parent page or database ID",
+                        },
                         "title": {"type": "string", "description": "Page title"},
                         "content": {"type": "string", "description": "Page content (markdown)"},
                     },
@@ -313,7 +364,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "dealname": {"type": "string", "description": "Deal name"},
                         "amount": {"type": "number", "description": "Deal amount"},
-                        "pipeline": {"type": "string", "description": "Pipeline name", "default": "default"},
+                        "pipeline": {
+                            "type": "string",
+                            "description": "Pipeline name",
+                            "default": "default",
+                        },
                         "dealstage": {"type": "string", "description": "Deal stage"},
                     },
                     "required": ["dealname"],
@@ -346,7 +401,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "sobject": {"type": "string", "description": "SObject type (Account, Contact, Lead, etc.)"},
+                        "sobject": {
+                            "type": "string",
+                            "description": "SObject type (Account, Contact, Lead, etc.)",
+                        },
                         "data": {"type": "object", "description": "Record field values"},
                     },
                     "required": ["sobject", "data"],
@@ -366,7 +424,12 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 },
             ),
         ],
-        credential_env_vars=["TOOL_SALESFORCE_CLIENT_ID", "TOOL_SALESFORCE_CLIENT_SECRET", "TOOL_SALESFORCE_REFRESH_TOKEN", "TOOL_SALESFORCE_INSTANCE_URL"],
+        credential_env_vars=[
+            "TOOL_SALESFORCE_CLIENT_ID",
+            "TOOL_SALESFORCE_CLIENT_SECRET",
+            "TOOL_SALESFORCE_REFRESH_TOKEN",
+            "TOOL_SALESFORCE_INSTANCE_URL",
+        ],
         connector_file="salesforce.mjs",
         icon="salesforce",
     ),
@@ -383,7 +446,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "subject": {"type": "string", "description": "Ticket subject"},
                         "description": {"type": "string", "description": "Ticket description"},
-                        "priority": {"type": "string", "description": "Priority: low, normal, high, urgent", "default": "normal"},
+                        "priority": {
+                            "type": "string",
+                            "description": "Priority: low, normal, high, urgent",
+                            "default": "normal",
+                        },
                         "requester_email": {"type": "string", "description": "Requester email"},
                     },
                     "required": ["subject", "description"],
@@ -396,7 +463,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search query"},
-                        "status": {"type": "string", "description": "Filter: new, open, pending, solved"},
+                        "status": {
+                            "type": "string",
+                            "description": "Filter: new, open, pending, solved",
+                        },
                         "limit": {"type": "integer", "description": "Max results", "default": 20},
                     },
                 },
@@ -416,7 +486,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 },
             ),
         ],
-        credential_env_vars=["TOOL_ZENDESK_SUBDOMAIN", "TOOL_ZENDESK_EMAIL", "TOOL_ZENDESK_API_TOKEN"],
+        credential_env_vars=[
+            "TOOL_ZENDESK_SUBDOMAIN",
+            "TOOL_ZENDESK_EMAIL",
+            "TOOL_ZENDESK_API_TOKEN",
+        ],
         connector_file="zendesk.mjs",
         icon="zendesk",
     ),
@@ -431,7 +505,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "text": {"type": "string", "description": "Message text (supports markdown)"},
+                        "text": {
+                            "type": "string",
+                            "description": "Message text (supports markdown)",
+                        },
                         "title": {"type": "string", "description": "Optional message card title"},
                     },
                     "required": ["text"],
@@ -453,7 +530,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search query (Drive API format)"},
+                        "query": {
+                            "type": "string",
+                            "description": "Search query (Drive API format)",
+                        },
                         "limit": {"type": "integer", "description": "Max results", "default": 20},
                     },
                 },
@@ -477,7 +557,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "name": {"type": "string", "description": "File name"},
                         "content": {"type": "string", "description": "File content"},
-                        "mime_type": {"type": "string", "description": "MIME type", "default": "text/plain"},
+                        "mime_type": {
+                            "type": "string",
+                            "description": "MIME type",
+                            "default": "text/plain",
+                        },
                         "parent_id": {"type": "string", "description": "Parent folder ID"},
                     },
                     "required": ["name", "content"],
@@ -558,7 +642,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
     # --- Enterprise connectors ---
     "sap": ToolDefinition(
         name="sap",
-        description="Search business partners, manage sales orders, and query materials in SAP S/4HANA",
+        description=(
+            "Search business partners, manage sales orders,"
+            " and query materials in SAP S/4HANA"
+        ),
         category="erp",
         functions=[
             ToolFunction(
@@ -578,7 +665,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "customer_id": {"type": "string", "description": "Filter by customer (SoldToParty)"},
+                        "customer_id": {
+                            "type": "string",
+                            "description": "Filter by customer (SoldToParty)",
+                        },
                         "status": {"type": "string", "description": "Filter by process status"},
                         "limit": {"type": "integer", "description": "Max results", "default": 20},
                     },
@@ -591,7 +681,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "customer_id": {"type": "string", "description": "Customer (SoldToParty)"},
-                        "items": {"type": "array", "description": "Order items [{material, quantity}]"},
+                        "items": {
+                            "type": "array",
+                            "description": "Order items [{material, quantity}]",
+                        },
                     },
                     "required": ["customer_id"],
                 },
@@ -637,7 +730,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "short_description": {"type": "string", "description": "Incident title"},
                         "description": {"type": "string", "description": "Detailed description"},
-                        "urgency": {"type": "string", "description": "Urgency: 1 (high), 2 (medium), 3 (low)", "default": "2"},
+                        "urgency": {
+                            "type": "string",
+                            "description": "Urgency: 1 (high), 2 (medium), 3 (low)",
+                            "default": "2",
+                        },
                         "category": {"type": "string", "description": "Incident category"},
                     },
                     "required": ["short_description"],
@@ -668,7 +765,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 },
             ),
         ],
-        credential_env_vars=["TOOL_SERVICENOW_INSTANCE", "TOOL_SERVICENOW_USERNAME", "TOOL_SERVICENOW_PASSWORD"],
+        credential_env_vars=[
+            "TOOL_SERVICENOW_INSTANCE",
+            "TOOL_SERVICENOW_USERNAME",
+            "TOOL_SERVICENOW_PASSWORD",
+        ],
         connector_file="servicenow.mjs",
         icon="servicenow",
     ),
@@ -686,7 +787,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "sql": {"type": "string", "description": "SQL statement to execute"},
                         "database": {"type": "string", "description": "Target database"},
                         "schema": {"type": "string", "description": "Target schema"},
-                        "limit": {"type": "integer", "description": "Max rows to return", "default": 100},
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max rows to return",
+                            "default": 100,
+                        },
                     },
                     "required": ["sql"],
                 },
@@ -706,7 +811,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "database": {"type": "string", "description": "Database name"},
-                        "schema": {"type": "string", "description": "Schema name", "default": "PUBLIC"},
+                        "schema": {
+                            "type": "string",
+                            "description": "Schema name",
+                            "default": "PUBLIC",
+                        },
                     },
                     "required": ["database"],
                 },
@@ -718,14 +827,23 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "database": {"type": "string", "description": "Database name"},
-                        "schema": {"type": "string", "description": "Schema name", "default": "PUBLIC"},
+                        "schema": {
+                            "type": "string",
+                            "description": "Schema name",
+                            "default": "PUBLIC",
+                        },
                         "table": {"type": "string", "description": "Table name"},
                     },
                     "required": ["database", "table"],
                 },
             ),
         ],
-        credential_env_vars=["TOOL_SNOWFLAKE_ACCOUNT", "TOOL_SNOWFLAKE_USERNAME", "TOOL_SNOWFLAKE_PASSWORD", "TOOL_SNOWFLAKE_WAREHOUSE"],
+        credential_env_vars=[
+            "TOOL_SNOWFLAKE_ACCOUNT",
+            "TOOL_SNOWFLAKE_USERNAME",
+            "TOOL_SNOWFLAKE_PASSWORD",
+            "TOOL_SNOWFLAKE_WAREHOUSE",
+        ],
         connector_file="snowflake.mjs",
         icon="snowflake",
     ),
@@ -743,7 +861,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "database": {"type": "string", "description": "Database name"},
                         "collection": {"type": "string", "description": "Collection name"},
                         "filter": {"type": "object", "description": "MongoDB query filter"},
-                        "limit": {"type": "integer", "description": "Max documents to return", "default": 20},
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max documents to return",
+                            "default": 20,
+                        },
                     },
                     "required": ["database", "collection"],
                 },
@@ -770,7 +892,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "database": {"type": "string", "description": "Database name"},
                         "collection": {"type": "string", "description": "Collection name"},
                         "filter": {"type": "object", "description": "MongoDB query filter"},
-                        "update": {"type": "object", "description": "Update operations (e.g. {$set: {field: value}})"},
+                        "update": {
+                            "type": "object",
+                            "description": "Update operations (e.g. {$set: {field: value}})",
+                        },
                     },
                     "required": ["database", "collection", "filter", "update"],
                 },
@@ -815,7 +940,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "customer_id": {"type": "string", "description": "Stripe customer ID (cus_...)"},
+                        "customer_id": {
+                            "type": "string",
+                            "description": "Stripe customer ID (cus_...)",
+                        },
                     },
                     "required": ["customer_id"],
                 },
@@ -827,7 +955,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "customer_id": {"type": "string", "description": "Filter by customer ID"},
-                        "status": {"type": "string", "description": "Filter: draft, open, paid, void, uncollectible"},
+                        "status": {
+                            "type": "string",
+                            "description": "Filter: draft, open, paid, void, uncollectible",
+                        },
                         "limit": {"type": "integer", "description": "Max results", "default": 20},
                     },
                 },
@@ -839,7 +970,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "customer_id": {"type": "string", "description": "Customer ID"},
-                        "items": {"type": "array", "description": "Line items [{amount, currency, description}]"},
+                        "items": {
+                            "type": "array",
+                            "description": "Line items [{amount, currency, description}]",
+                        },
                         "description": {"type": "string", "description": "Invoice description"},
                     },
                     "required": ["customer_id"],
@@ -861,7 +995,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "to": {"type": "string", "description": "Recipient phone number (+E.164 format)"},
+                        "to": {
+                            "type": "string",
+                            "description": "Recipient phone number (+E.164 format)",
+                        },
                         "body": {"type": "string", "description": "Message text"},
                     },
                     "required": ["to", "body"],
@@ -897,13 +1034,20 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "to": {"type": "string", "description": "Recipient phone number"},
-                        "twiml_url": {"type": "string", "description": "URL returning TwiML instructions"},
+                        "twiml_url": {
+                            "type": "string",
+                            "description": "URL returning TwiML instructions",
+                        },
                     },
                     "required": ["to", "twiml_url"],
                 },
             ),
         ],
-        credential_env_vars=["TOOL_TWILIO_ACCOUNT_SID", "TOOL_TWILIO_AUTH_TOKEN", "TOOL_TWILIO_FROM_NUMBER"],
+        credential_env_vars=[
+            "TOOL_TWILIO_ACCOUNT_SID",
+            "TOOL_TWILIO_AUTH_TOKEN",
+            "TOOL_TWILIO_FROM_NUMBER",
+        ],
         connector_file="twilio.mjs",
         icon="twilio",
     ),
@@ -943,7 +1087,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "contacts": {"type": "array", "description": "Contacts [{email, first_name, last_name}]"},
+                        "contacts": {
+                            "type": "array",
+                            "description": "Contacts [{email, first_name, last_name}]",
+                        },
                     },
                     "required": ["contacts"],
                 },
@@ -1001,7 +1148,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "conversation_id": {"type": "string", "description": "Conversation ID"},
                         "body": {"type": "string", "description": "Reply body"},
-                        "type": {"type": "string", "description": "Reply type: admin or user", "default": "admin"},
+                        "type": {
+                            "type": "string",
+                            "description": "Reply type: admin or user",
+                            "default": "admin",
+                        },
                     },
                     "required": ["conversation_id", "body"],
                 },
@@ -1047,10 +1198,17 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "selector": {"type": "string", "description": "CSS selector or text to match"},
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector or text to match",
+                        },
                         "method": {
                             "type": "string",
-                            "description": "Selection method: 'css', 'text', 'xpath'. Default: 'css'",
+                            "description": (
+                                "Selection method: 'css',"
+                                " 'text', 'xpath'."
+                                " Default: 'css'"
+                            ),
                             "default": "css",
                         },
                     },
@@ -1063,7 +1221,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "selector": {"type": "string", "description": "CSS selector of the input field"},
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector of the input field",
+                        },
                         "text": {"type": "string", "description": "Text to type"},
                         "clear": {
                             "type": "boolean",
@@ -1094,7 +1255,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "selector": {"type": "string", "description": "CSS selector to extract text from"},
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector to extract text from",
+                        },
                     },
                     "required": ["selector"],
                 },
@@ -1121,8 +1285,14 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "selector": {"type": "string", "description": "CSS selector of the select element"},
-                        "value": {"type": "string", "description": "Option value or visible text to select"},
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector of the select element",
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "Option value or visible text to select",
+                        },
                     },
                     "required": ["selector", "value"],
                 },
@@ -1135,7 +1305,11 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "selector": {
                             "type": "string",
-                            "description": "Optional CSS selector for specific element. Default: 'body'",
+                            "description": (
+                                "Optional CSS selector for"
+                                " specific element."
+                                " Default: 'body'"
+                            ),
                             "default": "body",
                         },
                     },
@@ -1169,7 +1343,10 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 parameters={
                     "type": "object",
                     "properties": {
-                        "schema": {"type": "object", "description": "JSON schema describing desired output structure"},
+                        "schema": {
+                            "type": "object",
+                            "description": "JSON schema describing desired output structure",
+                        },
                     },
                 },
             ),
@@ -1208,10 +1385,7 @@ def parse_tool_ref(ref: str) -> tuple[str, str | None]:
 def get_tool(name: str) -> ToolDefinition:
     """Get a tool definition by name. Raises KeyError if not found."""
     if name not in TOOL_REGISTRY:
-        raise KeyError(
-            f"Unknown tool '{name}'. "
-            f"Available: {', '.join(sorted(TOOL_REGISTRY))}"
-        )
+        raise KeyError(f"Unknown tool '{name}'. Available: {', '.join(sorted(TOOL_REGISTRY))}")
     return TOOL_REGISTRY[name]
 
 
@@ -1233,7 +1407,6 @@ def validate_tools(tool_names: list[str]) -> list[str]:
         base_name, _ = parse_tool_ref(ref)
         if base_name not in TOOL_REGISTRY:
             errors.append(
-                f"Unknown tool '{base_name}'. "
-                f"Available: {', '.join(sorted(TOOL_REGISTRY))}"
+                f"Unknown tool '{base_name}'. Available: {', '.join(sorted(TOOL_REGISTRY))}"
             )
     return errors
