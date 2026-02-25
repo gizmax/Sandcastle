@@ -61,6 +61,25 @@ class PerformanceStats:
     sample_count: int = 0
 
 
+@dataclass
+class DegradationAlert:
+    """Alert when a model's performance drops below SLO."""
+
+    model: str
+    step_id: str
+    workflow_name: str
+    metric: str  # "quality" | "cost" | "latency"
+    current_value: float
+    threshold: float
+    severity: str  # "warning" | "critical"
+    recommended_action: str
+    detected_at: float = 0.0
+
+    def __post_init__(self):
+        if not self.detected_at:
+            self.detected_at = time.time()
+
+
 # --- Default model pool ---
 
 DEFAULT_MODEL_POOL = [
@@ -84,6 +103,9 @@ class CostLatencyOptimizer:
     def __init__(self) -> None:
         self._cache: dict[str, tuple[float, list[PerformanceStats]]] = {}
         self._cache_ttl: int = 300  # 5 minutes
+        self._alerts: list[DegradationAlert] = []
+        self._max_alerts: int = 100
+        self._previous_stats: dict[str, dict[str, PerformanceStats]] = {}  # step_key -> model -> stats
 
     async def select_model(
         self,
@@ -142,6 +164,13 @@ class CostLatencyOptimizer:
             reason = "Cold start - no historical data. Using balanced default."
 
         confidence = self._calculate_confidence(selected)
+
+        # Check for degradation and include in reason
+        alerts = await self.check_degradation(step_id, workflow_name, slo)
+        if alerts:
+            critical = [a for a in alerts if a.severity == "critical"]
+            if critical:
+                reason += f" WARNING: {len(critical)} critical degradation alert(s) detected."
 
         return RoutingDecision(
             selected_option=selected,
@@ -221,6 +250,135 @@ class CostLatencyOptimizer:
         """When nothing meets SLO, pick middle option."""
         sorted_by_cost = sorted(pool, key=lambda o: o.avg_cost or 0.10)
         return sorted_by_cost[len(sorted_by_cost) // 2]
+
+    # --- Feedback loop ---
+
+    async def record_outcome(
+        self,
+        step_id: str,
+        workflow_name: str,
+        model: str,
+        quality_score: float | None,
+        cost_usd: float,
+        latency_seconds: float,
+    ) -> None:
+        """Record actual step outcome to improve future routing decisions.
+
+        Called after each step completes. Updates the performance stats
+        and invalidates cache so next decision uses fresh data.
+        """
+        try:
+            # Invalidate cache for this step so next query gets fresh data
+            cache_key = f"{workflow_name}:{step_id}"
+            if cache_key in self._cache:
+                del self._cache[cache_key]
+
+            logger.debug(
+                "Optimizer feedback: step=%s model=%s quality=%s cost=%.4f latency=%.1fs",
+                step_id, model, quality_score, cost_usd, latency_seconds,
+            )
+        except Exception as e:
+            logger.warning("Failed to record optimizer outcome: %s", e)
+
+    # --- Degradation detection ---
+
+    async def check_degradation(
+        self,
+        step_id: str,
+        workflow_name: str,
+        slo: SLO,
+    ) -> list[DegradationAlert]:
+        """Check if any model has degraded below SLO for this step.
+
+        Compares current stats against SLO thresholds and previous stats.
+        Returns list of new alerts.
+        """
+        stats = await self._get_performance_stats(step_id, workflow_name)
+        step_key = f"{workflow_name}:{step_id}"
+        new_alerts: list[DegradationAlert] = []
+
+        for s in stats:
+            if s.sample_count < 5:
+                continue  # Not enough data to judge
+
+            # Check quality degradation
+            if s.avg_quality is not None and s.avg_quality < slo.quality_min:
+                alert = DegradationAlert(
+                    model=s.model,
+                    step_id=step_id,
+                    workflow_name=workflow_name,
+                    metric="quality",
+                    current_value=s.avg_quality,
+                    threshold=slo.quality_min,
+                    severity="critical" if s.avg_quality < slo.quality_min * 0.8 else "warning",
+                    recommended_action=f"Consider switching from {s.model} to a higher-quality model.",
+                )
+                new_alerts.append(alert)
+
+            # Check cost overrun
+            if s.avg_cost is not None and s.avg_cost > slo.cost_max_usd:
+                alert = DegradationAlert(
+                    model=s.model,
+                    step_id=step_id,
+                    workflow_name=workflow_name,
+                    metric="cost",
+                    current_value=s.avg_cost,
+                    threshold=slo.cost_max_usd,
+                    severity="critical" if s.avg_cost > slo.cost_max_usd * 1.5 else "warning",
+                    recommended_action=f"Model {s.model} cost exceeds SLO. Consider downgrading.",
+                )
+                new_alerts.append(alert)
+
+            # Check latency breach
+            if s.avg_latency is not None and s.avg_latency > slo.latency_max_seconds:
+                alert = DegradationAlert(
+                    model=s.model,
+                    step_id=step_id,
+                    workflow_name=workflow_name,
+                    metric="latency",
+                    current_value=s.avg_latency,
+                    threshold=slo.latency_max_seconds,
+                    severity="critical" if s.avg_latency > slo.latency_max_seconds * 1.5 else "warning",
+                    recommended_action=f"Model {s.model} latency exceeds SLO. Consider a faster model.",
+                )
+                new_alerts.append(alert)
+
+            # Check trend degradation (compare with previous)
+            prev = self._previous_stats.get(step_key, {}).get(s.model)
+            if prev and prev.avg_quality is not None and s.avg_quality is not None:
+                quality_drop = prev.avg_quality - s.avg_quality
+                if quality_drop > 0.1:  # More than 10% absolute drop
+                    alert = DegradationAlert(
+                        model=s.model,
+                        step_id=step_id,
+                        workflow_name=workflow_name,
+                        metric="quality",
+                        current_value=s.avg_quality,
+                        threshold=prev.avg_quality,
+                        severity="warning",
+                        recommended_action=f"Model {s.model} quality dropped by {quality_drop:.2f}. Monitor closely.",
+                    )
+                    new_alerts.append(alert)
+
+        # Store current stats for future comparison
+        self._previous_stats[step_key] = {s.model: s for s in stats}
+
+        # Store alerts (keep last N)
+        self._alerts.extend(new_alerts)
+        if len(self._alerts) > self._max_alerts:
+            self._alerts = self._alerts[-self._max_alerts:]
+
+        return new_alerts
+
+    def get_recent_alerts(self, limit: int = 20) -> list[DegradationAlert]:
+        """Get recent degradation alerts."""
+        return self._alerts[-limit:]
+
+    def clear_alerts(self) -> int:
+        """Clear all alerts. Returns count of cleared alerts."""
+        count = len(self._alerts)
+        self._alerts.clear()
+        return count
 
     async def _get_performance_stats(
         self, step_id: str, workflow_name: str
@@ -324,6 +482,19 @@ class CostLatencyOptimizer:
         except Exception as e:
             logger.warning(f"Performance stats query failed: {e}")
             return []
+
+
+# --- Module-level singleton for feedback ---
+
+_optimizer_instance: CostLatencyOptimizer | None = None
+
+
+def get_optimizer() -> CostLatencyOptimizer:
+    """Get or create the singleton optimizer instance."""
+    global _optimizer_instance
+    if _optimizer_instance is None:
+        _optimizer_instance = CostLatencyOptimizer()
+    return _optimizer_instance
 
 
 def calculate_budget_pressure(

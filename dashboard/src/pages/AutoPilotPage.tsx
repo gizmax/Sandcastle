@@ -25,11 +25,13 @@ interface Experiment {
   created_at: string | null;
   completed_at: string | null;
   samples: Sample[] | null;
+  rollout_stage: string | null;
 }
 
 interface AutoPilotStats {
   total_experiments: number;
   active_experiments: number;
+  deploying_experiments: number;
   completed_experiments: number;
   total_samples: number;
   avg_quality_improvement: number;
@@ -38,8 +40,11 @@ interface AutoPilotStats {
 
 const STATUS_MAP: Record<string, { bg: string; text: string; dot: string; label: string }> = {
   active: { bg: "bg-running/15 border-running/30", text: "text-running", dot: "bg-running animate-pulse", label: "Active" },
+  running: { bg: "bg-running/15 border-running/30", text: "text-running", dot: "bg-running animate-pulse", label: "Running" },
+  deploying: { bg: "bg-accent/15 border-accent/30", text: "text-accent", dot: "bg-accent animate-pulse", label: "Deploying" },
   completed: { bg: "bg-success/15 border-success/30", text: "text-success", dot: "bg-success", label: "Completed" },
   paused: { bg: "bg-warning/15 border-warning/30", text: "text-warning", dot: "bg-warning", label: "Paused" },
+  cancelled: { bg: "bg-muted/15 border-muted/30", text: "text-muted", dot: "bg-muted", label: "Cancelled" },
 };
 
 function getVariantStats(samples: Sample[]) {
@@ -108,6 +113,19 @@ export default function AutoPilotPage() {
         return;
       }
       toast.success("Experiment reset");
+      void fetchData();
+    },
+    [fetchData]
+  );
+
+  const handleAdvanceRollout = useCallback(
+    async (id: string) => {
+      const res = await api.post(`/autopilot/experiments/${id}/advance-rollout`);
+      if (res.error) {
+        toast.error(`Failed to advance rollout: ${res.error.message}`);
+        return;
+      }
+      toast.success("Rollout advanced to next stage");
       void fetchData();
     },
     [fetchData]
@@ -293,6 +311,62 @@ export default function AutoPilotPage() {
                             })}
                           </tbody>
                         </table>
+                      </div>
+                    )}
+
+                    {/* Progressive Rollout Status */}
+                    {exp.status === "deploying" && exp.rollout_stage && (
+                      <div className="px-5 py-4 border-t border-border bg-accent/5">
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-sm font-medium text-foreground">Progressive Rollout</p>
+                          <span className="text-xs font-mono text-accent capitalize">{exp.rollout_stage}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {["canary", "partial", "full"].map((stage, idx) => {
+                            const stages = ["canary", "partial", "full"];
+                            const currentIdx = stages.indexOf(exp.rollout_stage || "canary");
+                            const isActive = idx <= currentIdx;
+                            const isCurrent = idx === currentIdx;
+                            return (
+                              <div key={stage} className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <div className={cn(
+                                    "h-2 flex-1 rounded-full transition-all",
+                                    isActive ? "bg-accent" : "bg-border",
+                                    isCurrent && "animate-pulse"
+                                  )} />
+                                  {idx < stages.length - 1 && (
+                                    <div className={cn("h-px w-4", isActive ? "bg-accent" : "bg-border")} />
+                                  )}
+                                </div>
+                                <div className="flex justify-between mt-1">
+                                  <span className={cn(
+                                    "text-[10px] font-medium capitalize",
+                                    isActive ? "text-accent" : "text-muted"
+                                  )}>
+                                    {stage}
+                                  </span>
+                                  <span className={cn(
+                                    "text-[10px] font-mono",
+                                    isActive ? "text-accent" : "text-muted"
+                                  )}>
+                                    {stage === "canary" ? "10%" : stage === "partial" ? "50%" : "100%"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdvanceRollout(exp.id);
+                          }}
+                          className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-accent/10 border border-accent/30 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/20 transition-colors"
+                        >
+                          <Rocket className="h-3 w-3" />
+                          Advance to Next Stage
+                        </button>
                       </div>
                     )}
 

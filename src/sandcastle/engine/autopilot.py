@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -10,6 +12,15 @@ from typing import Any
 from sandcastle.engine.dag import AutoPilotConfig, StepDefinition, VariantConfig
 
 logger = logging.getLogger(__name__)
+
+# Progressive rollout stage definitions
+ROLLOUT_STAGES = {
+    "canary": 0.10,    # 10% traffic
+    "partial": 0.50,   # 50% traffic
+    "full": 1.0,       # 100% traffic
+}
+
+ROLLOUT_ORDER = ["canary", "partial", "full"]
 
 
 async def get_or_create_experiment(
@@ -65,7 +76,7 @@ async def pick_variant(
     experiment_id: uuid.UUID,
     variants: list[VariantConfig],
 ) -> VariantConfig | None:
-    """Pick the least-sampled variant (round-robin selection)."""
+    """Pick variant using Thompson Sampling (Beta-Bernoulli bandit)."""
     from sqlalchemy import func, select
 
     from sandcastle.models.db import AutoPilotSample, async_session
@@ -74,26 +85,38 @@ async def pick_variant(
         return None
 
     async with async_session() as session:
-        # Count samples per variant
+        # Get per-variant quality stats
         stmt = (
             select(
                 AutoPilotSample.variant_id,
-                func.count(AutoPilotSample.id).label("count"),
+                func.count(AutoPilotSample.id).label("total"),
+                func.avg(AutoPilotSample.quality_score).label("avg_quality"),
             )
             .where(AutoPilotSample.experiment_id == experiment_id)
             .group_by(AutoPilotSample.variant_id)
         )
         result = await session.execute(stmt)
-        counts = {row.variant_id: row.count for row in result.all()}
+        stats = {
+            row.variant_id: (row.total, float(row.avg_quality or 0.5))
+            for row in result.all()
+        }
 
-    # Pick the variant with the fewest samples
-    min_count = float("inf")
+    # Thompson Sampling: sample from Beta distribution for each variant
+    best_sample = -1.0
     selected = variants[0]
 
     for variant in variants:
-        count = counts.get(variant.id, 0)
-        if count < min_count:
-            min_count = count
+        total, avg_q = stats.get(variant.id, (0, 0.5))
+        # Convert to Beta distribution parameters
+        # alpha = successes + 1, beta = failures + 1
+        successes = int(total * avg_q)
+        failures = total - successes
+        alpha = max(successes + 1, 1)
+        beta_param = max(failures + 1, 1)
+        # Sample from Beta distribution
+        sample = random.betavariate(alpha, beta_param)
+        if sample > best_sample:
+            best_sample = sample
             selected = variant
 
     return selected
@@ -273,17 +296,54 @@ async def maybe_complete_experiment(
     winner = select_winner(variant_stats, config)
 
     if winner and config.auto_deploy:
+        # Check statistical significance before deploying
+        async with async_session() as session:
+            scores_stmt = (
+                select(AutoPilotSample.variant_id, AutoPilotSample.quality_score)
+                .where(
+                    AutoPilotSample.experiment_id == experiment_id,
+                    AutoPilotSample.quality_score.is_not(None),
+                )
+            )
+            scores_result = await session.execute(scores_stmt)
+            scores_by_variant: dict[str, list[float]] = {}
+            for row in scores_result.all():
+                scores_by_variant.setdefault(row.variant_id, []).append(
+                    float(row.quality_score)
+                )
+
+        winner_scores = scores_by_variant.get(winner["variant_id"], [])
+        # Collect runner-up scores (all non-winner variants)
+        other_scores = []
+        for vid, scores in scores_by_variant.items():
+            if vid != winner["variant_id"]:
+                other_scores.extend(scores)
+
+        is_significant, p_value = _check_significance(winner_scores, other_scores)
+        winner["p_value"] = p_value
+        winner["is_significant"] = is_significant
+
+        if not is_significant:
+            logger.info(
+                "AutoPilot experiment %s: winner %s not yet statistically "
+                "significant (p=%.3f). Continuing.",
+                experiment_id, winner["variant_id"], p_value,
+            )
+            return None  # Keep running - not enough evidence yet
+
+        # Start progressive rollout instead of immediate full deploy
         async with async_session() as session:
             experiment = await session.get(AutoPilotExperiment, experiment_id)
             if experiment and experiment.status == ExperimentStatus.RUNNING:
-                experiment.status = ExperimentStatus.COMPLETED
+                experiment.status = ExperimentStatus.DEPLOYING
                 experiment.deployed_variant_id = winner["variant_id"]
-                experiment.completed_at = datetime.now(timezone.utc)
+                experiment.rollout_stage = "canary"
                 await session.commit()
 
         logger.info(
-            f"AutoPilot experiment {experiment_id} completed: "
-            f"winner={winner['variant_id']} ({config.optimize_for})"
+            "AutoPilot experiment %s: winner=%s (p=%.3f), "
+            "starting progressive rollout (canary)",
+            experiment_id, winner["variant_id"], p_value,
         )
 
     return winner
@@ -340,3 +400,115 @@ def select_winner(variant_stats: list, config: AutoPilotConfig) -> dict | None:
     else:
         # Default: optimize for quality
         return max(candidates, key=lambda c: c["avg_quality"])
+
+
+# --- Statistical significance ---
+
+
+def _beta_inc(a: float, b: float, x: float) -> float:
+    """Approximate regularized incomplete beta function."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    # Use a normal approximation for the t-distribution.
+    # Recover t^2 from x = df / (df + t^2) where df = 2*a
+    t_stat_sq = (1 - x) / x * (2 * a)
+    t_stat = math.sqrt(max(t_stat_sq, 0))
+    # Normal approximation of t-distribution CDF
+    z = t_stat * (1 - 1 / (4 * max(a * 2, 1)))
+    # Standard normal CDF approximation
+    p = 0.5 * (1 + math.erf(z / math.sqrt(2)))
+    return 2 * (1 - p)
+
+
+def _check_significance(
+    winner_scores: list[float],
+    runner_up_scores: list[float],
+    min_p_value: float = 0.05,
+) -> tuple[bool, float]:
+    """Welch's t-test to check if winner is statistically significant.
+
+    Returns (is_significant, p_value).
+    """
+    n1, n2 = len(winner_scores), len(runner_up_scores)
+    if n1 < 3 or n2 < 3:
+        return False, 1.0
+
+    mean1 = sum(winner_scores) / n1
+    mean2 = sum(runner_up_scores) / n2
+    var1 = sum((x - mean1) ** 2 for x in winner_scores) / (n1 - 1)
+    var2 = sum((x - mean2) ** 2 for x in runner_up_scores) / (n2 - 1)
+
+    se = math.sqrt(var1 / n1 + var2 / n2)
+    if se == 0:
+        return mean1 > mean2, 0.0 if mean1 != mean2 else 1.0
+
+    t_stat = (mean1 - mean2) / se
+
+    # Welch-Satterthwaite degrees of freedom
+    num = (var1 / n1 + var2 / n2) ** 2
+    den = (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
+    df = num / den if den > 0 else 1
+
+    # Approximate p-value using t-distribution CDF
+    x = df / (df + t_stat ** 2)
+    if t_stat > 0:
+        p_value = 0.5 * _beta_inc(0.5 * df, 0.5, x)
+    else:
+        p_value = 1.0 - 0.5 * _beta_inc(0.5 * df, 0.5, x)
+
+    return p_value < min_p_value, p_value
+
+
+# --- Progressive rollout ---
+
+
+def should_use_winner(rollout_stage: str | None) -> bool:
+    """Determine if current request should use the winning variant based on rollout stage."""
+    if rollout_stage is None:
+        return False
+    traffic = ROLLOUT_STAGES.get(rollout_stage, 0)
+    return random.random() < traffic
+
+
+async def advance_rollout(experiment_id: uuid.UUID) -> dict | None:
+    """Advance the experiment to the next rollout stage.
+
+    Call this periodically or after sufficient monitoring.
+    Returns the new stage info or None if already fully deployed.
+    """
+    from sandcastle.models.db import AutoPilotExperiment, ExperimentStatus, async_session
+
+    async with async_session() as session:
+        experiment = await session.get(AutoPilotExperiment, experiment_id)
+        if not experiment or experiment.status != ExperimentStatus.DEPLOYING:
+            return None
+
+        current = experiment.rollout_stage or "canary"
+        current_idx = ROLLOUT_ORDER.index(current) if current in ROLLOUT_ORDER else 0
+
+        if current_idx >= len(ROLLOUT_ORDER) - 1:
+            # Already at full - complete the experiment
+            experiment.status = ExperimentStatus.COMPLETED
+            experiment.completed_at = datetime.now(timezone.utc)
+            experiment.rollout_stage = "full"
+            await session.commit()
+            logger.info(
+                "AutoPilot experiment %s: rollout complete (full)", experiment_id
+            )
+            return {"stage": "full", "traffic": 1.0, "completed": True}
+
+        next_stage = ROLLOUT_ORDER[current_idx + 1]
+        experiment.rollout_stage = next_stage
+        await session.commit()
+
+        logger.info(
+            "AutoPilot experiment %s: advanced rollout %s -> %s (%.0f%% traffic)",
+            experiment_id, current, next_stage, ROLLOUT_STAGES[next_stage] * 100,
+        )
+        return {
+            "stage": next_stage,
+            "traffic": ROLLOUT_STAGES[next_stage],
+            "completed": False,
+        }
