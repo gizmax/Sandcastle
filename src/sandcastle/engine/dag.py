@@ -172,6 +172,33 @@ class LoopConfig:
 
 
 @dataclass
+class RaceConfig:
+    """Configuration for racing parallel branches - first valid result wins."""
+
+    branches: list[list[str]] = field(default_factory=list)  # list of step ID lists
+    validator: str | None = None  # optional validation expression
+
+
+@dataclass
+class SensorConfig:
+    """Configuration for polling an external endpoint until a condition is met."""
+
+    url: str = ""
+    check_interval: int = 30  # seconds
+    timeout: int = 1800  # seconds
+    condition: str = ""  # expression to evaluate on response
+    method: str = "GET"
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class GateConfig:
+    """Configuration for multi-strategy approval gates."""
+
+    strategies: list[dict] = field(default_factory=list)  # [{type: "llm_eval"|"human"|"timeout", config: {...}}]
+
+
+@dataclass
 class SLOConfig:
     """Service Level Objective for optimizer-driven model selection."""
 
@@ -251,13 +278,14 @@ class MemoryConfig:
 VALID_STEP_TYPES = frozenset({
     "standard", "approval", "sub_workflow",
     "llm", "http", "code", "condition", "classify", "loop",
+    "race", "sensor", "gate",
 })
 
 # Types that don't need a prompt
-NON_PROMPT_TYPES = frozenset({"http", "code", "condition", "loop"})
+NON_PROMPT_TYPES = frozenset({"http", "code", "condition", "loop", "race", "sensor"})
 
 # Types that don't use an LLM model (skip model validation)
-NON_LLM_TYPES = frozenset({"http", "code", "condition", "loop"})
+NON_LLM_TYPES = frozenset({"http", "code", "condition", "loop", "race", "sensor"})
 
 
 @dataclass
@@ -274,7 +302,7 @@ class StepDefinition:
     output_schema: dict | None = None
     retry: RetryConfig | None = None
     fallback: FallbackConfig | None = None
-    type: str = "standard"  # "standard" | "approval" | "sub_workflow" | "llm" | "http" | "code" | "condition" | "classify" | "loop"
+    type: str = "standard"  # "standard" | "approval" | "sub_workflow" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -291,6 +319,9 @@ class StepDefinition:
     condition_config: ConditionConfig | None = None
     classify_config: ClassifyConfig | None = None
     loop_config: LoopConfig | None = None
+    race_config: RaceConfig | None = None
+    sensor_config: SensorConfig | None = None
+    gate_config: GateConfig | None = None
 
 
 @dataclass
@@ -633,6 +664,39 @@ def _parse_loop_config(data: dict | None) -> LoopConfig | None:
     )
 
 
+def _parse_race_config(data: dict | None) -> RaceConfig | None:
+    """Parse race step configuration from YAML data."""
+    if data is None:
+        return None
+    return RaceConfig(
+        branches=data.get("branches", []),
+        validator=data.get("validator"),
+    )
+
+
+def _parse_sensor_config(data: dict | None) -> SensorConfig | None:
+    """Parse sensor step configuration from YAML data."""
+    if data is None:
+        return None
+    return SensorConfig(
+        url=data.get("url", ""),
+        check_interval=data.get("check_interval", 30),
+        timeout=data.get("timeout", 1800),
+        condition=data.get("condition", ""),
+        method=data.get("method", "GET"),
+        headers=data.get("headers", {}),
+    )
+
+
+def _parse_gate_config(data: dict | None) -> GateConfig | None:
+    """Parse gate step configuration from YAML data."""
+    if data is None:
+        return None
+    return GateConfig(
+        strategies=data.get("strategies", []),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -685,6 +749,9 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         condition_config=_parse_condition_config(data.get("condition_config")),
         classify_config=_parse_classify_config(data.get("classify_config")),
         loop_config=_parse_loop_config(data.get("loop_config")),
+        race_config=_parse_race_config(data.get("race_config")),
+        sensor_config=_parse_sensor_config(data.get("sensor_config")),
+        gate_config=_parse_gate_config(data.get("gate_config")),
     )
 
 
@@ -845,6 +912,32 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
             if not step.loop_config or not step.loop_config.over:
                 errors.append(
                     f"Loop step '{step.id}' must have loop_config with over"
+                )
+        elif step.type == "race":
+            if not step.race_config or not step.race_config.branches:
+                errors.append(
+                    f"Race step '{step.id}' must have race_config with branches"
+                )
+            if step.race_config:
+                for branch in step.race_config.branches:
+                    for sid in branch:
+                        if sid not in step_ids:
+                            errors.append(
+                                f"Race step '{step.id}' references unknown step '{sid}'"
+                            )
+        elif step.type == "sensor":
+            if not step.sensor_config or not step.sensor_config.url:
+                errors.append(
+                    f"Sensor step '{step.id}' must have sensor_config with a url"
+                )
+            if step.sensor_config and not step.sensor_config.condition:
+                errors.append(
+                    f"Sensor step '{step.id}' must have sensor_config with a condition"
+                )
+        elif step.type == "gate":
+            if not step.gate_config or not step.gate_config.strategies:
+                errors.append(
+                    f"Gate step '{step.id}' must have gate_config with strategies"
                 )
 
     # Check model names against provider registry

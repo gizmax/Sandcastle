@@ -2148,6 +2148,349 @@ async def _execute_loop_step(
         )
 
 
+async def _execute_race_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+) -> StepResult:
+    """Execute a race step - run branches in parallel, take first valid result."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.race_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing race_config")
+
+    try:
+        async def run_branch(branch_steps: list[str]) -> dict:
+            """Execute a sequence of steps and return the last output."""
+            branch_context = RunContext(
+                run_id=context.run_id,
+                input=dict(context.input),
+                step_outputs=dict(context.step_outputs),
+                costs=list(context.costs),
+                workflow_name=context.workflow_name,
+                default_tools=context.default_tools,
+            )
+            branch_cost = 0.0
+            last_output = None
+            for sub_step_id in branch_steps:
+                try:
+                    sub_step = workflow.get_step(sub_step_id)
+                except ValueError:
+                    continue
+                sub_result = await execute_step_with_retry(
+                    sub_step, branch_context, sandbox, storage,
+                )
+                branch_context.step_outputs[sub_step_id] = sub_result.output
+                branch_cost += sub_result.cost_usd
+                last_output = sub_result.output
+                if sub_result.status == "failed":
+                    raise RuntimeError(f"Branch step '{sub_step_id}' failed: {sub_result.error}")
+            return {"output": last_output, "cost": branch_cost}
+
+        # Run all branches in parallel
+        tasks = [asyncio.create_task(run_branch(branch)) for branch in cfg.branches]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect successful results
+        total_cost = 0.0
+        winning_output = None
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            total_cost += result["cost"]
+            # Validate if validator expression is set
+            if cfg.validator:
+                eval_ns: dict[str, Any] = {
+                    "__builtins__": {
+                        "len": len, "int": int, "float": float, "str": str,
+                        "bool": bool, "True": True, "False": False, "None": None,
+                    },
+                    "output": result["output"],
+                }
+                try:
+                    if bool(eval(cfg.validator, eval_ns)):  # noqa: S307
+                        winning_output = result["output"]
+                        break
+                except Exception:
+                    continue
+            else:
+                # No validator - take first non-error result
+                winning_output = result["output"]
+                break
+
+        if winning_output is None:
+            # No branch produced a valid result - use first non-error output anyway
+            for result in results:
+                if not isinstance(result, Exception):
+                    winning_output = result["output"]
+                    break
+
+        duration = time.monotonic() - started_at
+        if winning_output is None:
+            return StepResult(
+                step_id=step.id, status="failed",
+                error="All race branches failed",
+                cost_usd=total_cost, duration_seconds=duration,
+            )
+
+        return StepResult(
+            step_id=step.id, output=winning_output, cost_usd=total_cost,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_sensor_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a sensor step - poll URL until condition is met or timeout."""
+    import time
+
+    import httpx
+
+    started_at = time.monotonic()
+    cfg = step.sensor_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing sensor_config")
+
+    try:
+        url = resolve_templates(cfg.url, context, step.depends_on)
+        headers = {
+            k: resolve_templates(v, context, step.depends_on)
+            for k, v in cfg.headers.items()
+        }
+        deadline = time.monotonic() + cfg.timeout
+
+        while time.monotonic() < deadline:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.request(
+                        method=cfg.method.upper(),
+                        url=url,
+                        headers=headers,
+                    )
+                try:
+                    response_data = resp.json()
+                except Exception:
+                    response_data = {"status_code": resp.status_code, "text": resp.text[:5000]}
+
+                # Evaluate condition
+                eval_ns: dict[str, Any] = {
+                    "__builtins__": {
+                        "len": len, "int": int, "float": float, "str": str,
+                        "bool": bool, "True": True, "False": False, "None": None,
+                    },
+                    "response": response_data,
+                    "status_code": resp.status_code,
+                }
+                condition_met = bool(eval(cfg.condition, eval_ns))  # noqa: S307
+
+                if condition_met:
+                    duration = time.monotonic() - started_at
+                    return StepResult(
+                        step_id=step.id, output=response_data, cost_usd=0.0,
+                        duration_seconds=duration, status="completed",
+                    )
+            except Exception as poll_err:
+                logger.debug(f"Sensor poll error for step '{step.id}': {poll_err}")
+
+            await asyncio.sleep(cfg.check_interval)
+
+        # Timeout reached
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed",
+            error=f"Sensor timed out after {cfg.timeout}s",
+            duration_seconds=duration,
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_gate_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Execute a gate step - iterate through approval strategies."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.gate_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing gate_config")
+
+    try:
+        for strategy in cfg.strategies:
+            strategy_type = strategy.get("type", "")
+            strategy_config = strategy.get("config", {})
+
+            if strategy_type == "llm_eval":
+                # LLM-based evaluation (similar to classify step pattern)
+                import httpx
+
+                from sandcastle.engine.providers import get_api_key, resolve_model
+
+                eval_prompt = strategy_config.get("prompt", "Evaluate this input and respond with 'approved' or 'rejected'.")
+                eval_input = strategy_config.get("input", "")
+                if eval_input:
+                    eval_input = resolve_templates(eval_input, context, step.depends_on)
+                    eval_prompt = f"{eval_prompt}\n\nInput: {eval_input}"
+
+                model_name = strategy_config.get("model", "haiku")
+                model_info = resolve_model(model_name)
+                api_key = get_api_key(model_info)
+
+                if model_info.provider == "claude":
+                    async with httpx.AsyncClient(timeout=step.timeout) as client:
+                        resp = await client.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key": api_key,
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": model_info.api_model_id,
+                                "max_tokens": 256,
+                                "messages": [{"role": "user", "content": eval_prompt}],
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        llm_response = data["content"][0]["text"].strip().lower()
+                        usage = data.get("usage", {})
+                        in_tok = usage.get("input_tokens", 0)
+                        out_tok = usage.get("output_tokens", 0)
+                else:
+                    base_url = model_info.api_base_url or "https://api.openai.com/v1"
+                    async with httpx.AsyncClient(timeout=step.timeout) as client:
+                        resp = await client.post(
+                            f"{base_url}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": model_info.api_model_id,
+                                "max_tokens": 256,
+                                "messages": [{"role": "user", "content": eval_prompt}],
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        llm_response = data["choices"][0]["message"]["content"].strip().lower()
+                        usage = data.get("usage", {})
+                        in_tok = usage.get("prompt_tokens", 0)
+                        out_tok = usage.get("completion_tokens", 0)
+
+                cost = (
+                    in_tok * model_info.input_price_per_m / 1_000_000
+                    + out_tok * model_info.output_price_per_m / 1_000_000
+                )
+                approved = "approved" in llm_response or "approve" in llm_response
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    output={
+                        "decision": "approved" if approved else "rejected",
+                        "reason": llm_response,
+                        "strategy": "llm_eval",
+                    },
+                    cost_usd=cost,
+                    duration_seconds=duration,
+                    status="completed",
+                )
+
+            elif strategy_type == "human":
+                # Create approval request and pause workflow (reuse existing mechanism)
+                from sandcastle.models.db import (
+                    ApprovalRequest,
+                    ApprovalStatus,
+                    Run,
+                    RunStatus,
+                    async_session,
+                )
+
+                message = strategy_config.get("message", "Gate requires human approval")
+                timeout_hours = strategy_config.get("timeout_hours")
+                on_timeout = strategy_config.get("on_timeout", "abort")
+
+                async with async_session() as session:
+                    approval = ApprovalRequest(
+                        run_id=uuid.UUID(context.run_id),
+                        step_id=step.id,
+                        status=ApprovalStatus.PENDING,
+                        request_data={"gate_strategy": "human"},
+                        message=message,
+                        timeout_at=None,
+                        on_timeout=on_timeout,
+                        allow_edit=False,
+                    )
+                    if timeout_hours:
+                        approval.timeout_at = datetime.now(timezone.utc) + timedelta(hours=timeout_hours)
+                    session.add(approval)
+                    run = await session.get(Run, uuid.UUID(context.run_id))
+                    if run:
+                        run.status = RunStatus.AWAITING_APPROVAL
+                    await session.commit()
+                    await session.refresh(approval)
+                    approval_id = str(approval.id)
+
+                raise WorkflowPaused(
+                    approval_id=approval_id, run_id=context.run_id
+                )
+
+            elif strategy_type == "timeout":
+                # Auto-approve or reject after a delay
+                delay = strategy_config.get("seconds", 60)
+                action = strategy_config.get("action", "approve")
+                await asyncio.sleep(delay)
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    output={
+                        "decision": "approved" if action == "approve" else "rejected",
+                        "reason": f"Auto-{action} after {delay}s timeout",
+                        "strategy": "timeout",
+                    },
+                    cost_usd=0.0,
+                    duration_seconds=duration,
+                    status="completed",
+                )
+
+        # No strategy matched
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed",
+            error="No gate strategy matched or all strategies failed",
+            duration_seconds=duration,
+        )
+    except WorkflowPaused:
+        raise
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
 async def _prepare_and_run_step(
     step_id: str,
     workflow: WorkflowDefinition,
@@ -2312,6 +2655,59 @@ async def _prepare_and_run_step(
         else:
             raise StepExecutionError(
                 f"Loop step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "race":
+        result = await _execute_race_step(
+            step, context, sandbox, storage, workflow, depth,
+        )
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Race step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "sensor":
+        result = await _execute_sensor_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Sensor step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "gate":
+        result = await _execute_gate_step(step, context, storage)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Gate step '{step_id}' failed: {result.error}"
             )
         return
 

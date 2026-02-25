@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare } from "lucide-react";
+import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -24,6 +24,9 @@ import {
   type ApprovalConfig,
   type SloConfig,
   type AutoPilotConfig,
+  type RaceStepConfig,
+  type SensorStepConfig,
+  type GateStepConfig,
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
@@ -50,6 +53,9 @@ const DEFAULT_CODE_CONFIG = { code: "", language: "python" };
 const DEFAULT_CONDITION_CONFIG = { expression: "", thenSteps: [] as string[], elseSteps: [] as string[] };
 const DEFAULT_CLASSIFY_CONFIG = { categories: [] as string[], input: "", model: "haiku", branches: {} as Record<string, string[]> };
 const DEFAULT_LOOP_CONFIG = { over: "", stepIds: [] as string[], maxIterations: 100 };
+const DEFAULT_RACE_CONFIG = { branches: "", validator: "" };
+const DEFAULT_SENSOR_CONFIG = { url: "", method: "GET", headers: "", checkInterval: 30, timeout: 1800, condition: "" };
+const DEFAULT_GATE_CONFIG = { strategies: [] as GateStepConfig["strategies"] };
 
 function generateYaml(
   workflowName: string,
@@ -166,6 +172,60 @@ function generateYaml(
       yaml += `      over: "${step.loopConfig.over}"\n`;
       yaml += `      step_ids: [${step.loopConfig.stepIds.join(", ")}]\n`;
       yaml += `      max_iterations: ${step.loopConfig.maxIterations}\n`;
+    } else if (sType === "race") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: race\n`;
+      yaml += `    race_config:\n`;
+      yaml += `      branches:\n`;
+      const branchLines = step.raceConfig.branches.split("\n").filter((l: string) => l.trim());
+      for (const line of branchLines) {
+        const stepIds = line.split(",").map((s: string) => s.trim()).filter(Boolean);
+        yaml += `        - [${stepIds.join(", ")}]\n`;
+      }
+      if (step.raceConfig.validator) {
+        yaml += `      validator: "${step.raceConfig.validator}"\n`;
+      }
+    } else if (sType === "sensor") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: sensor\n`;
+      yaml += `    sensor_config:\n`;
+      yaml += `      url: "${step.sensorConfig.url}"\n`;
+      yaml += `      method: ${step.sensorConfig.method}\n`;
+      yaml += `      condition: "${step.sensorConfig.condition}"\n`;
+      yaml += `      check_interval: ${step.sensorConfig.checkInterval}\n`;
+      yaml += `      timeout: ${step.sensorConfig.timeout}\n`;
+      if (step.sensorConfig.headers) {
+        try {
+          const hdrs = JSON.parse(step.sensorConfig.headers);
+          if (Object.keys(hdrs).length > 0) {
+            yaml += `      headers:\n`;
+            for (const [k, v] of Object.entries(hdrs)) {
+              yaml += `        ${k}: "${v}"\n`;
+            }
+          }
+        } catch { /* skip invalid JSON */ }
+      }
+    } else if (sType === "gate") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: gate\n`;
+      yaml += `    gate_config:\n`;
+      yaml += `      strategies:\n`;
+      for (const strategy of step.gateConfig.strategies) {
+        yaml += `        - type: ${strategy.type}\n`;
+        yaml += `          config:\n`;
+        if (strategy.type === "llm_eval") {
+          if (strategy.prompt) yaml += `            prompt: "${strategy.prompt}"\n`;
+          if (strategy.input) yaml += `            input: "${strategy.input}"\n`;
+          yaml += `            model: ${strategy.model}\n`;
+        } else if (strategy.type === "human") {
+          if (strategy.message) yaml += `            message: "${strategy.message}"\n`;
+          yaml += `            timeout_hours: ${strategy.timeoutHours}\n`;
+          yaml += `            on_timeout: ${strategy.onTimeout}\n`;
+        } else if (strategy.type === "timeout") {
+          yaml += `            seconds: ${strategy.seconds}\n`;
+          yaml += `            action: ${strategy.action}\n`;
+        }
+      }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
       yaml += `    type: llm\n`;
@@ -440,6 +500,9 @@ function buildInitialState(wf: InitialWorkflow) {
       conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
       classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
       loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      raceConfig: { ...DEFAULT_RACE_CONFIG },
+      sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
+      gateConfig: { ...DEFAULT_GATE_CONFIG },
     };
   });
 
@@ -499,6 +562,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     const prefixes: Record<string, string> = {
       standard: "step", llm: "llm", http: "http", code: "code",
       condition: "check", classify: "route", loop: "loop",
+      race: "race", sensor: "sensor", gate: "gate",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -528,6 +592,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
       classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
       loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      raceConfig: { ...DEFAULT_RACE_CONFIG },
+      sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
+      gateConfig: { ...DEFAULT_GATE_CONFIG },
     };
 
     const newNode: Node = {
@@ -744,6 +811,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
             { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
             { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },
+            { type: "race" as const, icon: Zap, label: "Race", color: "text-purple-400" },
+            { type: "sensor" as const, icon: Radio, label: "Sensor", color: "text-teal-400" },
+            { type: "gate" as const, icon: ShieldCheck, label: "Gate", color: "text-red-400" },
           ] as const).map(({ type, icon: Icon, label, color }) => (
             <button
               key={type}

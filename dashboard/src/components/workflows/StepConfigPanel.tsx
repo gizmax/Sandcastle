@@ -79,7 +79,7 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate";
 
 export interface HttpStepConfig {
   url: string;
@@ -113,6 +113,36 @@ export interface LoopStepConfig {
   maxIterations: number;
 }
 
+export interface RaceStepConfig {
+  branches: string;  // textarea: one branch per line, step IDs comma-separated
+  validator: string;
+}
+
+export interface SensorStepConfig {
+  url: string;
+  method: string;
+  headers: string;  // JSON string
+  checkInterval: number;
+  timeout: number;
+  condition: string;
+}
+
+export interface GateStrategy {
+  type: "llm_eval" | "human" | "timeout";
+  prompt: string;
+  input: string;
+  model: string;
+  message: string;
+  timeoutHours: number;
+  seconds: number;
+  action: "approve" | "reject";
+  onTimeout: string;
+}
+
+export interface GateStepConfig {
+  strategies: GateStrategy[];
+}
+
 export interface StepConfig {
   id: string;
   stepType: StepType;
@@ -137,6 +167,9 @@ export interface StepConfig {
   conditionConfig: ConditionStepConfig;
   classifyConfig: ClassifyStepConfig;
   loopConfig: LoopStepConfig;
+  raceConfig: RaceStepConfig;
+  sensorConfig: SensorStepConfig;
+  gateConfig: GateStepConfig;
 }
 
 interface StepConfigPanelProps {
@@ -249,6 +282,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="condition">Condition (If/Else)</option>
           <option value="classify">Classify (Route)</option>
           <option value="loop">Loop (For Each)</option>
+          <option value="race">Race (Parallel)</option>
+          <option value="sensor">Sensor (Poll)</option>
+          <option value="gate">Gate (Approval)</option>
         </select>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
@@ -258,6 +294,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           {step.stepType === "condition" && "If/else branching based on expression evaluation."}
           {step.stepType === "classify" && "LLM-based classification into categories, routes to branches."}
           {step.stepType === "loop" && "Iterate over a list, running sub-steps for each item."}
+          {step.stepType === "race" && "Run branches in parallel - first valid result wins."}
+          {step.stepType === "sensor" && "Poll an external URL until a condition is met."}
+          {step.stepType === "gate" && "Multi-strategy approval gate (LLM eval, human, timeout)."}
         </p>
       </div>
 
@@ -470,6 +509,277 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               className={inputClass}
             />
           </div>
+        </div>
+      )}
+
+      {/* Race Config */}
+      {step.stepType === "race" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Branches (one per line, step IDs comma-separated)</label>
+            <textarea
+              value={step.raceConfig.branches}
+              onChange={(e) => onChange({ ...step, raceConfig: { ...step.raceConfig, branches: e.target.value } })}
+              rows={4}
+              placeholder={"step-a, step-b\nstep-c, step-d"}
+              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Each line is a branch of step IDs to execute sequentially. All branches run in parallel.
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Validator Expression</label>
+            <input
+              type="text"
+              value={step.raceConfig.validator}
+              onChange={(e) => onChange({ ...step, raceConfig: { ...step.raceConfig, validator: e.target.value } })}
+              placeholder="len(output) > 0"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Optional. Python expression to validate branch output. Available: output."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Sensor Config */}
+      {step.stepType === "sensor" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">URL</label>
+            <input
+              type="text"
+              value={step.sensorConfig.url}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, url: e.target.value } })}
+              placeholder="https://api.example.com/status"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Method</label>
+            <select
+              value={step.sensorConfig.method}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, method: e.target.value } })}
+              className={inputClass}
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Condition</label>
+            <input
+              type="text"
+              value={step.sensorConfig.condition}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, condition: e.target.value } })}
+              placeholder="response.get('status') == 'ready'"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Python expression. Available: response (parsed JSON), status_code."}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Poll Interval (s)</label>
+              <input
+                type="number"
+                value={step.sensorConfig.checkInterval}
+                onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, checkInterval: Number(e.target.value) } })}
+                min={1}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Timeout (s)</label>
+              <input
+                type="number"
+                value={step.sensorConfig.timeout}
+                onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, timeout: Number(e.target.value) } })}
+                min={1}
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Headers (JSON)</label>
+            <input
+              type="text"
+              value={step.sensorConfig.headers}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, headers: e.target.value } })}
+              placeholder='{"Authorization": "Bearer ..."}'
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Gate Config */}
+      {step.stepType === "gate" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-muted">Strategies</label>
+            <button
+              type="button"
+              onClick={() => {
+                const newStrategy: GateStrategy = {
+                  type: "llm_eval",
+                  prompt: "",
+                  input: "",
+                  model: "haiku",
+                  message: "",
+                  timeoutHours: 24,
+                  seconds: 60,
+                  action: "approve",
+                  onTimeout: "abort",
+                };
+                onChange({
+                  ...step,
+                  gateConfig: {
+                    ...step.gateConfig,
+                    strategies: [...step.gateConfig.strategies, newStrategy],
+                  },
+                });
+              }}
+              className="flex items-center gap-1 text-[11px] text-accent hover:text-accent-hover"
+            >
+              <Plus className="h-3 w-3" /> Add Strategy
+            </button>
+          </div>
+          {step.gateConfig.strategies.map((strategy, idx) => (
+            <div key={idx} className="rounded-lg border border-border p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <select
+                  value={strategy.type}
+                  onChange={(e) => {
+                    const updated = [...step.gateConfig.strategies];
+                    updated[idx] = { ...updated[idx], type: e.target.value as GateStrategy["type"] };
+                    onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                  }}
+                  className={cn(inputClass, "flex-1")}
+                >
+                  <option value="llm_eval">LLM Eval</option>
+                  <option value="human">Human Approval</option>
+                  <option value="timeout">Timeout</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updated = step.gateConfig.strategies.filter((_, i) => i !== idx);
+                    onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                  }}
+                  className="text-muted hover:text-error"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {strategy.type === "llm_eval" && (
+                <>
+                  <input
+                    type="text"
+                    value={strategy.prompt}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], prompt: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    placeholder="Evaluation prompt..."
+                    className={inputClass}
+                  />
+                  <input
+                    type="text"
+                    value={strategy.input}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], input: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    placeholder="{steps.prev.output}"
+                    className={inputClass}
+                  />
+                  <select
+                    value={strategy.model}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], model: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    className={inputClass}
+                  >
+                    <option value="haiku">Haiku</option>
+                    <option value="sonnet">Sonnet</option>
+                  </select>
+                </>
+              )}
+
+              {strategy.type === "human" && (
+                <>
+                  <input
+                    type="text"
+                    value={strategy.message}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], message: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    placeholder="Approval message..."
+                    className={inputClass}
+                  />
+                  <input
+                    type="number"
+                    value={strategy.timeoutHours}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], timeoutHours: Number(e.target.value) };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    min={1}
+                    className={inputClass}
+                  />
+                </>
+              )}
+
+              {strategy.type === "timeout" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-0.5 block text-[11px] text-muted">Seconds</label>
+                    <input
+                      type="number"
+                      value={strategy.seconds}
+                      onChange={(e) => {
+                        const updated = [...step.gateConfig.strategies];
+                        updated[idx] = { ...updated[idx], seconds: Number(e.target.value) };
+                        onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                      }}
+                      min={1}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[11px] text-muted">Action</label>
+                    <select
+                      value={strategy.action}
+                      onChange={(e) => {
+                        const updated = [...step.gateConfig.strategies];
+                        updated[idx] = { ...updated[idx], action: e.target.value as "approve" | "reject" };
+                        onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                      }}
+                      className={inputClass}
+                    >
+                      <option value="approve">Auto-approve</option>
+                      <option value="reject">Auto-reject</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {step.gateConfig.strategies.length === 0 && (
+            <p className="text-[11px] text-muted-foreground">No strategies yet. Add at least one.</p>
+          )}
         </div>
       )}
 

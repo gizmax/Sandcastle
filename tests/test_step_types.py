@@ -1,4 +1,4 @@
-"""Tests for hybrid step types: llm, http, code, condition, classify, loop."""
+"""Tests for hybrid step types: llm, http, code, condition, classify, loop, race, sensor, gate."""
 
 from __future__ import annotations
 
@@ -12,11 +12,14 @@ from sandcastle.engine.dag import (
     ClassifyConfig,
     CodeConfig,
     ConditionConfig,
+    GateConfig,
     HttpConfig,
     LlmConfig,
     LoopConfig,
     NON_LLM_TYPES,
     NON_PROMPT_TYPES,
+    RaceConfig,
+    SensorConfig,
     StepDefinition,
     VALID_STEP_TYPES,
     WorkflowDefinition,
@@ -38,6 +41,9 @@ _execute_http_step = _executor_mod._execute_http_step
 _execute_llm_step = _executor_mod._execute_llm_step
 _execute_loop_step = _executor_mod._execute_loop_step
 _execute_classify_step = _executor_mod._execute_classify_step
+_execute_race_step = _executor_mod._execute_race_step
+_execute_sensor_step = _executor_mod._execute_sensor_step
+_execute_gate_step = _executor_mod._execute_gate_step
 
 
 # ---- DAG parsing tests ----
@@ -993,3 +999,342 @@ steps:
         errors = validate(wf)
         # Should have no errors
         assert len(errors) == 0, f"Unexpected errors: {errors}"
+
+
+# ---- Phase 2: Race step tests ----
+
+class TestRaceStepParsing:
+    """Test YAML parsing for race step type."""
+
+    def test_parse_race_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: fast-race
+    type: race
+    race_config:
+      branches:
+        - [branch-a1, branch-a2]
+        - [branch-b1]
+      validator: "len(output) > 0"
+  - id: branch-a1
+    prompt: "Branch A step 1"
+  - id: branch-a2
+    prompt: "Branch A step 2"
+  - id: branch-b1
+    prompt: "Branch B step 1"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("fast-race")
+        assert step.type == "race"
+        assert step.race_config is not None
+        assert len(step.race_config.branches) == 2
+        assert step.race_config.branches[0] == ["branch-a1", "branch-a2"]
+        assert step.race_config.validator == "len(output) > 0"
+
+    def test_race_in_valid_step_types(self):
+        assert "race" in VALID_STEP_TYPES
+
+    def test_race_in_non_prompt_types(self):
+        assert "race" in NON_PROMPT_TYPES
+        assert "race" in NON_LLM_TYPES
+
+
+class TestSensorStepParsing:
+    """Test YAML parsing for sensor step type."""
+
+    def test_parse_sensor_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: wait-ready
+    type: sensor
+    sensor_config:
+      url: "https://api.example.com/status"
+      check_interval: 10
+      timeout: 300
+      condition: "response.get('status') == 'ready'"
+      method: GET
+      headers:
+        Authorization: "Bearer token123"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("wait-ready")
+        assert step.type == "sensor"
+        assert step.sensor_config is not None
+        assert step.sensor_config.url == "https://api.example.com/status"
+        assert step.sensor_config.check_interval == 10
+        assert step.sensor_config.timeout == 300
+        assert step.sensor_config.condition == "response.get('status') == 'ready'"
+        assert step.sensor_config.method == "GET"
+        assert "Authorization" in step.sensor_config.headers
+
+    def test_sensor_in_valid_step_types(self):
+        assert "sensor" in VALID_STEP_TYPES
+
+    def test_sensor_in_non_prompt_types(self):
+        assert "sensor" in NON_PROMPT_TYPES
+        assert "sensor" in NON_LLM_TYPES
+
+
+class TestGateStepParsing:
+    """Test YAML parsing for gate step type."""
+
+    def test_parse_gate_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: quality-gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: "Is this output good?"
+            model: haiku
+        - type: human
+          config:
+            message: "Please review"
+            timeout_hours: 24
+        - type: timeout
+          config:
+            seconds: 60
+            action: approve
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("quality-gate")
+        assert step.type == "gate"
+        assert step.gate_config is not None
+        assert len(step.gate_config.strategies) == 3
+        assert step.gate_config.strategies[0]["type"] == "llm_eval"
+        assert step.gate_config.strategies[1]["type"] == "human"
+        assert step.gate_config.strategies[2]["type"] == "timeout"
+
+    def test_gate_in_valid_step_types(self):
+        assert "gate" in VALID_STEP_TYPES
+
+    def test_gate_placeholder_prompt(self):
+        """Gate steps should NOT be in NON_PROMPT_TYPES (gate uses LLM for eval)."""
+        # Gate is not in NON_PROMPT_TYPES since it can use LLM eval
+        assert "gate" not in NON_PROMPT_TYPES
+
+
+# ---- Phase 2: Validation tests ----
+
+class TestRaceStepValidation:
+    """Test validation rules for race step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+{steps_yaml}
+"""
+        return parse_yaml_string(yaml_content)
+
+    def test_race_requires_branches(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: race
+    race_config:
+      validator: "True"
+""")
+        errors = validate(wf)
+        assert any("branches" in e.lower() for e in errors)
+
+    def test_race_validates_branch_step_refs(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: race
+    race_config:
+      branches:
+        - [nonexistent]
+""")
+        errors = validate(wf)
+        assert any("nonexistent" in e for e in errors)
+
+
+class TestSensorStepValidation:
+    """Test validation rules for sensor step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+{steps_yaml}
+"""
+        return parse_yaml_string(yaml_content)
+
+    def test_sensor_requires_url(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: sensor
+    sensor_config:
+      condition: "True"
+""")
+        errors = validate(wf)
+        assert any("url" in e.lower() for e in errors)
+
+    def test_sensor_requires_condition(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: sensor
+    sensor_config:
+      url: "https://example.com"
+""")
+        errors = validate(wf)
+        assert any("condition" in e.lower() for e in errors)
+
+
+class TestGateStepValidation:
+    """Test validation rules for gate step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+{steps_yaml}
+"""
+        return parse_yaml_string(yaml_content)
+
+    def test_gate_requires_strategies(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: gate
+    gate_config:
+      strategies: []
+""")
+        errors = validate(wf)
+        assert any("strategies" in e.lower() for e in errors)
+
+    def test_gate_valid_with_strategies(self):
+        wf = self._make_wf("""
+  - id: good
+    type: gate
+    gate_config:
+      strategies:
+        - type: timeout
+          config:
+            seconds: 10
+            action: approve
+""")
+        errors = validate(wf)
+        gate_errors = [e for e in errors if "gate" in e.lower()]
+        assert len(gate_errors) == 0
+
+
+# ---- Phase 2: Executor tests ----
+
+class TestSensorStepExecutor:
+    """Test sensor step execution (mocked)."""
+
+    @pytest.fixture
+    def context(self):
+        return RunContext(
+            run_id="test-run",
+            input={"endpoint": "https://example.com/status"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_sensor_success(self, context):
+        """Sensor should return when condition is met."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "ready"}
+        mock_response.status_code = 200
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.request.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            step = StepDefinition(
+                id="wait",
+                type="sensor",
+                sensor_config=SensorConfig(
+                    url="https://example.com/status",
+                    check_interval=1,
+                    timeout=5,
+                    condition="response.get('status') == 'ready'",
+                ),
+            )
+            result = await _execute_sensor_step(step, context)
+
+        assert result.status == "completed"
+        assert result.output == {"status": "ready"}
+        assert result.cost_usd == 0.0
+
+    @pytest.mark.asyncio
+    async def test_sensor_missing_config(self, context):
+        step = StepDefinition(id="bad", type="sensor")
+        result = await _execute_sensor_step(step, context)
+        assert result.status == "failed"
+        assert "Missing" in result.error
+
+
+class TestRaceStepExecutor:
+    """Test race step execution (mocked)."""
+
+    @pytest.fixture
+    def context(self):
+        return RunContext(
+            run_id="test-run",
+            input={},
+            step_outputs={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_race_parallel_branches(self, context):
+        """Race should run branches and return first valid result."""
+        wf = WorkflowDefinition(
+            name="test",
+            description="",
+            default_model="sonnet",
+            default_max_turns=10,
+            default_timeout=300,
+            steps=[
+                StepDefinition(
+                    id="race-step",
+                    type="race",
+                    race_config=RaceConfig(
+                        branches=[["branch-a"], ["branch-b"]],
+                    ),
+                ),
+                StepDefinition(id="branch-a", type="code",
+                    code_config=CodeConfig(code='result = "A"')),
+                StepDefinition(id="branch-b", type="code",
+                    code_config=CodeConfig(code='result = "B"')),
+            ],
+        )
+
+        async def mock_execute(step, ctx, *a, **kw):
+            return StepResult(
+                step_id=step.id,
+                output=f"Result from {step.id}",
+                status="completed",
+            )
+
+        with patch(
+            "sandcastle.engine.executor.execute_step_with_retry",
+            side_effect=mock_execute,
+        ):
+            step = wf.get_step("race-step")
+            result = await _execute_race_step(
+                step, context, AsyncMock(), AsyncMock(), wf, 0
+            )
+
+        assert result.status == "completed"
+        assert result.output is not None
