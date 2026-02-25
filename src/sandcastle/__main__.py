@@ -13,6 +13,7 @@ from typing import Any
 # ANSI colors
 # ---------------------------------------------------------------------------
 
+
 class _C:
     """ANSI color codes for terminal output."""
 
@@ -59,6 +60,7 @@ def _status_color(status: str) -> str:
 # Simple table formatter
 # ---------------------------------------------------------------------------
 
+
 def _table(headers: list[str], rows: list[list[str]], *, max_col: int = 40) -> str:
     """Format a simple ASCII table with aligned columns.
 
@@ -97,6 +99,7 @@ def _table(headers: list[str], rows: list[list[str]], *, max_col: int = 40) -> s
 # Client helper
 # ---------------------------------------------------------------------------
 
+
 def _get_client(args: argparse.Namespace) -> Any:
     """Create a SandcastleClient from parsed CLI arguments.
 
@@ -120,6 +123,7 @@ def _attr(obj: Any, key: str, default: Any = None) -> Any:
 # ---------------------------------------------------------------------------
 # Input parsing helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_input_pairs(pairs: list[str] | None) -> dict[str, Any]:
     """Parse KEY=VALUE pairs into a dict.
@@ -149,8 +153,10 @@ def _load_input_file(path: str) -> dict[str, Any]:
         with open(path) as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
-            print(f"Error: input file must contain a JSON object, got {type(data).__name__}",
-                  file=sys.stderr)
+            print(
+                f"Error: input file must contain a JSON object, got {type(data).__name__}",
+                file=sys.stderr,
+            )
             sys.exit(1)
         return data
     except FileNotFoundError:
@@ -164,6 +170,7 @@ def _load_input_file(path: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Spinner / progress
 # ---------------------------------------------------------------------------
+
 
 def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
     """Poll until a run reaches a terminal state, showing a simple spinner."""
@@ -192,6 +199,7 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
 # Command handlers
 # ---------------------------------------------------------------------------
 
+
 def _cmd_init(args: argparse.Namespace) -> None:
     """Interactive setup wizard - create .env and workflows directory."""
     from pathlib import Path
@@ -205,9 +213,9 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
     # Check if .env already exists
     if env_path.exists():
-        answer = input(
-            _color("  .env already exists. Overwrite? [y/N]: ", _C.YELLOW)
-        ).strip().lower()
+        answer = (
+            input(_color("  .env already exists. Overwrite? [y/N]: ", _C.YELLOW)).strip().lower()
+        )
         if answer not in ("y", "yes"):
             print("  Aborted.")
             return
@@ -431,13 +439,15 @@ def _ls_runs(client: Any, args: argparse.Namespace) -> None:
     headers = ["RUN ID", "WORKFLOW", "STATUS", "COST ($)", "STARTED"]
     rows: list[list[str]] = []
     for r in items:
-        rows.append([
-            r.get("run_id", "")[:12],
-            r.get("workflow_name", ""),
-            _status_color(r.get("status", "")),
-            f"{r.get('total_cost_usd', 0):.4f}",
-            _fmt_time(r.get("started_at")),
-        ])
+        rows.append(
+            [
+                r.get("run_id", "")[:12],
+                r.get("workflow_name", ""),
+                _status_color(r.get("status", "")),
+                f"{r.get('total_cost_usd', 0):.4f}",
+                _fmt_time(r.get("started_at")),
+            ]
+        )
     print(_table(headers, rows))
 
 
@@ -452,11 +462,13 @@ def _ls_workflows(client: Any) -> None:
     headers = ["NAME", "DESCRIPTION", "STEPS"]
     rows: list[list[str]] = []
     for w in items:
-        rows.append([
-            w.get("name", ""),
-            w.get("description", ""),
-            str(w.get("steps_count", "")),
-        ])
+        rows.append(
+            [
+                w.get("name", ""),
+                w.get("description", ""),
+                str(w.get("steps_count", "")),
+            ]
+        )
     print(_table(headers, rows))
 
 
@@ -472,13 +484,15 @@ def _ls_schedules(client: Any) -> None:
     rows: list[list[str]] = []
     for s in items:
         enabled = _color("yes", _C.GREEN) if s.get("enabled") else _color("no", _C.RED)
-        rows.append([
-            s.get("id", "")[:12],
-            s.get("workflow_name", ""),
-            s.get("cron_expression", ""),
-            enabled,
-            s.get("last_run_id", "-") or "-",
-        ])
+        rows.append(
+            [
+                s.get("id", "")[:12],
+                s.get("workflow_name", ""),
+                s.get("cron_expression", ""),
+                enabled,
+                s.get("last_run_id", "-") or "-",
+            ]
+        )
     print(_table(headers, rows))
 
 
@@ -586,6 +600,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
 
     try:
         from sandcastle.config import Settings
+
         cfg = Settings()
         _pass("Settings loaded successfully")
     except Exception as e:
@@ -640,22 +655,26 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     if backend == "e2b":
         try:
             import e2b  # noqa: F401
+
             _pass("E2B SDK installed")
         except ImportError:
             _fail("E2B SDK not installed (pip install e2b)")
     elif backend == "docker":
         try:
             import aiodocker  # noqa: F401
+
             _pass("aiodocker installed")
         except ImportError:
             _fail("aiodocker not installed (pip install aiodocker)")
         import shutil
+
         if shutil.which("docker"):
             _pass("Docker CLI found")
         else:
             _warn("Docker CLI not found in PATH")
     elif backend == "local":
         import shutil
+
         if shutil.which("node"):
             _pass("Node.js found")
         else:
@@ -765,11 +784,16 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if result.validation_errors:
-        print(f"\r  {_color('[WARN]', _C.YELLOW)} Generated with {len(result.validation_errors)} validation issue(s)")
+        print(
+            f"\r  {_color('[WARN]', _C.YELLOW)} Generated with "
+            f"{len(result.validation_errors)} validation issue(s)"
+        )
         for err in result.validation_errors:
             print(f"    - {err}")
     else:
-        print(f"\r  {_color('[OK]', _C.GREEN)} Generated \"{result.name}\" ({result.steps_count} steps)")
+        print(
+            f'\r  {_color("[OK]", _C.GREEN)} Generated "{result.name}" ({result.steps_count} steps)'
+        )
 
     # Refinement loop
     if refine:
@@ -792,13 +816,20 @@ def _cmd_generate(args: argparse.Namespace) -> None:
                 print(f"\n  {_color('[FAIL]', _C.RED)} Refinement failed: {exc}")
                 continue
             if result.validation_errors:
-                print(f"\r  {_color('[WARN]', _C.YELLOW)} Refined with {len(result.validation_errors)} issue(s)")
+                print(
+                    f"\r  {_color('[WARN]', _C.YELLOW)} Refined "
+                    f"with {len(result.validation_errors)} issue(s)"
+                )
             else:
-                print(f"\r  {_color('[OK]', _C.GREEN)} Refined \"{result.name}\" ({result.steps_count} steps)")
+                print(
+                    f'\r  {_color("[OK]", _C.GREEN)} Refined '
+                    f'"{result.name}" ({result.steps_count} steps)'
+                )
 
     # Output
     if output_file:
         from pathlib import Path
+
         Path(output_file).write_text(result.yaml_content)
         print(f"\n  Saved to {output_file}")
     else:
@@ -824,22 +855,13 @@ def _cmd_eval(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print()
-    print(
-        _color("  Eval Suite: ", _C.BOLD)
-        + (suite.description or suite.workflow)
-    )
-    print(
-        _color("  Workflow:   ", _C.BOLD)
-        + suite.workflow
-    )
+    print(_color("  Eval Suite: ", _C.BOLD) + (suite.description or suite.workflow))
+    print(_color("  Workflow:   ", _C.BOLD) + suite.workflow)
     case_count = len(suite.cases)
     if tags:
         tag_set = set(tags)
         case_count = sum(1 for c in suite.cases if tag_set.intersection(c.tags))
-    print(
-        _color("  Cases:      ", _C.BOLD)
-        + str(case_count)
-    )
+    print(_color("  Cases:      ", _C.BOLD) + str(case_count))
     print()
 
     _spinner_print("Running eval suite...")
@@ -859,6 +881,7 @@ def _cmd_eval(args: argparse.Namespace) -> None:
     # Try to save results to DB
     try:
         from pathlib import Path
+
         suite_yaml = Path(suite_path).read_text()
         asyncio.run(save_eval_run(result, suite_yaml=suite_yaml))
     except Exception:
@@ -884,13 +907,15 @@ def _print_eval_results(result: Any, *, verbose: bool = False) -> None:
         elif total_count > 0:
             assertion_str = _color(assertion_str, _C.GREEN)
 
-        rows.append([
-            case.name,
-            status,
-            assertion_str,
-            f"{case.cost_usd:.4f}",
-            f"{case.duration_seconds:.1f}",
-        ])
+        rows.append(
+            [
+                case.name,
+                status,
+                assertion_str,
+                f"{case.cost_usd:.4f}",
+                f"{case.duration_seconds:.1f}",
+            ]
+        )
 
     print(_table(headers, rows))
 
@@ -913,7 +938,9 @@ def _print_eval_results(result: Any, *, verbose: bool = False) -> None:
     print()
     pass_str = _color(str(result.passed), _C.GREEN) if result.passed > 0 else "0"
     fail_str = _color(str(result.failed), _C.RED) if result.failed > 0 else "0"
-    rate_color = _C.GREEN if result.pass_rate >= 0.8 else (_C.YELLOW if result.pass_rate >= 0.5 else _C.RED)
+    rate_color = (
+        _C.GREEN if result.pass_rate >= 0.8 else (_C.YELLOW if result.pass_rate >= 0.5 else _C.RED)
+    )
     rate_str = _color(f"{result.pass_rate * 100:.0f}%", rate_color)
 
     print(
@@ -958,12 +985,14 @@ def _cmd_templates(args: argparse.Namespace) -> None:
     headers = ["NAME", "CATEGORY", "STEPS", "DESCRIPTION"]
     rows: list[list[str]] = []
     for t in items:
-        rows.append([
-            t.get("name", ""),
-            t.get("category", ""),
-            str(t.get("step_count", "")),
-            t.get("description", ""),
-        ])
+        rows.append(
+            [
+                t.get("name", ""),
+                t.get("category", ""),
+                str(t.get("step_count", "")),
+                t.get("description", ""),
+            ]
+        )
     print(_table(headers, rows))
 
 
@@ -1031,7 +1060,9 @@ def _cmd_fork(args: argparse.Namespace) -> None:
     if change_args:
         for pair in change_args:
             if "=" not in pair:
-                print(f"Error: invalid change format '{pair}' - expected KEY=VALUE", file=sys.stderr)
+                print(
+                    f"Error: invalid change format '{pair}' - expected KEY=VALUE", file=sys.stderr
+                )
                 sys.exit(1)
             key, _, value = pair.partition("=")
             try:
@@ -1206,19 +1237,19 @@ def _cmd_runs(args: argparse.Namespace) -> None:
     rows: list[list[str]] = []
     for r in items:
         if isinstance(r, dict):
-            rows.append([
-                r.get("run_id", "")[:12],
-                r.get("workflow_name", ""),
-                _status_color(r.get("status", "")),
-                f"{r.get('total_cost_usd', 0):.4f}",
-                _fmt_time(r.get("started_at")),
-            ])
+            rows.append(
+                [
+                    r.get("run_id", "")[:12],
+                    r.get("workflow_name", ""),
+                    _status_color(r.get("status", "")),
+                    f"{r.get('total_cost_usd', 0):.4f}",
+                    _fmt_time(r.get("started_at")),
+                ]
+            )
     print(_table(headers, rows))
 
 
-def _find_pending_approval(
-    base: str, headers: dict[str, str], run_id: str
-) -> str | None:
+def _find_pending_approval(base: str, headers: dict[str, str], run_id: str) -> str | None:
     """Find the pending approval_id for a given run_id by querying the API."""
     import httpx
 
@@ -1249,6 +1280,7 @@ def _spinner_print(msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_dicts(data: Any) -> list[dict[str, Any]]:
     """Normalize an API response to a list of plain dicts."""
@@ -1311,13 +1343,15 @@ def _print_run_detail(run: Any) -> None:
         rows: list[list[str]] = []
         for s in steps:
             s = _to_dict(s)
-            rows.append([
-                s.get("step_id", ""),
-                _status_color(s.get("status", "")),
-                f"{s.get('cost_usd', 0):.4f}",
-                f"{s.get('duration_seconds', 0):.1f}",
-                str(s.get("attempt", 1)),
-            ])
+            rows.append(
+                [
+                    s.get("step_id", ""),
+                    _status_color(s.get("status", "")),
+                    f"{s.get('cost_usd', 0):.4f}",
+                    f"{s.get('duration_seconds', 0):.1f}",
+                    str(s.get("attempt", 1)),
+                ]
+            )
         print(_table(headers, rows))
 
     # Outputs
@@ -1333,6 +1367,7 @@ def _print_run_detail(run: Any) -> None:
 # ---------------------------------------------------------------------------
 # Migrations (preserved from original)
 # ---------------------------------------------------------------------------
+
 
 def _run_migrations() -> None:
     """Run Alembic migrations (PostgreSQL only)."""
@@ -1396,10 +1431,7 @@ def _cmd_hub_search(args: argparse.Namespace) -> None:
     # Filter by category
     category = getattr(args, "category", None)
     if category:
-        results = [
-            t for t in results
-            if t.get("category", "").lower() == category.lower()
-        ]
+        results = [t for t in results if t.get("category", "").lower() == category.lower()]
 
     if getattr(args, "json", False):
         print(json.dumps(results, indent=2))
@@ -1412,13 +1444,15 @@ def _cmd_hub_search(args: argparse.Namespace) -> None:
     headers = ["SLUG", "NAME", "CATEGORY", "STEPS", "AUTHOR"]
     rows: list[list[str]] = []
     for t in results:
-        rows.append([
-            t.get("slug", ""),
-            t.get("name", ""),
-            t.get("category", ""),
-            str(t.get("step_count", "")),
-            t.get("author", ""),
-        ])
+        rows.append(
+            [
+                t.get("slug", ""),
+                t.get("name", ""),
+                t.get("category", ""),
+                str(t.get("step_count", "")),
+                t.get("author", ""),
+            ]
+        )
     print(_table(headers, rows))
     print(f"\n{_color(str(len(results)), _C.CYAN)} result(s) found.")
 
@@ -1494,10 +1528,7 @@ def _cmd_hub_list(args: argparse.Namespace) -> None:
     # Filter by category
     category = getattr(args, "category", None)
     if category:
-        templates = [
-            t for t in templates
-            if t.get("category", "").lower() == category.lower()
-        ]
+        templates = [t for t in templates if t.get("category", "").lower() == category.lower()]
 
     limit = getattr(args, "limit", 20)
     templates = templates[:limit]
@@ -1513,13 +1544,15 @@ def _cmd_hub_list(args: argparse.Namespace) -> None:
     headers = ["SLUG", "NAME", "CATEGORY", "STEPS", "AUTHOR"]
     rows: list[list[str]] = []
     for t in templates:
-        rows.append([
-            t.get("slug", ""),
-            t.get("name", ""),
-            t.get("category", ""),
-            str(t.get("step_count", "")),
-            t.get("author", ""),
-        ])
+        rows.append(
+            [
+                t.get("slug", ""),
+                t.get("name", ""),
+                t.get("category", ""),
+                str(t.get("step_count", "")),
+                t.get("author", ""),
+            ]
+        )
     print(_table(headers, rows))
 
     stats = registry.get("stats", {})
@@ -1559,7 +1592,10 @@ def _cmd_hub_collections(args: argparse.Namespace) -> None:
 
         print(f"\n  {_color(icon, _C.CYAN)} {_color(name, _C.BOLD)}")
         print(f"     {desc}")
-        print(f"     {_color(str(len(slugs)), _C.GREEN)} templates | {_color(str(downloads), _C.CYAN)} downloads")
+        print(
+            f"     {_color(str(len(slugs)), _C.GREEN)} templates"
+            f" | {_color(str(downloads), _C.CYAN)} downloads"
+        )
         print(f"     Install: sandcastle hub install-collection {col.get('id', '')}")
 
     print(f"\n{_color(str(len(collections)), _C.CYAN)} collection(s) available.")
@@ -1610,7 +1646,9 @@ def _cmd_hub_install_collection(args: argparse.Namespace) -> None:
         except Exception as exc:
             print(f"  {_color('Error', _C.RED)}: {slug} - {exc}")
 
-    print(f"\n{_color(str(installed), _C.GREEN)} workflow(s) installed from '{col.get('name', '')}'.")
+    print(
+        f"\n{_color(str(installed), _C.GREEN)} workflow(s) installed from '{col.get('name', '')}'."
+    )
 
 
 def _cmd_hub_publish(args: argparse.Namespace) -> None:
@@ -1640,7 +1678,8 @@ def _cmd_hub_publish(args: argparse.Namespace) -> None:
 
     if not data or not isinstance(data, dict):
         print(
-            f"{_color('Error', _C.RED)}: YAML file must contain a mapping with name, description, and steps.",
+            f"{_color('Error', _C.RED)}: YAML file must contain"
+            " a mapping with name, description, and steps.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1695,6 +1734,7 @@ def _cmd_hub(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # API helpers (shared by new command groups)
 # ---------------------------------------------------------------------------
+
 
 def _api_headers(args: argparse.Namespace) -> dict[str, str]:
     """Build HTTP headers from CLI args (api-key, etc.)."""
@@ -1809,6 +1849,7 @@ def _json_out(data: Any) -> None:
 # keys - API Key management
 # ---------------------------------------------------------------------------
 
+
 def _cmd_keys_list(args: argparse.Namespace) -> None:
     """List all API keys (masked)."""
     body = _api_get(args, "/api/api-keys")
@@ -1828,15 +1869,17 @@ def _cmd_keys_list(args: argparse.Namespace) -> None:
         if isinstance(k, dict):
             cost = k.get("max_cost_per_run_usd")
             cost_str = f"${cost:.2f}" if cost else "-"
-            rows.append([
-                k.get("id", "")[:12],
-                k.get("key_prefix", ""),
-                k.get("name", "") or "-",
-                k.get("tenant_id", "") or "-",
-                cost_str,
-                _fmt_time(k.get("created_at")),
-                _fmt_time(k.get("last_used_at")),
-            ])
+            rows.append(
+                [
+                    k.get("id", "")[:12],
+                    k.get("key_prefix", ""),
+                    k.get("name", "") or "-",
+                    k.get("tenant_id", "") or "-",
+                    cost_str,
+                    _fmt_time(k.get("created_at")),
+                    _fmt_time(k.get("last_used_at")),
+                ]
+            )
     print(_table(headers, rows))
 
 
@@ -1916,16 +1959,18 @@ def _cmd_keys_rotate(args: argparse.Namespace) -> None:
     _api_delete(args, f"/api/api-keys/{args.key_id}")
 
     if getattr(args, "json", False):
-        _json_out({
-            "rotated": True,
-            "old_key_id": args.key_id,
-            "new_key_id": new_data.get("id"),
-            "new_key": new_data.get("key"),
-        })
+        _json_out(
+            {
+                "rotated": True,
+                "old_key_id": args.key_id,
+                "new_key_id": new_data.get("id"),
+                "new_key": new_data.get("key"),
+            }
+        )
         return
 
     print(f"Key rotated: {args.key_id} -> {new_data.get('id', '?')}")
-    print(f"  Old key deactivated.")
+    print("  Old key deactivated.")
     print()
     print(_color("  New key (shown ONCE - save it now!):", _C.YELLOW))
     print(f"  {_color(new_data.get('key', ''), _C.GREEN)}")
@@ -1953,6 +1998,7 @@ def _cmd_keys(args: argparse.Namespace) -> None:
 # dlq - Dead Letter Queue management
 # ---------------------------------------------------------------------------
 
+
 def _cmd_dlq_list(args: argparse.Namespace) -> None:
     """List dead letter queue items."""
     params: dict[str, Any] = {}
@@ -1976,15 +2022,17 @@ def _cmd_dlq_list(args: argparse.Namespace) -> None:
         if isinstance(item, dict):
             resolved = item.get("resolved_at")
             resolved_str = _fmt_time(resolved) if resolved else "-"
-            rows.append([
-                item.get("id", "")[:12],
-                item.get("run_id", "")[:12],
-                item.get("step_id", ""),
-                (item.get("error", "") or "")[:40],
-                str(item.get("attempts", 0)),
-                _fmt_time(item.get("created_at")),
-                resolved_str,
-            ])
+            rows.append(
+                [
+                    item.get("id", "")[:12],
+                    item.get("run_id", "")[:12],
+                    item.get("step_id", ""),
+                    (item.get("error", "") or "")[:40],
+                    str(item.get("attempts", 0)),
+                    _fmt_time(item.get("created_at")),
+                    resolved_str,
+                ]
+            )
     print(_table(headers, rows))
 
 
@@ -2041,6 +2089,7 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
 # violations - Policy violations
 # ---------------------------------------------------------------------------
 
+
 def _cmd_violations_list(args: argparse.Namespace) -> None:
     """List policy violations."""
     params: dict[str, Any] = {}
@@ -2073,15 +2122,17 @@ def _cmd_violations_list(args: argparse.Namespace) -> None:
                 sev_str = _color(sev, _C.YELLOW)
             else:
                 sev_str = _color(sev, _C.DIM) if sev else "-"
-            rows.append([
-                v.get("id", "")[:12],
-                v.get("run_id", "")[:12],
-                v.get("step_id", ""),
-                v.get("policy_id", ""),
-                sev_str,
-                v.get("action_taken", ""),
-                _fmt_time(v.get("created_at")),
-            ])
+            rows.append(
+                [
+                    v.get("id", "")[:12],
+                    v.get("run_id", "")[:12],
+                    v.get("step_id", ""),
+                    v.get("policy_id", ""),
+                    sev_str,
+                    v.get("action_taken", ""),
+                    _fmt_time(v.get("created_at")),
+                ]
+            )
     print(_table(headers, rows))
 
 
@@ -2102,6 +2153,7 @@ def _cmd_violations(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # tools - Tool/connector management
 # ---------------------------------------------------------------------------
+
 
 def _cmd_tools_list(args: argparse.Namespace) -> None:
     """List available tool connectors."""
@@ -2137,12 +2189,14 @@ def _cmd_tools_list(args: argparse.Namespace) -> None:
                 status_str = _color("not configured", _C.RED)
             conns = t.get("connections", [])
             conn_str = str(len(conns)) if conns else "0"
-            rows.append([
-                t.get("name", ""),
-                t.get("category", ""),
-                status_str,
-                conn_str,
-            ])
+            rows.append(
+                [
+                    t.get("name", ""),
+                    t.get("category", ""),
+                    status_str,
+                    conn_str,
+                ]
+            )
     print(_table(headers, rows))
 
 
@@ -2198,12 +2252,17 @@ def _cmd_tools(args: argparse.Namespace) -> None:
 # runs compare - Side-by-side run comparison
 # ---------------------------------------------------------------------------
 
+
 def _cmd_runs_compare(args: argparse.Namespace) -> None:
     """Compare two runs side by side."""
-    body = _api_get(args, "/api/runs/compare", params={
-        "run_a": args.run_a,
-        "run_b": args.run_b,
-    })
+    body = _api_get(
+        args,
+        "/api/runs/compare",
+        params={
+            "run_a": args.run_a,
+            "run_b": args.run_b,
+        },
+    )
     data = body.get("data", {})
 
     if getattr(args, "json", False):
@@ -2223,35 +2282,45 @@ def _cmd_runs_compare(args: argparse.Namespace) -> None:
     summary_headers = ["", "RUN A", "RUN B", "DELTA"]
     summary_rows: list[list[str]] = []
 
-    summary_rows.append([
-        "Run ID",
-        run_a.get("run_id", "")[:12],
-        run_b.get("run_id", "")[:12],
-        "",
-    ])
-    summary_rows.append([
-        "Workflow",
-        run_a.get("workflow_name", ""),
-        run_b.get("workflow_name", ""),
-        _color("same", _C.GREEN) if data.get("same_workflow") else _color("different", _C.YELLOW),
-    ])
-    summary_rows.append([
-        "Status",
-        _status_color(run_a.get("status", "")),
-        _status_color(run_b.get("status", "")),
-        "",
-    ])
+    summary_rows.append(
+        [
+            "Run ID",
+            run_a.get("run_id", "")[:12],
+            run_b.get("run_id", "")[:12],
+            "",
+        ]
+    )
+    summary_rows.append(
+        [
+            "Workflow",
+            run_a.get("workflow_name", ""),
+            run_b.get("workflow_name", ""),
+            _color("same", _C.GREEN)
+            if data.get("same_workflow")
+            else _color("different", _C.YELLOW),
+        ]
+    )
+    summary_rows.append(
+        [
+            "Status",
+            _status_color(run_a.get("status", "")),
+            _status_color(run_b.get("status", "")),
+            "",
+        ]
+    )
 
     cost_a = data.get("total_cost_a", 0)
     cost_b = data.get("total_cost_b", 0)
     cost_delta = data.get("total_cost_delta", 0)
     delta_color = _C.GREEN if cost_delta <= 0 else _C.RED
-    summary_rows.append([
-        "Cost",
-        f"${cost_a:.4f}",
-        f"${cost_b:.4f}",
-        _color(f"{cost_delta:+.4f}", delta_color),
-    ])
+    summary_rows.append(
+        [
+            "Cost",
+            f"${cost_a:.4f}",
+            f"${cost_b:.4f}",
+            _color(f"{cost_delta:+.4f}", delta_color),
+        ]
+    )
 
     dur_a = data.get("total_duration_a")
     dur_b = data.get("total_duration_b")
@@ -2263,12 +2332,14 @@ def _cmd_runs_compare(args: argparse.Namespace) -> None:
         if dur_delta is not None
         else "-"
     )
-    summary_rows.append([
-        "Duration",
-        dur_a_str,
-        dur_b_str,
-        dur_delta_str,
-    ])
+    summary_rows.append(
+        [
+            "Duration",
+            dur_a_str,
+            dur_b_str,
+            dur_delta_str,
+        ]
+    )
 
     print(_table(summary_headers, summary_rows))
 
@@ -2299,15 +2370,17 @@ def _cmd_runs_compare(args: argparse.Namespace) -> None:
                     changes.append("config")
                 change_str = _color(", ".join(changes), _C.YELLOW) if changes else "-"
 
-                step_rows.append([
-                    s.get("step_id", ""),
-                    pres_str,
-                    _status_color(s.get("status_a", "") or "-"),
-                    _status_color(s.get("status_b", "") or "-"),
-                    f"${s.get('cost_a', 0):.4f}",
-                    f"${s.get('cost_b', 0):.4f}",
-                    change_str,
-                ])
+                step_rows.append(
+                    [
+                        s.get("step_id", ""),
+                        pres_str,
+                        _status_color(s.get("status_a", "") or "-"),
+                        _status_color(s.get("status_b", "") or "-"),
+                        f"${s.get('cost_a', 0):.4f}",
+                        f"${s.get('cost_b', 0):.4f}",
+                        change_str,
+                    ]
+                )
         print(_table(step_headers, step_rows))
 
     print()
@@ -2316,6 +2389,7 @@ def _cmd_runs_compare(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # autopilot - AutoPilot experiment management
 # ---------------------------------------------------------------------------
+
 
 def _cmd_autopilot_list(args: argparse.Namespace) -> None:
     """List AutoPilot experiments."""
@@ -2342,15 +2416,17 @@ def _cmd_autopilot_list(args: argparse.Namespace) -> None:
             status = e.get("status", "")
             deployed = e.get("deployed_variant_id")
             deployed_str = deployed[:12] if deployed else "-"
-            rows.append([
-                e.get("id", "")[:12],
-                e.get("workflow_name", ""),
-                e.get("step_id", ""),
-                _status_color(status),
-                e.get("optimize_for", ""),
-                deployed_str,
-                _fmt_time(e.get("created_at")),
-            ])
+            rows.append(
+                [
+                    e.get("id", "")[:12],
+                    e.get("workflow_name", ""),
+                    e.get("step_id", ""),
+                    _status_color(status),
+                    e.get("optimize_for", ""),
+                    deployed_str,
+                    _fmt_time(e.get("created_at")),
+                ]
+            )
     print(_table(headers, rows))
 
 
@@ -2393,6 +2469,7 @@ def _cmd_autopilot(args: argparse.Namespace) -> None:
 # Argument parser
 # ---------------------------------------------------------------------------
 
+
 def _add_connection_args(parser: argparse.ArgumentParser) -> None:
     """Add --url and --api-key arguments to a subparser."""
     parser.add_argument(
@@ -2415,7 +2492,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Sandcastle - workflow orchestrator CLI",
     )
     parser.add_argument(
-        "--json", action="store_true", default=False,
+        "--json",
+        action="store_true",
+        default=False,
         help="Output raw JSON instead of formatted tables",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -2427,22 +2506,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p_serve = subparsers.add_parser("serve", help="Start the API server")
     p_serve.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     p_serve.add_argument("--port", type=int, default=8080, help="Bind port (default: 8080)")
-    p_serve.add_argument("--reload", action="store_true", default=True,
-                         help="Enable auto-reload (default: on)")
-    p_serve.add_argument("--no-reload", action="store_false", dest="reload",
-                         help="Disable auto-reload")
+    p_serve.add_argument(
+        "--reload", action="store_true", default=True, help="Enable auto-reload (default: on)"
+    )
+    p_serve.add_argument(
+        "--no-reload", action="store_false", dest="reload", help="Disable auto-reload"
+    )
 
     # --- run ---
     p_run = subparsers.add_parser("run", help="Run a workflow")
     p_run.add_argument("workflow", help="Workflow name or path to .yaml file")
-    p_run.add_argument("--input", "-i", action="append", metavar="KEY=VALUE",
-                       help="Input key=value pair (repeatable)")
-    p_run.add_argument("--input-file", "-f", metavar="FILE",
-                       help="JSON file with input data")
-    p_run.add_argument("--wait", "-w", action="store_true",
-                       help="Wait for completion and print result")
-    p_run.add_argument("--max-cost", type=float, default=None, metavar="USD",
-                       help="Maximum cost limit in USD")
+    p_run.add_argument(
+        "--input",
+        "-i",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Input key=value pair (repeatable)",
+    )
+    p_run.add_argument("--input-file", "-f", metavar="FILE", help="JSON file with input data")
+    p_run.add_argument(
+        "--wait", "-w", action="store_true", help="Wait for completion and print result"
+    )
+    p_run.add_argument(
+        "--max-cost", type=float, default=None, metavar="USD", help="Maximum cost limit in USD"
+    )
     _add_connection_args(p_run)
 
     # --- status ---
@@ -2458,8 +2545,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- logs ---
     p_logs = subparsers.add_parser("logs", help="Stream run events (SSE)")
     p_logs.add_argument("run_id", help="Run ID to stream")
-    p_logs.add_argument("--follow", "-f", action="store_true",
-                        help="Keep streaming after terminal state")
+    p_logs.add_argument(
+        "--follow", "-f", action="store_true", help="Keep streaming after terminal state"
+    )
     _add_connection_args(p_logs)
 
     # --- ls ---
@@ -2467,10 +2555,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ls_sub = p_ls.add_subparsers(dest="resource", help="Resource type")
 
     p_ls_runs = ls_sub.add_parser("runs", help="List runs")
-    p_ls_runs.add_argument("--status", "-s", default=None,
-                           help="Filter by status (queued, running, completed, failed)")
-    p_ls_runs.add_argument("--limit", "-n", type=int, default=20,
-                           help="Max number of results (default: 20)")
+    p_ls_runs.add_argument(
+        "--status", "-s", default=None, help="Filter by status (queued, running, completed, failed)"
+    )
+    p_ls_runs.add_argument(
+        "--limit", "-n", type=int, default=20, help="Max number of results (default: 20)"
+    )
     _add_connection_args(p_ls_runs)
 
     p_ls_wf = ls_sub.add_parser("workflows", help="List available workflows")
@@ -2486,8 +2576,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_sched_create = sched_sub.add_parser("create", help="Create a new schedule")
     p_sched_create.add_argument("workflow", help="Workflow name")
     p_sched_create.add_argument("cron", help="Cron expression (e.g. '0 9 * * *')")
-    p_sched_create.add_argument("--input", "-i", action="append", metavar="KEY=VALUE",
-                                help="Input key=value pair (repeatable)")
+    p_sched_create.add_argument(
+        "--input",
+        "-i",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Input key=value pair (repeatable)",
+    )
     _add_connection_args(p_sched_create)
 
     p_sched_delete = sched_sub.add_parser("delete", help="Delete a schedule")
@@ -2519,53 +2614,59 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- eval ---
     p_eval = subparsers.add_parser("eval", help="Run an eval suite against a workflow")
     p_eval.add_argument("suite", help="Path to eval suite YAML file")
-    p_eval.add_argument("--concurrency", "-c", type=int, default=1,
-                         help="Max concurrent test cases (default: 1)")
-    p_eval.add_argument("--tag", "-t", action="append",
-                         help="Filter cases by tag (repeatable)")
-    p_eval.add_argument("--verbose", "-v", action="store_true",
-                         help="Show assertion details for failed cases")
+    p_eval.add_argument(
+        "--concurrency", "-c", type=int, default=1, help="Max concurrent test cases (default: 1)"
+    )
+    p_eval.add_argument("--tag", "-t", action="append", help="Filter cases by tag (repeatable)")
+    p_eval.add_argument(
+        "--verbose", "-v", action="store_true", help="Show assertion details for failed cases"
+    )
 
     # --- generate ---
     p_gen = subparsers.add_parser("generate", help="Generate workflow from natural language")
     p_gen.add_argument("--description", "-d", help="What the workflow should do")
-    p_gen.add_argument("--output", "-o", metavar="FILE", help="Write YAML to file instead of stdout")
-    p_gen.add_argument("--refine", action="store_true", help="Enter refinement loop after generation")
+    p_gen.add_argument(
+        "--output", "-o", metavar="FILE", help="Write YAML to file instead of stdout"
+    )
+    p_gen.add_argument(
+        "--refine", action="store_true", help="Enter refinement loop after generation"
+    )
 
     # --- templates ---
     p_templates = subparsers.add_parser("templates", help="List workflow templates")
-    p_templates.add_argument("--category", "-c", default=None,
-                             help="Filter by category")
+    p_templates.add_argument("--category", "-c", default=None, help="Filter by category")
     _add_connection_args(p_templates)
 
     # --- replay ---
     p_replay = subparsers.add_parser("replay", help="Replay a workflow run from a step")
     p_replay.add_argument("run_id", help="Run ID to replay")
-    p_replay.add_argument("--from-step", required=True, dest="from_step",
-                          help="Step ID to replay from")
+    p_replay.add_argument(
+        "--from-step", required=True, dest="from_step", help="Step ID to replay from"
+    )
     _add_connection_args(p_replay)
 
     # --- fork ---
     p_fork = subparsers.add_parser("fork", help="Fork a run with modifications")
     p_fork.add_argument("run_id", help="Run ID to fork")
-    p_fork.add_argument("--from-step", required=True, dest="from_step",
-                        help="Step ID to fork from")
-    p_fork.add_argument("--change", action="append", metavar="KEY=VALUE",
-                        help="Step override key=value (repeatable)")
+    p_fork.add_argument("--from-step", required=True, dest="from_step", help="Step ID to fork from")
+    p_fork.add_argument(
+        "--change",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Step override key=value (repeatable)",
+    )
     _add_connection_args(p_fork)
 
     # --- approve ---
     p_approve = subparsers.add_parser("approve", help="Approve a paused approval step")
     p_approve.add_argument("run_id", help="Run ID with pending approval")
-    p_approve.add_argument("--data", default=None,
-                           help="JSON data to pass with approval")
+    p_approve.add_argument("--data", default=None, help="JSON data to pass with approval")
     _add_connection_args(p_approve)
 
     # --- reject ---
     p_reject = subparsers.add_parser("reject", help="Reject a paused approval step")
     p_reject.add_argument("run_id", help="Run ID with pending approval")
-    p_reject.add_argument("--reason", default=None,
-                          help="Rejection reason")
+    p_reject.add_argument("--reason", default=None, help="Rejection reason")
     _add_connection_args(p_reject)
 
     # --- runs ---
@@ -2574,10 +2675,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # runs list (default when no sub-command given)
     p_runs_list = runs_sub.add_parser("list", help="List recent workflow runs")
-    p_runs_list.add_argument("--status", "-s", default=None,
-                             help="Filter by status (queued, running, completed, failed)")
-    p_runs_list.add_argument("--limit", "-n", type=int, default=20,
-                             help="Max number of results (default: 20)")
+    p_runs_list.add_argument(
+        "--status", "-s", default=None, help="Filter by status (queued, running, completed, failed)"
+    )
+    p_runs_list.add_argument(
+        "--limit", "-n", type=int, default=20, help="Max number of results (default: 20)"
+    )
     _add_connection_args(p_runs_list)
 
     # runs compare
@@ -2587,10 +2690,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_args(p_runs_compare)
 
     # Keep backward compat: 'sandcastle runs --status ...' still works
-    p_runs.add_argument("--status", "-s", default=None,
-                        help="Filter by status (queued, running, completed, failed)")
-    p_runs.add_argument("--limit", "-n", type=int, default=20,
-                        help="Max number of results (default: 20)")
+    p_runs.add_argument(
+        "--status", "-s", default=None, help="Filter by status (queued, running, completed, failed)"
+    )
+    p_runs.add_argument(
+        "--limit", "-n", type=int, default=20, help="Max number of results (default: 20)"
+    )
     _add_connection_args(p_runs)
 
     # --- keys ---
@@ -2603,15 +2708,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_keys_create = keys_sub.add_parser("create", help="Create a new API key")
     p_keys_create.add_argument("--name", required=True, help="Name for the API key")
     p_keys_create.add_argument("--tenant", default=None, help="Tenant ID to scope the key")
-    p_keys_create.add_argument("--cost-limit", type=float, default=None, dest="cost_limit",
-                               help="Max cost per run in USD")
+    p_keys_create.add_argument(
+        "--cost-limit", type=float, default=None, dest="cost_limit", help="Max cost per run in USD"
+    )
     _add_connection_args(p_keys_create)
 
     p_keys_delete = keys_sub.add_parser("delete", help="Delete (deactivate) an API key")
     p_keys_delete.add_argument("key_id", help="API key ID to delete")
     _add_connection_args(p_keys_delete)
 
-    p_keys_rotate = keys_sub.add_parser("rotate", help="Rotate an API key (create new + deactivate old)")
+    p_keys_rotate = keys_sub.add_parser(
+        "rotate", help="Rotate an API key (create new + deactivate old)"
+    )
     p_keys_rotate.add_argument("key_id", help="API key ID to rotate")
     _add_connection_args(p_keys_rotate)
 
@@ -2620,8 +2728,7 @@ def _build_parser() -> argparse.ArgumentParser:
     dlq_sub = p_dlq.add_subparsers(dest="dlq_action")
 
     p_dlq_list = dlq_sub.add_parser("list", help="List failed items")
-    p_dlq_list.add_argument("--resolved", action="store_true",
-                            help="Include resolved items")
+    p_dlq_list.add_argument("--resolved", action="store_true", help="Include resolved items")
     _add_connection_args(p_dlq_list)
 
     p_dlq_retry = dlq_sub.add_parser("retry", help="Retry a failed item")
@@ -2637,9 +2744,12 @@ def _build_parser() -> argparse.ArgumentParser:
     violations_sub = p_violations.add_subparsers(dest="violations_action")
 
     p_violations_list = violations_sub.add_parser("list", help="List policy violations")
-    p_violations_list.add_argument("--severity", default=None,
-                                   choices=["critical", "high", "medium", "low"],
-                                   help="Filter by severity level")
+    p_violations_list.add_argument(
+        "--severity",
+        default=None,
+        choices=["critical", "high", "medium", "low"],
+        help="Filter by severity level",
+    )
     _add_connection_args(p_violations_list)
 
     # --- tools ---
@@ -2652,8 +2762,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_tools_configure = tools_sub.add_parser("configure", help="Set credentials for a tool")
     p_tools_configure.add_argument("tool_name", help="Tool name to configure")
-    p_tools_configure.add_argument("--env", action="append", metavar="KEY=VALUE",
-                                   help="Credential env var (repeatable, e.g. --env SLACK_TOKEN=xoxb-...)")
+    p_tools_configure.add_argument(
+        "--env",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Credential env var (repeatable, e.g. --env SLACK_TOKEN=xoxb-...)",
+    )
     _add_connection_args(p_tools_configure)
 
     # --- autopilot ---
@@ -2661,8 +2775,7 @@ def _build_parser() -> argparse.ArgumentParser:
     autopilot_sub = p_autopilot.add_subparsers(dest="autopilot_action")
 
     p_autopilot_list = autopilot_sub.add_parser("list", help="List experiments")
-    p_autopilot_list.add_argument("--status", "-s", default=None,
-                                  help="Filter by status")
+    p_autopilot_list.add_argument("--status", "-s", default=None, help="Filter by status")
     _add_connection_args(p_autopilot_list)
 
     p_autopilot_deploy = autopilot_sub.add_parser("deploy", help="Deploy winning variant")
@@ -2679,13 +2792,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     hub_install = hub_sub.add_parser("install", help="Install a community workflow")
     hub_install.add_argument("slug", help="Workflow slug (e.g. gizmax/lead-scoring)")
-    hub_install.add_argument("--dir", "-d", default=None,
-                             help="Target directory (default: ./workflows/)")
+    hub_install.add_argument(
+        "--dir", "-d", default=None, help="Target directory (default: ./workflows/)"
+    )
 
     hub_list = hub_sub.add_parser("list", help="List community workflows")
     hub_list.add_argument("--category", "-c", help="Filter by category")
-    hub_list.add_argument("--limit", "-n", type=int, default=20,
-                          help="Max results")
+    hub_list.add_argument("--limit", "-n", type=int, default=20, help="Max results")
 
     hub_publish = hub_sub.add_parser("publish", help="Publish a workflow to the community hub")
     hub_publish.add_argument("file", help="Path to workflow YAML file")
@@ -2697,8 +2810,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "install-collection", help="Install all workflows from a collection"
     )
     hub_install_col.add_argument("collection_id", help="Collection ID")
-    hub_install_col.add_argument("--dir", "-d", default=None,
-                                 help="Target directory (default: ./workflows/)")
+    hub_install_col.add_argument(
+        "--dir", "-d", default=None, help="Target directory (default: ./workflows/)"
+    )
 
     return parser
 
@@ -2706,6 +2820,7 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Route CLI commands."""

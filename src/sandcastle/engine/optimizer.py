@@ -105,7 +105,9 @@ class CostLatencyOptimizer:
         self._cache_ttl: int = 300  # 5 minutes
         self._alerts: list[DegradationAlert] = []
         self._max_alerts: int = 100
-        self._previous_stats: dict[str, dict[str, PerformanceStats]] = {}  # step_key -> model -> stats
+        self._previous_stats: dict[
+            str, dict[str, PerformanceStats]
+        ] = {}  # step_key -> model -> stats
 
     async def select_model(
         self,
@@ -220,15 +222,17 @@ class CostLatencyOptimizer:
         for option in pool:
             s = stats_map.get(option.model)
             if s:
-                enriched.append(ModelOption(
-                    id=option.id,
-                    model=option.model,
-                    max_turns=option.max_turns,
-                    avg_quality=s.avg_quality,
-                    avg_cost=s.avg_cost,
-                    avg_latency=s.avg_latency,
-                    sample_count=s.sample_count,
-                ))
+                enriched.append(
+                    ModelOption(
+                        id=option.id,
+                        model=option.model,
+                        max_turns=option.max_turns,
+                        avg_quality=s.avg_quality,
+                        avg_cost=s.avg_cost,
+                        avg_latency=s.avg_latency,
+                        sample_count=s.sample_count,
+                    )
+                )
             else:
                 enriched.append(option)
         return enriched
@@ -275,7 +279,11 @@ class CostLatencyOptimizer:
 
             logger.debug(
                 "Optimizer feedback: step=%s model=%s quality=%s cost=%.4f latency=%.1fs",
-                step_id, model, quality_score, cost_usd, latency_seconds,
+                step_id,
+                model,
+                quality_score,
+                cost_usd,
+                latency_seconds,
             )
         except Exception as e:
             logger.warning("Failed to record optimizer outcome: %s", e)
@@ -311,7 +319,10 @@ class CostLatencyOptimizer:
                     current_value=s.avg_quality,
                     threshold=slo.quality_min,
                     severity="critical" if s.avg_quality < slo.quality_min * 0.8 else "warning",
-                    recommended_action=f"Consider switching from {s.model} to a higher-quality model.",
+                    recommended_action=(
+                        f"Consider switching from {s.model}"
+                        " to a higher-quality model."
+                    ),
                 )
                 new_alerts.append(alert)
 
@@ -338,8 +349,13 @@ class CostLatencyOptimizer:
                     metric="latency",
                     current_value=s.avg_latency,
                     threshold=slo.latency_max_seconds,
-                    severity="critical" if s.avg_latency > slo.latency_max_seconds * 1.5 else "warning",
-                    recommended_action=f"Model {s.model} latency exceeds SLO. Consider a faster model.",
+                    severity="critical"
+                    if s.avg_latency > slo.latency_max_seconds * 1.5
+                    else "warning",
+                    recommended_action=(
+                        f"Model {s.model} latency exceeds SLO."
+                        " Consider a faster model."
+                    ),
                 )
                 new_alerts.append(alert)
 
@@ -356,7 +372,11 @@ class CostLatencyOptimizer:
                         current_value=s.avg_quality,
                         threshold=prev.avg_quality,
                         severity="warning",
-                        recommended_action=f"Model {s.model} quality dropped by {quality_drop:.2f}. Monitor closely.",
+                        recommended_action=(
+                            f"Model {s.model} quality dropped"
+                            f" by {quality_drop:.2f}."
+                            " Monitor closely."
+                        ),
                     )
                     new_alerts.append(alert)
 
@@ -366,7 +386,7 @@ class CostLatencyOptimizer:
         # Store alerts (keep last N)
         self._alerts.extend(new_alerts)
         if len(self._alerts) > self._max_alerts:
-            self._alerts = self._alerts[-self._max_alerts:]
+            self._alerts = self._alerts[-self._max_alerts :]
 
         return new_alerts
 
@@ -406,9 +426,7 @@ class CostLatencyOptimizer:
         self._cache[cache_key] = (now, stats)
         return stats
 
-    async def _query_stats(
-        self, step_id: str, workflow_name: str
-    ) -> list[PerformanceStats]:
+    async def _query_stats(self, step_id: str, workflow_name: str) -> list[PerformanceStats]:
         """Query DB for performance statistics."""
         try:
             from sqlalchemy import func, select
@@ -497,9 +515,7 @@ def get_optimizer() -> CostLatencyOptimizer:
     return _optimizer_instance
 
 
-def calculate_budget_pressure(
-    current_cost: float, max_cost: float | None
-) -> float:
+def calculate_budget_pressure(current_cost: float, max_cost: float | None) -> float:
     """Calculate current budget utilization (0-1)."""
     if not max_cost or max_cost <= 0:
         return 0.0

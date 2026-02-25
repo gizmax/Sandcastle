@@ -6,8 +6,8 @@ validates availability, and masks values for safe display.
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ def _resolve_named_connections(refs: list[tuple[str, str]]) -> dict[str, str]:
     if loop and loop.is_running():
         # Already in async context - use thread to run sync query
         import concurrent.futures
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(_resolve_named_connections_sync, refs).result(timeout=5)
     else:
@@ -77,8 +78,9 @@ async def _resolve_named_connections_async(
 ) -> dict[str, str]:
     """Async DB lookup for named connection credentials."""
     from sqlalchemy import select
-    from sandcastle.models.db import ToolConnection, async_session
+
     from sandcastle.engine.tools.registry import get_tool
+    from sandcastle.models.db import ToolConnection, async_session
 
     credentials: dict[str, str] = {}
     async with async_session() as session:
@@ -110,6 +112,7 @@ def _resolve_named_connections_sync(
 ) -> dict[str, str]:
     """Sync wrapper for named connection resolution."""
     import asyncio
+
     return asyncio.run(_resolve_named_connections_async(refs))
 
 
@@ -129,7 +132,12 @@ def validate_tool_credentials(tool_names: list[str]) -> dict[str, dict]:
         try:
             tool = get_tool(name)
         except KeyError:
-            result[name] = {"configured": False, "missing": [], "present": [], "error": "unknown tool"}
+            result[name] = {
+                "configured": False,
+                "missing": [],
+                "present": [],
+                "error": "unknown tool",
+            }
             continue
 
         missing = []
@@ -161,15 +169,15 @@ def mask_credential(value: str) -> str:
 
 # Known credential token prefixes for auto-redaction
 CREDENTIAL_PATTERNS: list[str] = [
-    r"xoxb-[\w\-]+",         # Slack bot token
-    r"xoxp-[\w\-]+",         # Slack user token
-    r"ghp_[\w]+",            # GitHub personal access token
-    r"gho_[\w]+",            # GitHub OAuth token
-    r"ghs_[\w]+",            # GitHub server token
-    r"sk-[\w]+",             # OpenAI / generic API key
-    r"Bearer\s+[\w\-\.]+",   # Bearer token
-    r"Basic\s+[\w=]+",       # Basic auth
-    r"AKIA[\w]+",            # AWS access key
+    r"xoxb-[\w\-]+",  # Slack bot token
+    r"xoxp-[\w\-]+",  # Slack user token
+    r"ghp_[\w]+",  # GitHub personal access token
+    r"gho_[\w]+",  # GitHub OAuth token
+    r"ghs_[\w]+",  # GitHub server token
+    r"sk-[\w]+",  # OpenAI / generic API key
+    r"Bearer\s+[\w\-\.]+",  # Bearer token
+    r"Basic\s+[\w=]+",  # Basic auth
+    r"AKIA[\w]+",  # AWS access key
     r"(?:psql|postgres(?:ql)?):\/\/\S+",  # PostgreSQL connection string
-    r"https?://hooks\.slack\.com/\S+",     # Slack webhook URL
+    r"https?://hooks\.slack\.com/\S+",  # Slack webhook URL
 ]

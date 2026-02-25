@@ -195,7 +195,9 @@ class SensorConfig:
 class GateConfig:
     """Configuration for multi-strategy approval gates."""
 
-    strategies: list[dict] = field(default_factory=list)  # [{type: "llm_eval"|"human"|"timeout", config: {...}}]
+    strategies: list[dict] = field(
+        default_factory=list
+    )  # [{type: "llm_eval"|"human"|"timeout", config: {...}}]
 
 
 @dataclass
@@ -315,23 +317,41 @@ class MemoryConfig:
     """Workflow-level memory configuration."""
 
     agent: str = ""
-    scope: str = "workflow"       # workflow | agent | global
+    scope: str = "workflow"  # workflow | agent | global
     auto_inject: bool = True
     max_inject: int = 10
 
 
-VALID_STEP_TYPES = frozenset({
-    "standard", "approval", "sub_workflow",
-    "llm", "http", "code", "condition", "classify", "loop",
-    "race", "sensor", "gate",
-    "transform", "notify", "delegate", "browser",
-})
+VALID_STEP_TYPES = frozenset(
+    {
+        "standard",
+        "approval",
+        "sub_workflow",
+        "llm",
+        "http",
+        "code",
+        "condition",
+        "classify",
+        "loop",
+        "race",
+        "sensor",
+        "gate",
+        "transform",
+        "notify",
+        "delegate",
+        "browser",
+    }
+)
 
 # Types that don't need a prompt
-NON_PROMPT_TYPES = frozenset({"http", "code", "condition", "loop", "race", "sensor", "transform", "notify"})
+NON_PROMPT_TYPES = frozenset(
+    {"http", "code", "condition", "loop", "race", "sensor", "transform", "notify"}
+)
 
 # Types that don't use an LLM model (skip model validation)
-NON_LLM_TYPES = frozenset({"http", "code", "condition", "loop", "race", "sensor", "transform", "notify"})
+NON_LLM_TYPES = frozenset(
+    {"http", "code", "condition", "loop", "race", "sensor", "transform", "notify"}
+)
 
 
 @dataclass
@@ -348,7 +368,10 @@ class StepDefinition:
     output_schema: dict | None = None
     retry: RetryConfig | None = None
     fallback: FallbackConfig | None = None
-    type: str = "standard"  # "standard" | "approval" | "sub_workflow" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate"
+    type: str = "standard"
+    # "standard" | "approval" | "sub_workflow" | "llm" | "http"
+    # | "code" | "condition" | "classify" | "loop" | "race"
+    # | "sensor" | "gate" | "transform" | "notify" | "delegate"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -461,12 +484,14 @@ def _parse_autopilot_config(data: dict | None) -> AutoPilotConfig | None:
         return None
     variants = []
     for v in data.get("variants", []):
-        variants.append(VariantConfig(
-            id=v.get("id", ""),
-            model=v.get("model"),
-            prompt=v.get("prompt"),
-            max_turns=v.get("max_turns"),
-        ))
+        variants.append(
+            VariantConfig(
+                id=v.get("id", ""),
+                model=v.get("model"),
+                prompt=v.get("prompt"),
+                max_turns=v.get("max_turns"),
+            )
+        )
 
     eval_data = data.get("evaluation")
     evaluation = None
@@ -879,9 +904,7 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
     if "on_complete" in data:
         oc = data["on_complete"]
         on_complete = CompletionConfig(
-            webhook=(
-                _resolve_env_vars(oc["webhook"]) if oc.get("webhook") else None
-            ),
+            webhook=(_resolve_env_vars(oc["webhook"]) if oc.get("webhook") else None),
             storage_path=oc.get("storage_path"),
         )
 
@@ -890,9 +913,7 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
         of = data["on_failure"]
         on_failure = FailureConfig(
             dead_letter=of.get("dead_letter", False),
-            webhook=(
-                _resolve_env_vars(of["webhook"]) if of.get("webhook") else None
-            ),
+            webhook=(_resolve_env_vars(of["webhook"]) if of.get("webhook") else None),
         )
 
     global_policies = [_parse_policy(p) for p in data.get("policies", [])]
@@ -965,27 +986,19 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
     for step in workflow.steps:
         if step.type == "approval":
             if not step.approval_config or not step.approval_config.message:
-                errors.append(
-                    f"Approval step '{step.id}' must have approval_config with a message"
-                )
+                errors.append(f"Approval step '{step.id}' must have approval_config with a message")
         if step.type == "sub_workflow":
             if not step.sub_workflow or not step.sub_workflow.workflow:
-                errors.append(
-                    f"Sub-workflow step '{step.id}' must have sub_workflow.workflow"
-                )
+                errors.append(f"Sub-workflow step '{step.id}' must have sub_workflow.workflow")
 
     # Validate hybrid step types
     for step in workflow.steps:
         if step.type == "http":
             if not step.http_config or not step.http_config.url:
-                errors.append(
-                    f"HTTP step '{step.id}' must have http_config with a url"
-                )
+                errors.append(f"HTTP step '{step.id}' must have http_config with a url")
         elif step.type == "code":
             if not step.code_config or not step.code_config.code:
-                errors.append(
-                    f"Code step '{step.id}' must have code_config with code"
-                )
+                errors.append(f"Code step '{step.id}' must have code_config with code")
         elif step.type == "condition":
             if not step.condition_config or not step.condition_config.expression:
                 errors.append(
@@ -1012,39 +1025,28 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     for sid in branch_steps:
                         if sid not in step_ids:
                             errors.append(
-                                f"Classify step '{step.id}' branch '{cat}' references unknown step '{sid}'"
+                                f"Classify step '{step.id}' branch "
+                                f"'{cat}' references unknown step '{sid}'"
                             )
         elif step.type == "loop":
             if not step.loop_config or not step.loop_config.over:
-                errors.append(
-                    f"Loop step '{step.id}' must have loop_config with over"
-                )
+                errors.append(f"Loop step '{step.id}' must have loop_config with over")
         elif step.type == "race":
             if not step.race_config or not step.race_config.branches:
-                errors.append(
-                    f"Race step '{step.id}' must have race_config with branches"
-                )
+                errors.append(f"Race step '{step.id}' must have race_config with branches")
             if step.race_config:
                 for branch in step.race_config.branches:
                     for sid in branch:
                         if sid not in step_ids:
-                            errors.append(
-                                f"Race step '{step.id}' references unknown step '{sid}'"
-                            )
+                            errors.append(f"Race step '{step.id}' references unknown step '{sid}'")
         elif step.type == "sensor":
             if not step.sensor_config or not step.sensor_config.url:
-                errors.append(
-                    f"Sensor step '{step.id}' must have sensor_config with a url"
-                )
+                errors.append(f"Sensor step '{step.id}' must have sensor_config with a url")
             if step.sensor_config and not step.sensor_config.condition:
-                errors.append(
-                    f"Sensor step '{step.id}' must have sensor_config with a condition"
-                )
+                errors.append(f"Sensor step '{step.id}' must have sensor_config with a condition")
         elif step.type == "gate":
             if not step.gate_config or not step.gate_config.strategies:
-                errors.append(
-                    f"Gate step '{step.id}' must have gate_config with strategies"
-                )
+                errors.append(f"Gate step '{step.id}' must have gate_config with strategies")
         elif step.type == "transform":
             if not step.transform_config or not step.transform_config.template:
                 errors.append(
@@ -1052,13 +1054,9 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 )
         elif step.type == "notify":
             if not step.notify_config or not step.notify_config.service:
-                errors.append(
-                    f"Notify step '{step.id}' must have notify_config with a service"
-                )
+                errors.append(f"Notify step '{step.id}' must have notify_config with a service")
             if not step.notify_config or not step.notify_config.message:
-                errors.append(
-                    f"Notify step '{step.id}' must have notify_config with a message"
-                )
+                errors.append(f"Notify step '{step.id}' must have notify_config with a message")
         elif step.type == "delegate":
             if not step.delegate_config or not step.delegate_config.workflow:
                 errors.append(
@@ -1066,9 +1064,7 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 )
         elif step.type == "browser":
             if not step.browser_config:
-                errors.append(
-                    f"Browser step '{step.id}' must have browser_config"
-                )
+                errors.append(f"Browser step '{step.id}' must have browser_config")
             elif step.browser_config.mode not in ("playwright", "computer_use", "dom"):
                 errors.append(
                     f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
@@ -1094,15 +1090,12 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
     for model_name in all_models:
         if model_name not in KNOWN_MODELS:
             errors.append(
-                f"Unknown model '{model_name}'. "
-                f"Available: {', '.join(sorted(KNOWN_MODELS))}"
+                f"Unknown model '{model_name}'. Available: {', '.join(sorted(KNOWN_MODELS))}"
             )
 
     # Check SLO configuration
     for step in workflow.steps:
-        if step.slo and step.slo.optimize_for not in (
-            "cost", "quality", "latency", "balanced"
-        ):
+        if step.slo and step.slo.optimize_for not in ("cost", "quality", "latency", "balanced"):
             errors.append(
                 f"Step '{step.id}' has invalid SLO optimize_for: '{step.slo.optimize_for}'"
             )
@@ -1118,8 +1111,7 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         base_name, _ = parse_tool_ref(tool_ref)
         if base_name not in KNOWN_TOOLS:
             errors.append(
-                f"Unknown tool '{base_name}'. "
-                f"Available: {', '.join(sorted(KNOWN_TOOLS))}"
+                f"Unknown tool '{base_name}'. Available: {', '.join(sorted(KNOWN_TOOLS))}"
             )
 
     # Check memory configuration
@@ -1130,9 +1122,7 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 "Must be 'workflow', 'agent', or 'global'"
             )
         if workflow.memory.scope == "agent" and not workflow.memory.agent:
-            errors.append(
-                "Memory scope 'agent' requires 'agent' name to be set"
-            )
+            errors.append("Memory scope 'agent' requires 'agent' name to be set")
 
     # Check for cycles
     cycle_errors = _detect_cycles(workflow.steps)
