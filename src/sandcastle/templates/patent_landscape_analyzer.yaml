@@ -1,0 +1,596 @@
+# name: Patent Landscape Analyzer
+# description: Conduct prior art searches across patent databases, map competitive IP landscapes, identify innovation white spaces, and generate freedom-to-operate risk assessments
+# tags: [Patents, IP, Legal, Innovation, FTO]
+# category: hr_legal
+
+name: patent-landscape-analyzer
+description: Conduct prior art searches across patent databases, map competitive IP landscapes, identify innovation white spaces, and generate freedom-to-operate risk assessments
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["technology_domain", "company_name"]
+  properties:
+    technology_domain:
+      type: string
+      description: "The technology domain to analyze (e.g. 'natural language processing', 'battery electrode chemistry', 'autonomous vehicle perception')"
+    company_name:
+      type: string
+      description: "Your company or organization name for the FTO assessment"
+    target_jurisdictions:
+      type: string
+      description: "Comma-separated list of patent jurisdictions to cover"
+      default: "US, EP, CN"
+    search_keywords:
+      type: string
+      description: "Comma-separated specific keywords and phrases to include in prior art searches (e.g. 'transformer attention mechanism, multi-head self-attention, sparse attention')"
+    competitor_names:
+      type: string
+      description: "Comma-separated list of competitor companies whose patent portfolios should be analyzed"
+
+steps:
+  - id: prior-art-search
+    prompt: |
+      Conduct an exhaustive prior art search for the specified technology domain. Your goal
+      is to identify all relevant existing patents, published applications, and non-patent
+      literature that establish the state of the art and could pose freedom-to-operate risks.
+
+      Technology domain: {input.technology_domain}
+      Company: {input.company_name}
+      Target jurisdictions: {input.target_jurisdictions}
+      Search keywords: {input.search_keywords}
+      Competitors: {input.competitor_names}
+
+      Execute the following comprehensive prior art search strategy:
+
+      **1. Patent Classification Research**
+      Begin by identifying all relevant patent classification codes that cover this technology:
+      - International Patent Classification (IPC) codes - identify primary and secondary classes.
+        For example, if the domain is battery technology, relevant IPC codes might include
+        H01M (electrochemical cells), H01M 4/00 (electrodes), H01M 10/00 (secondary cells).
+      - Cooperative Patent Classification (CPC) codes - these are more granular than IPC and
+        provide finer distinctions. Map out the full CPC tree relevant to the domain.
+      - US Patent Classification (USPC) codes for historical US patents not yet reclassified.
+      - Locarno classification if design patents are relevant.
+      Document the classification mapping as a hierarchical tree showing primary classes,
+      subclasses, and groups with brief descriptions of what each covers.
+
+      **2. Keyword and Semantic Search Strategy**
+      Develop a multi-layered search query strategy:
+      - Primary keyword combinations using Boolean operators (AND, OR, NOT)
+      - Synonym expansion - for each search keyword, identify 5-10 synonyms and technical
+        variants that patent attorneys might use. Patent claims often use unusual terminology
+        to broaden scope (e.g., "computing device" instead of "computer", "communication module"
+        instead of "wireless chip").
+      - Concept-based searches using broader technology concepts
+      - Inventor name searches for known key researchers in the field
+      - Assignee searches for all competitor companies listed plus major players
+      - Citation chain searches - start from known key patents and trace both forward citations
+        (who cited this patent) and backward citations (what this patent cited)
+
+      **3. Database Coverage**
+      Search across these patent databases and sources:
+      - USPTO (United States Patent and Trademark Office) - full-text patents and published applications
+      - EPO (European Patent Office) via Espacenet - European patents and applications
+      - WIPO (World Intellectual Property Organization) via PatentScope - PCT applications
+      - CNIPA (China National Intellectual Property Administration) - Chinese patents
+      - JPO (Japan Patent Office) - Japanese patents if relevant
+      - KIPO (Korean Intellectual Property Office) - Korean patents if relevant
+      - Google Patents for cross-referencing and full-text availability
+      - Lens.org for open access patent and scholarly literature integration
+
+      **4. Non-Patent Literature (NPL) Search**
+      Prior art is not limited to patents. Search for:
+      - Academic publications predating key patent filing dates
+      - Industry standards and specifications (IEEE, IETF, W3C, etc.)
+      - Conference proceedings and technical symposia papers
+      - Product manuals, user guides, and technical documentation
+      - Press releases and product announcements with specific dates
+      - Open source project commits with timestamps predating patent filings
+      - Doctoral dissertations and masters theses
+
+      **5. Search Results Organization**
+      For each piece of prior art identified, document:
+      - Publication number / document identifier
+      - Title in English (translate if necessary)
+      - Filing date and publication date (critical for priority date analysis)
+      - Assignee / applicant organization
+      - Inventor names
+      - Patent family size (how many countries was it filed in)
+      - Legal status (active, expired, abandoned, pending)
+      - Jurisdiction coverage
+      - Abstract summary (2-3 sentences)
+      - Relevance score (1-10) to the technology domain
+      - Specific claims or disclosures relevant to {input.technology_domain}
+
+      **6. Landscape Statistics**
+      Compile aggregate statistics:
+      - Total patents found per jurisdiction
+      - Filing trend over the past 10 years (annual counts)
+      - Top 20 assignees by patent count
+      - Top IPC/CPC codes by patent count
+      - Geographic distribution of filings
+      - Average patent family size (indicating perceived value)
+      - Ratio of granted patents to applications (indicating examination outcomes)
+
+      Aim to identify 50-100 of the most relevant prior art references, prioritized by
+      relevance to {input.company_name}'s technology activities and potential FTO risk.
+      Flag any patents owned by the listed competitors with a special marker.
+    model: sonnet
+    max_turns: 10
+
+  - id: claim-analysis
+    depends_on: [prior-art-search]
+    prompt: |
+      Perform detailed patent claim analysis on the most critical patents identified
+      in the prior art search. Focus on understanding the scope and enforceability
+      of claims that could affect {input.company_name}'s freedom to operate.
+
+      Prior art search results: {steps.prior-art-search.output}
+      Technology domain: {input.technology_domain}
+      Company: {input.company_name}
+      Competitors: {input.competitor_names}
+
+      For the top 20-30 most relevant patents (highest relevance scores and competitor-owned),
+      perform the following claim-level analysis:
+
+      **1. Independent Claim Decomposition**
+      For each patent's independent claims:
+      - Parse the claim into individual claim elements (limitations)
+      - Identify the preamble, transitional phrase (comprising, consisting of, consisting
+        essentially of), and body of each claim
+      - Note the claim type: method/process, apparatus/system, composition, or article of manufacture
+      - Identify means-plus-function elements (35 USC 112(f) in US) that have narrower scope
+      - Map each claim element to its technical function and the specific technology it covers
+      - Identify any claim elements that use broad functional language vs. specific structural language
+
+      **2. Dependent Claim Analysis**
+      - Map the dependency tree showing how dependent claims narrow the independent claims
+      - Identify which dependent claims add meaningful additional limitations vs. trivial ones
+      - Note dependent claims that correspond to specific commercial embodiments
+      - Assess whether dependent claims create "fallback positions" if independent claims
+        are invalidated
+
+      **3. Claim Scope Assessment**
+      For each independent claim:
+      - Breadth rating (1-10): How broadly does the claim cover the technology space?
+        A score of 10 means the claim covers virtually any implementation in the space.
+      - Specificity rating (1-10): How specific are the claim limitations to a particular
+        implementation? A score of 10 means highly specific to one embodiment.
+      - Enforceability rating (1-10): Based on claim clarity, prosecution history, and
+        specification support, how likely is this claim to be enforceable?
+      - Design-around difficulty (1-10): How hard would it be to design around this claim
+        while still implementing the core technology? A score of 10 means extremely difficult.
+
+      **4. Prosecution History Indicators**
+      Where available, note:
+      - Amendments made during prosecution that narrow claim scope
+      - Examiner rejections and the prior art cited
+      - Arguments made by the applicant that might create prosecution history estoppel
+      - Any terminal disclaimers filed (indicating related patents by same assignee)
+      - Continuation and divisional application strategies (indicating the applicant
+        was strategically building a patent thicket)
+
+      **5. Citation Network Analysis**
+      Build a citation network from the key patents:
+      - Forward citations: Which later patents cite these key patents? This indicates
+        the foundational nature of the patent and identifies potential related threats.
+      - Backward citations: What prior art did the examiner and applicant rely on?
+        This reveals the knowledge base and potential invalidation references.
+      - Co-citation clusters: Which patents are frequently cited together?
+        These clusters represent technology sub-domains.
+      - Citation velocity: How frequently is each patent being cited in recent years?
+        Increasing citation velocity suggests growing importance.
+
+      **6. Patent Family Analysis**
+      For each key patent family:
+      - Map all family members across jurisdictions
+      - Identify the priority application and filing date
+      - Note variations in claim scope between jurisdictions (US vs. EP vs. CN claims
+        often differ significantly due to different examination standards)
+      - Check for PCT applications that may have entered national phase in additional countries
+      - Identify any family members that are still pending (potential future threats)
+
+      **7. Claim Element Mapping Matrix**
+      Create a matrix mapping:
+      - Rows: Key patents (top 20-30)
+      - Columns: Core technology elements of {input.technology_domain}
+      - Cells: Which claim elements of each patent cover which technology elements
+      This matrix will be critical for the FTO assessment to identify which patents
+      pose the highest risk to specific aspects of {input.company_name}'s technology.
+
+      Produce a structured claim analysis report with risk ratings for each patent.
+    model: sonnet
+    max_turns: 10
+
+  - id: landscape-mapping
+    depends_on: [prior-art-search]
+    prompt: |
+      Create a comprehensive competitive patent landscape map showing how IP ownership
+      is distributed across the technology domain and who controls key technology areas.
+
+      Prior art search results: {steps.prior-art-search.output}
+      Technology domain: {input.technology_domain}
+      Company: {input.company_name}
+      Competitors: {input.competitor_names}
+      Jurisdictions: {input.target_jurisdictions}
+
+      Build the following landscape visualizations and analyses:
+
+      **1. Competitive Portfolio Comparison**
+      For each major patent holder identified (top 15-20 assignees):
+      - Total patent count (granted + pending)
+      - Portfolio age distribution (filing years)
+      - Technology sub-domain coverage (which IPC/CPC classes they dominate)
+      - Geographic filing strategy (which jurisdictions they prioritize)
+      - Patent quality indicators:
+        * Average forward citation count per patent
+        * Percentage of patents granted vs. abandoned
+        * Average patent family size
+        * Claim count distribution (more claims generally means more scope)
+      - Portfolio growth rate (year-over-year filing trend)
+      - Recent filing activity (last 2 years) - indicates current R&D focus
+      - Maintenance fee payment patterns (dropping patents indicates de-prioritization)
+
+      **2. Technology Sub-Domain Map**
+      Divide {input.technology_domain} into 8-15 technology sub-domains based on the
+      IPC/CPC classification analysis. For each sub-domain:
+      - Total patent count and growth trend
+      - Top 5 assignees (showing concentration vs. fragmentation)
+      - Technology maturity assessment (emerging, growth, mature, declining) based on:
+        * Filing rate trajectory
+        * Ratio of applications to grants
+        * Citation patterns
+        * Inventor mobility between assignees
+      - Key blocking patents (patents with high forward citation counts that others
+        must work around)
+      - Average remaining patent life (years until expiration)
+
+      **3. Patent Thicket Analysis**
+      Identify areas where dense overlapping patents create thickets:
+      - Sub-domains where 5+ different assignees hold overlapping claims
+      - Cross-licensing indicators (mutual citations between competitors)
+      - Standard-essential patents (SEPs) that may require FRAND licensing
+      - Patent pools or licensing programs that exist in the space
+      - Thicket density score (1-10) for each sub-domain
+
+      **4. Filing Trend Analysis**
+      Analyze temporal patterns in patent filings:
+      - Year-over-year filing counts for the overall domain (10-year trend)
+      - Inflection points where filing activity spiked or dropped
+      - Correlation with industry events (product launches, regulation changes, etc.)
+      - Prediction of near-term filing trajectory (increasing, plateau, declining)
+      - Identification of "land grab" periods where multiple companies filed aggressively
+      - Emerging sub-domains with accelerating filing rates (hot areas)
+      - Declining sub-domains with decelerating filing rates (cold areas)
+
+      **5. Inventor and Research Team Analysis**
+      - Top 20 prolific inventors in the domain
+      - Inventor migration patterns between companies (indicates talent flow and knowledge transfer)
+      - Research team clustering (groups of inventors who frequently co-author patents)
+      - Academic-to-industry pipeline (university inventors who later file corporate patents)
+      - Geographic distribution of inventive activity (innovation hubs)
+
+      **6. Licensing and Litigation Landscape**
+      - Known licensing agreements in the space
+      - Patent assertion entity (PAE/troll) activity in the domain
+      - Major litigation cases and their outcomes
+      - Invalidated patents and grounds for invalidation (useful for future challenges)
+      - Inter partes review (IPR) and post-grant review (PGR) activity at the USPTO PTAB
+      - Opposition proceedings at the EPO
+
+      **7. Portfolio Valuation Indicators**
+      For competitor portfolios, estimate relative value based on:
+      - Portfolio coverage breadth (number of distinct sub-domains)
+      - Portfolio depth (average patents per sub-domain)
+      - Claim quality metrics (specificity, enforceability)
+      - Remaining patent life
+      - Revenue generation potential (licensing, product protection)
+      - Defensive value (cross-licensing leverage)
+
+      Produce a structured landscape report with competitive positioning maps
+      and technology coverage heat maps. Rank all competitors by portfolio
+      strength in each sub-domain.
+    model: sonnet
+    max_turns: 10
+
+  - id: white-space-detection
+    depends_on: [prior-art-search]
+    prompt: |
+      Identify innovation white spaces - technology areas within the domain where
+      patent coverage is thin or nonexistent, representing opportunities for
+      {input.company_name} to establish IP positions.
+
+      Prior art search results: {steps.prior-art-search.output}
+      Technology domain: {input.technology_domain}
+      Company: {input.company_name}
+      Competitors: {input.competitor_names}
+
+      Perform a systematic white space analysis:
+
+      **1. Technology Gap Identification**
+      Map the entire technology domain as a grid where:
+      - Rows represent technology approaches or methods
+      - Columns represent application areas or use cases
+      Identify cells in this grid where:
+      - No patents exist (true white space)
+      - Only expired patents exist (freedom to operate with no current barriers)
+      - Only pending applications exist (uncertain space - could become blocked)
+      - Only low-quality patents exist (filings with narrow claims, low citations,
+        or known prior art that could invalidate them)
+
+      For each white space identified:
+      - Technical description of the unpatented area
+      - Why it may be unpatented (technically infeasible? not commercially valuable?
+        simply overlooked? recently emerged?)
+      - Commercial potential (is there a market need this could serve?)
+      - Technical feasibility for {input.company_name} based on the technology domain
+
+      **2. Convergence Zone Analysis**
+      Some of the most valuable white spaces exist at the intersection of two or more
+      technology domains. Identify convergence opportunities:
+      - Adjacent technology domains that are merging with {input.technology_domain}
+      - New combinations of known techniques that have not been patented
+      - Emerging standards or protocols that create new implementation approaches
+      - Cross-industry applications of {input.technology_domain} technology
+        (e.g., applying pharmaceutical techniques to materials science)
+      - Platform plays where a technology can serve as infrastructure for multiple applications
+
+      **3. Expiration Window Analysis**
+      Identify patents that will expire in the next 1-5 years:
+      - List patents expiring each year with their technology coverage
+      - Assess which expirations open up significant technology areas
+      - Identify "patent cliffs" where multiple related patents expire simultaneously
+      - Evaluate whether improvement patents could be filed on expiring technology
+      - Note any supplementary protection certificates (SPCs) or patent term extensions
+        that might extend coverage beyond the standard 20-year term
+
+      **4. White Space Scoring Matrix**
+      For each identified white space, calculate a composite opportunity score:
+      - Technical novelty (1-10): How differentiated is the potential invention?
+      - Commercial value (1-10): What is the market opportunity?
+      - Patentability likelihood (1-10): Based on patent office examination standards,
+        how likely is a patent to be granted? Consider obviousness, written description,
+        and enablement requirements.
+      - Defensive value (1-10): Would holding patents here provide leverage in
+        cross-licensing negotiations?
+      - Offensive value (1-10): Could patents here be asserted against competitors?
+      - Filing urgency (1-10): Is there evidence that competitors are moving toward
+        this space? Are there recent publications that could become prior art?
+      - Overall opportunity score: weighted combination of the above
+
+      **5. Prior Art Risk for Each White Space**
+      For each high-scoring white space, assess the prior art risk:
+      - Identify the closest existing prior art references
+      - Evaluate whether a combination of existing references would make a new
+        patent obvious (103 rejection risk in the US)
+      - Check for relevant non-patent literature that could be used as prior art
+      - Assess the filing date sensitivity - how quickly must a patent application
+        be filed to avoid losing priority to emerging publications?
+
+      **6. Strategic Filing Recommendations**
+      Prioritize white spaces into tiers:
+      - Tier 1 (File immediately): High opportunity score, evidence of competitor interest,
+        low prior art risk, strong commercial alignment
+      - Tier 2 (File within 6 months): Good opportunity, moderate urgency
+      - Tier 3 (Monitor and evaluate): Promising but needs more technical development
+        before filing
+
+      For each Tier 1 opportunity:
+      - Suggested claim strategy (broad vs. narrow, method vs. apparatus)
+      - Recommended filing jurisdictions based on market importance
+      - Provisional vs. non-provisional filing recommendation
+      - Estimated prior art landscape the examiner will cite
+      - Draft claim concept (high-level description of what the claims should cover)
+
+      Produce a prioritized white space report with the scoring matrix and
+      filing recommendations for the top 10-15 opportunities.
+    model: sonnet
+    max_turns: 10
+
+  - id: fto-assessment
+    depends_on: [claim-analysis, landscape-mapping, white-space-detection]
+    prompt: |
+      Generate a comprehensive freedom-to-operate (FTO) assessment for {input.company_name}
+      in the {input.technology_domain} space. This is the critical legal risk analysis
+      that determines whether the company can commercialize its technology without
+      infringing third-party patent rights.
+
+      Claim analysis results: {steps.claim-analysis.output}
+      Landscape mapping: {steps.landscape-mapping.output}
+      White space analysis: {steps.white-space-detection.output}
+      Technology domain: {input.technology_domain}
+      Company: {input.company_name}
+      Jurisdictions: {input.target_jurisdictions}
+      Competitors: {input.competitor_names}
+
+      Perform the following FTO analysis:
+
+      **1. Technology-to-Patent Mapping**
+      For each core technology element that {input.company_name} uses or plans to use
+      in {input.technology_domain}:
+      - Describe the technology element in detail
+      - List all patents whose claims potentially cover this element
+      - For each patent, assess:
+        * Literal infringement risk: Does {input.company_name}'s technology literally
+          satisfy every element of at least one independent claim?
+        * Doctrine of equivalents risk: Even if not literally infringing, could the
+          technology be found equivalent to the claimed elements?
+        * Claim construction issues: Are there ambiguous claim terms whose interpretation
+          could swing the infringement analysis?
+      - Infringement risk rating: High / Medium / Low / Clear
+
+      **2. Jurisdiction-Specific Risk Assessment**
+      Patent infringement law varies by jurisdiction. For each target jurisdiction
+      in {input.target_jurisdictions}:
+      - List active patents with infringement risk in that jurisdiction
+      - Note jurisdiction-specific legal doctrines that affect the analysis:
+        * US: Doctrine of equivalents, prosecution history estoppel, willful infringement
+          (treble damages), ITC exclusion orders
+        * EP: Claim interpretation per Protocol on Article 69 EPC, contributory
+          infringement, cross-border injunctions
+        * CN: Claim interpretation standards, damages calculation methods, patent
+          linkage in pharmaceutical cases
+      - Overall jurisdiction risk level: High / Medium / Low
+      - Potential damages exposure (qualitative: catastrophic / significant / moderate / minimal)
+
+      **3. Risk Mitigation Strategies**
+      For each High and Medium risk patent, recommend one or more mitigation strategies:
+
+      a) Design-around options:
+         - Describe specific technical modifications that would avoid infringement
+         - Assess the impact of the design-around on product functionality and performance
+         - Estimate the engineering effort required (person-months)
+         - Note whether the design-around creates its own patentable invention
+
+      b) Invalidity challenges:
+         - Identify specific prior art that predates the patent and discloses the claimed elements
+         - Assess the strength of an invalidity argument (strong / moderate / weak)
+         - Recommend the challenge venue (USPTO IPR, EPO opposition, litigation defense)
+         - Estimate the cost and timeline for an invalidity challenge
+
+      c) Licensing options:
+         - Assess whether the patent holder has a licensing program
+         - Estimate reasonable royalty rates based on industry comparables
+         - Evaluate cross-licensing potential (does {input.company_name} hold patents
+           the other party might need?)
+         - Assess FRAND licensing availability if applicable
+
+      d) Acquisition options:
+         - For patents held by small entities or NPEs, evaluate whether purchasing
+           the patent is cost-effective compared to licensing
+         - Identify distressed patent portfolios that might be available
+
+      **4. FTO Risk Matrix**
+      Create a comprehensive risk matrix:
+      - Rows: Each technology element of {input.company_name}'s product/technology
+      - Columns: Risk level, blocking patents, jurisdictions affected, mitigation strategy,
+        estimated cost to resolve, timeline to resolution
+      - Color-code: Red (high risk, must address before launch), Yellow (medium risk,
+        should address), Green (low risk or clear)
+
+      **5. Aggregate FTO Opinion**
+      Provide an overall FTO opinion structured as:
+      - Executive summary (can {input.company_name} proceed? with what conditions?)
+      - Overall risk level (High / Medium / Low) per jurisdiction
+      - Mandatory actions before commercial launch
+      - Recommended but optional protective measures
+      - Ongoing monitoring requirements
+      - Total estimated cost for risk mitigation (range)
+
+      **6. Litigation Exposure Analysis**
+      If an infringement suit were brought:
+      - Which patents are most likely to be asserted?
+      - Which competitors or NPEs are most likely plaintiffs?
+      - Estimated litigation cost per jurisdiction
+      - Estimated damages exposure per jurisdiction
+      - Preliminary injunction risk assessment
+      - Impact on product launch timeline
+
+      This FTO assessment should be detailed enough to serve as the foundation for
+      a legal opinion. Flag areas where formal legal counsel review is essential.
+    model: sonnet
+    max_turns: 10
+
+  - id: strategic-recommendations
+    depends_on: [fto-assessment]
+    prompt: |
+      Synthesize all patent landscape analysis into strategic IP recommendations
+      for {input.company_name}. This is the executive-level deliverable that
+      translates technical patent analysis into business strategy.
+
+      FTO assessment: {steps.fto-assessment.output}
+      Claim analysis: {steps.claim-analysis.output}
+      Landscape mapping: {steps.landscape-mapping.output}
+      White space analysis: {steps.white-space-detection.output}
+      Technology domain: {input.technology_domain}
+      Company: {input.company_name}
+      Competitors: {input.competitor_names}
+
+      Produce the following strategic deliverables:
+
+      **1. Executive Summary**
+      A concise 1-page summary covering:
+      - The overall state of the patent landscape in {input.technology_domain}
+      - {input.company_name}'s current IP position relative to competitors
+      - The top 3 FTO risks that require immediate attention
+      - The top 3 white space opportunities for new patent filings
+      - Budget recommendation for IP strategy execution (next 12 months)
+
+      **2. Competitive IP Positioning**
+      For each key competitor:
+      - Their patent portfolio strength and strategic intent
+      - Areas where they have blocking positions against {input.company_name}
+      - Areas where {input.company_name} has or could develop leverage
+      - Likelihood of patent assertion (litigious history, NPE partnerships, licensing programs)
+      - Recommended defensive strategy (cross-license, design-around, challenge, acquire)
+
+      **3. Patent Portfolio Development Strategy**
+      Recommend a 3-year patent filing strategy:
+      - Year 1 priorities: Defensive filings to protect current products, white space
+        filings for near-term opportunities, continuation filings to expand existing coverage
+      - Year 2 priorities: Strategic filings in growth areas, international expansion
+        of key patents, portfolio gap-filling
+      - Year 3 priorities: Next-generation technology filings, convergence zone patents,
+        platform and infrastructure patents
+      - Annual filing target (number of patent applications)
+      - Budget allocation per year (filing, prosecution, maintenance)
+      - Geographic filing strategy (which jurisdictions for which technologies)
+
+      **4. Patent Portfolio Valuation**
+      Estimate the value of {input.company_name}'s recommended patent portfolio:
+      - Cost-based valuation (filing and prosecution costs as baseline)
+      - Market-based valuation (comparable patent transaction values)
+      - Income-based valuation (estimated licensing revenue potential)
+      - Strategic value assessment (cross-licensing leverage, litigation defense, M&A premium)
+
+      **5. Filing Strategy for Top Opportunities**
+      For each of the top 5 white space opportunities:
+      - Invention disclosure summary (what is the novel contribution)
+      - Recommended claim strategy:
+        * Broadest reasonable claim scope
+        * Fallback claim positions
+        * Multiple claim types (method, system, computer-readable medium)
+      - Recommended filing approach:
+        * Provisional application for early priority date (if US)
+        * PCT application for international coverage
+        * Direct national filings for key jurisdictions
+      - Prior art considerations and anticipated examiner objections
+      - Estimated time from filing to grant per jurisdiction
+      - Cost estimate per patent family
+
+      **6. IP Risk Mitigation Roadmap**
+      A prioritized action plan with:
+      - Immediate actions (0-30 days): Critical FTO risks to address now
+      - Short-term actions (1-3 months): Design-arounds to implement, invalidity
+        challenges to file, licensing negotiations to initiate
+      - Medium-term actions (3-12 months): Portfolio development filings,
+        competitive monitoring setup, cross-licensing program development
+      - Ongoing monitoring: Patent watch services to set up, key competitors to track,
+        publication monitoring for new prior art
+      - Escalation triggers: Events that should trigger an updated FTO analysis
+        (competitor filing, product pivot, new market entry, etc.)
+
+      **7. Budget and Resource Requirements**
+      - Outside patent counsel costs (prosecution, opinions, litigation prep)
+      - Patent filing and maintenance fees by jurisdiction
+      - Internal resource requirements (patent committee, invention disclosure program)
+      - Patent search and monitoring tool subscriptions
+      - Total 3-year IP budget recommendation with annual breakdown
+
+      **8. Key Performance Indicators**
+      Recommend KPIs to track IP strategy success:
+      - Patent filing rate and grant rate
+      - Portfolio coverage score (percentage of technology sub-domains covered)
+      - FTO risk reduction (number and severity of unresolved risks)
+      - White space capture rate (percentage of identified opportunities filed)
+      - Competitive position improvement (portfolio strength ranking vs. competitors)
+      - Licensing revenue or cost avoidance metrics
+
+      Write this as a board-ready strategic document that connects IP decisions
+      to business outcomes. Every recommendation should have a clear business
+      justification, estimated cost, and expected return.
+    model: sonnet
+    max_turns: 10

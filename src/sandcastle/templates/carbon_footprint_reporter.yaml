@@ -1,0 +1,819 @@
+# name: Carbon Footprint Reporter
+# description: Collect emissions data from energy bills, travel, supply chain, and fleet, calculate Scope 1/2/3 carbon footprints, generate regulatory-compliant ESG reports, and identify reduction opportunities
+# tags: [ESG, Carbon, Sustainability, Climate, GHG-Protocol, CSRD]
+# category: general_ai
+
+name: carbon-footprint-reporter
+description: Collect emissions data from energy bills, travel, supply chain, and fleet, calculate Scope 1/2/3 carbon footprints, generate regulatory-compliant ESG reports, and identify reduction opportunities
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["organization_name", "reporting_year", "industry_sector"]
+  properties:
+    organization_name:
+      type: string
+      description: "Name of the organization for carbon footprint reporting"
+    reporting_year:
+      type: string
+      description: "Calendar or fiscal year for emissions reporting (e.g. '2025', 'FY2025')"
+    industry_sector:
+      type: string
+      description: "Industry sector for benchmarking and materiality assessment (e.g. 'technology', 'manufacturing', 'retail', 'financial_services', 'healthcare')"
+    data_sources:
+      type: string
+      description: "Comma-separated list of emissions data sources available (e.g. 'energy, travel, fleet, supply_chain, waste, water, refrigerants')"
+      default: "energy, travel, fleet, supply_chain"
+    reporting_framework:
+      type: string
+      description: "Primary reporting framework: 'GHG Protocol', 'ISO 14064', 'CDP', 'CSRD', 'SEC Climate'"
+      default: "GHG Protocol"
+
+steps:
+  - id: data-collection
+    prompt: |
+      You are an environmental data analyst specializing in greenhouse gas emissions data collection and quality assurance. Your task is to design and execute a comprehensive emissions data collection strategy for the organization's carbon footprint assessment.
+
+      Organization: {input.organization_name}
+      Reporting Year: {input.reporting_year}
+      Industry Sector: {input.industry_sector}
+      Data Sources: {input.data_sources}
+      Reporting Framework: {input.reporting_framework}
+
+      Design and execute a comprehensive emissions data collection plan:
+
+      **1. Organizational Boundary Definition**
+      Before collecting data, establish the reporting boundary:
+      - Consolidation approach: equity share vs operational control vs financial control
+      - Recommend the appropriate approach for {input.organization_name} based on industry standard practice for {input.industry_sector}
+      - List all entities, facilities, and operations that fall within the boundary
+      - Identify joint ventures, leased assets, and franchises - determine their inclusion/exclusion
+      - Base year selection and rationale (for trend tracking and target setting)
+      - Structural changes (acquisitions, divestitures, mergers) that require base year recalculation
+
+      **2. Scope 1 - Direct Emissions Data Collection**
+      Collect data for all direct GHG emissions from owned or controlled sources:
+
+      Stationary Combustion:
+      - Natural gas consumption by facility (therms, cubic meters, or MMBtu from utility bills)
+      - Heating oil, diesel, propane, coal consumption
+      - On-site generators and backup power fuel consumption
+      - Boiler and furnace fuel consumption
+      - Data format: facility name, fuel type, quantity consumed, unit, billing period
+
+      Mobile Combustion (Fleet):
+      - Company-owned vehicles: make, model, year, fuel type, annual mileage, fuel consumption
+      - Heavy equipment and machinery fuel consumption
+      - Marine vessels and aircraft (if applicable)
+      - Data format: vehicle ID, fuel type, gallons consumed, miles driven
+
+      Process Emissions:
+      - Industrial process emissions (cement, steel, chemicals, etc. - if applicable to {input.industry_sector})
+      - Wastewater treatment plant emissions
+      - Data format: process type, production volume, emission factor
+
+      Fugitive Emissions:
+      - Refrigerant leaks from HVAC systems (refrigerant type: R-22, R-410A, R-134a, etc., and quantity recharged)
+      - SF6 from electrical equipment
+      - CH4 from gas distribution systems
+      - Data format: refrigerant type, quantity lost/recharged, GWP value
+
+      **3. Scope 2 - Energy Indirect Emissions Data Collection**
+      Collect data for all indirect GHG emissions from purchased energy:
+
+      Electricity:
+      - Monthly electricity consumption by facility (kWh from utility bills)
+      - Electricity provider and grid region (for grid emission factors)
+      - Renewable Energy Certificates (RECs) purchased - quantity, vintage, tracking system
+      - On-site renewable generation (solar, wind) - kWh generated and consumed vs exported
+      - Power Purchase Agreements (PPAs) - contracted volume, project details, additionality
+      - Data format: facility, month, kWh, utility provider, grid region, REC quantity
+
+      Steam, Heating, and Cooling:
+      - Purchased steam consumption (lbs or kg)
+      - District heating/cooling consumption
+      - Data format: facility, energy type, quantity, provider
+
+      Dual reporting preparation:
+      - Location-based method data: grid average emission factors by region
+      - Market-based method data: supplier-specific factors, RECs, PPAs, residual mix factors
+      - Document both methods as required by GHG Protocol Scope 2 Guidance
+
+      **4. Scope 3 - Value Chain Emissions Data Collection**
+      Collect data for all relevant Scope 3 categories (per GHG Protocol Corporate Value Chain Standard):
+
+      Upstream categories:
+      - Cat 1: Purchased goods and services - spend data by category, supplier-specific emission data, LCA data
+      - Cat 2: Capital goods - major equipment purchases, construction projects, IT hardware
+      - Cat 3: Fuel and energy-related activities (not in Scope 1/2) - upstream emissions from purchased fuels, T&D losses
+      - Cat 4: Upstream transportation and distribution - freight data (ton-miles, mode of transport)
+      - Cat 5: Waste generated in operations - waste by type (landfill, recycled, composted, incinerated), weight
+      - Cat 6: Business travel - air travel (miles, class), hotel nights, rental cars, rail, taxi/rideshare
+      - Cat 7: Employee commuting - survey data or estimates (mode, distance, frequency)
+      - Cat 8: Upstream leased assets - emissions from leased facilities not in Scope 1/2
+
+      Downstream categories:
+      - Cat 9: Downstream transportation and distribution
+      - Cat 10: Processing of sold products
+      - Cat 11: Use of sold products
+      - Cat 12: End-of-life treatment of sold products
+      - Cat 13: Downstream leased assets
+      - Cat 14: Franchises
+      - Cat 15: Investments (for financial institutions)
+
+      For each category:
+      - Assess materiality for the {input.industry_sector} sector (material, not material, not applicable)
+      - Define data collection method: supplier-specific, average-data, spend-based, hybrid
+      - Document data quality score (1-5 per GHG Protocol guidance)
+
+      **5. Data Quality Assessment**
+      For all collected data, assess quality:
+      | Data Source | Coverage (%) | Reliability | Temporal Representativeness | Geographic Representativeness | Quality Score |
+      |------------|-------------|-------------|---------------------------|------------------------------|--------------|
+      - Identify data gaps and estimation methods used
+      - Document assumptions and proxy data used
+      - Recommend data quality improvements for next reporting cycle
+      - Flag material data gaps that could affect the accuracy of the footprint
+
+      **6. Data Collection Summary**
+      Produce a structured data package:
+      - Total data points collected by scope and category
+      - Data completeness assessment (what percentage of the footprint is based on primary vs secondary data)
+      - Key assumptions and limitations
+      - Data collection timeline and responsible parties
+      - Recommendations for improving data collection for next year
+    model: haiku
+    max_turns: 8
+
+  - id: scope-calculation
+    depends_on: [data-collection]
+    prompt: |
+      You are a GHG accounting specialist with expertise in the GHG Protocol Corporate Standard and emission factor application. Your task is to calculate the complete carbon footprint across Scope 1, 2, and 3 using appropriate methodologies and emission factors.
+
+      Data Collection Results: {steps.data-collection.output}
+      Organization: {input.organization_name}
+      Reporting Year: {input.reporting_year}
+      Industry Sector: {input.industry_sector}
+      Reporting Framework: {input.reporting_framework}
+
+      Calculate the complete GHG inventory:
+
+      **1. Emission Factor Selection**
+      Select and document the appropriate emission factors for each activity data source:
+
+      Scope 1 Emission Factors:
+      - Stationary combustion: EPA emission factors by fuel type (kg CO2/MMBtu, CH4 and N2O factors)
+        - Natural gas: 53.06 kg CO2/MMBtu
+        - Diesel: 73.96 kg CO2/MMBtu
+        - Heating oil: 73.96 kg CO2/MMBtu
+        - Propane: 62.87 kg CO2/MMBtu
+      - Mobile combustion: EPA emission factors by vehicle type and fuel
+        - Gasoline passenger cars: 8.887 kg CO2/gallon
+        - Diesel trucks: 10.21 kg CO2/gallon
+        - Adjust CH4 and N2O by model year and vehicle type
+      - Fugitive emissions: IPCC GWP values (AR5 or AR6 as specified by framework)
+        - R-410A: GWP 2,088
+        - R-22: GWP 1,810
+        - R-134a: GWP 1,430
+        - SF6: GWP 23,500
+
+      Scope 2 Emission Factors:
+      - Location-based: EPA eGRID factors by subregion (lb CO2e/MWh)
+        - Document the specific eGRID subregion for each facility
+        - Use the most recent published eGRID data
+      - Market-based: supplier-specific factors, REC retirement records, residual mix factors
+        - Green-e certified RECs: 0 tonnes CO2e per MWh
+        - Contractual PPAs with specified project emission factors
+        - Utility-specific emission factors from utility reports
+        - Residual mix factor for unredeemed RECs
+
+      Scope 3 Emission Factors:
+      - Spend-based: EPA EEIO emission factors by commodity code (kg CO2e per dollar)
+      - Average-data: industry average factors from databases (DEFRA, ecoinvent, GaBi)
+      - Supplier-specific: actual emission data from suppliers (preferred when available)
+      - Transportation: emission factors by mode (ton-mile factors for truck, rail, air, ship)
+      - Travel: DEFRA business travel factors (air by class and distance, hotel, rental car)
+      - Waste: EPA WARM model factors by waste type and disposal method
+
+      Document the source, vintage, and applicability of every emission factor used.
+
+      **2. Scope 1 Calculation**
+      Calculate direct emissions from each source:
+
+      Stationary Combustion:
+      | Facility | Fuel Type | Quantity | Unit | CO2 (tCO2) | CH4 (tCO2e) | N2O (tCO2e) | Total (tCO2e) |
+      |----------|-----------|----------|------|-----------|-------------|-------------|---------------|
+      - Show calculation methodology: Activity Data x Emission Factor = Emissions
+      - Convert all GHGs to CO2e using GWP values
+      - Sum by facility and fuel type
+
+      Mobile Combustion:
+      | Vehicle/Fleet | Fuel Type | Gallons | CO2 (tCO2) | CH4 (tCO2e) | N2O (tCO2e) | Total (tCO2e) |
+      |--------------|-----------|---------|-----------|-------------|-------------|---------------|
+      - Calculate by vehicle category or fleet segment
+
+      Process Emissions:
+      - Apply process-specific calculation methodology
+      - Document any process-specific emission factors
+
+      Fugitive Emissions:
+      | Equipment | Refrigerant | Quantity Lost (kg) | GWP | tCO2e |
+      |-----------|------------|-------------------|-----|-------|
+
+      **Total Scope 1:** Sum all categories
+
+      **3. Scope 2 Calculation**
+      Calculate energy indirect emissions using dual reporting:
+
+      Location-Based Method:
+      | Facility | Grid Region | kWh | eGRID Factor (lb CO2e/MWh) | tCO2e |
+      |----------|------------|-----|---------------------------|-------|
+
+      Market-Based Method:
+      | Facility | Instrument | kWh | Emission Factor | tCO2e |
+      |----------|-----------|-----|-----------------|-------|
+      - Apply hierarchy: supplier-specific > REC > residual mix > grid average
+
+      Calculate the difference between location-based and market-based (shows impact of green energy procurement).
+
+      **4. Scope 3 Calculation**
+      Calculate value chain emissions by category:
+
+      For each material Scope 3 category:
+      | Category | Methodology | Activity Data | Emission Factor | tCO2e | Data Quality |
+      |----------|-------------|---------------|-----------------|-------|-------------|
+      - Show calculation for each category
+      - Note the methodology used (spend-based, average-data, supplier-specific)
+      - Assess the uncertainty range for each estimate
+
+      **5. GHG Inventory Summary**
+      Produce the complete GHG inventory:
+
+      | Scope | Category | tCO2e | % of Total | Data Quality | Methodology |
+      |-------|----------|-------|-----------|-------------|-------------|
+      | Scope 1 | Stationary | | | | |
+      | Scope 1 | Mobile | | | | |
+      | Scope 1 | Process | | | | |
+      | Scope 1 | Fugitive | | | | |
+      | **Scope 1 Total** | | **X** | **X%** | | |
+      | Scope 2 (Location) | Electricity | | | | |
+      | Scope 2 (Market) | Electricity | | | | |
+      | **Scope 2 Total** | | **X** | **X%** | | |
+      | Scope 3 | Cat 1-15 | | | | |
+      | **Scope 3 Total** | | **X** | **X%** | | |
+      | **TOTAL (S1+S2+S3)** | | **X** | **100%** | | |
+
+      **6. Intensity Metrics**
+      Calculate emission intensity ratios:
+      - tCO2e per revenue ($M)
+      - tCO2e per employee (FTE)
+      - tCO2e per unit of production (sector-specific: per sq ft, per transaction, per product)
+      - tCO2e per unit of floor space (for facilities-heavy organizations)
+      - Year-over-year intensity trend (if base year data available)
+
+      **7. Uncertainty Analysis**
+      Quantify the uncertainty in the emissions calculation:
+      - Emission factor uncertainty (published uncertainty ranges)
+      - Activity data uncertainty (measurement vs estimation)
+      - Combined uncertainty using error propagation
+      - Confidence interval for the total footprint
+      - Material areas where uncertainty could significantly affect the result
+    model: sonnet
+    max_turns: 10
+
+  - id: benchmark-analysis
+    depends_on: [scope-calculation]
+    prompt: |
+      You are an ESG benchmarking analyst specializing in corporate climate performance assessment. Your task is to benchmark the organization's carbon footprint against industry peers, climate targets, and regulatory thresholds.
+
+      Scope Calculation Results: {steps.scope-calculation.output}
+      Organization: {input.organization_name}
+      Industry Sector: {input.industry_sector}
+      Reporting Year: {input.reporting_year}
+
+      Perform a comprehensive benchmarking analysis:
+
+      **1. Industry Peer Benchmarking**
+      Compare the organization's emissions against peers in the {input.industry_sector} sector:
+
+      Absolute Emissions Comparison:
+      - Identify 5-10 comparable organizations (similar size, geography, business model)
+      - Compare total Scope 1+2 emissions
+      - Compare Scope 3 reporting completeness (how many categories reported)
+      - Rank {input.organization_name} against peers (top quartile, median, bottom quartile)
+
+      Intensity Benchmarking:
+      - Revenue intensity (tCO2e/$M revenue) vs sector average
+      - Employee intensity (tCO2e/FTE) vs sector average
+      - Product/service intensity (sector-specific metric) vs industry best practice
+      - Identify the top performers and what drives their lower intensity
+
+      Scope 3 Maturity Benchmarking:
+      - Number of Scope 3 categories reported vs industry standard
+      - Percentage of emissions from measured vs estimated data
+      - Supplier engagement level (how many suppliers report emissions)
+      - Scope 3 as percentage of total footprint vs industry average
+
+      **2. Science-Based Targets Initiative (SBTi) Alignment**
+      Assess alignment with science-based targets:
+
+      1.5 degree C pathway analysis:
+      - Calculate the required absolute reduction rate for the {input.industry_sector} sector
+      - For Scope 1+2: SBTi requires 4.2% annual linear reduction (absolute contraction approach)
+      - For Scope 3: SBTi requires absolute or intensity targets covering at least 67% of Scope 3 if Scope 3 is > 40% of total
+      - Determine whether {input.organization_name}'s current trajectory aligns with these requirements
+      - Calculate the gap between current emissions and the 1.5C pathway
+      - Estimate the target year for net zero based on current sector pathways (SBTi Net Zero Standard)
+
+      Well-below 2 degree C pathway analysis:
+      - Calculate required reduction rate
+      - Compare against current performance
+      - Identify which scopes/categories need the most aggressive reduction
+
+      **3. Regulatory Threshold Assessment**
+      Evaluate the organization against current and upcoming regulatory requirements:
+
+      EU Corporate Sustainability Reporting Directive (CSRD):
+      - Determine if {input.organization_name} falls under CSRD reporting obligations
+      - Assess compliance with European Sustainability Reporting Standards (ESRS) E1 Climate Change
+      - Double materiality assessment for climate-related impacts
+      - Financial materiality: climate risks to the organization
+      - Impact materiality: organization's impact on climate
+
+      SEC Climate Disclosure Rules:
+      - Determine if the organization meets SEC reporting thresholds
+      - Assess readiness for Scope 1+2 disclosure requirements
+      - Evaluate Scope 3 disclosure readiness (if material or if targets are set)
+      - Internal controls over climate-related financial data
+
+      California Climate Disclosure Laws (SB 253/SB 261):
+      - Revenue threshold assessment ($1B for emissions, $500M for risk)
+      - Compliance timeline and readiness
+
+      TCFD (Task Force on Climate-Related Financial Disclosures):
+      - Governance: board and management oversight of climate risks
+      - Strategy: climate scenario analysis readiness
+      - Risk Management: process for identifying and managing climate risks
+      - Metrics and Targets: quality and completeness of climate metrics
+
+      **4. Carbon Market and Pricing Analysis**
+      Assess the organization's exposure to carbon pricing:
+      - Current carbon price exposure (EU ETS, regional programs, voluntary markets)
+      - Shadow carbon price recommendation for internal decision-making
+      - Projected carbon price trajectory for the next 5-10 years
+      - Annual carbon cost estimate at current and projected prices
+      - Cost of inaction: projected carbon costs without emissions reduction
+
+      **5. Climate Risk Scoring**
+      Produce a climate performance scorecard:
+      | Dimension | Score (1-10) | Benchmark | Gap | Priority |
+      |-----------|-------------|-----------|-----|----------|
+      | Absolute Emissions | | | | |
+      | Emission Intensity | | | | |
+      | Scope 3 Completeness | | | | |
+      | SBTi Alignment | | | | |
+      | Regulatory Readiness | | | | |
+      | Disclosure Quality | | | | |
+      | Target Ambition | | | | |
+      | Reduction Trajectory | | | | |
+
+      Overall Climate Performance Score: X/100
+      Rating: Leader / Above Average / Average / Below Average / Laggard
+
+      **6. Peer Learning Opportunities**
+      Identify specific best practices from top-performing peers:
+      - What are leaders doing differently in Scope 1 (electrification, fuel switching, efficiency)
+      - What are leaders doing differently in Scope 2 (renewable procurement, PPAs, on-site generation)
+      - What are leaders doing differently in Scope 3 (supplier engagement, product design, circular economy)
+      - Technology and innovation approaches that are delivering results
+      - Collaboration and partnership models that accelerate progress
+    model: sonnet
+    max_turns: 10
+
+  - id: reduction-opportunities
+    depends_on: [scope-calculation]
+    prompt: |
+      You are a corporate sustainability strategist specializing in GHG emissions reduction planning. Your task is to identify, quantify, and prioritize emissions reduction opportunities across all scopes with detailed implementation guidance and ROI analysis.
+
+      Scope Calculation Results: {steps.scope-calculation.output}
+      Organization: {input.organization_name}
+      Industry Sector: {input.industry_sector}
+      Reporting Year: {input.reporting_year}
+      Data Sources: {input.data_sources}
+
+      Identify and analyze comprehensive reduction opportunities:
+
+      **1. Scope 1 Reduction Opportunities**
+
+      Stationary Combustion Reduction:
+      - Building electrification: replace gas heating with heat pumps
+        - Technical feasibility by facility (climate zone, building age, infrastructure)
+        - Capital cost estimate per facility
+        - Annual energy savings and emission reduction (tCO2e)
+        - Payback period and NPV analysis
+        - Available incentives and rebates (IRA Section 179D, utility rebates)
+      - On-site renewable thermal: solar thermal, geothermal, biomass
+      - Energy efficiency upgrades: building envelope improvements, HVAC optimization, LED lighting, building management systems
+      - Fuel switching: natural gas to renewable natural gas (RNG) or hydrogen
+
+      Fleet Decarbonization:
+      - Electric vehicle transition roadmap
+        - Current fleet composition and replacement schedule
+        - EV model availability by vehicle class
+        - Charging infrastructure requirements and costs
+        - TCO comparison: ICE vs EV by vehicle class (include fuel, maintenance, depreciation)
+        - Phased transition plan (priority: shortest-range, most-used vehicles first)
+        - Grid emission factor consideration (EVs on a coal-heavy grid may have limited benefit)
+      - Alternative fuels: biodiesel, renewable diesel, hydrogen fuel cells
+      - Route optimization and fleet right-sizing
+      - Telematics and eco-driving programs
+
+      Fugitive Emission Reduction:
+      - Refrigerant management: regular leak detection, preventive maintenance, advanced leak detection
+      - Low-GWP refrigerant transition: R-410A to R-32 or natural refrigerants (CO2, propane, ammonia)
+      - Equipment upgrade schedule aligned with F-gas regulations
+      - SF6 leak reduction and alternative insulation gas adoption
+
+      **2. Scope 2 Reduction Opportunities**
+
+      Energy Efficiency:
+      - Facility energy audit findings and recommendations
+      - HVAC optimization: variable frequency drives, demand-controlled ventilation, economizers
+      - Lighting: LED conversion, occupancy sensors, daylight harvesting
+      - IT efficiency: server consolidation, cloud migration, green data center practices
+      - Industrial process optimization (if applicable)
+      - Estimated kWh reduction per measure and implementation cost
+
+      Renewable Energy Procurement:
+      - On-site solar PV: capacity analysis by facility (roof area, orientation, shading)
+        - System size (kW), annual generation (kWh), cost, payback period
+        - Net metering or feed-in tariff availability
+        - Battery storage considerations for demand charge reduction
+      - Off-site renewable PPAs: virtual PPA structures, physical PPA options
+        - Contract terms: 10-15 year tenor, fixed price escalation
+        - Additionality criteria: new vs existing projects
+        - Price comparison: PPA price vs grid price trajectory
+      - Renewable Energy Certificates (RECs): Green-e certified, market vs bundled
+      - Community solar subscriptions
+      - Utility green tariff programs
+
+      **3. Scope 3 Reduction Opportunities**
+
+      Supply Chain (Categories 1-2):
+      - Supplier engagement program design:
+        - Tiered approach: top 20 suppliers by spend/emissions (covers ~80% of supply chain footprint)
+        - CDP Supply Chain membership for supplier data collection
+        - Supplier scorecards with emission reduction targets
+        - Preferred supplier criteria including climate performance
+      - Sustainable procurement policies:
+        - Low-carbon material specifications
+        - Recycled content requirements
+        - Local sourcing to reduce transportation emissions
+      - Product design for sustainability:
+        - Life cycle assessment integration into product development
+        - Material substitution opportunities (lower-carbon alternatives)
+        - Design for longevity, repairability, and recyclability
+
+      Business Travel (Category 6):
+      - Travel policy updates: virtual-first meeting policy, class-of-service restrictions
+      - SAF (Sustainable Aviation Fuel) procurement through airline programs
+      - Rail substitution for short-haul flights (under 500 miles/800 km)
+      - Carbon offset/inset requirements for remaining travel
+      - Estimated reduction: 30-50% from COVID-era baseline (permanent remote work policies)
+
+      Employee Commuting (Category 7):
+      - Remote and hybrid work policies (estimate emission reduction per remote day)
+      - EV charging at workplace
+      - Transit subsidies and bike-to-work programs
+      - Shuttle services for major commuter corridors
+      - Carpooling platform and incentives
+
+      Waste and Circular Economy (Category 5):
+      - Waste reduction targets by stream (landfill diversion rate)
+      - Recycling program optimization
+      - Composting for organic waste
+      - Packaging reduction and redesign
+      - Extended producer responsibility programs
+
+      **4. Marginal Abatement Cost Curve (MACC)**
+      Construct a MACC showing all reduction opportunities:
+      | Opportunity | Reduction (tCO2e) | Cost per tCO2e ($) | Capital Required | Payback | Category |
+      |------------|-------------------|-------------------|-----------------|---------|----------|
+      Sort from lowest cost (negative cost = cost savings) to highest cost.
+      Identify the "negative cost" opportunities (energy efficiency measures that pay for themselves).
+      Calculate cumulative reduction potential and cumulative investment required.
+
+      **5. Implementation Roadmap**
+      Phase the opportunities into a multi-year reduction plan:
+
+      Year 1 (Quick Wins): negative-cost and low-cost measures
+      - Total investment, total reduction, net savings
+      - Specific projects and timelines
+
+      Years 2-3 (Medium-term): significant capital projects
+      - Renewable energy procurement
+      - Fleet electrification (first phase)
+      - Supplier engagement program launch
+
+      Years 4-5 (Long-term): transformational changes
+      - Building electrification
+      - Fleet electrification (completion)
+      - Supply chain decarbonization at scale
+      - Circular economy transition
+
+      **6. Carbon Offset and Inset Strategy**
+      For residual emissions that cannot be reduced:
+      - High-quality offset criteria (Gold Standard, Verra VCS, with co-benefits)
+      - Nature-based vs technology-based removal options
+      - Carbon inset opportunities within the value chain
+      - Budget allocation recommendation for offsets
+      - Transition plan from offsets to insetting and direct removal
+      - Warning: offsets should not substitute for direct reduction - SBTi limits offset use in net zero claims
+
+      **7. Financial Analysis Summary**
+      Aggregate the financial case:
+      - Total potential emission reduction (tCO2e and % of current footprint)
+      - Total capital investment required over 5 years
+      - Net present value of all measures (savings minus costs)
+      - Internal rate of return for the reduction program
+      - Carbon price breakeven (at what carbon price does the full program become NPV positive)
+      - Risk reduction value (reduced exposure to carbon pricing, regulation, reputation)
+    model: sonnet
+    max_turns: 10
+
+  - id: regulatory-reporting
+    depends_on: [scope-calculation, benchmark-analysis, reduction-opportunities]
+    prompt: |
+      You are a climate disclosure specialist with expertise in multi-framework regulatory reporting. Your task is to prepare regulatory-compliant ESG reports that satisfy the requirements of the specified reporting frameworks.
+
+      Scope Calculation: {steps.scope-calculation.output}
+      Benchmark Analysis: {steps.benchmark-analysis.output}
+      Reduction Opportunities: {steps.reduction-opportunities.output}
+      Organization: {input.organization_name}
+      Reporting Year: {input.reporting_year}
+      Industry Sector: {input.industry_sector}
+      Reporting Framework: {input.reporting_framework}
+
+      Prepare comprehensive regulatory-compliant climate disclosure documentation:
+
+      **1. GHG Protocol Compliant Emissions Report**
+      Structure the emissions report per GHG Protocol Corporate Standard requirements:
+
+      Section A: Organization and Reporting Boundaries
+      - Legal name, industry classification, reporting period
+      - Consolidation approach selected and justification
+      - Entities and facilities included in the inventory
+      - Significant exclusions with justification
+      - Base year and recalculation policy
+
+      Section B: GHG Emissions Data
+      - Scope 1 emissions by gas (CO2, CH4, N2O, HFCs, PFCs, SF6, NF3) in metric tonnes CO2e
+      - Scope 2 emissions: location-based and market-based, separately reported
+      - Scope 3 emissions by category (all 15 categories with materiality justification for exclusions)
+      - Total emissions (Scope 1 + Scope 2 location-based + Scope 3)
+      - Biogenic CO2 emissions reported separately (outside scopes)
+      - GWP values used and source (IPCC AR5/AR6)
+
+      Section C: Methodology and Emission Factors
+      - Calculation methodologies per scope and category
+      - Emission factor sources and vintage
+      - Activity data sources and quality
+      - Assumptions, estimations, and limitations
+      - Changes in methodology from prior year (if applicable)
+
+      Section D: Verification
+      - Verification status (verified/unverified)
+      - Verification standard used (ISO 14064-3, AA1000AS)
+      - Level of assurance (limited vs reasonable)
+      - Verifier name and qualifications
+      - Material findings and management response
+
+      **2. TCFD-Aligned Climate Risk Disclosure**
+      Prepare disclosure content for each TCFD pillar:
+
+      Governance:
+      - Board oversight of climate-related risks and opportunities
+      - Board competencies in climate/sustainability
+      - Management roles and responsibilities for climate issues
+      - How climate considerations are integrated into business strategy and risk management
+
+      Strategy:
+      - Climate-related risks identified (physical and transition risks)
+        - Physical: acute (extreme weather, floods) and chronic (sea level rise, temperature change, water stress)
+        - Transition: policy/legal (carbon pricing, regulations), technology (disruption, new tech costs), market (consumer preferences, commodity prices), reputation (stigmatization, stakeholder concern)
+      - Climate-related opportunities identified
+        - Resource efficiency, energy source, products/services, markets, resilience
+      - Impact on organization's business model, strategy, and financial planning
+      - Scenario analysis: describe scenarios used (IEA NZE, NGFS, SSP), time horizons, and outcomes
+
+      Risk Management:
+      - Process for identifying and assessing climate risks
+      - Process for managing climate risks
+      - Integration with enterprise risk management
+      - Climate risk materiality thresholds
+
+      Metrics and Targets:
+      - Scope 1, 2, 3 emissions (from calculation step)
+      - Emission intensity metrics
+      - Climate-related targets: absolute and intensity, time-bound
+      - Progress against targets
+      - Internal carbon price (if used)
+      - Climate-related remuneration policies
+
+      **3. CSRD / ESRS E1 Climate Change Disclosure**
+      If CSRD is applicable or requested, prepare ESRS E1 content:
+
+      E1-1: Transition plan for climate change mitigation
+      - GHG reduction targets (aligned with 1.5C where possible)
+      - Decarbonization levers and actions planned
+      - Investment and funding requirements
+      - Locked-in GHG emissions from existing assets
+
+      E1-2: Policies related to climate change mitigation and adaptation
+      E1-3: Actions and resources related to climate change policies
+      E1-4: Targets related to climate change mitigation and adaptation
+      E1-5: Energy consumption and mix
+      E1-6: Gross Scope 1, 2, 3 GHG emissions
+      E1-7: GHG removals and storage (if applicable)
+      E1-8: Internal carbon pricing
+      E1-9: Anticipated financial effects from material physical and transition risks
+
+      **4. CDP Climate Change Questionnaire Responses**
+      Pre-populate responses for key CDP questions:
+      - C0: Introduction (about the organization)
+      - C1: Governance (board and management oversight)
+      - C2: Risks and opportunities (identification, assessment, management)
+      - C3: Business strategy (scenario analysis, transition plan)
+      - C4: Targets and performance (emission reduction targets, progress)
+      - C5: Emissions methodology (standards used, verification)
+      - C6: Emissions data (Scope 1, 2, 3 by category)
+      - C7: Emissions breakdowns (by country, business unit, activity)
+      - C8: Energy (consumption, mix, efficiency)
+      - C9: Additional metrics (sector-specific)
+      - C10: Verification (third-party verification details)
+      - C11: Carbon pricing (ETS exposure, internal carbon price)
+      - C12: Engagement (value chain engagement strategy)
+
+      **5. SEC Climate Disclosure Preparation**
+      If applicable, prepare content aligned with SEC climate rules:
+      - Material climate risks discussion
+      - Governance disclosure
+      - GHG emissions (Scope 1+2 with attestation readiness)
+      - Financial statement impacts of climate-related events
+      - Climate-related targets and transition plan disclosure
+      - Internal controls over climate-related financial information
+
+      **6. Data Quality and Assurance Readiness**
+      Prepare for third-party verification:
+      - Data management system description
+      - Internal controls over GHG data
+      - Sampling methodology for verification
+      - Uncertainty quantification
+      - Materiality threshold for errors
+      - Document retention and audit trail
+      - Recommended verification scope and timeline
+    model: sonnet
+    max_turns: 10
+
+  - id: executive-summary
+    depends_on: [regulatory-reporting]
+    prompt: |
+      You are a corporate sustainability communications expert. Your task is to compile all carbon footprint analysis into a compelling, accessible executive summary and action plan suitable for board presentation, investor communications, and stakeholder engagement.
+
+      Scope Calculation: {steps.scope-calculation.output}
+      Benchmark Analysis: {steps.benchmark-analysis.output}
+      Reduction Opportunities: {steps.reduction-opportunities.output}
+      Regulatory Reporting: {steps.regulatory-reporting.output}
+      Organization: {input.organization_name}
+      Reporting Year: {input.reporting_year}
+      Industry Sector: {input.industry_sector}
+      Reporting Framework: {input.reporting_framework}
+
+      Produce a comprehensive executive summary and stakeholder communication package:
+
+      **1. Board-Level Executive Summary (2 pages)**
+
+      Opening Statement:
+      "{input.organization_name} total greenhouse gas emissions for {input.reporting_year} were X tCO2e, representing a Y% change from the prior year/base year. This report provides a complete accounting across Scope 1 (direct), Scope 2 (energy), and Scope 3 (value chain) emissions."
+
+      Key Metrics Dashboard (text-based visualization):
+      | Metric | {input.reporting_year} | Prior Year | Change | Target |
+      |--------|----------------------|------------|--------|--------|
+      | Total Emissions (tCO2e) | | | | |
+      | Scope 1 (tCO2e) | | | | |
+      | Scope 2 - Market (tCO2e) | | | | |
+      | Scope 3 (tCO2e) | | | | |
+      | Revenue Intensity (tCO2e/$M) | | | | |
+      | Employee Intensity (tCO2e/FTE) | | | | |
+      | Renewable Energy (%) | | | | |
+      | SBTi Alignment Status | | | | |
+
+      Emissions Profile:
+      - Pie chart description showing Scope 1/2/3 proportions
+      - Top 5 emission sources by magnitude
+      - Year-over-year trend analysis (if data available)
+      - Comparison to industry peers (quartile positioning)
+
+      Strategic Highlights:
+      - What went well (reductions achieved, milestones reached)
+      - What needs attention (areas of increase, emerging risks)
+      - Key decisions needed from the board
+
+      **2. Climate Action Plan Summary**
+      Summarize the reduction roadmap in executive-friendly format:
+
+      Near-Term Actions (1-2 years):
+      - Top 5 initiatives by impact, with estimated cost and reduction
+      - Quick wins already in progress
+      - Resources and approvals needed
+
+      Medium-Term Actions (3-5 years):
+      - Major capital projects (fleet, buildings, renewable energy)
+      - Supply chain engagement milestones
+      - Technology transitions
+
+      Long-Term Vision (5-10 years):
+      - Net zero pathway and target date
+      - Transformational changes needed
+      - Industry collaboration and advocacy
+
+      Investment Summary:
+      | Timeframe | Investment | Annual Savings | Reduction (tCO2e) | ROI |
+      |-----------|-----------|---------------|-------------------|-----|
+      | Near-term | $X | $X | X | X% |
+      | Medium-term | $X | $X | X | X% |
+      | Long-term | $X | $X | X | X% |
+      | **Total** | **$X** | **$X** | **X** | **X%** |
+
+      **3. Regulatory Compliance Status**
+      Traffic light dashboard for regulatory readiness:
+      | Framework | Applicability | Readiness | Next Deadline | Action Required |
+      |-----------|--------------|-----------|---------------|----------------|
+      | GHG Protocol | | | | |
+      | TCFD | | | | |
+      | CSRD/ESRS | | | | |
+      | SEC Climate | | | | |
+      | CDP | | | | |
+      | SBTi | | | | |
+
+      **4. Risk and Opportunity Summary**
+      Top 5 Climate Risks:
+      | Risk | Type | Likelihood | Impact | Mitigation Status |
+      |------|------|-----------|--------|------------------|
+      1-5 with brief description and financial exposure estimate
+
+      Top 5 Climate Opportunities:
+      | Opportunity | Type | Potential Value | Investment | Timeline |
+      |------------|------|----------------|-----------|----------|
+      1-5 with brief description and revenue/savings potential
+
+      **5. Stakeholder Communication Templates**
+
+      For Investors:
+      - ESG data sheet with key climate metrics (standardized for ESG raters)
+      - CDP score projection and improvement actions
+      - MSCI ESG rating considerations
+      - Sustainalytics carbon risk rating inputs
+      - Net zero commitment credibility assessment
+
+      For Customers:
+      - Product/service carbon footprint summary
+      - Reduction achievements to date
+      - Science-based target commitment
+      - How customers can contribute to the reduction journey
+
+      For Employees:
+      - Company climate action highlights
+      - Employee engagement opportunities (commuting, travel, innovation)
+      - Training and awareness program overview
+      - Individual impact metrics and gamification ideas
+
+      For Regulators:
+      - Compliance attestation summary
+      - Framework-specific disclosures ready for submission
+      - Internal controls description
+      - Verification and assurance status
+
+      **6. Recommended Board Resolutions**
+      Draft specific resolutions for board consideration:
+      1. Approve the {input.reporting_year} GHG inventory and authorize external publication
+      2. Approve emission reduction targets [specific targets to be proposed]
+      3. Authorize capital allocation for near-term reduction initiatives ($X)
+      4. Approve engagement of third-party verifier for next reporting cycle
+      5. Establish climate governance committee or expand existing ESG committee mandate
+
+      **7. Next Steps and Timeline**
+      | Action | Owner | Deadline | Status |
+      |--------|-------|----------|--------|
+      - Immediate: finalize and publish GHG inventory
+      - 30 days: submit CDP questionnaire (if applicable)
+      - 60 days: commence third-party verification
+      - 90 days: publish sustainability report / ESG section of annual report
+      - Ongoing: implement near-term reduction measures
+      - Annual: repeat GHG inventory, update targets, report progress
+
+      Format the entire executive summary in clean, professional markdown suitable for presentation to the board of directors. Use clear, non-technical language where possible, with technical details in appendices. Every claim should be supported by data from the analysis.
+    model: sonnet
+    max_turns: 10

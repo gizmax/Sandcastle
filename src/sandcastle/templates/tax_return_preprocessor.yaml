@@ -1,0 +1,676 @@
+# name: Tax Return Preprocessor
+# description: Ingest W-2s, 1099s, receipts, and bank statements, categorize transactions, identify deductions, flag anomalies, and produce structured data packages ready for CPA review
+# tags: [Tax, Accounting, Finance, CPA, IRS, Deductions]
+# category: general_ai
+
+name: tax-return-preprocessor
+description: Ingest W-2s, 1099s, receipts, and bank statements, categorize transactions, identify deductions, flag anomalies, and produce structured data packages ready for CPA review
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["tax_year", "filing_status"]
+  properties:
+    tax_year:
+      type: string
+      description: "Tax year being prepared (e.g. '2025', '2024')"
+    filing_status:
+      type: string
+      description: "IRS filing status: 'single', 'married_joint', 'married_separate', 'head_of_household', or 'qualifying_surviving_spouse'"
+    document_sources:
+      type: string
+      description: "Comma-separated list of document sources provided (e.g. 'W-2, 1099-NEC, 1099-INT, 1099-DIV, 1099-B, bank statements, receipts, K-1')"
+    business_type:
+      type: string
+      description: "Type of taxpayer: 'individual' (W-2 employee), 'self_employed' (Schedule C), 'partnership' (K-1), 'scorp' (K-1 + W-2), 'rental_property' (Schedule E)"
+      default: "individual"
+
+steps:
+  - id: document-ingestion
+    prompt: |
+      You are a tax document specialist experienced in processing and extracting data from all common US tax documents. Your task is to inventory, classify, and extract structured data from every document provided for this tax return preparation.
+
+      Tax Year: {input.tax_year}
+      Filing Status: {input.filing_status}
+      Document Sources: {input.document_sources}
+      Business Type: {input.business_type}
+
+      Perform comprehensive document ingestion and extraction:
+
+      **1. Document Inventory and Classification**
+      Catalog every document by type and extract all relevant fields:
+
+      **W-2 (Wage and Tax Statement):**
+      For each W-2 received, extract:
+      - Box 1: Wages, tips, other compensation
+      - Box 2: Federal income tax withheld
+      - Box 3: Social Security wages / Box 4: Social Security tax withheld
+      - Box 5: Medicare wages / Box 6: Medicare tax withheld
+      - Box 12 codes: retirement contributions (D=401k, E=403b, W=HSA, DD=health insurance)
+      - Box 13: Statutory employee, retirement plan, third-party sick pay checkboxes
+      - Box 14: Other (state disability, union dues, educational assistance)
+      - State/local wage and tax information (boxes 15-20)
+      - Employer EIN and name
+      - Cross-validate: Box 1 + Box 12 pre-tax deductions should approximately equal gross pay
+
+      **1099 Series Documents:**
+
+      1099-NEC (Nonemployee Compensation):
+      - Box 1: Nonemployee compensation (triggers Schedule C or Schedule C-EZ)
+      - Box 4: Federal income tax withheld (if any backup withholding)
+      - Payer information and TIN
+
+      1099-INT (Interest Income):
+      - Box 1: Interest income
+      - Box 3: Interest on U.S. Savings Bonds and Treasury obligations (partially tax-exempt)
+      - Box 4: Federal income tax withheld
+      - Box 8: Tax-exempt interest (municipal bonds - still reportable)
+      - Box 11: Bond premium (amortizable)
+
+      1099-DIV (Dividends and Distributions):
+      - Box 1a: Total ordinary dividends
+      - Box 1b: Qualified dividends (taxed at capital gains rates)
+      - Box 2a: Total capital gain distributions
+      - Box 3: Nontaxable distributions (return of capital)
+      - Box 5: Section 199A dividends (QBI-eligible)
+      - Box 7: Foreign tax paid (potential foreign tax credit)
+
+      1099-B (Proceeds from Broker Transactions):
+      - For each transaction: date acquired, date sold, proceeds, cost basis, gain/loss
+      - Basis reporting category: short-term covered, long-term covered, noncovered
+      - Wash sale adjustments (code W)
+      - Aggregate vs per-transaction reporting
+
+      1099-R (Retirement Distributions):
+      - Box 1: Gross distribution
+      - Box 2a: Taxable amount
+      - Box 7: Distribution code (determines tax treatment: normal, early, Roth, rollover)
+      - IRA/SEP/SIMPLE checkbox
+
+      1099-K (Payment Card and Third Party Network Transactions):
+      - Gross amount of payment card/third party network transactions
+      - Merchant category code
+      - Cross-reference with Schedule C income to avoid double-counting
+
+      1099-S (Proceeds from Real Estate):
+      - Gross proceeds from real estate sale
+      - Date of closing
+      - Property address (for basis calculation and Section 121 exclusion)
+
+      1099-G (Government Payments):
+      - Box 1: Unemployment compensation
+      - Box 2: State tax refund (may be taxable if previously itemized)
+
+      1099-SA/5498-SA (HSA Distributions and Contributions):
+      - Distribution amount and whether used for qualified medical expenses
+      - Contribution amounts for the tax year
+
+      **K-1 Forms (Partnership/S-Corp/Trust):**
+      - Schedule K-1 (Form 1065): Partnership income, deductions, credits
+      - Schedule K-1 (Form 1120-S): S-Corporation income, deductions, credits
+      - Schedule K-1 (Form 1041): Trust and estate income
+      - For each K-1: ordinary income, rental income, interest, dividends, capital gains, Section 179 deductions, self-employment earnings, QBI information, basis and at-risk limitations
+
+      **Bank Statements and Financial Records:**
+      - Summarize all bank and credit card statements by account
+      - Total deposits and withdrawals per account per month
+      - Identify potential business income not reported on 1099s (cash deposits, Venmo/PayPal)
+      - Identify potential deductible expenses (mortgage interest, property taxes, charitable donations)
+
+      **Receipts and Supporting Documents:**
+      - Categorize all receipts by expense type
+      - Sum totals per category
+      - Flag receipts over $75 without adequate documentation
+      - Flag cash expenses without receipts (substantiation risk)
+
+      **2. Document Completeness Assessment**
+      Identify missing documents based on the filing status and business type:
+      - Expected but missing: documents that should exist based on the taxpayer's profile
+      - Optional but recommended: documents that could provide additional deductions
+      - Prior year comparison: documents received last year that are missing this year
+
+      **3. Income Summary**
+      Produce a comprehensive income summary:
+      | Income Source | Form | Amount | Tax Treatment | Schedule |
+      |--------------|------|--------|---------------|----------|
+      - Total gross income from all sources
+      - Adjustments to income (above-the-line deductions identified so far)
+      - Preliminary adjusted gross income (AGI) estimate
+    model: haiku
+    max_turns: 8
+
+  - id: transaction-categorization
+    depends_on: [document-ingestion]
+    prompt: |
+      You are a bookkeeping specialist experienced in categorizing financial transactions for tax purposes. Your task is to categorize every transaction into the appropriate IRS tax categories for accurate return preparation.
+
+      Document Ingestion Results: {steps.document-ingestion.output}
+      Tax Year: {input.tax_year}
+      Filing Status: {input.filing_status}
+      Business Type: {input.business_type}
+
+      Categorize all transactions following IRS guidelines:
+
+      **1. Income Categorization**
+      Classify all income into IRS categories:
+
+      Earned Income:
+      - Wages and salaries (W-2 Box 1) - Line 1a on Form 1040
+      - Self-employment income (1099-NEC, business revenue) - Schedule C
+      - Tips and gratuities (reported and unreported estimates)
+
+      Investment Income:
+      - Interest income (1099-INT) - Schedule B if over $1,500
+      - Dividend income (1099-DIV) - Schedule B if over $1,500
+      - Capital gains and losses (1099-B) - Schedule D and Form 8949
+      - Rental income (1099-MISC Box 1 or direct) - Schedule E
+      - Royalty income - Schedule E
+
+      Retirement Income:
+      - IRA distributions (1099-R) - taxable portion on Line 4b
+      - Pension income (1099-R) - taxable portion on Line 5b
+      - Social Security benefits (SSA-1099) - up to 85% taxable
+
+      Other Income:
+      - Unemployment compensation (1099-G)
+      - State tax refund (if previously itemized)
+      - Gambling winnings (W-2G)
+      - K-1 pass-through income
+      - Alimony received (pre-2019 agreements only)
+      - Cancellation of debt income (1099-C)
+
+      **2. Schedule C Categorization (for self-employed/business)**
+      If business type is self_employed, scorp, or rental_property, categorize all business expenses:
+
+      | IRS Category | Schedule C Line | Transactions | Total |
+      |-------------|----------------|--------------|-------|
+      | Advertising | Line 8 | | |
+      | Car and truck expenses | Line 9 | | |
+      | Commissions and fees | Line 10 | | |
+      | Contract labor | Line 11 | | |
+      | Depreciation | Line 13 | | |
+      | Employee benefit programs | Line 14 | | |
+      | Insurance (non-health) | Line 15 | | |
+      | Interest (mortgage, other) | Line 16 | | |
+      | Legal and professional services | Line 17 | | |
+      | Office expense | Line 18 | | |
+      | Pension/profit-sharing | Line 19 | | |
+      | Rent or lease (vehicles, machinery, equipment) | Line 20a | | |
+      | Rent or lease (other business property) | Line 20b | | |
+      | Repairs and maintenance | Line 21 | | |
+      | Supplies | Line 22 | | |
+      | Taxes and licenses | Line 23 | | |
+      | Travel | Line 24a | | |
+      | Meals (50% deductible) | Line 24b | | |
+      | Utilities | Line 25 | | |
+      | Wages | Line 26 | | |
+      | Other expenses | Line 27 | | |
+
+      For each category:
+      - List every transaction with date, description, amount, and source document
+      - Apply IRS categorization rules strictly
+      - Flag ambiguous transactions that could fit multiple categories
+      - Note any transactions that require additional substantiation (e.g. meals must have business purpose documented)
+
+      **3. Capital Gains/Losses Categorization (Schedule D / Form 8949)**
+      For all investment transactions from 1099-B:
+      - Separate into short-term (held 1 year or less) and long-term (held more than 1 year)
+      - Group by basis reporting category (covered, noncovered)
+      - Identify wash sales and calculate disallowed loss
+      - Calculate net short-term and long-term gain/loss
+      - Apply capital loss limitations ($3,000 per year, carryforward calculation)
+      - Identify qualified small business stock (Section 1202) exclusions if applicable
+      - Calculate Net Investment Income Tax (NIIT) exposure if AGI exceeds threshold
+
+      **4. Rental Property Categorization (Schedule E)**
+      If rental property income exists:
+      - Rental income per property
+      - Expenses per property: mortgage interest, property taxes, insurance, repairs, management fees, depreciation, utilities (if landlord-paid), HOA fees
+      - Passive activity limitation assessment
+      - $25,000 active participation exception calculation
+      - At-risk limitation analysis
+
+      **5. Transaction Summary by Tax Form**
+      Map all categorized transactions to the specific tax forms they will appear on:
+      | Tax Form | Description | Key Amounts |
+      |----------|-------------|-------------|
+      | Form 1040 | Individual tax return | AGI, taxable income |
+      | Schedule A | Itemized deductions | Total itemized |
+      | Schedule B | Interest and dividends | Total interest, total dividends |
+      | Schedule C | Business income | Net profit/loss |
+      | Schedule D | Capital gains | Net gain/loss |
+      | Schedule E | Rental/partnership | Net rental income |
+      | Schedule SE | Self-employment tax | SE tax amount |
+      | Form 8949 | Sales of capital assets | Transaction details |
+      | Form 8995 | QBI deduction | QBI amount |
+
+      **6. Uncategorized Transactions**
+      List any transactions that cannot be confidently categorized:
+      - Transaction details and amount
+      - Possible categories with confidence level
+      - Information needed from the taxpayer to resolve
+      - Tax impact of each possible categorization (to help prioritize resolution)
+    model: haiku
+    max_turns: 8
+
+  - id: deduction-identification
+    depends_on: [transaction-categorization]
+    prompt: |
+      You are a tax planning specialist with deep knowledge of IRS deduction rules, tax credits, and optimization strategies. Your task is to identify every legitimate deduction and credit available to this taxpayer and calculate the optimal tax position.
+
+      Transaction Categorization: {steps.transaction-categorization.output}
+      Document Ingestion: {steps.document-ingestion.output}
+      Tax Year: {input.tax_year}
+      Filing Status: {input.filing_status}
+      Business Type: {input.business_type}
+
+      Identify and calculate all applicable deductions and credits:
+
+      **1. Standard vs Itemized Deduction Comparison**
+      Calculate both options and recommend the optimal choice:
+
+      Standard Deduction for {input.tax_year} by filing status:
+      - Single: $15,700 (2025) / adjust for actual tax year
+      - Married Filing Jointly: $31,400
+      - Married Filing Separately: $15,700
+      - Head of Household: $23,550
+      - Additional standard deduction for age 65+ or blind: $1,600 (single) or $1,300 (married)
+
+      Itemized Deductions (Schedule A):
+      - Medical and dental expenses (exceeding 7.5% of AGI)
+        - Identify all medical expenses from documents
+        - Calculate the 7.5% AGI threshold
+        - List qualifying expenses: doctor visits, prescriptions, dental, vision, health insurance premiums (if not pre-tax), long-term care insurance (age-based limits), medical equipment, mileage for medical purposes
+      - State and local taxes (SALT) - capped at $10,000
+        - State income tax paid (or state sales tax if higher)
+        - Real property taxes
+        - Personal property taxes (vehicle registration if based on value)
+        - Calculate SALT cap impact
+      - Mortgage interest (Schedule A Line 8a)
+        - Qualified residence interest on up to $750,000 of acquisition debt ($1M if pre-12/15/2017)
+        - Home equity loan interest (only deductible if used for home improvement)
+        - Mortgage points (first year vs amortized)
+        - PMI premiums (if still deductible for the tax year)
+      - Charitable contributions
+        - Cash donations (60% of AGI limit for cash to public charities)
+        - Non-cash donations (30% limit, requires appraisal over $5,000)
+        - Qualified charitable distributions from IRA (age 70.5+)
+        - Charitable mileage deduction
+        - Documentation requirements: contemporaneous written acknowledgment for $250+
+      - Casualty and theft losses (only if in federally declared disaster area)
+      - Other itemized deductions (gambling losses up to winnings)
+
+      Recommendation: Standard or Itemized (show the math for both)
+
+      **2. Above-the-Line Deductions (Adjustments to Income)**
+      Identify all applicable adjustments to income:
+      - Educator expenses (up to $300 per eligible educator)
+      - HSA contributions (individual: $4,300, family: $8,550 for 2025 - adjust for tax year)
+      - Self-employment tax deduction (50% of SE tax)
+      - Self-employed health insurance deduction (100% of premiums if eligible)
+      - Self-employed retirement plan deduction (SEP IRA, SIMPLE IRA, Solo 401k)
+      - IRA contributions (traditional IRA: $7,000 under 50, $8,000 age 50+; deductibility depends on income and retirement plan coverage)
+      - Student loan interest deduction (up to $2,500, phased out at higher incomes)
+      - Alimony paid (pre-2019 agreements only)
+      - Moving expenses (military only)
+
+      **3. Business Deductions (Schedule C / Self-Employment)**
+      If applicable, identify additional business deductions:
+      - Home office deduction:
+        - Simplified method: $5/sq ft, max 300 sq ft = $1,500
+        - Regular method: actual expenses pro-rated by business use percentage
+        - Calculate both methods and recommend the higher deduction
+        - Requirements: exclusive and regular use, principal place of business
+      - Vehicle expenses:
+        - Standard mileage rate vs actual expense method
+        - Business miles log requirement (date, destination, purpose, miles)
+        - Calculate both methods and recommend
+      - Section 179 expensing: immediate deduction for qualifying business assets
+      - De minimis safe harbor: expense items under $2,500 (or $5,000 with applicable financial statement)
+      - Business meals: 50% deductible (must document business purpose, attendees, discussion)
+      - Professional development: courses, books, conferences related to current business
+
+      **4. Qualified Business Income (QBI) Deduction - Section 199A**
+      If the taxpayer has pass-through business income:
+      - Calculate QBI from each qualified business
+      - Determine if the business is a Specified Service Trade or Business (SSTB)
+      - Apply income thresholds: below threshold (full 20% deduction), within phase-in range, above threshold
+      - W-2 wages / UBIA limitation for above-threshold taxpayers
+      - Combined QBI deduction calculation
+      - Interaction with other deductions and phase-outs
+
+      **5. Tax Credits Identification**
+      Identify all applicable tax credits (more valuable than deductions):
+      - Child Tax Credit ($2,000 per qualifying child under 17, refundable up to $1,700)
+      - Child and Dependent Care Credit (up to $3,000 for one, $6,000 for two+; 20-35% credit rate)
+      - Earned Income Tax Credit (EITC) - calculate based on income and dependents
+      - Education credits: American Opportunity Credit ($2,500/student, 4 years) and Lifetime Learning Credit ($2,000/return)
+      - Retirement Savings Contributions Credit (Saver's Credit) for low-moderate income
+      - Premium Tax Credit (Form 8962) for marketplace health insurance
+      - Foreign Tax Credit (Form 1116) for taxes paid to foreign governments
+      - Adoption Credit
+      - Energy credits: Residential Clean Energy Credit, Energy Efficient Home Improvement Credit
+      - Electric Vehicle Credit (new and used)
+
+      **6. Deduction Summary and Optimization**
+      Produce a comprehensive deduction and credit summary:
+      | Deduction/Credit | Amount | Tax Savings | Confidence | Notes |
+      |-----------------|--------|-------------|------------|-------|
+      - Total deductions identified
+      - Total credits identified
+      - Estimated tax liability reduction
+      - Items requiring additional documentation from the taxpayer
+      - Missed deduction alerts (deductions commonly missed by this taxpayer profile)
+      - Year-end planning recommendations (if still within the tax year)
+    model: sonnet
+    max_turns: 10
+
+  - id: anomaly-detection
+    depends_on: [transaction-categorization]
+    prompt: |
+      You are a tax compliance specialist with expertise in IRS audit selection criteria and red flag detection. Your task is to identify anomalies, inconsistencies, and potential audit triggers in the tax return data before it goes to the CPA.
+
+      Transaction Categorization: {steps.transaction-categorization.output}
+      Document Ingestion: {steps.document-ingestion.output}
+      Tax Year: {input.tax_year}
+      Filing Status: {input.filing_status}
+      Business Type: {input.business_type}
+
+      Analyze the return data for anomalies and red flags:
+
+      **1. IRS Discriminant Index Function (DIF) Score Indicators**
+      The IRS uses DIF scoring to select returns for audit. Flag items that would increase the DIF score:
+      - Deductions that are disproportionate to income (e.g. charitable deductions > 30% of AGI)
+      - Business expense ratios that exceed IRS benchmarks for the industry
+      - High vehicle expenses with low business mileage documentation
+      - Schedule C losses for multiple consecutive years (hobby loss rule - IRC 183)
+      - Large miscellaneous deductions or "other expense" categories
+      - Round numbers that suggest estimation rather than actual record-keeping
+      - Income discrepancies between filed return amounts and IRS information returns (1099 matching)
+
+      **2. Specific Red Flag Analysis**
+
+      Income Red Flags:
+      - Cash deposits in bank statements that don't match reported income
+      - 1099s received but income not reported (IRS document matching will catch this)
+      - Gaps in income reporting (e.g. taxpayer worked January-June but only has one W-2)
+      - Cryptocurrency transactions not reported (IRS receives 1099 from exchanges)
+      - Foreign income or accounts not reported (FBAR and Form 8938 requirements)
+      - Unreported side income (gig economy, freelance, rental)
+
+      Schedule C Red Flags:
+      - Net profit margin significantly below industry average (IRS has industry benchmarks)
+      - Home office deduction claimed with no clear exclusive-use space
+      - Vehicle expenses claiming 100% business use (nearly impossible for sole vehicle)
+      - Meals and entertainment exceeding 10% of gross revenue
+      - Travel expenses without adequate business purpose documentation
+      - Contract labor without corresponding 1099-NEC filings to those workers
+      - Cost of goods sold without corresponding inventory records
+      - Business losses used to offset W-2 income (especially in years 3+ of operation)
+
+      Schedule D Red Flags:
+      - Capital losses that exceed $3,000 carryforward limit
+      - Wash sales not properly reported (30-day window)
+      - Cost basis discrepancies between taxpayer records and 1099-B
+      - Section 1202 (QSBS) exclusion claimed without proper documentation
+      - Cryptocurrency dispositions without adequate cost basis tracking
+
+      Schedule E Red Flags:
+      - Rental losses with high AGI (passive activity limitations)
+      - Real estate professional status claimed (750-hour requirement)
+      - Below-market rent to family members
+      - Depreciation on personal-use property
+      - Mixed-use property without proper allocation
+
+      Deduction Red Flags:
+      - Charitable deductions > $500 without Form 8283
+      - Non-cash charitable deductions with inflated valuations
+      - Medical expenses exactly at the 7.5% AGI threshold (suggests calculation to maximize)
+      - Student loan interest claimed by someone not legally obligated on the loan
+      - IRA deduction with retirement plan participation and high income
+
+      **3. Mathematical and Logical Consistency Checks**
+      Verify internal consistency of the return data:
+      - W-2 Box 1 + pre-tax deductions (Box 12) should approximate gross pay
+      - Social Security wages (Box 3) should not exceed the wage base ($176,100 for 2025 - adjust for tax year)
+      - Total 1099-B proceeds should reconcile with brokerage account statements
+      - Schedule C income should be consistent with bank deposits minus personal deposits
+      - Self-employment tax calculated correctly (92.35% of net earnings, 15.3% rate up to SS wage base, 2.9% above)
+      - Estimated tax payments match IRS records (Form 1040-ES)
+      - Withholding totals (all W-2s and 1099s) match claimed withholding
+      - Prior year carryforwards applied correctly (capital losses, NOLs, charitable contributions)
+
+      **4. Missing Information and Documentation Gaps**
+      Identify items where substantiation may be insufficient:
+      - Expenses over $75 without receipt (IRS substantiation rules)
+      - Business meals without contemporaneous log (date, place, attendees, business purpose)
+      - Vehicle mileage log quality assessment
+      - Charitable contributions $250+ without written acknowledgment from organization
+      - Non-cash donations $500+ without Form 8283
+      - Home office measurements and documentation
+      - Foreign accounts over $10,000 aggregate (FBAR filing requirement)
+      - Foreign assets over $50,000/$200,000 (FATCA Form 8938 requirement)
+
+      **5. Year-Over-Year Comparison Anomalies**
+      If prior year data is available or can be estimated:
+      - Significant income changes (> 25% increase or decrease)
+      - New deduction categories that didn't exist last year
+      - Filing status changes and their impact
+      - Deductions that suddenly appeared or disappeared
+
+      **6. Anomaly Summary Report**
+      Produce a prioritized list of anomalies:
+      | Priority | Anomaly | Risk Level | Tax Impact | Resolution Required |
+      |----------|---------|------------|------------|-------------------|
+      - High priority: items that will likely trigger IRS notice or audit
+      - Medium priority: items that need clarification but are defensible
+      - Low priority: minor inconsistencies to clean up
+
+      For each anomaly, provide:
+      - What the issue is and why it is flagged
+      - The potential tax impact (additional tax, penalties, interest)
+      - What documentation or information would resolve the issue
+      - Recommended action (correct, document, accept risk)
+    model: haiku
+    max_turns: 8
+
+  - id: tax-optimization
+    depends_on: [transaction-categorization, deduction-identification, anomaly-detection]
+    prompt: |
+      You are a tax strategist with CPA-level expertise in tax optimization for individuals and small businesses. Your task is to synthesize all findings and produce an optimized tax position with recommendations for current and future tax years.
+
+      Transaction Categorization: {steps.transaction-categorization.output}
+      Deduction Identification: {steps.deduction-identification.output}
+      Anomaly Detection: {steps.anomaly-detection.output}
+      Tax Year: {input.tax_year}
+      Filing Status: {input.filing_status}
+      Business Type: {input.business_type}
+
+      Produce a comprehensive tax optimization analysis:
+
+      **1. Tax Liability Calculation**
+      Calculate the estimated tax liability step by step:
+
+      Federal Tax Calculation:
+      - Total Income (all sources)
+      - Adjustments to Income (above-the-line deductions)
+      = Adjusted Gross Income (AGI)
+      - Standard or Itemized Deduction (whichever is higher)
+      - QBI Deduction (Section 199A, if applicable)
+      = Taxable Income
+      - Apply {input.tax_year} tax brackets for {input.filing_status}
+      = Regular Tax
+      - Check for Alternative Minimum Tax (AMT) if applicable
+      = Tax Before Credits
+      - Apply all tax credits identified
+      = Net Tax Liability
+      + Self-Employment Tax (if applicable)
+      + Net Investment Income Tax (3.8% on investment income above threshold)
+      + Additional Medicare Tax (0.9% on wages above threshold)
+      = Total Tax
+      - Withholding and Estimated Payments
+      = Tax Due or Refund
+
+      Show this as a complete tax computation worksheet with every line item.
+
+      **2. Optimization Scenarios**
+      Model alternative scenarios to demonstrate optimization impact:
+
+      Scenario A: Baseline (as-filed with identified deductions)
+      Scenario B: Standard deduction instead of itemized (or vice versa)
+      Scenario C: Maximum retirement contributions utilized
+      Scenario D: Optimal entity structure (if self-employed: sole prop vs S-Corp election)
+
+      For each scenario:
+      | Scenario | Taxable Income | Total Tax | Effective Rate | Savings vs Baseline |
+      |----------|---------------|-----------|----------------|-------------------|
+
+      **3. Missed Optimization Opportunities**
+      Identify strategies that could have reduced the tax liability:
+      - Retirement contribution maximization (401k, IRA, SEP, SIMPLE - calculate the tax savings)
+      - HSA contribution maximization (triple tax advantage: deductible, grows tax-free, tax-free medical withdrawals)
+      - Tax-loss harvesting opportunities not taken during the tax year
+      - Charitable contribution bunching strategy (every-other-year itemizing)
+      - Roth conversion opportunities (if in a low-income year)
+      - S-Corp election analysis for self-employed (reasonable salary + distributions to reduce SE tax)
+      - Income deferral opportunities that were available
+      - Expense acceleration opportunities that were available
+      - Estimated tax payment optimization (avoid underpayment penalty vs overpayment)
+
+      **4. Penalty and Interest Assessment**
+      Check for potential penalties:
+      - Underpayment of estimated tax penalty (Form 2210)
+        - Calculate whether safe harbor was met (100% of prior year tax or 110% if AGI > $150,000)
+        - If penalty applies, calculate the amount using IRS quarterly method
+      - Late filing penalty assessment (if applicable)
+      - Accuracy-related penalty exposure for any aggressive positions
+      - Recommend estimated tax adjustments for next year to avoid penalties
+
+      **5. Future Year Tax Planning Recommendations**
+      Based on this year's return, provide planning recommendations:
+      - Quarterly estimated tax payment schedule for next year
+      - W-4 withholding adjustment recommendations
+      - Retirement contribution strategy (which accounts to prioritize)
+      - Investment positioning (tax-efficient asset location)
+      - Business structure optimization (entity election timing)
+      - Charitable giving strategy
+      - Education funding strategy (529 plans, Coverdell)
+      - Estate planning considerations (annual gift exclusion, lifetime exemption)
+      - State tax planning (if in a high-tax state, strategies for reduction)
+
+      **6. Anomaly Resolution Recommendations**
+      For each anomaly flagged in the anomaly detection step:
+      - Recommend specific resolution action
+      - Quantify the tax impact of resolving vs not resolving
+      - Provide documentation templates for substantiation
+      - Assess audit risk if the anomaly is left unresolved
+      - Prioritize resolutions by tax impact and risk
+
+      Output a comprehensive tax optimization summary with clear recommendations ranked by impact.
+    model: sonnet
+    max_turns: 10
+
+  - id: cpa-package
+    depends_on: [tax-optimization]
+    prompt: |
+      You are a CPA-ready tax return preparation specialist. Your task is to compile all analysis into a structured, professional data package that a CPA can use to efficiently prepare and file the tax return with minimal back-and-forth.
+
+      Document Ingestion: {steps.document-ingestion.output}
+      Transaction Categorization: {steps.transaction-categorization.output}
+      Deduction Identification: {steps.deduction-identification.output}
+      Anomaly Detection: {steps.anomaly-detection.output}
+      Tax Optimization: {steps.tax-optimization.output}
+      Tax Year: {input.tax_year}
+      Filing Status: {input.filing_status}
+      Business Type: {input.business_type}
+
+      Produce the following CPA-ready documentation package:
+
+      **1. Client Information Summary**
+      - Taxpayer name, SSN (last 4 only for security), date of birth
+      - Filing status: {input.filing_status}
+      - Address, phone, email
+      - Dependent information (names, SSNs, relationships, DOB, months lived with taxpayer)
+      - Bank routing/account for direct deposit
+      - Prior year AGI (for e-filing identity verification)
+      - Identity Protection PIN (if assigned by IRS)
+
+      **2. Income Summary Worksheet**
+      Organized by tax form and line number:
+      | Source | Form/Schedule | Line | Amount | Documents | Notes |
+      |--------|--------------|------|--------|-----------|-------|
+      Every income item mapped to the exact line on the tax return where it belongs.
+
+      **3. Deduction and Credit Worksheet**
+      | Deduction/Credit | Form/Schedule | Line | Amount | Documents | Substantiation |
+      |-----------------|--------------|------|--------|-----------|----------------|
+      Every deduction and credit mapped to the exact line, with supporting document references.
+
+      **4. Tax Form Preparation Checklist**
+      List every tax form that should be included in the return:
+      - [ ] Form 1040 (main return)
+      - [ ] Schedule A (if itemizing)
+      - [ ] Schedule B (if interest/dividends > $1,500)
+      - [ ] Schedule C (if self-employed)
+      - [ ] Schedule D (if capital gains/losses)
+      - [ ] Schedule E (if rental/partnership income)
+      - [ ] Schedule SE (if self-employment income)
+      - [ ] Form 8949 (capital asset sales detail)
+      - [ ] Form 8995 (QBI deduction)
+      - [ ] Form 8889 (HSA)
+      - [ ] Form 8962 (Premium Tax Credit)
+      - [ ] State return forms (list applicable states)
+      For each form, note the key data points that feed into it.
+
+      **5. Open Items List (Questions for Client)**
+      Compile all unresolved items that the CPA needs to follow up on:
+      | # | Question | Context | Tax Impact | Priority |
+      |---|----------|---------|------------|----------|
+      For each item:
+      - Clear, specific question
+      - Why it matters for the return
+      - What answer options exist and their tax impact
+      - Suggested deadline for resolution
+
+      **6. Risk and Review Notes for CPA**
+      Highlight areas requiring CPA professional judgment:
+      - Aggressive vs conservative positions to discuss with client
+      - Anomalies that need CPA review before filing
+      - Areas where tax law is ambiguous and CPA should document position
+      - Items that should be disclosed on the return (Form 8275/8275-R)
+      - Statute of limitations considerations for amended returns
+
+      **7. Document Appendix**
+      Organized document reference:
+      | Document | Type | Date | Key Amounts | Status |
+      |----------|------|------|-------------|--------|
+      - All documents received and their status (complete, incomplete, missing)
+      - Missing document list with impact assessment
+      - Document retention recommendations (IRS requires 3-7 years depending on situation)
+
+      **8. Estimated Tax Payment Schedule for Next Year**
+      Based on the current year analysis:
+      | Quarter | Due Date | Recommended Payment | Basis |
+      |---------|----------|-------------------|-------|
+      | Q1 | April 15 | $X | |
+      | Q2 | June 15 | $X | |
+      | Q3 | September 15 | $X | |
+      | Q4 | January 15 | $X | |
+      - Total estimated payments recommended
+      - Safe harbor calculation (100%/110% of current year)
+      - W-4 adjustment recommendation (if applicable)
+
+      **9. Engagement Summary**
+      Brief cover memo for the CPA:
+      - Scope of work performed
+      - Key findings summary (3-5 bullet points)
+      - Tax liability estimate
+      - Top 3 optimization recommendations
+      - Items requiring urgent attention
+      - Limitations and disclaimers (AI-assisted preparation, CPA review required)
+
+      Format everything in clean, professional markdown with consistent formatting. The package should minimize the CPA's preparation time while ensuring nothing is missed. Every number should be traceable to a source document.
+    model: sonnet
+    max_turns: 10

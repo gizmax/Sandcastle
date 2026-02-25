@@ -1,0 +1,593 @@
+# name: Compliance Audit Readiness
+# description: Monitor systems against SOC 2, HIPAA, GDPR, ISO 27001 requirements, auto-generate evidence artifacts, flag control gaps, simulate auditor questions, and produce audit-ready documentation
+# tags: [Compliance, Audit, SOC2, HIPAA, GDPR, ISO-27001, GRC]
+# category: engineering
+
+name: compliance-audit-readiness
+description: Monitor systems against SOC 2, HIPAA, GDPR, ISO 27001 requirements, auto-generate evidence artifacts, flag control gaps, simulate auditor questions, and produce audit-ready documentation
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["frameworks", "organization_name"]
+  properties:
+    frameworks:
+      type: string
+      description: "Comma-separated list of compliance frameworks to audit against (e.g. 'SOC 2, HIPAA, GDPR, ISO 27001, PCI DSS')"
+    organization_name:
+      type: string
+      description: "Name of the organization being assessed for compliance readiness"
+    system_scope:
+      type: string
+      description: "Comma-separated list of systems, applications, and infrastructure in scope for the audit (e.g. 'AWS production, customer portal, HR database, email system')"
+    audit_date:
+      type: string
+      description: "Target audit date or timeframe for readiness assessment"
+      default: "next quarter"
+
+steps:
+  - id: control-mapping
+    prompt: |
+      You are a GRC (Governance, Risk, and Compliance) expert with deep knowledge of multiple compliance frameworks. Your task is to create a comprehensive control mapping that cross-references requirements across all specified frameworks.
+
+      Organization: {input.organization_name}
+      Compliance Frameworks: {input.frameworks}
+      Systems in Scope: {input.system_scope}
+      Target Audit Date: {input.audit_date}
+
+      Perform a detailed control mapping following this methodology:
+
+      **1. Framework Decomposition**
+      For each framework specified in {input.frameworks}, enumerate every applicable control requirement:
+
+      For SOC 2 (Trust Services Criteria):
+      - CC1: Control Environment (CC1.1 through CC1.5) - COSO principles, ethical values, board oversight, accountability structures
+      - CC2: Communication and Information (CC2.1 through CC2.3) - internal/external communication, system descriptions
+      - CC3: Risk Assessment (CC3.1 through CC3.4) - risk identification, fraud risk, change management impact
+      - CC4: Monitoring Activities (CC4.1 through CC4.2) - ongoing evaluations, remediation of deficiencies
+      - CC5: Control Activities (CC5.1 through CC5.3) - technology controls, policies, deployment of controls
+      - CC6: Logical and Physical Access (CC6.1 through CC6.8) - authentication, access provisioning, encryption, physical security
+      - CC7: System Operations (CC7.1 through CC7.5) - change management, vulnerability management, incident response
+      - CC8: Change Management (CC8.1) - change authorization and testing
+      - CC9: Risk Mitigation (CC9.1 through CC9.2) - risk acceptance, vendor management
+      - Additional criteria based on report type: Availability (A1), Confidentiality (C1), Processing Integrity (PI1), Privacy (P1)
+
+      For HIPAA:
+      - Administrative Safeguards (164.308): security management, workforce security, information access, security awareness, contingency planning, evaluation
+      - Physical Safeguards (164.310): facility access, workstation use, device and media controls
+      - Technical Safeguards (164.312): access control, audit controls, integrity, transmission security
+      - Organizational Requirements (164.314): business associate agreements, group health plan requirements
+      - Breach Notification Rule (164.400-414): individual notification, HHS notification, media notification
+
+      For GDPR:
+      - Lawfulness of Processing (Art. 6): legal basis for data processing
+      - Data Subject Rights (Art. 12-23): access, rectification, erasure, portability, objection
+      - Data Protection by Design (Art. 25): privacy by default
+      - Records of Processing (Art. 30): processing activity documentation
+      - Data Protection Impact Assessment (Art. 35): DPIA requirements
+      - Data Protection Officer (Art. 37-39): DPO appointment and responsibilities
+      - International Transfers (Art. 44-49): transfer mechanisms, adequacy decisions, SCCs
+      - Data Breach Notification (Art. 33-34): 72-hour notification, communication to data subjects
+
+      For ISO 27001:
+      - Annex A controls (A.5 through A.18): organizational, people, physical, technological controls
+      - Clause 4-10 management system requirements: context, leadership, planning, support, operation, performance evaluation, improvement
+      - Statement of Applicability (SoA) considerations
+
+      **2. Cross-Framework Control Mapping Matrix**
+      Create a comprehensive mapping table showing equivalence and overlap:
+      | Control Domain | SOC 2 TSC | HIPAA Section | GDPR Article | ISO 27001 Annex A |
+      |---------------|-----------|---------------|--------------|-------------------|
+      | Access Control | CC6.1-6.3 | 164.312(a) | Art. 32 | A.9 |
+      | ... | ... | ... | ... | ... |
+
+      For each mapping:
+      - Identify controls that satisfy multiple frameworks simultaneously (efficiency opportunities)
+      - Note where framework requirements diverge and separate controls are needed
+      - Flag the strictest requirement when frameworks overlap (the control must meet the highest bar)
+      - Identify framework-unique requirements that don't map to others
+
+      **3. Scope-Specific Control Applicability**
+      For each system in {input.system_scope}:
+      - Determine which controls apply to that specific system
+      - Identify system-specific implementation requirements
+      - Note any controls that are not applicable (with justification for exclusion)
+      - Map data flows between systems that create cross-system control requirements
+      - Identify shared infrastructure controls that cover multiple systems
+
+      **4. Control Priority Matrix**
+      Rank controls by:
+      - Audit risk: likelihood of the auditor focusing on this control (High/Medium/Low)
+      - Implementation complexity: effort required to implement or demonstrate (High/Medium/Low)
+      - Gap likelihood: probability that the control has gaps based on common patterns (High/Medium/Low)
+      - Business impact: consequence of control failure (Critical/High/Medium/Low)
+
+      Produce a prioritized list of the top 20 controls that should receive the most preparation attention before the {input.audit_date} audit.
+
+      **5. Deliverable**
+      Output the complete control mapping as structured tables with clear cross-references.
+      Include a summary showing: total controls per framework, overlap percentage, unique controls per framework, and estimated evidence artifacts needed.
+    model: sonnet
+    max_turns: 10
+
+  - id: evidence-collection
+    depends_on: [control-mapping]
+    prompt: |
+      You are a compliance evidence specialist responsible for preparing audit evidence packages. Your task is to define and template every evidence artifact needed for the audit based on the control mapping.
+
+      Control Mapping: {steps.control-mapping.output}
+      Organization: {input.organization_name}
+      Systems in Scope: {input.system_scope}
+      Frameworks: {input.frameworks}
+
+      For each control identified in the mapping, define the evidence artifacts required:
+
+      **1. Evidence Artifact Inventory**
+      Create a comprehensive inventory organized by control domain:
+
+      For each artifact, specify:
+      | Field | Description |
+      |-------|-------------|
+      | Artifact ID | Unique identifier (EVD-XXX) |
+      | Control Reference | Which control(s) this evidence supports |
+      | Artifact Type | Policy, Procedure, Screenshot, Report, Log, Configuration, Interview, Observation |
+      | Description | What the artifact must demonstrate |
+      | Source System | Where to obtain or generate this artifact |
+      | Collection Method | How to collect (automated export, manual screenshot, report generation) |
+      | Frequency | How often this evidence must be refreshed (annual, quarterly, continuous) |
+      | Responsible Role | Who is responsible for collecting and maintaining this evidence |
+      | Retention Period | How long to retain per regulatory requirement |
+
+      **2. Evidence Templates by Category**
+
+      Policy Documents (generate templates for):
+      - Information Security Policy (covering: scope, roles, responsibilities, acceptable use)
+      - Access Control Policy (covering: least privilege, separation of duties, periodic review)
+      - Data Classification Policy (covering: classification levels, handling procedures, labeling)
+      - Incident Response Policy (covering: roles, escalation, communication, post-incident)
+      - Change Management Policy (covering: approval workflow, testing, rollback procedures)
+      - Vendor Management Policy (covering: assessment criteria, monitoring, contract requirements)
+      - Business Continuity and Disaster Recovery Policy
+      - Data Retention and Disposal Policy
+
+      For each policy template, include:
+      - Required sections and their minimum content
+      - Approval and review cadence requirements
+      - Version control and change history format
+      - Distribution and acknowledgment tracking
+
+      Technical Evidence (define collection procedures for):
+      - Access review reports: format, scope, frequency, reviewer sign-off
+      - Vulnerability scan results: tool requirements, scope coverage, remediation timelines
+      - Penetration test reports: scope, methodology, finding format, remediation tracking
+      - System configuration baselines: CIS benchmarks, hardening standards, drift detection
+      - Encryption certificates: inventory, expiration tracking, key management procedures
+      - Backup and recovery test results: test scenarios, RTO/RPO validation, success criteria
+      - Network diagrams: current architecture, data flow diagrams, security zone boundaries
+      - Change management records: tickets, approvals, test results, deployment evidence
+
+      Training and Awareness Evidence:
+      - Security awareness training completion records
+      - Role-specific training documentation (developers, administrators, executives)
+      - Phishing simulation results and trend data
+      - Policy acknowledgment records
+
+      **3. Evidence Collection Automation Recommendations**
+      For each artifact that can be automated:
+      - Specific tool or script to generate the evidence
+      - Scheduling and delivery mechanism
+      - Format standardization (PDF, CSV, JSON, screenshot with timestamp)
+      - Chain of custody and integrity verification (hashing, timestamps, audit trails)
+
+      **4. Evidence Gap Indicators**
+      Flag common evidence gaps that organizations typically face:
+      - Missing historical evidence (policies created recently but audit period is retroactive)
+      - Inconsistent evidence (policy says one thing, configuration shows another)
+      - Stale evidence (last access review was 18 months ago, not quarterly as required)
+      - Incomplete scope coverage (evidence covers primary system but not all in-scope systems)
+
+      Output the complete evidence inventory with templates, collection procedures, and automation recommendations.
+    model: haiku
+    max_turns: 8
+
+  - id: gap-analysis
+    depends_on: [evidence-collection]
+    prompt: |
+      You are a senior compliance auditor performing a pre-audit gap analysis. Your task is to identify every control gap, evidence deficiency, and risk area that could result in audit findings, qualified opinions, or non-compliance determinations.
+
+      Control Mapping: {steps.control-mapping.output}
+      Evidence Collection Plan: {steps.evidence-collection.output}
+      Organization: {input.organization_name}
+      Systems in Scope: {input.system_scope}
+      Frameworks: {input.frameworks}
+      Target Audit Date: {input.audit_date}
+
+      Conduct a thorough gap analysis following this methodology:
+
+      **1. Control Implementation Gap Assessment**
+      For each control in the mapping, assess the likely implementation status:
+
+      Status categories:
+      - Fully Implemented: control is designed and operating effectively with evidence available
+      - Partially Implemented: control exists but has gaps in design or operating effectiveness
+      - Not Implemented: control does not exist or is not operational
+      - Not Applicable: control does not apply (with documented justification)
+
+      For each control assessed as Partially or Not Implemented:
+      - Describe the specific gap (what is missing or insufficient)
+      - Assess gap severity: Critical (audit failure), Major (qualified finding), Minor (observation), Opportunity (improvement suggestion)
+      - Identify the root cause of the gap (resource constraints, awareness, technical limitation, policy gap)
+      - Estimate remediation effort: Quick Win (< 1 week), Moderate (1-4 weeks), Significant (1-3 months), Major Project (3+ months)
+
+      **2. Evidence Sufficiency Assessment**
+      For each evidence artifact in the collection plan, assess:
+      - Availability: Does this evidence exist today? If not, can it be generated retroactively?
+      - Completeness: Does the evidence cover the full audit period and all in-scope systems?
+      - Accuracy: Is the evidence current and consistent with actual system configuration?
+      - Integrity: Can the evidence be verified as unaltered (timestamps, hashes, audit trails)?
+      - Relevance: Does the evidence directly demonstrate the control's operating effectiveness?
+
+      Flag evidence gaps that are impossible to remediate before the audit date (e.g. missing historical logs that cannot be recreated).
+
+      **3. Cross-Framework Gap Impact Analysis**
+      Since a single gap may affect multiple frameworks:
+      - Map each gap to all frameworks it impacts
+      - Assess the compound risk of each gap across frameworks
+      - Identify gaps that would cause the most damage across the most frameworks (priority fixes)
+      - Note where remediating a gap for one framework automatically closes gaps in others
+
+      **4. Common Gap Patterns by Framework**
+      Based on industry knowledge, flag likely gaps for each framework:
+
+      SOC 2 common gaps:
+      - Access reviews not performed at required frequency
+      - Change management tickets missing required approvals
+      - Vulnerability remediation exceeding SLA timelines
+      - Incomplete vendor risk assessments
+      - Insufficient monitoring and logging coverage
+
+      HIPAA common gaps:
+      - Business Associate Agreements missing or outdated
+      - Risk analysis not comprehensive or not updated annually
+      - Minimum necessary standard not consistently applied
+      - Workforce training gaps or missing acknowledgments
+      - Insufficient PHI access logging and monitoring
+
+      GDPR common gaps:
+      - Records of processing activities incomplete or outdated
+      - Cookie consent implementation non-compliant
+      - Data subject access request process not formalized
+      - Data retention periods not defined or not enforced
+      - International data transfer mechanisms not documented
+
+      ISO 27001 common gaps:
+      - Statement of Applicability incomplete or not aligned with risk assessment
+      - Internal audit program not established or not independent
+      - Management review meetings not documented
+      - Risk treatment plan not maintained
+      - Continual improvement process not evidenced
+
+      **5. Gap Severity Scoring**
+      Produce a quantitative readiness assessment:
+      - Calculate an Audit Readiness Score (0-100) per framework
+      - Score formula: (Fully Implemented Controls / Total Applicable Controls) x 100, weighted by severity
+      - Break down the score by control domain
+      - Identify the domains with the lowest scores (focus areas)
+      - Project the score improvement if all Critical and Major gaps are remediated before the audit
+
+      **6. Risk Heat Map**
+      Create a text-based risk heat map:
+      - Rows: control domains
+      - Columns: frameworks
+      - Cells: gap severity (Critical/Major/Minor/None)
+      - Highlight cells that are Critical or Major
+
+      **7. Gap Analysis Summary**
+      Produce a concise summary including:
+      - Total gaps identified by severity (Critical/Major/Minor)
+      - Total gaps by framework
+      - Estimated total remediation effort
+      - Top 10 gaps to remediate first (highest risk reduction per effort)
+      - Gaps that cannot be remediated before the audit date (risk acceptance required)
+      - Overall assessment: Is {input.organization_name} ready for the {input.audit_date} audit? (Ready/Conditionally Ready/Not Ready)
+    model: sonnet
+    max_turns: 10
+
+  - id: auditor-simulation
+    depends_on: [evidence-collection]
+    prompt: |
+      You are a seasoned external auditor with 15+ years of experience conducting compliance audits for SOC 2, HIPAA, GDPR, and ISO 27001. Your task is to simulate the auditor's perspective and generate the questions, walkthroughs, and inquiry procedures that the organization should expect during the audit.
+
+      Control Mapping: {steps.control-mapping.output}
+      Evidence Collection Plan: {steps.evidence-collection.output}
+      Organization: {input.organization_name}
+      Systems in Scope: {input.system_scope}
+      Frameworks: {input.frameworks}
+      Target Audit Date: {input.audit_date}
+
+      Simulate the audit process comprehensively:
+
+      **1. Opening Meeting Questions**
+      Questions the auditor will ask during the audit kickoff:
+      - Describe the organizational structure and reporting lines for security and compliance
+      - What significant changes have occurred since the last audit (or since program inception)?
+      - Are there any known incidents, breaches, or regulatory actions during the audit period?
+      - What systems and processes are in scope, and have there been any scope changes?
+      - Who are the key contacts for each control domain?
+      - What third-party service providers process sensitive data?
+
+      **2. Framework-Specific Inquiry Procedures**
+
+      For SOC 2 audits, simulate these inquiry tracks:
+
+      Control Environment (CC1):
+      - "Describe how management demonstrates its commitment to integrity and ethical values."
+      - "How does the board exercise oversight of the development and performance of internal controls?"
+      - "Walk me through your process for assigning authority and responsibility for security."
+      - "How do you ensure accountability for internal control across the organization?"
+
+      Logical Access (CC6):
+      - "Walk me through your user access provisioning process from request to approval to implementation."
+      - "How do you handle access for terminated employees? What is the SLA for deprovisioning?"
+      - "Show me evidence of your most recent periodic access review. Who reviewed? What actions were taken?"
+      - "How do you manage privileged access? Are there separate admin accounts?"
+      - "Describe your password policy and multi-factor authentication implementation."
+      - "How is encryption implemented for data at rest and in transit? Show me the certificate inventory."
+
+      System Operations (CC7):
+      - "Walk me through a recent change from request through deployment. Show me the ticket."
+      - "How do you detect and respond to security incidents? Walk me through a recent example."
+      - "Show me your vulnerability management program. What is your SLA for critical vulnerabilities?"
+      - "How do you monitor system availability and performance?"
+
+      For HIPAA audits:
+      - "Show me your most recent risk analysis. How was scope determined? How were risks ranked?"
+      - "Walk me through how you implement minimum necessary access for PHI."
+      - "Show me your BAA inventory. How do you monitor BA compliance?"
+      - "Describe your breach notification procedures. Have you had any breaches in the audit period?"
+      - "How do you handle data subject requests for access to their PHI?"
+      - "Walk me through your workforce training program. How do you verify completion?"
+      - "Show me your contingency plan. When was it last tested?"
+
+      For GDPR audits:
+      - "Show me your Record of Processing Activities. How is it maintained and updated?"
+      - "What legal basis do you rely on for each processing activity?"
+      - "Walk me through your Data Subject Access Request process. Show me a recent example."
+      - "How do you implement data protection by design and by default in new projects?"
+      - "Show me your DPIA template. When was the last DPIA conducted?"
+      - "How do you manage international data transfers? Show me your transfer impact assessments."
+      - "Describe your data retention and deletion procedures. How do you verify deletion?"
+      - "How do you manage cookie consent? Show me your consent mechanism."
+
+      For ISO 27001 audits:
+      - "Show me your Statement of Applicability. How does it align with your risk assessment?"
+      - "Walk me through your risk assessment methodology. How do you determine risk levels?"
+      - "Show me evidence of your management review meetings. What actions resulted?"
+      - "Describe your internal audit program. Who conducts internal audits? Are they independent?"
+      - "Show me your continual improvement process. How do you track and implement improvements?"
+      - "Walk me through your asset inventory and classification scheme."
+
+      **3. Walkthrough Scenarios**
+      For each critical control, design a walkthrough the auditor would request:
+      - Sample selection criteria (how the auditor will pick samples)
+      - Step-by-step walkthrough procedure
+      - Evidence the auditor will request to see at each step
+      - Common pitfalls that trip up organizations during walkthroughs
+      - "Gotcha" questions auditors ask to test actual vs documented procedures
+
+      **4. Technical Testing Scenarios**
+      If the auditor performs technical testing:
+      - System access demonstrations they will request
+      - Configuration reviews they will perform
+      - Log samples they will request and analyze
+      - Network architecture validations
+      - Encryption verification procedures
+
+      **5. Interview Preparation Guide**
+      For each role that will be interviewed:
+      - CISO/Security Lead: governance, risk management, strategic questions
+      - System Administrators: technical implementation, operational procedures
+      - Developers: secure development lifecycle, code review, testing
+      - HR: onboarding/offboarding, background checks, training
+      - Legal/Privacy: data protection, consent, international transfers
+      - Executive Management: tone at the top, commitment, resource allocation
+
+      Provide recommended responses for each question that are honest, comprehensive, and demonstrate control maturity. Flag any questions where an honest answer might reveal a gap.
+
+      **6. Red Flags Auditors Watch For**
+      List the top 20 red flags that experienced auditors look for:
+      - Policies with no evidence of enforcement
+      - Inconsistent dates or timestamps in evidence
+      - Evidence that appears freshly created rather than maintained continuously
+      - Employees who cannot explain their security responsibilities
+      - Gaps in logging or monitoring coverage
+      - Overreliance on manual processes without compensating controls
+      (Continue with 14 more specific red flags)
+
+      Output the complete auditor simulation as a preparation guide that the organization's team can use to rehearse for the audit.
+    model: sonnet
+    max_turns: 10
+
+  - id: remediation-planning
+    depends_on: [gap-analysis, auditor-simulation]
+    prompt: |
+      You are a compliance program manager responsible for creating and executing a remediation plan that will close all identified gaps before the audit date. Your task is to synthesize the gap analysis and auditor simulation findings into an actionable remediation roadmap.
+
+      Gap Analysis: {steps.gap-analysis.output}
+      Auditor Simulation: {steps.auditor-simulation.output}
+      Organization: {input.organization_name}
+      Systems in Scope: {input.system_scope}
+      Frameworks: {input.frameworks}
+      Target Audit Date: {input.audit_date}
+
+      Create a comprehensive remediation plan:
+
+      **1. Prioritized Remediation Backlog**
+      Rank all gaps by a composite priority score based on:
+      - Audit impact: probability and severity of an audit finding (weight: 40%)
+      - Cross-framework coverage: number of frameworks the remediation satisfies (weight: 25%)
+      - Effort efficiency: risk reduction achieved per unit of effort (weight: 20%)
+      - Dependency: whether other remediations depend on this one (weight: 15%)
+
+      For each remediation item:
+      | Field | Detail |
+      |-------|--------|
+      | Priority Rank | 1, 2, 3... |
+      | Gap Reference | Gap ID from analysis |
+      | Remediation Description | Specific actions to close the gap |
+      | Frameworks Addressed | Which frameworks benefit |
+      | Effort Estimate | Person-days |
+      | Prerequisites | Dependencies on other items or resources |
+      | Owner | Role/team responsible |
+      | Target Completion | Date (working backward from audit date) |
+      | Verification Method | How to confirm the gap is closed |
+
+      **2. Remediation Workstreams**
+      Group remediations into parallel workstreams:
+      - Policy and Documentation workstream: all policy creation, updates, and approvals
+      - Technical Controls workstream: system configurations, tooling, monitoring
+      - Process and Procedures workstream: workflow updates, training, role definitions
+      - Evidence Generation workstream: retroactive evidence collection, report generation
+
+      For each workstream:
+      - Owner and team members
+      - Timeline with milestones
+      - Dependencies on other workstreams
+      - Resource requirements (people, tools, budget)
+      - Risk factors that could delay completion
+
+      **3. Quick Wins (Week 1-2)**
+      Identify remediations that can be completed immediately with minimal effort:
+      - Policy approvals that just need a signature
+      - Configuration changes that are straightforward
+      - Evidence that already exists but needs to be collected and organized
+      - Training that can be rolled out via existing platforms
+      - Access reviews that can be completed with existing tooling
+
+      **4. Critical Path Items (Must Complete Before Audit)**
+      Identify items that absolutely must be done before the audit:
+      - Items that would cause audit failure if not addressed
+      - Items that require lead time (vendor assessments, penetration tests, training cycles)
+      - Items with dependencies that create scheduling constraints
+      - Buffer time recommendations for unexpected delays
+
+      **5. Risk Acceptance Decisions**
+      For gaps that cannot be fully remediated before the audit:
+      - Document the gap and remaining risk
+      - Propose compensating controls that partially address the gap
+      - Draft risk acceptance language for management sign-off
+      - Assess the likely auditor response (finding severity, management response opportunity)
+      - Recommend disclosure approach during the audit (proactive disclosure vs wait for finding)
+
+      **6. Budget and Resource Estimate**
+      Provide a realistic budget estimate:
+      - Internal labor costs (person-days by role)
+      - External consulting needs (if gaps require specialized expertise)
+      - Tool and licensing costs (if new tools are needed for monitoring, scanning, etc.)
+      - Training costs
+      - Total estimated investment to achieve audit readiness
+      - ROI justification: cost of remediation vs cost of audit failure, fines, and reputational damage
+
+      **7. Audit Week Preparation Checklist**
+      Create a detailed checklist for the week before and during the audit:
+      - Evidence binder preparation (digital evidence room organization)
+      - Interview rehearsal schedule
+      - Point-of-contact assignments for each control domain
+      - War room setup and communication protocols
+      - Escalation procedures for auditor requests that require investigation
+      - Daily debrief schedule during audit fieldwork
+
+      Output the complete remediation plan formatted for executive approval and team execution.
+    model: sonnet
+    max_turns: 10
+
+  - id: documentation-package
+    depends_on: [remediation-planning]
+    prompt: |
+      You are a compliance documentation specialist tasked with producing the final audit-ready documentation package. Your task is to compile all analysis, plans, and evidence templates into a polished, organized documentation set that the organization can use directly in their audit.
+
+      Control Mapping: {steps.control-mapping.output}
+      Gap Analysis: {steps.gap-analysis.output}
+      Auditor Simulation: {steps.auditor-simulation.output}
+      Remediation Plan: {steps.remediation-planning.output}
+      Organization: {input.organization_name}
+      Frameworks: {input.frameworks}
+      Systems in Scope: {input.system_scope}
+      Target Audit Date: {input.audit_date}
+
+      Produce the following documentation package:
+
+      **1. Audit Readiness Executive Report**
+      A 2-3 page executive summary for leadership:
+      - Overall audit readiness score per framework (0-100)
+      - Traffic light status: Green (ready), Yellow (conditionally ready), Red (not ready)
+      - Top 5 risks and their remediation status
+      - Investment required and timeline to readiness
+      - Recommendation: proceed with audit on schedule, delay, or request scope reduction
+      - Comparison to industry benchmarks for organizations of similar size and complexity
+
+      **2. Control Matrix Document**
+      A formal control matrix formatted for auditor consumption:
+      - Control ID and description per framework
+      - Implementation status (Implemented, Partially Implemented, Planned, Not Applicable)
+      - Control owner (role, not individual name)
+      - Evidence references (artifact IDs from the evidence collection plan)
+      - Testing frequency and last test date
+      - Any exceptions or compensating controls
+      This should be in table format suitable for direct submission to the auditor.
+
+      **3. System Description Document**
+      For SOC 2 specifically (or equivalent for other frameworks):
+      - Organizational overview and services provided
+      - System boundaries and infrastructure description
+      - Principal service commitments and system requirements
+      - Components of the system: infrastructure, software, people, procedures, data
+      - Trust services criteria applicability
+      - Complementary user entity controls (CUECs)
+      - Complementary subservice organization controls (CSOCs)
+      - Significant changes during the audit period
+
+      **4. Policy Index and Status Tracker**
+      Comprehensive list of all required policies:
+      | Policy Name | Version | Last Approved | Next Review | Owner | Frameworks | Status |
+      |-------------|---------|---------------|-------------|-------|------------|--------|
+      For each policy, note whether it exists, needs updates, or needs to be created.
+      Include the minimum required content outline for each policy.
+
+      **5. Evidence Request List (PBC - Prepared by Client)**
+      Pre-populate the PBC list that auditors typically send:
+      - Organize by control domain and framework
+      - For each evidence request, specify: what is needed, format, date range, responsible party
+      - Include status column (Available, In Progress, Not Available)
+      - Pre-fill with evidence artifacts from the collection plan
+      - Note any evidence that requires special handling (confidentiality, redaction)
+
+      **6. Interview Preparation Binder**
+      For each role that will be interviewed during the audit:
+      - Key topics and likely questions (from auditor simulation)
+      - Recommended talking points
+      - Evidence to have ready during the interview
+      - Questions to avoid volunteering information on (without being dishonest)
+      - Practice scenarios
+
+      **7. Ongoing Compliance Monitoring Plan**
+      Define how compliance will be maintained after the audit:
+      - Continuous monitoring activities and their frequency
+      - Control testing schedule (monthly, quarterly, annually)
+      - Evidence collection automation and archival procedures
+      - Change management triggers that require compliance re-assessment
+      - Annual audit preparation timeline (starting 6 months before each audit)
+      - Compliance metrics and KPIs to track
+
+      **8. Appendices**
+      - Glossary of compliance terms and acronyms
+      - Framework version references (which version of each standard was used)
+      - Regulatory update monitoring plan (how to stay current with framework changes)
+      - Template library index (all templates generated during this assessment)
+      - Contact list template for audit team coordination
+
+      Format the entire documentation package in clean, professional markdown with consistent formatting, clear section numbering, and table of contents. The package should be immediately usable by the compliance team and presentable to auditors.
+    model: sonnet
+    max_turns: 10

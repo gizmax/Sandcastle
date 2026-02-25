@@ -2986,44 +2986,806 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 18
+    },
+    {
+      "slug": "elena-growth/ai-brand-sentinel",
+      "name": "AI Brand Sentinel",
+      "description": "Monitor how AI platforms represent your brand in generated answers, track sentiment shifts, identify source URLs influencing AI opinions, and generate corrective content recommendations",
+      "author": "elena-growth",
+      "author_url": "https://github.com/elena-growth",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "AI Monitoring",
+        "Brand",
+        "Sentiment",
+        "SEO"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "web_search"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ai_brand_sentinel.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~12s",
+      "downloads": 34,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 5
+    },
+    {
+      "slug": "revops-sam/rfp-response-engine",
+      "name": "RFP Response Engine",
+      "description": "Multi-agent RFP/RFQ response generator that ingests bid requirements, matches against company knowledge base, drafts section-by-section responses, and scores proposal strength",
+      "author": "revops-sam",
+      "author_url": "https://github.com/revops-sam",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "RFP",
+        "Proposals",
+        "Procurement",
+        "Knowledge Base"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "web_search"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/rfp_response_engine.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~12s",
+      "downloads": 61,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 13
+    },
+    {
+      "slug": "tomr-eng/codebase-health-scanner",
+      "name": "Codebase Health Scanner",
+      "description": "Analyze codebase for technical debt signals - complexity hotspots, test coverage gaps, dependency vulnerabilities, dead code, API contract drift, and documentation staleness with prioritized remediation roadmap",
+      "author": "tomr-eng",
+      "author_url": "https://github.com/tomr-eng",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Engineering",
+        "Technical Debt",
+        "Code Quality",
+        "Security",
+        "DevOps"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "code_interpreter"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/codebase_health_scanner.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0132,
+      "avg_execution_time": "~13s",
+      "downloads": 84,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 3.9,
+      "review_count": 13
+    },
+    {
+      "slug": "nadia-cx/knowledge-base-auditor",
+      "name": "Knowledge Base Auditor",
+      "description": "Audit knowledge bases for staleness, contradictions with recent support tickets, coverage gaps, and outdated information, then produce prioritized update recommendations with freshness scores",
+      "author": "nadia-cx",
+      "author_url": "https://github.com/nadia-cx",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Knowledge Base",
+        "Content Audit",
+        "Customer Success",
+        "AI Chatbot"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "zendesk"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/knowledge_base_auditor.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 40,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 9
+    },
+    {
+      "slug": "lena-content/crisis-communication-commander",
+      "name": "Crisis Communication Commander",
+      "description": "Real-time PR crisis management - monitor channels, draft holding statements, generate Q&A documents, coordinate multi-channel response, and track sentiment recovery",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "PR",
+        "Crisis Management",
+        "Communications",
+        "Reputation"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack",
+        "web_search"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/crisis_communication_commander.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~14s",
+      "downloads": 107,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 17
+    },
+    {
+      "slug": "ops-ninja/outage-postmortem-generator",
+      "name": "Outage Postmortem Generator",
+      "description": "Collect incident timeline from monitoring tools, correlate log entries, identify root cause chains, draft blameless postmortem documents, extract action items, and track remediation",
+      "author": "ops-ninja",
+      "author_url": "https://github.com/ops-ninja",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Incident-Response",
+        "SRE",
+        "Postmortem",
+        "Reliability",
+        "DevOps"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/outage_postmortem_generator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 85,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 12
+    },
+    {
+      "slug": "kai-security/compliance-audit-readiness",
+      "name": "Compliance Audit Readiness",
+      "description": "Monitor systems against SOC 2, HIPAA, GDPR, ISO 27001 requirements, auto-generate evidence artifacts, flag control gaps, simulate auditor questions, and produce audit-ready documentation",
+      "author": "kai-security",
+      "author_url": "https://github.com/kai-security",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Compliance",
+        "Audit",
+        "SOC2",
+        "HIPAA",
+        "GDPR",
+        "ISO-27001",
+        "GRC"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/compliance_audit_readiness.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~14s",
+      "downloads": 62,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 11
+    },
+    {
+      "slug": "workflow-lab/insurance-claims-adjuster",
+      "name": "Insurance Claims Adjuster",
+      "description": "Ingest insurance claims with documents and photos, extract damage assessments, cross-reference policy coverage, detect fraud indicators, estimate payouts, and generate adjuster-ready case summaries",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Insurance",
+        "Claims",
+        "Fraud-Detection",
+        "Underwriting",
+        "FinTech"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/insurance_claims_adjuster.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~15s",
+      "downloads": 134,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.5,
+      "review_count": 24
+    },
+    {
+      "slug": "priya-fintech/tax-return-preprocessor",
+      "name": "Tax Return Preprocessor",
+      "description": "Ingest W-2s, 1099s, receipts, and bank statements, categorize transactions, identify deductions, flag anomalies, and produce structured data packages ready for CPA review",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Tax",
+        "Accounting",
+        "Finance",
+        "CPA",
+        "IRS",
+        "Deductions"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/tax_return_preprocessor.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0132,
+      "avg_execution_time": "~13s",
+      "downloads": 80,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 16
+    },
+    {
+      "slug": "workflow-lab/carbon-footprint-reporter",
+      "name": "Carbon Footprint Reporter",
+      "description": "Collect emissions data from energy bills, travel, supply chain, and fleet, calculate Scope 1/2/3 carbon footprints, generate regulatory-compliant ESG reports, and identify reduction opportunities",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "ESG",
+        "Carbon",
+        "Sustainability",
+        "Climate",
+        "GHG-Protocol",
+        "CSRD"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/carbon_footprint_reporter.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~13s",
+      "downloads": 64,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 3.9,
+      "review_count": 10
+    },
+    {
+      "slug": "lawtech-ai/patent-landscape-analyzer",
+      "name": "Patent Landscape Analyzer",
+      "description": "Conduct prior art searches across patent databases, map competitive IP landscapes, identify innovation white spaces, and generate freedom-to-operate risk assessments",
+      "author": "lawtech-ai",
+      "author_url": "https://github.com/lawtech-ai",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Patents",
+        "IP",
+        "Legal",
+        "Innovation",
+        "FTO"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/patent_landscape_analyzer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.024,
+      "avg_execution_time": "~12s",
+      "downloads": 38,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 8
+    },
+    {
+      "slug": "jmartinez/permit-application-processor",
+      "name": "Permit Application Processor",
+      "description": "Automate government permit applications - extract requirements from local codes, pre-fill forms, check completeness, flag non-compliance, and track approval across jurisdictions",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Permits",
+        "Compliance",
+        "Government",
+        "Regulatory",
+        "Forms"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/permit_application_processor.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0132,
+      "avg_execution_time": "~13s",
+      "downloads": 63,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 12
+    },
+    {
+      "slug": "priya-fintech/vendor-renewal-negotiator",
+      "name": "Vendor Renewal Negotiator",
+      "description": "Monitor SaaS and vendor contract renewals, analyze usage vs terms, benchmark pricing against market rates, identify leverage points, and draft counter-proposals",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Procurement",
+        "SaaS",
+        "Negotiation",
+        "Vendor",
+        "Cost Optimization"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/vendor_renewal_negotiator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~12s",
+      "downloads": 37,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 9
+    },
+    {
+      "slug": "elena-growth/competitive-teardown",
+      "name": "Competitive Teardown",
+      "description": "Comprehensive competitor product teardown - feature-by-feature analysis, UX evaluation, pricing deconstruction, positioning critique, and strategic vulnerability assessment",
+      "author": "elena-growth",
+      "author_url": "https://github.com/elena-growth",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Competitive",
+        "Strategy",
+        "Product",
+        "UX",
+        "Pricing"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitive_teardown.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.024,
+      "avg_execution_time": "~15s",
+      "downloads": 44,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 6
+    },
+    {
+      "slug": "revops-sam/qbr-autopilot",
+      "name": "QBR Autopilot",
+      "description": "Generate complete Quarterly Business Review packages - pull CRM data, usage metrics, support trends, and renewal status into executive summaries, health scorecards, and strategic recommendations",
+      "author": "revops-sam",
+      "author_url": "https://github.com/revops-sam",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "QBR",
+        "Customer Success",
+        "CRM",
+        "Account Management",
+        "Retention"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/qbr_autopilot.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~15s",
+      "downloads": 178,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.8,
+      "review_count": 31
+    },
+    {
+      "slug": "datacraft-io/board-meeting-prep",
+      "name": "Board Meeting Prep",
+      "description": "Aggregate financial metrics, KPIs, competitive developments, and team updates into comprehensive board meeting packages with executive narratives and discussion prompts",
+      "author": "datacraft-io",
+      "author_url": "https://github.com/datacraft-io",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Board",
+        "Finance",
+        "Strategy",
+        "Executive",
+        "Governance"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/board_meeting_prep.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~14s",
+      "downloads": 149,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 26
+    },
+    {
+      "slug": "ops-ninja/saas-usage-optimizer",
+      "name": "SaaS Usage Optimizer",
+      "description": "Audit SaaS subscriptions across the organization, analyze usage vs licensed seats, identify redundant tools, calculate waste, and produce consolidation roadmap with savings projections",
+      "author": "ops-ninja",
+      "author_url": "https://github.com/ops-ninja",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "SaaS",
+        "Cost Optimization",
+        "IT Management",
+        "Procurement",
+        "Audit"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/saas_usage_optimizer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~15s",
+      "downloads": 91,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 18
+    },
+    {
+      "slug": "social-sage/influencer-campaign-matcher",
+      "name": "Influencer Campaign Matcher",
+      "description": "Analyze brand requirements and campaign goals, identify optimal influencer matches by content style, audience demographics, engagement authenticity, brand safety, and predicted ROI",
+      "author": "social-sage",
+      "author_url": "https://github.com/social-sage",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "Influencer",
+        "Campaign",
+        "Social-Media",
+        "ROI"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/influencer_campaign_matcher.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 34,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 3.9,
+      "review_count": 7
+    },
+    {
+      "slug": "jmartinez/construction-bid-analyzer",
+      "name": "Construction Bid Analyzer",
+      "description": "Ingest construction bid documents, extract scope items and quantities, cross-reference cost databases, flag missing items, and produce structured cost estimates with risk-adjusted ranges",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Construction",
+        "Estimating",
+        "Bidding",
+        "Cost-Analysis",
+        "Risk"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/construction_bid_analyzer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~13s",
+      "downloads": 164,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 24
+    },
+    {
+      "slug": "pricewatch/hotel-revenue-optimizer",
+      "name": "Hotel Revenue Optimizer",
+      "description": "Analyze booking patterns, competitor rates, events, weather, and seasonal trends to generate dynamic room pricing, occupancy forecasts, and revenue management strategies",
+      "author": "pricewatch",
+      "author_url": "https://github.com/pricewatch",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Hospitality",
+        "Revenue-Management",
+        "Pricing",
+        "Forecasting",
+        "Hotels"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/hotel_revenue_optimizer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~15s",
+      "downloads": 83,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.5,
+      "review_count": 17
+    },
+    {
+      "slug": "amira-dev/student-learning-path-builder",
+      "name": "Student Learning Path Builder",
+      "description": "Analyze student assessment results and learning preferences to generate personalized learning paths with resource recommendations, pacing adjustments, and intervention triggers",
+      "author": "amira-dev",
+      "author_url": "https://github.com/amira-dev",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Education",
+        "Personalized-Learning",
+        "Curriculum",
+        "Assessment",
+        "EdTech"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/student_learning_path_builder.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 69,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 13
+    },
+    {
+      "slug": "kai-security/data-privacy-scanner",
+      "name": "Data Privacy Scanner",
+      "description": "Scan codebases and data flows to discover PII/PHI, classify sensitivity levels, map data lineage, detect compliance violations, and generate Data Protection Impact Assessments",
+      "author": "kai-security",
+      "author_url": "https://github.com/kai-security",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Privacy",
+        "GDPR",
+        "CCPA",
+        "HIPAA",
+        "Compliance",
+        "Security"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/data_privacy_scanner.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~13s",
+      "downloads": 166,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT",
+      "rating": 4.5,
+      "review_count": 27
     }
   ],
   "categories": [
     {
       "id": "sales_crm",
       "name": "Sales & CRM",
-      "count": 15
+      "count": 17
     },
     {
       "id": "marketing",
       "name": "Marketing",
-      "count": 20
+      "count": 24
     },
     {
       "id": "support",
       "name": "Support",
-      "count": 8
+      "count": 9
     },
     {
       "id": "engineering",
       "name": "Engineering",
-      "count": 17
+      "count": 21
     },
     {
       "id": "hr_legal",
       "name": "HR & Legal",
-      "count": 11
+      "count": 13
     },
     {
       "id": "general_ai",
       "name": "General AI",
-      "count": 17
+      "count": 26
     }
   ],
   "stats": {
-    "total_templates": 88,
+    "total_templates": 110,
     "total_authors": 22,
-    "total_downloads": 17365,
+    "total_downloads": 19232,
     "last_updated": "2026-02-25T20:00:00Z"
   },
   "collections": [
@@ -3219,6 +3981,59 @@
         "gizmax/client-onboarding-orchestrator"
       ],
       "downloads": 146
+    },
+    {
+      "id": "compliance-fortress",
+      "name": "Compliance Fortress",
+      "description": "SOC 2/HIPAA/GDPR audit readiness, data privacy scanning, carbon reporting, and patent landscape analysis",
+      "icon": "shield",
+      "template_slugs": [
+        "kai-security/compliance-audit-readiness",
+        "kai-security/data-privacy-scanner",
+        "workflow-lab/carbon-footprint-reporter",
+        "lawtech-ai/patent-landscape-analyzer"
+      ],
+      "downloads": 163
+    },
+    {
+      "id": "crisis-ops",
+      "name": "Crisis & Incident Ops",
+      "description": "PR crisis management, outage postmortems, knowledge base auditing, and codebase health scanning",
+      "icon": "alert-triangle",
+      "template_slugs": [
+        "lena-content/crisis-communication-commander",
+        "ops-ninja/outage-postmortem-generator",
+        "nadia-cx/knowledge-base-auditor",
+        "tomr-eng/codebase-health-scanner"
+      ],
+      "downloads": 125
+    },
+    {
+      "id": "executive-intelligence",
+      "name": "Executive Intelligence",
+      "description": "Board meeting packages, QBR automation, SaaS optimization, and competitive product teardowns",
+      "icon": "bar-chart",
+      "template_slugs": [
+        "datacraft-io/board-meeting-prep",
+        "revops-sam/qbr-autopilot",
+        "ops-ninja/saas-usage-optimizer",
+        "elena-growth/competitive-teardown"
+      ],
+      "downloads": 197
+    },
+    {
+      "id": "industry-verticals",
+      "name": "Industry Verticals",
+      "description": "Construction bids, hotel revenue, insurance claims, tax preprocessing, and permit applications",
+      "icon": "layers",
+      "template_slugs": [
+        "jmartinez/construction-bid-analyzer",
+        "pricewatch/hotel-revenue-optimizer",
+        "workflow-lab/insurance-claims-adjuster",
+        "priya-fintech/tax-return-preprocessor",
+        "jmartinez/permit-application-processor"
+      ],
+      "downloads": 184
     }
   ]
 }

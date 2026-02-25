@@ -1,0 +1,397 @@
+# name: Influencer Campaign Matcher
+# description: Analyze brand requirements and campaign goals, identify optimal influencer matches by content style, audience demographics, engagement authenticity, brand safety, and predicted ROI
+# tags: [Marketing, Influencer, Campaign, Social-Media, ROI]
+# category: marketing
+
+name: influencer-campaign-matcher
+description: Analyze brand requirements and campaign goals, identify optimal influencer matches by content style, audience demographics, engagement authenticity, brand safety, and predicted ROI
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["brand_name", "campaign_goal", "target_audience"]
+  properties:
+    brand_name:
+      type: string
+      description: "Brand or company name running the campaign"
+    campaign_goal:
+      type: string
+      description: "Primary campaign objective: awareness, engagement, conversion, or launch"
+      default: "awareness"
+    target_audience:
+      type: string
+      description: "Target audience description (demographics, interests, behaviors)"
+    budget_range:
+      type: string
+      description: "Campaign budget range (e.g. '$5K-$20K')"
+      default: "$5K-$20K"
+    platform_focus:
+      type: string
+      description: "Comma-separated platforms to focus on"
+      default: "Instagram, TikTok, YouTube"
+    content_category:
+      type: string
+      description: "Content vertical (e.g. 'fitness', 'tech', 'beauty', 'food')"
+
+steps:
+  - id: brand-brief-analysis
+    prompt: |
+      Analyze the brand brief and campaign requirements to build a detailed
+      influencer search profile.
+
+      Brand: {input.brand_name}
+      Campaign goal: {input.campaign_goal}
+      Target audience: {input.target_audience}
+      Budget range: {input.budget_range}
+      Platforms: {input.platform_focus}
+      Content category: {input.content_category}
+
+      Produce a comprehensive brand brief analysis:
+
+      **1. Brand Identity Profile**
+      - Brand positioning and core values
+      - Visual identity characteristics (aesthetic, color palette, mood)
+      - Brand voice attributes (formal/casual, humorous/serious, aspirational/relatable)
+      - Content themes that align with brand messaging
+      - Past campaign examples and what worked (if discoverable)
+      - Competitor influencer strategies observed in market
+
+      **2. Campaign Objective Framework**
+      - Primary KPI definition based on {input.campaign_goal}:
+        - Awareness: reach, impressions, brand mention volume, share of voice
+        - Engagement: engagement rate, comments, saves, shares, UGC volume
+        - Conversion: click-through rate, cost per acquisition, ROAS, promo code usage
+        - Launch: pre-launch signups, day-1 sales, media mentions, social buzz volume
+      - Secondary KPIs to track alongside primary
+      - Benchmark ranges for the content category and platform
+      - Attribution model recommendation (last-click, multi-touch, brand lift study)
+
+      **3. Audience-Influencer Fit Criteria**
+      - Demographic requirements (age, gender, location, income level)
+      - Psychographic alignment (interests, values, lifestyle, aspirations)
+      - Platform behavior patterns (when they browse, what they engage with)
+      - Purchase decision factors for this audience segment
+      - Content format preferences by audience type:
+        - Gen Z: short-form video, authentic/raw, meme culture
+        - Millennials: polished video, educational, lifestyle aspiration
+        - Gen X+: longer-form, review/comparison, expertise-driven
+
+      **4. Influencer Tier Strategy**
+      Based on budget of {input.budget_range}, recommend tier allocation:
+      - Mega (1M+): brand awareness, high reach, low engagement rate
+      - Macro (100K-1M): balanced reach and engagement, category authority
+      - Mid-tier (10K-100K): strong engagement, niche authority, content quality
+      - Micro (1K-10K): highest engagement, community trust, authenticity
+      - Nano (<1K): hyper-local, genuine advocacy, UGC source
+
+      Recommend percentage budget allocation across tiers with rationale.
+
+      **5. Search Criteria Matrix**
+      Build a weighted scoring matrix with these criteria:
+      - Audience match (demographics overlap): weight 25%
+      - Content quality and brand aesthetic fit: weight 20%
+      - Engagement rate authenticity: weight 20%
+      - Platform authority in category: weight 15%
+      - Past brand collaboration success: weight 10%
+      - Cost efficiency (CPM/CPE): weight 10%
+
+      Return the complete brief analysis as structured JSON with all scoring criteria.
+    model: haiku
+    max_turns: 10
+
+  - id: influencer-discovery
+    depends_on: [brand-brief-analysis]
+    prompt: |
+      Discover and profile potential influencer candidates based on the brand
+      brief analysis.
+
+      Brand brief: {steps.brand-brief-analysis.output}
+      Platforms: {input.platform_focus}
+      Content category: {input.content_category}
+      Target audience: {input.target_audience}
+
+      For each platform specified, identify 8-12 influencer candidates across
+      the recommended tier mix. For each candidate, extract:
+
+      **1. Profile Overview**
+      - Username/handle and platform
+      - Follower count and growth trajectory (growing/stable/declining)
+      - Content category and niche specialization
+      - Geographic base and audience geography distribution
+      - Posting frequency and consistency score (1-10)
+      - Account age and maturity
+
+      **2. Content Analysis**
+      - Content format mix (video %, carousel %, static %, stories %)
+      - Average production quality score (1-10)
+      - Visual aesthetic alignment with brand (1-10)
+      - Tone and voice characteristics
+      - Top 5 performing content themes
+      - Content originality vs trend-following ratio
+      - Caption quality and storytelling ability
+
+      **3. Audience Demographics**
+      - Age distribution (estimated %)
+      - Gender split
+      - Top 5 geographic locations
+      - Interest categories of followers
+      - Estimated income bracket of audience
+      - Audience overlap with brand's target (estimated %)
+
+      **4. Engagement Metrics**
+      - Average engagement rate (likes + comments / followers)
+      - Comment quality assessment (genuine vs spam/bot ratio)
+      - Save rate and share rate (if estimable)
+      - Stories engagement and completion rate
+      - Reels/Shorts view-to-follower ratio
+      - Community sentiment in comments (positive/neutral/negative)
+
+      **5. Collaboration History**
+      - Past brand partnerships identified
+      - Industry/category of past sponsors
+      - Frequency of sponsored content vs organic
+      - FTC/ASA disclosure compliance observed
+      - Estimated rate card based on tier and engagement
+
+      Compile all candidates into a ranked shortlist per platform with
+      initial fit scores based on the brand brief criteria matrix.
+    model: sonnet
+    max_turns: 10
+
+  - id: authenticity-scoring
+    depends_on: [influencer-discovery]
+    prompt: |
+      Perform deep authenticity and engagement quality analysis on the
+      discovered influencer candidates.
+
+      Influencer candidates: {steps.influencer-discovery.output}
+      Brand: {input.brand_name}
+
+      For each candidate, run authenticity checks:
+
+      **1. Follower Authenticity Assessment**
+      - Follower growth pattern analysis:
+        - Organic growth: gradual, consistent with content milestones
+        - Suspicious growth: sudden spikes without viral content
+        - Purchased followers: rapid jumps followed by unfollows
+      - Follower-to-following ratio analysis
+      - Ghost follower estimation (inactive accounts percentage)
+      - Bot follower indicators (generic usernames, no profile photos, no posts)
+      - Follower authenticity score: 1-100
+
+      **2. Engagement Authenticity**
+      - Comment analysis:
+        - Generic comments ratio ("Nice!", "Love this!", emoji-only)
+        - Substantive comments ratio (questions, personal stories, debate)
+        - Comment timing patterns (natural spread vs clustered)
+        - Repeat commenter identification (engagement pod indicators)
+      - Like-to-comment ratio (healthy range: 2-5% comments per likes)
+      - Engagement rate consistency across posts (high variance = suspicious)
+      - Engagement decay analysis (does engagement drop on non-sponsored posts?)
+      - Engagement authenticity score: 1-100
+
+      **3. Audience Quality Assessment**
+      - Active vs passive follower ratio
+      - Audience reachability (% of followers who see posts)
+      - Audience loyalty indicators (repeat engagers, story viewers)
+      - Cross-platform audience overlap (same people on IG and TikTok?)
+      - Audience quality score: 1-100
+
+      **4. Influence Credibility**
+      - Expertise signals in content (depth of knowledge, original insights)
+      - Community trust indicators (people asking for advice, tagging friends)
+      - Thought leadership vs content creation distinction
+      - Media mentions and cross-platform citations
+      - Credibility score: 1-100
+
+      **5. Composite Authenticity Score**
+      Calculate weighted composite:
+      - Follower authenticity: 30%
+      - Engagement authenticity: 30%
+      - Audience quality: 25%
+      - Influence credibility: 15%
+
+      Flag any candidates with composite score below 60 as high-risk.
+      Rank all candidates by authenticity score within each tier.
+    model: sonnet
+    max_turns: 10
+
+  - id: brand-safety-check
+    depends_on: [influencer-discovery]
+    prompt: |
+      Conduct brand safety analysis for each influencer candidate.
+
+      Influencer candidates: {steps.influencer-discovery.output}
+      Brand: {input.brand_name}
+
+      For each candidate, assess brand safety across these dimensions:
+
+      **1. Content History Scan**
+      - Controversial topics or statements in past 12 months
+      - Political content that could alienate audience segments
+      - Profanity, explicit content, or age-inappropriate material
+      - Substance use or promotion
+      - Misinformation or unverified health/science claims
+      - Content that contradicts brand values
+
+      **2. Competitor Association**
+      - Past or current partnerships with direct competitors
+      - Exclusivity conflict risk
+      - Frequency of competitor product mentions (even organic)
+      - Category saturation (too many brands in same vertical)
+
+      **3. Legal and Compliance Risk**
+      - FTC/ASA disclosure compliance history
+      - Past advertising standards violations
+      - Pending lawsuits or legal issues
+      - Content rights and licensing clarity
+      - Regulatory risk for the brand's industry (pharma, finance, alcohol)
+
+      **4. Reputation Trajectory**
+      - Sentiment trend over last 6 months (improving/declining)
+      - Recent controversies or "cancellation" attempts
+      - Crisis response history (how they handled past issues)
+      - Public perception stability score
+
+      **5. Brand Safety Score**
+      - Low risk (80-100): clean history, aligned values, no controversies
+      - Medium risk (50-79): minor concerns, manageable with guidelines
+      - High risk (below 50): significant concerns, not recommended
+      - Disqualified: active controversies or competitor conflicts
+
+      For medium-risk candidates, provide specific mitigation strategies
+      (content approval clauses, exclusivity requirements, morality clause).
+
+      Return brand safety scorecard for all candidates with clear
+      go/no-go recommendations.
+    model: haiku
+    max_turns: 10
+
+  - id: roi-prediction
+    depends_on: [influencer-discovery, authenticity-scoring, brand-safety-check]
+    prompt: |
+      Predict campaign ROI for each qualified influencer candidate.
+
+      Influencer profiles: {steps.influencer-discovery.output}
+      Authenticity scores: {steps.authenticity-scoring.output}
+      Brand safety: {steps.brand-safety-check.output}
+      Campaign goal: {input.campaign_goal}
+      Budget: {input.budget_range}
+
+      For each candidate that passed brand safety (score >= 50) and
+      authenticity (score >= 60), model predicted ROI:
+
+      **1. Reach and Impression Modeling**
+      - Estimated organic reach per post (% of followers)
+      - Platform algorithm favorability for content type
+      - Viral coefficient estimation based on past performance
+      - Cross-platform amplification potential
+      - Total estimated impressions per deliverable
+
+      **2. Engagement Prediction**
+      - Expected engagement rate adjusted for authenticity score
+      - Comment volume and sentiment prediction
+      - Save and share rate estimation
+      - UGC generation probability (followers creating derivative content)
+      - Hashtag performance prediction
+
+      **3. Conversion Modeling** (for conversion/launch goals)
+      - Click-through rate estimation by platform and content type
+      - Landing page conversion rate assumption
+      - Promo code redemption rate benchmarks
+      - Average order value impact
+      - Customer lifetime value consideration
+
+      **4. Cost Efficiency Metrics**
+      Per influencer, calculate:
+      - CPM (Cost Per Mille impressions)
+      - CPE (Cost Per Engagement)
+      - CPC (Cost Per Click) estimated
+      - CPA (Cost Per Acquisition) estimated for conversion campaigns
+      - EMV (Earned Media Value) potential
+      - ROI ratio: expected return / investment
+
+      **5. Portfolio Optimization**
+      Using the full candidate pool:
+      - Optimal budget allocation across selected influencers
+      - Audience overlap analysis (avoid paying for same eyeballs twice)
+      - Content mix optimization (format diversity)
+      - Timeline staggering for sustained visibility
+      - Total campaign ROI projection with confidence interval (low/mid/high)
+
+      Rank all qualified candidates by ROI efficiency within budget constraints.
+    model: sonnet
+    max_turns: 10
+
+  - id: campaign-plan
+    depends_on: [roi-prediction]
+    prompt: |
+      Compile the complete influencer campaign plan with selected partners,
+      content strategy, timeline, and measurement framework.
+
+      ROI predictions: {steps.roi-prediction.output}
+      Brand brief: {steps.brand-brief-analysis.output}
+      Brand: {input.brand_name}
+      Budget: {input.budget_range}
+      Goal: {input.campaign_goal}
+
+      **1. Selected Influencer Portfolio**
+      - Final roster with allocated budget per influencer
+      - Role assignment: hero content creator, amplifier, UGC seeder
+      - Deliverable specifications per influencer:
+        - Content format, quantity, and timing
+        - Key messaging requirements
+        - Hashtags, mentions, and links
+        - Disclosure requirements
+      - Total portfolio metrics (combined reach, expected engagement)
+
+      **2. Content Strategy**
+      - Content brief template for each influencer tier
+      - Creative direction guidelines (dos and don'ts)
+      - Key messages hierarchy (must-include, nice-to-have)
+      - Content approval workflow (review rounds, turnaround times)
+      - Repurposing rights and usage terms
+      - UGC contest or challenge design (if applicable)
+
+      **3. Campaign Timeline**
+      - Phase 1: Outreach and contracting (week 1-2)
+      - Phase 2: Briefing and content creation (week 2-4)
+      - Phase 3: Content review and approval (week 4-5)
+      - Phase 4: Staggered publishing schedule (week 5-8)
+      - Phase 5: Amplification and engagement (week 5-10)
+      - Phase 6: Reporting and analysis (week 10-12)
+      - Day-by-day publishing calendar for Phase 4
+
+      **4. Contract and Negotiation**
+      - Rate negotiation strategy per tier
+      - Standard contract clauses: deliverables, timeline, payment terms
+      - Exclusivity period recommendation
+      - Content ownership and licensing terms
+      - Performance bonus structure (if exceeding KPIs)
+      - Cancellation and morality clause language
+
+      **5. Measurement Framework**
+      - Real-time tracking dashboard metrics
+      - Weekly performance report template
+      - Mid-campaign optimization triggers:
+        - If engagement below 50% of predicted: action plan
+        - If engagement above 150% of predicted: amplification plan
+      - Final campaign report structure:
+        - Performance vs KPI targets
+        - ROI calculation with attribution
+        - Top performing content analysis
+        - Audience insights gained
+        - Recommendations for next campaign
+
+      **6. Budget Summary**
+      - Line-item budget: influencer fees, production support, paid amplification,
+        tools and tracking, contingency (10%)
+      - Payment schedule aligned with deliverable milestones
+      - Total projected ROI with confidence range
+
+      Format as a professional campaign brief suitable for client or
+      leadership approval.
+    model: sonnet
+    max_turns: 10

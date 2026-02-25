@@ -1,0 +1,726 @@
+# name: Hotel Revenue Optimizer
+# description: Analyze booking patterns, competitor rates, events, weather, and seasonal trends to generate dynamic room pricing, occupancy forecasts, and revenue management strategies
+# tags: [Hospitality, Revenue-Management, Pricing, Forecasting, Hotels]
+# category: general_ai
+
+name: hotel-revenue-optimizer
+description: Analyze booking patterns, competitor rates, events, weather, and seasonal trends to generate dynamic room pricing, occupancy forecasts, and revenue management strategies
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["hotel_name", "location"]
+  properties:
+    hotel_name:
+      type: string
+      description: "Name of the hotel property to optimize (e.g. 'Grand Marina Resort', 'Downtown Business Hotel')"
+    location:
+      type: string
+      description: "Hotel location - city, state/province, country (e.g. 'San Diego, CA, USA', 'Barcelona, Spain')"
+    room_types:
+      type: string
+      description: "Comma-separated list of room types and inventory counts (e.g. 'Standard King:80, Deluxe Double:45, Suite:12, Presidential:2')"
+    competitor_hotels:
+      type: string
+      description: "Comma-separated list of primary competitor hotels to monitor (e.g. 'Hilton Downtown, Marriott Waterfront, Hyatt Regency')"
+    planning_horizon:
+      type: string
+      description: "Forward-looking planning period for pricing and forecasting"
+      default: "30 days"
+
+steps:
+  - id: market-analysis
+    prompt: |
+      You are a senior hospitality market analyst specializing in the {input.location} lodging market.
+      Perform a comprehensive market analysis for {input.hotel_name} that will serve as the foundation
+      for demand forecasting and revenue optimization.
+
+      HOTEL CONTEXT:
+      - Property: {input.hotel_name}
+      - Location: {input.location}
+      - Room types: {input.room_types}
+      - Competitor set: {input.competitor_hotels}
+      - Planning horizon: {input.planning_horizon}
+
+      MARKET ANALYSIS FRAMEWORK:
+
+      1. LOCAL MARKET CHARACTERIZATION
+         Analyze the {input.location} hotel market across these dimensions:
+         - Market tier classification: gateway/primary, secondary, tertiary, resort/destination
+         - Demand generators: What drives overnight stays in this market?
+           * Business demand: corporate headquarters, business parks, convention centers
+           * Leisure demand: attractions, beaches, entertainment districts, national parks
+           * Group demand: convention center capacity, major event venues
+           * Government/institutional: military bases, universities, hospitals
+         - Supply dynamics: approximate total hotel rooms in the competitive set,
+           new supply pipeline (rooms under construction or announced)
+         - Seasonality profile: identify peak, shoulder, and trough seasons with
+           approximate occupancy ranges for each (e.g., "Peak Jun-Aug: 85-95%,
+           Shoulder Apr-May/Sep-Oct: 65-75%, Trough Nov-Mar: 45-55%")
+         - Market segmentation mix: estimated percentage split between
+           transient business, transient leisure, group/MICE, government/contract,
+           wholesale/OTA, airline crew, extended stay
+
+      2. KEY PERFORMANCE INDICATOR BENCHMARKS
+         Establish market-level KPI benchmarks for {input.location}:
+         - ADR (Average Daily Rate): market average and range by chain scale
+         - RevPAR (Revenue Per Available Room): market average by season
+         - Occupancy: market average by day-of-week and season
+         - TRevPAR (Total Revenue Per Available Room): including F&B, spa, parking, etc.
+         - GOPPAR (Gross Operating Profit Per Available Room): profitability benchmark
+         - Market penetration indices:
+           * ARI (Average Rate Index): property ADR / comp set ADR
+           * MPI (Market Penetration Index): property occupancy / comp set occupancy
+           * RGI (Revenue Generation Index): property RevPAR / comp set RevPAR
+           Target: ARI > 100, MPI > 100, RGI > 100 indicates outperformance
+
+      3. DEMAND SEGMENTATION ANALYSIS
+         For {input.hotel_name}, analyze each demand segment:
+
+         a) TRANSIENT BUSINESS
+            - Typical booking window (1-7 days out)
+            - Rate sensitivity (low - values location and amenities over price)
+            - Day-of-week pattern (strong Mon-Thu, weak Fri-Sun)
+            - Cancellation behavior and no-show rates
+            - Loyalty program impact
+            - Corporate negotiated rate considerations
+
+         b) TRANSIENT LEISURE
+            - Typical booking window (14-60 days out)
+            - Rate sensitivity (high - compares across OTAs and properties)
+            - Day-of-week pattern (strong Fri-Sun, variable midweek)
+            - Length of stay patterns
+            - Package preferences (breakfast included, parking, attraction tickets)
+            - Seasonal demand correlation
+
+         c) GROUP AND MEETINGS
+            - Typical booking window (60-365 days out)
+            - Rate negotiation dynamics (10-30% discount off BAR typical)
+            - Minimum night and room block requirements
+            - Attrition risk and wash factor (typically 15-25% of block)
+            - Ancillary revenue potential (F&B, AV, room rental)
+            - Citywide convention impact vs. in-house groups
+
+         d) WHOLESALE AND OTA
+            - Channel distribution cost (15-25% commission on OTAs)
+            - Net rate vs. commission model implications
+            - Opaque channel strategy (Hotwire, Priceline Express)
+            - Rate parity requirements and implications
+            - Last-minute inventory strategy
+
+      4. SUPPLY-SIDE COMPETITIVE LANDSCAPE
+         For each competitor in the comp set ({input.competitor_hotels}):
+         - Property characteristics: room count, chain scale, star rating, year built/renovated
+         - Location advantage/disadvantage relative to {input.hotel_name}
+         - Amenity comparison: F&B outlets, meeting space SF, pool, spa, fitness, parking
+         - Brand strength and loyalty program size
+         - Online reputation: typical review scores on TripAdvisor, Google, Booking.com
+         - Recent pricing behavior: aggressive, moderate, or premium positioning
+         - Renovation status: recently renovated (rate premium justified) vs. needs updating
+
+      5. MACROECONOMIC AND TRAVEL TREND FACTORS
+         Assess how broader trends affect {input.location} hotel demand:
+         - Air travel capacity: flight seats into nearest airports, new route announcements
+         - Gas prices: impact on drive-to leisure demand
+         - Corporate travel policy trends: post-pandemic normalization status
+         - Remote work impact: "bleisure" travel trends
+         - International visitor trends: visa policies, exchange rates, direct flights
+         - Short-term rental competition: Airbnb/VRBO supply impact in {input.location}
+
+      Produce a structured market intelligence briefing with data tables, trend arrows,
+      and clear implications for pricing strategy.
+    model: sonnet
+    max_turns: 10
+
+  - id: demand-forecasting
+    depends_on: [market-analysis]
+    prompt: |
+      You are a revenue management analyst building a demand forecast model for {input.hotel_name}.
+      Using the market analysis, construct a day-by-day demand forecast for the planning horizon.
+
+      MARKET ANALYSIS:
+      {steps.market-analysis.output}
+
+      HOTEL CONTEXT:
+      - Property: {input.hotel_name}
+      - Location: {input.location}
+      - Room types: {input.room_types}
+      - Planning horizon: {input.planning_horizon}
+
+      DEMAND FORECASTING METHODOLOGY:
+
+      1. BASELINE DEMAND CURVE CONSTRUCTION
+         Build a baseline demand curve using multiple forecasting layers:
+
+         a) DAY-OF-WEEK PATTERN
+            Establish the typical occupancy pattern by day of week for each demand segment.
+            For each day (Monday through Sunday), estimate:
+            - Business transient demand (number of room nights)
+            - Leisure transient demand
+            - Group demand (from known bookings plus wash factor)
+            - Contract/government demand
+            - Wholesale/OTA demand
+
+            Typical day-of-week indices (100 = average):
+            - Monday: 105-115 (business ramp-up)
+            - Tuesday: 115-125 (peak business)
+            - Wednesday: 115-125 (peak business)
+            - Thursday: 100-110 (business wind-down, some leisure early arrivals)
+            - Friday: 80-100 (leisure arrivals replace business departures)
+            - Saturday: 70-95 (leisure-dependent, varies heavily by market type)
+            - Sunday: 60-80 (lowest demand day in most markets)
+
+            IMPORTANT: These indices vary dramatically by market type:
+            - Convention market: midweek spikes around events
+            - Resort market: weekend/holiday peaks, midweek troughs
+            - Airport market: relatively flat with business travel patterns
+            - Suburban market: lower weekend demand, some sports/event spikes
+
+         b) SEASONAL ADJUSTMENT
+            Apply seasonal multipliers to the day-of-week baseline:
+            - Map the planning horizon ({input.planning_horizon}) to the seasonal profile
+            - Apply weekly seasonal indices based on {input.location} seasonality
+            - Account for shoulder season transitions (demand ramps up/down gradually)
+
+         c) TREND ADJUSTMENT
+            Apply year-over-year growth or decline trends:
+            - Market-wide demand growth rate
+            - Property-specific factors (recent renovation, new competition, brand change)
+            - Economic indicators (employment, GDP, consumer confidence)
+
+      2. EVENT AND HOLIDAY OVERLAY
+         Identify all demand-impacting events during the planning horizon for {input.location}:
+
+         a) HOLIDAYS AND OBSERVANCES
+            - Federal/national holidays (impact varies: some boost leisure, some hurt business)
+            - School vacation periods (spring break, summer, winter break)
+            - Religious observances (Easter, Ramadan, Chinese New Year)
+            For each holiday, estimate the demand impact: +X% or -X% by segment
+
+         b) CITYWIDE EVENTS
+            - Conventions and trade shows at the convention center
+            - Sporting events (professional, college, marathons, tournaments)
+            - Concerts and festivals
+            - Political events, inaugurations, rallies
+            For each event, estimate:
+            - Room night impact (how many incremental rooms consumed)
+            - Compression effect (spillover to surrounding hotels)
+            - Length of impact (arrival day through departure day)
+            - Historical ADR lift during similar events
+
+         c) LOCAL EVENTS AND DEMAND GENERATORS
+            - University move-in/graduation weekends
+            - Hospital-related demand patterns
+            - Military events (deployments, homecomings, ceremonies)
+            - Corporate events at nearby business campuses
+
+      3. WEATHER IMPACT MODELING
+         For {input.location}, model weather's impact on demand:
+         - Historical weather patterns for the planning period
+         - Impact of adverse weather: rain, snow, extreme heat, hurricanes
+         - Leisure cancellation/rebooking rates during weather events
+         - Business travel: less weather-sensitive but impacted by flight cancellations
+         - Outdoor attraction dependency: beach hotels, ski resorts, golf resorts
+         Assign weather risk factors by week: low/medium/high with demand adjustment %
+
+      4. BOOKING PACE ANALYSIS
+         Model the expected booking pace (on-the-books trajectory):
+         - Days out vs. expected pickup curve by segment
+         - Lead time distribution: what percentage of rooms book at 30, 14, 7, 3, 1, 0 days out
+         - Last-minute booking surge potential (especially for leisure and OTA)
+         - Group wash projection: expected attrition from current group blocks
+         - Cancellation forecast: expected cancellations by segment (business 10-15%, leisure 15-25%)
+
+      5. DEMAND FORECAST OUTPUT
+         Produce a day-by-day forecast table for each day in the planning horizon:
+         [Date] | [Day] | [Season] | [Events] | [Weather Risk] |
+         [Forecast Occ%] | [Demand by Segment] | [Confidence Level] |
+         [Constrained Demand (capped at capacity)] | [Unconstrained Demand (true market demand)]
+
+         Highlight:
+         - Compression nights (demand exceeds supply): pricing power opportunity
+         - Need nights (demand well below supply): promotional pricing opportunity
+         - Shoulder nights (moderate demand): standard pricing
+         - Group displacement opportunities: nights where turning away groups to sell
+           higher-rated transient business is profitable
+
+      Include a weekly summary roll-up and flag the top 5 highest-demand and lowest-demand
+      periods with strategic recommendations for each.
+    model: haiku
+    max_turns: 10
+
+  - id: competitor-rate-scan
+    depends_on: [market-analysis]
+    prompt: |
+      You are a competitive intelligence analyst specializing in hotel rate shopping and
+      competitor pricing strategy. Perform a detailed competitive rate analysis for
+      {input.hotel_name} against its comp set.
+
+      MARKET ANALYSIS:
+      {steps.market-analysis.output}
+
+      HOTEL CONTEXT:
+      - Property: {input.hotel_name}
+      - Location: {input.location}
+      - Room types: {input.room_types}
+      - Competitor set: {input.competitor_hotels}
+      - Planning horizon: {input.planning_horizon}
+
+      COMPETITIVE RATE ANALYSIS:
+
+      1. RATE SHOPPING FRAMEWORK
+         For each competitor ({input.competitor_hotels}), analyze their current and expected
+         pricing across multiple dimensions:
+
+         a) RATE STRUCTURE ANALYSIS
+            - Best Available Rate (BAR) by room type
+            - Advance purchase rates (7-day, 14-day, 21-day, 30-day)
+            - Non-refundable rate discount (typically 10-15% off BAR)
+            - Member/loyalty rate discount
+            - AAA/AARP/government/military rates
+            - Package rates (breakfast included, parking included)
+            - Extended stay rates (7+ nights, 14+ nights, 30+ nights)
+
+         b) RATE TIER POSITIONING
+            For each date in the planning horizon, estimate where each competitor
+            prices relative to the market:
+            - Premium position: 10-20% above comp set average
+            - Market rate: within 5% of comp set average
+            - Value position: 10-20% below comp set average
+            - Distressed pricing: >20% below (signals low demand expectations)
+
+         c) CHANNEL-SPECIFIC PRICING
+            Analyze pricing variations across distribution channels:
+            - Brand.com (direct booking): typically best rate guarantee
+            - Expedia/Hotels.com rates
+            - Booking.com rates
+            - Google Hotel Ads pricing
+            - Opaque channels (Hotwire, Priceline Express Deals)
+            - Wholesale/tour operator rates visible on reseller sites
+            - Metasearch aggregator pricing (TripAdvisor, Kayak, Trivago)
+
+      2. RATE PARITY ANALYSIS
+         Evaluate rate parity compliance across the comp set:
+         - Which competitors maintain strict rate parity across all channels?
+         - Which competitors "leak" lower rates to specific OTAs or wholesalers?
+         - How does rate parity violation impact market pricing dynamics?
+         - Identify opportunities where {input.hotel_name} can capture demand by
+           maintaining better rate integrity than competitors who undercut themselves
+
+      3. COMPETITOR PRICING BEHAVIOR PATTERNS
+         Analyze each competitor's revenue management sophistication:
+
+         a) RATE CHANGE FREQUENCY
+            - Daily dynamic pricing (sophisticated RM)
+            - Weekly adjustments (moderate RM)
+            - Seasonal pricing only (basic RM)
+            - Static pricing (no RM)
+
+         b) DEMAND RESPONSE PATTERNS
+            - How quickly do they raise rates when demand increases?
+            - How deeply do they discount during low demand?
+            - Do they close lower rate tiers progressively or keep all tiers open?
+            - Do they use length-of-stay restrictions (MinLOS, MaxLOS)?
+            - Do they use closed-to-arrival (CTA) restrictions on high-demand nights?
+
+         c) COMPETITIVE RESPONSE PATTERNS
+            - Price leaders vs. price followers in the comp set
+            - Rate matching behavior: who follows whom?
+            - Aggressive competitors who consistently undercut the market
+            - Premium holdouts who maintain rates even during soft demand
+
+      4. RATE FENCE STRATEGY COMPARISON
+         Analyze the rate fence architecture of each competitor:
+         - Physical fences: room type upgrades and differentials
+         - Non-physical fences: cancellation policy, prepayment, loyalty status
+         - Time-based fences: advance purchase, last-minute, length of stay
+         - Channel fences: direct booking perks, mobile-only rates
+         - Group fences: minimum block size, concessions (comp rooms, rate discounts)
+
+         For each competitor, identify:
+         - Their most effective rate fences (preventing rate dilution)
+         - Their weakest rate fences (allowing customers to "game" to lower rates)
+         - Rate fence innovations that {input.hotel_name} should consider adopting
+
+      5. VALUE PERCEPTION ANALYSIS
+         Beyond rate, analyze the overall value proposition of each competitor:
+         - Included amenities (breakfast, WiFi, parking, airport shuttle)
+         - Loyalty program earning rates and redemption value
+         - Room product quality relative to rate (review-based assessment)
+         - Service quality reputation
+         - Net effective rate after including/excluding amenities
+
+         Calculate the "rate-adjusted value score" for each competitor:
+         Value Score = (Review Score / 5.0) * 100 / (Rate / Comp Set Average Rate)
+         A score > 100 indicates the property over-delivers on value relative to its rate.
+
+      6. COMPETITIVE INTELLIGENCE SUMMARY
+         Produce a competitive rate intelligence report with:
+         - Rate positioning matrix: competitors plotted on price vs. quality grid
+         - Rate advantage/disadvantage table by date and room type
+         - Competitive threat assessment: which competitors are most dangerous and why
+         - Pricing opportunities: dates/segments where competitors leave money on the table
+         - Recommended rate position for {input.hotel_name} relative to each competitor
+
+      Format all pricing data in clear comparison tables suitable for RM team daily use.
+    model: sonnet
+    max_turns: 10
+
+  - id: event-calendar-analysis
+    depends_on: [market-analysis]
+    prompt: |
+      You are an event and demand intelligence analyst for {input.hotel_name}. Build a comprehensive
+      event calendar that maps demand drivers for the planning horizon and beyond.
+
+      MARKET ANALYSIS:
+      {steps.market-analysis.output}
+
+      HOTEL CONTEXT:
+      - Property: {input.hotel_name}
+      - Location: {input.location}
+      - Planning horizon: {input.planning_horizon}
+
+      EVENT CALENDAR ANALYSIS:
+
+      1. CITYWIDE EVENT INVENTORY
+         Research and catalog every known event in {input.location} during and slightly beyond
+         the planning horizon ({input.planning_horizon}):
+
+         a) CONVENTIONS AND TRADE SHOWS
+            For each event:
+            - Event name and organizer
+            - Dates (move-in, event dates, move-out)
+            - Expected attendance
+            - Estimated room nights generated
+            - History: has this event been held here before? Growing or shrinking?
+            - Hotel block patterns: does the event use an official hotel block?
+            - Walk-in/overflow demand estimate for non-headquarter hotels
+
+         b) SPORTING EVENTS
+            - Professional sports schedules (home games for all major teams)
+            - College sports (especially football, basketball, bowl games)
+            - Tournaments and championships
+            - Marathons, triathlons, and participatory events
+            - Extreme/niche sports events
+            For each: date, estimated out-of-town visitors, typical demand impact
+
+         c) CONCERTS, FESTIVALS, AND ENTERTAINMENT
+            - Arena and stadium concerts
+            - Music festivals and multi-day events
+            - Food and drink festivals
+            - Cultural events and parades
+            - Theatre and performing arts events (if venue is significant)
+            For each: date, expected attendance, percentage out-of-town, demand impact
+
+         d) BUSINESS AND CORPORATE EVENTS
+            - Major corporate meetings or product launches
+            - Industry conferences at local venues
+            - Job fairs and career events
+            - Technology and startup events
+
+         e) ACADEMIC AND INSTITUTIONAL EVENTS
+            - University graduation weekends (very high demand)
+            - Move-in weekends
+            - Parents' weekends and homecoming
+            - Academic conferences
+            - Hospital-related events and medical conferences
+
+      2. HOLIDAY AND SCHOOL CALENDAR MAPPING
+         Map all relevant holidays and school schedules:
+         - Federal/national holidays with exact dates
+         - Local school district calendar: start dates, breaks, end dates
+         - University calendar: semesters, breaks, finals
+         - Religious holidays that may affect travel patterns
+         - Three-day weekend opportunities (holiday + Monday/Friday)
+         For each period, classify as: demand boost, demand reduction, or neutral
+
+      3. WEATHER AND SEASONAL EVENT CORRELATION
+         Analyze how weather patterns in {input.location} interact with events:
+         - Outdoor events at risk of weather cancellation or reduced attendance
+         - Indoor events that benefit from bad weather (people seek indoor activities)
+         - Seasonal activities: beach season, ski season, foliage season, cherry blossoms
+         - Weather-dependent feeder markets: when source markets have bad weather,
+           do they travel MORE (escape weather) or LESS (disrupted flights)?
+
+      4. DEMAND IMPACT QUANTIFICATION
+         For each identified event, quantify the expected impact on {input.hotel_name}:
+         - Direct room night demand (rooms the event generates for this hotel)
+         - Compression effect (other demand pushed to this hotel when event hotels fill)
+         - ADR impact: estimated rate lift/decline during the event
+         - Length of stay impact: do event attendees stay 1, 2, 3+ nights?
+         - Arrival and departure patterns: which nights benefit most?
+         - Ancillary revenue impact: F&B, parking, meeting rooms, banquets
+
+         Categorize each event's impact level:
+         - Major (citywide compression): >5% occupancy lift, >10% ADR lift
+         - Moderate (localized demand): 2-5% occupancy lift, 5-10% ADR lift
+         - Minor (supplemental demand): <2% occupancy lift, minimal ADR impact
+         - Negative (demand suppressant): reduces demand (e.g., construction, road closures)
+
+      5. EVENT-DRIVEN PRICING TRIGGERS
+         For each significant event, define pricing action triggers:
+         - Pre-event trigger: when to raise rates (typically 60-90 days out for major events)
+         - Minimum rate floor during the event
+         - Length-of-stay restrictions to apply
+         - Close-to-arrival dates to restrict
+         - Group displacement recommendation: should groups be displaced for this event?
+         - Overbooking tolerance: how much to overbook given no-show/cancellation rates
+
+      6. FORWARD-LOOKING EVENT PIPELINE
+         Look beyond the current planning horizon to identify:
+         - Recurring annual events and their confirmed dates
+         - Newly announced events coming to {input.location}
+         - Events that may leave the market (contract expirations, venue changes)
+         - Bid events that {input.location} is competing to host
+         - Infrastructure changes affecting events (new venue, expanded convention center)
+
+      Produce a comprehensive event calendar in chronological order with demand impact scores,
+      pricing trigger dates, and strategic notes for each event period.
+    model: haiku
+    max_turns: 10
+
+  - id: pricing-optimization
+    depends_on: [demand-forecasting, competitor-rate-scan, event-calendar-analysis]
+    prompt: |
+      You are the Director of Revenue Management for {input.hotel_name}. Using the demand forecast,
+      competitive rate intelligence, and event calendar, build an optimized pricing strategy for
+      the planning horizon.
+
+      DEMAND FORECAST:
+      {steps.demand-forecasting.output}
+
+      COMPETITIVE RATE INTELLIGENCE:
+      {steps.competitor-rate-scan.output}
+
+      EVENT CALENDAR:
+      {steps.event-calendar-analysis.output}
+
+      HOTEL CONTEXT:
+      - Property: {input.hotel_name}
+      - Location: {input.location}
+      - Room types: {input.room_types}
+      - Competitor set: {input.competitor_hotels}
+      - Planning horizon: {input.planning_horizon}
+
+      PRICING OPTIMIZATION METHODOLOGY:
+
+      1. RATE ARCHITECTURE DESIGN
+         Define the optimal rate structure for {input.hotel_name}:
+
+         a) RATE TIERS BY ROOM TYPE
+            For each room type ({input.room_types}), establish:
+            - Rack rate (ceiling): maximum published rate
+            - BAR (Best Available Rate) range: seasonal floor to peak ceiling
+            - Advance purchase tiers: 7, 14, 21, 30 day discounts (5-15% graduated)
+            - Non-refundable tier: 10-15% below BAR
+            - Loyalty/member rate: 5-10% below BAR
+            - Government/military rate: per diem rate or negotiated
+            - AAA/AARP: 10-15% below BAR
+            - Wholesale net rate: 20-30% below BAR (for tour operators and wholesalers)
+
+            Room type differentials (based on market positioning):
+            - Standard to Deluxe: typically $20-50 or 15-25% premium
+            - Deluxe to Suite: typically $75-150 or 40-80% premium
+            - Suite to Premium/Presidential: typically 2-3x standard rate
+
+         b) RATE FENCE STRATEGY
+            Design rate fences to maximize revenue from each customer segment:
+            - Advance purchase: require prepayment, non-refundable for lowest rates
+            - Length of stay: MinLOS 2-3 nights during peak events to prevent cherry-picking
+            - Day-of-week: weekend rates vs. weekday rates
+            - Channel: direct booking perks (free WiFi, late checkout, points) to drive channel shift
+            - Membership: loyalty tiers with escalating benefits, not just rate discounts
+            - Packaging: create value without discounting base rate (add breakfast for $15 vs. discount room by $30)
+
+      2. DYNAMIC PRICING RECOMMENDATIONS
+         For each day in the planning horizon, recommend specific rates:
+
+         [Date] | [Day] | [Forecast Occ%] | [Event Impact] | [Comp Set Avg Rate] |
+         [Recommended BAR by Room Type] | [Rate Tier Availability] | [Restrictions] | [Rationale]
+
+         Apply these dynamic pricing principles:
+         - Demand > 85% forecast: aggressive rate increases, close lowest 2-3 rate tiers,
+           apply MinLOS 2 nights, reduce OTA allocation
+         - Demand 70-85% forecast: moderate rate positioning at or above comp set,
+           close lowest 1-2 rate tiers, standard availability
+         - Demand 55-70% forecast: competitive rate positioning, all tiers open,
+           consider value-add packages to stimulate demand
+         - Demand < 55% forecast: promotional pricing, open opaque channels,
+           consider flash sales or OTA promotions, no restrictions
+
+      3. OVERBOOKING STRATEGY
+         Define overbooking levels by demand scenario:
+         - High demand nights (>90% forecast): overbook 5-8% based on historical no-show rate
+         - Moderate demand nights (70-90%): overbook 3-5%
+         - Low demand nights (<70%): no overbooking
+         - Event nights: adjust based on event-specific no-show patterns
+         Calculate the cost of walk (relocating a guest) vs. cost of empty room to
+         optimize overbooking levels. Typical walk cost: 1 room night at competitor +
+         transportation + compensation = $200-400 depending on market.
+
+      4. CHANNEL DISTRIBUTION OPTIMIZATION
+         Recommend distribution strategy by demand level:
+         - High demand: reduce OTA allocation, close opaque channels, push direct bookings
+         - Moderate demand: maintain standard OTA allocation, keep direct booking incentives
+         - Low demand: expand OTA visibility, open opaque channels, consider flash sales
+         - Always: maintain rate parity, leverage brand.com direct booking perks
+
+         Net revenue optimization by channel:
+         - Direct booking: 100% of rate (minus loyalty costs ~3-5%)
+         - Brand channels: 95-97% of rate
+         - OTAs (commission model): 75-85% of rate
+         - OTAs (merchant model): 70-80% of rate
+         - Wholesale: 65-75% of rate
+         - Opaque: variable, but useful for distressed inventory
+
+      5. GROUP PRICING AND DISPLACEMENT ANALYSIS
+         For any group opportunities during the planning horizon:
+         - Calculate displacement cost: transient revenue lost by accepting group
+         - Group revenue calculation: (rooms x rate x nights) + ancillary (F&B, AV, room rental)
+         - Decision threshold: accept group only if group total revenue > displaced transient revenue
+         - Include shoulder night benefit: groups that fill need-nights adjacent to peak nights
+           create value beyond their room revenue
+         - Recommend: accept, negotiate (counteroffer rate), or decline with explanation
+
+      6. REVENUE IMPACT PROJECTION
+         Project the financial impact of the recommended pricing strategy:
+         - Total room revenue for the planning horizon
+         - Average ADR across all room types
+         - Projected occupancy %
+         - Projected RevPAR
+         - Revenue uplift vs. flat-rate (no dynamic pricing) scenario
+         - Revenue uplift vs. competitor-matching (reactive pricing) scenario
+         - Risk-adjusted projection: best case, expected, worst case
+
+      Produce the complete pricing recommendation in a format suitable for daily RM team execution,
+      with clear action items by date and decision triggers for rate adjustments.
+    model: sonnet
+    max_turns: 10
+
+  - id: revenue-strategy
+    depends_on: [pricing-optimization]
+    prompt: |
+      You are the VP of Revenue Strategy for {input.hotel_name}. Synthesize all analysis into a
+      comprehensive revenue management strategy document for ownership, asset management, and
+      the executive leadership team.
+
+      PRICING OPTIMIZATION:
+      {steps.pricing-optimization.output}
+
+      DEMAND FORECAST:
+      {steps.demand-forecasting.output}
+
+      COMPETITIVE INTELLIGENCE:
+      {steps.competitor-rate-scan.output}
+
+      EVENT CALENDAR:
+      {steps.event-calendar-analysis.output}
+
+      MARKET ANALYSIS:
+      {steps.market-analysis.output}
+
+      HOTEL CONTEXT:
+      - Property: {input.hotel_name}
+      - Location: {input.location}
+      - Room types: {input.room_types}
+      - Competitor set: {input.competitor_hotels}
+      - Planning horizon: {input.planning_horizon}
+
+      REVENUE STRATEGY DOCUMENT:
+
+      1. EXECUTIVE DASHBOARD (1 page)
+         - Headline KPI projections for the planning horizon:
+           * Projected occupancy vs. prior year and budget
+           * Projected ADR vs. prior year and budget
+           * Projected RevPAR vs. prior year and budget
+           * Projected total room revenue
+           * RGI (Revenue Generation Index) target vs. comp set
+         - Top 3 revenue opportunities to capture
+         - Top 3 revenue risks to mitigate
+         - Recommended strategic focus for the period
+
+      2. PRICING STRATEGY SUMMARY
+         Consolidate the daily pricing recommendations into an actionable summary:
+         - Rate calendar: visual representation of recommended BAR by date
+         - Rate change triggers: when and why to adjust rates
+         - Restriction calendar: MinLOS, CTA, and tier closure schedule
+         - Channel strategy by period: when to expand/contract OTA visibility
+         - Group displacement calendar: dates where groups should be displaced
+
+      3. TOTAL REVENUE OPTIMIZATION
+         Extend beyond room revenue to optimize total property revenue:
+
+         a) FOOD AND BEVERAGE
+            - Restaurant pricing strategy aligned with demand periods
+            - Banquet and catering pricing for group business
+            - In-room dining promotion during high-occupancy periods
+            - Bar/lounge revenue opportunities during events
+            - Breakfast package optimization (include vs. charge separately)
+
+         b) ANCILLARY REVENUE
+            - Parking revenue optimization (dynamic pricing for event nights)
+            - Spa and wellness: package deals during low-demand, premium pricing during peak
+            - Resort/amenity fees: market comparison and optimization
+            - Early check-in / late checkout upselling (revenue per transaction)
+            - Room upgrade upselling: front desk, pre-arrival email, kiosk
+            - Pet fees, rollaway bed fees, and other incidental charges
+
+         c) MEETING AND EVENT SPACE
+            - Space rental rates by day-of-week and season
+            - F&B minimum spend requirements
+            - AV revenue margin optimization
+            - Day meeting package vs. full meeting package pricing
+            - Off-peak promotional rates to fill empty meeting space
+
+      4. UPSELL AND CROSS-SELL FRAMEWORK
+         Design a systematic upsell/cross-sell program:
+         - Pre-arrival: email offer for room upgrades (24-48 hours before check-in)
+         - At check-in: front desk upsell script and pricing matrix
+         - During stay: F&B credits, spa promotions, late checkout offers
+         - Digital touchpoints: mobile app notifications, in-room tablet offers
+         - Upsell pricing: typically 30-50% of the rate differential between room types
+           (generates incremental revenue without displacing a full-price booking)
+
+      5. COMPETITIVE RESPONSE PLAYBOOK
+         Define response protocols for competitor pricing moves:
+         - If competitor drops rates >15%: assess if demand-driven or distressed, do not follow
+           unless losing market share (monitor booking pace)
+         - If competitor raises rates >10%: evaluate following to capture rate premium or holding
+           to capture volume
+         - If new competitor enters market: assess impact by segment, protect key accounts
+         - If competitor runs promotion: match only if promotion targets same segment and
+           booking pace is concerning
+         - Rate war avoidance: never be the first to discount aggressively;
+           focus on value differentiation over price matching
+
+      6. 90-DAY ACTION PLAN
+         Break the strategy into actionable weekly tasks:
+         - Week 1-2: Implement rate calendar and restriction changes
+         - Week 3-4: Launch direct booking promotion and loyalty push
+         - Week 5-6: Review booking pace vs. forecast, adjust rates
+         - Week 7-8: Event preparation - set event pricing and restrictions
+         - Week 9-10: Mid-period review and strategy adjustment
+         - Week 11-12: Forward planning for next horizon
+
+         For each week, specify:
+         - Rate actions to take
+         - Marketing campaigns to launch or adjust
+         - Group pricing decisions due
+         - Channel distribution changes
+         - Performance metrics to review
+
+      7. PERFORMANCE MONITORING FRAMEWORK
+         Define the KPIs and review cadence:
+         - Daily: occupancy pickup, ADR, RevPAR, booking pace, cancellations
+         - Weekly: comp set rate comparison, channel mix, segment mix, booking window analysis
+         - Monthly: P&L review, market share (STR report), forecast accuracy assessment
+         - Quarterly: strategy review, annual budget reforecast, comp set evaluation
+         Define alert thresholds for when to escalate rate decisions to senior leadership.
+
+      Format as a professional strategy document with clear section headers, data tables,
+      and action-oriented recommendations. This document should serve as the revenue management
+      team's operating playbook for the planning horizon.
+    model: sonnet
+    max_turns: 10

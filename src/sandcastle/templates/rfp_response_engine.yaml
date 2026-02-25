@@ -1,0 +1,665 @@
+# name: RFP Response Engine
+# description: Multi-agent RFP/RFQ response generator that ingests bid requirements, matches against company knowledge base, drafts section-by-section responses, and scores proposal strength
+# tags: [Sales, RFP, Proposals, Procurement, Knowledge Base]
+# category: sales_crm
+
+name: rfp-response-engine
+description: Multi-agent RFP/RFQ response generator that ingests bid requirements, matches against company knowledge base, drafts section-by-section responses, and scores proposal strength
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [web_search]
+
+input_schema:
+  required: ["rfp_document", "company_name"]
+  properties:
+    rfp_document:
+      type: string
+      description: "Full text of the RFP/RFQ document, or URL to the bid document"
+    company_name:
+      type: string
+      description: "Your company name (the bidder/proposer)"
+    knowledge_base_source:
+      type: string
+      description: "Source of company knowledge base for response matching (e.g. 'confluence', 'notion', 'sharepoint', or paste key capabilities)"
+    win_themes:
+      type: string
+      description: "Comma-separated strategic win themes to weave into the proposal (e.g. 'innovation leader, proven ROI, local presence')"
+    submission_deadline:
+      type: string
+      description: "Submission deadline for the RFP (e.g. '2026-03-15')"
+
+steps:
+  - id: requirement-extraction
+    prompt: |
+      Parse and decompose the RFP/RFQ document into a structured requirements inventory,
+      identifying every requirement, evaluation criterion, and compliance item.
+
+      RFP document: {input.rfp_document}
+      Company name: {input.company_name}
+      Submission deadline: {input.submission_deadline}
+
+      You are an expert RFP Analyst with 20 years of experience in government and
+      enterprise procurement. Your task is to perform a forensic decomposition of this
+      RFP document, extracting every element that requires a response.
+
+      **DOCUMENT STRUCTURE ANALYSIS**
+
+      First, identify the RFP structure:
+      - Issuing organization and contact information
+      - RFP/RFQ reference number and title
+      - Submission deadline, format requirements, and delivery instructions
+      - Bid validity period
+      - Pre-bid conference details (if any)
+      - Q&A submission process and timeline
+      - Evaluation methodology (best value, LPTA, trade-off, etc.)
+      - Weighting scheme (technical score %, price score %, past performance %)
+      - Number of awards anticipated (single, multiple, IDIQ)
+
+      **REQUIREMENT EXTRACTION**
+
+      For each requirement in the document, extract:
+
+      1. **Requirement ID**: Sequential identifier (REQ-001, REQ-002, etc.)
+      2. **Section Reference**: Where in the RFP this requirement appears (section/page)
+      3. **Requirement Text**: Exact verbatim text of the requirement
+      4. **Requirement Type**: Classify as one of:
+         - MANDATORY: Must comply or bid is non-responsive (look for "shall", "must", "required")
+         - DESIRABLE: Scored but not mandatory (look for "should", "preferred", "desired")
+         - INFORMATIONAL: Background information, no response needed
+         - PRICING: Cost-related requirements
+         - PAST_PERFORMANCE: Experience/reference requirements
+         - COMPLIANCE: Legal, regulatory, certification requirements
+         - TECHNICAL: Technical capability or approach requirements
+         - MANAGEMENT: Team, process, methodology requirements
+      5. **Response Format**: What format is expected (narrative, table, diagram, resume, etc.)
+      6. **Page/Word Limit**: Any length constraints
+      7. **Evaluation Weight**: If stated or inferable from the scoring rubric
+      8. **Complexity Score**: 1-5 rating of how complex the response will be
+      9. **Cross-References**: Other requirements this relates to
+
+      **EVALUATION CRITERIA MAPPING**
+
+      Extract the complete evaluation framework:
+      - Technical evaluation factors and subfactors with weights
+      - Past performance evaluation criteria
+      - Price evaluation methodology
+      - Any adjectival ratings (Outstanding, Good, Acceptable, etc.) and their definitions
+      - Discriminating factors: What the evaluator cares MOST about (often buried in
+        the evaluation section language)
+
+      **COMPLIANCE CHECKLIST**
+
+      Create a submission compliance checklist:
+      - Required certifications (ISO, SOC2, FedRAMP, etc.)
+      - Insurance requirements and thresholds
+      - Required forms and representations
+      - Small business / set-aside requirements
+      - Security clearance requirements
+      - Financial stability documentation
+      - Required attachments and exhibits
+      - Formatting requirements (font, margins, page limits, file format)
+      - Number of copies (hard and electronic)
+
+      **HIDDEN REQUIREMENTS AND RED FLAGS**
+
+      Identify non-obvious elements:
+      - "Wired" indicators: language that seems to favor a specific incumbent
+      - Unrealistic requirements that may be designed to limit competition
+      - Ambiguous requirements that need clarification before response
+      - Conflicting requirements within the document
+      - Implied requirements not explicitly stated but expected by evaluators
+      - Organizational pain points revealed by the RFP language
+
+      **RISK ASSESSMENT**
+
+      For each major requirement area, assess:
+      - Can {input.company_name} likely meet this? (Yes/Partial/No/Unknown)
+      - Risk level if we cannot fully comply (High/Medium/Low)
+      - Suggested mitigation strategy for gaps
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "document_overview" - Summary of the RFP (issuer, title, value, deadline, evaluation method)
+      2. "requirements_inventory" - Complete list of all requirements with all metadata fields
+      3. "evaluation_framework" - Extracted scoring rubric and weights
+      4. "compliance_checklist" - All compliance items with status
+      5. "hidden_requirements" - Non-obvious items and red flags
+      6. "risk_register" - Gaps and risks with mitigation strategies
+      7. "response_outline" - Recommended proposal structure matching RFP sections
+      8. "questions_for_issuer" - Recommended clarification questions to submit
+      9. "statistics" - Total requirements count, mandatory vs desirable, complexity distribution
+    model: haiku
+    max_turns: 10
+
+  - id: knowledge-matching
+    depends_on: [requirement-extraction]
+    prompt: |
+      Match each RFP requirement against company knowledge base content and past proposal
+      responses to identify reusable material and capability gaps.
+
+      Company: {input.company_name}
+      Knowledge base: {input.knowledge_base_source}
+      Win themes: {input.win_themes}
+      Requirement inventory: {steps.requirement-extraction.output}
+
+      You are a Proposal Knowledge Manager with deep expertise in response content
+      libraries and capability matching. Your task is to map every requirement to the
+      best available response material and identify gaps requiring new content.
+
+      **KNOWLEDGE MATCHING PROCESS**
+
+      For each requirement in the inventory, perform:
+
+      **Step 1: Semantic Requirement Analysis**
+      - Decompose the requirement into its core capability needs
+      - Identify the domain area (e.g., cloud infrastructure, change management, security)
+      - Determine the specificity level: generic capability vs highly specific solution
+      - Extract keywords and concepts for knowledge base search
+
+      **Step 2: Knowledge Base Search Strategy**
+      Search across these content categories:
+      - **Past proposals**: Previous RFP responses for similar requirements
+        * Exact match: Same requirement from different RFP
+        * Partial match: Similar requirement with modifications needed
+        * Analogous match: Different domain but same capability pattern
+      - **Capability statements**: Pre-written descriptions of company capabilities
+      - **Case studies**: Relevant project examples and outcomes
+      - **Technical documentation**: Architecture docs, solution descriptions
+      - **Resumes and qualifications**: Team member profiles matching requirements
+      - **Certifications and compliance**: Existing compliance documentation
+      - **Marketing collateral**: White papers, solution briefs
+
+      **Step 3: Match Quality Assessment**
+      For each requirement-to-knowledge match:
+      - **Match Score (0-100)**: How well does existing content address the requirement?
+        * 90-100: Direct reuse with minimal editing
+        * 70-89: Good foundation, needs customization for this RFP context
+        * 50-69: Related content exists but significant rewriting needed
+        * 30-49: Tangentially related, mostly new content required
+        * 0-29: No relevant content found, completely new draft needed
+      - **Freshness**: When was the matched content last updated?
+      - **Win history**: Was this content used in a winning proposal before?
+      - **Relevance to win themes**: Does the matched content align with [{input.win_themes}]?
+
+      **Step 4: Gap Identification**
+      For requirements with low match scores (below 50):
+      - What capability or content is missing?
+      - Is this a TRUE gap (we lack the capability) or a DOCUMENTATION gap (we have
+        the capability but no written description)?
+      - What subject matter expert (SME) input is needed?
+      - Estimated effort to create new content: Low (1-2 hours), Medium (3-8 hours),
+        High (1-2 days), Critical (requires new solution design)
+
+      **CONTENT REUSE OPTIMIZATION**
+
+      - Identify the most reusable content blocks across multiple requirements
+      - Flag content that needs WIN THEME injection (weaving [{input.win_themes}]
+        into existing boilerplate to make it compelling)
+      - Identify opportunities for cross-referencing (one strong response section
+        that supports multiple requirements)
+      - Flag stale content that needs refresh before reuse (>12 months old)
+
+      **COMPETITIVE POSITIONING NOTES**
+
+      For each major requirement area:
+      - What is our likely competitive advantage? (differentiators to emphasize)
+      - What is our likely weakness? (areas to mitigate or ghost)
+      - What should we VOLUNTEER beyond the requirement? (discriminators)
+      - Ghost strategies: How to address a known weakness without highlighting it
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "requirement_matches" - Array of {requirement_id, matched_content_summary,
+         match_score, freshness, win_themes_alignment, gaps, effort_estimate}
+      2. "reusable_content_library" - Curated list of content blocks ready for reuse
+      3. "gap_register" - All content gaps ranked by requirement importance
+      4. "sme_requests" - List of SME inputs needed with urgency levels
+      5. "competitive_positioning" - Per-section competitive advantage/weakness analysis
+      6. "content_strategy" - Recommended approach for each proposal section
+         (reuse, customize, create new)
+      7. "effort_estimate" - Total estimated effort in person-hours, broken down by section
+    model: sonnet
+    max_turns: 10
+
+  - id: section-drafting
+    depends_on: [knowledge-matching]
+    prompt: |
+      Draft the complete proposal response section-by-section, incorporating matched
+      knowledge base content, win themes, and competitive positioning.
+
+      Company: {input.company_name}
+      Win themes: {input.win_themes}
+      Requirements: {steps.requirement-extraction.output}
+      Knowledge matches: {steps.knowledge-matching.output}
+
+      You are a Senior Proposal Writer specializing in winning government and enterprise
+      bids. You have a 70%+ win rate on competitive proposals. Your task is to draft
+      every section of the proposal response.
+
+      **WRITING METHODOLOGY: SHIPLEY-INSPIRED APPROACH**
+
+      Apply these principles to every section:
+
+      **1. Theme Statements (Action Captions)**
+      Every major section and subsection begins with a bold theme statement that:
+      - Summarizes the key discriminator or benefit
+      - Connects to one of the win themes: [{input.win_themes}]
+      - Is evaluator-friendly: makes scoring easy by highlighting compliance and value
+      - Example: "{input.company_name}'s proven cloud migration methodology has reduced
+        transition risk by 40% across 15 enterprise engagements, delivering an average
+        $2.3M in cost savings."
+
+      **2. Compliance First, Then Discriminate**
+      For each requirement:
+      - First sentence: Direct compliance statement ("We shall provide..." / "Our approach includes...")
+      - Second: How we comply (our specific solution/approach)
+      - Third: Why our approach is BETTER (discriminator tied to win theme)
+      - Fourth: Evidence (past performance, metrics, case studies)
+      Structure: COMPLY -> HOW -> WHY BETTER -> PROVE IT
+
+      **3. Evaluator-Optimized Structure**
+      - Mirror the RFP section structure EXACTLY (same numbering, same headings)
+      - Use the evaluation criteria language in your response (keyword matching for evaluators)
+      - Include requirement cross-references: "(See Section 3.2.1 of the RFP)"
+      - Bold key compliance phrases so evaluators can skim and score quickly
+
+      **4. Proof Points and Specificity**
+      Replace vague claims with specific evidence:
+      - BAD: "We have extensive experience in cybersecurity."
+      - GOOD: "{input.company_name} has delivered 47 cybersecurity assessments for
+        federal agencies over 8 years, including 12 FedRAMP authorizations with zero
+        critical findings."
+      Every claim needs a proof point: number, date, client name, or metric.
+
+      **SECTION DRAFTING INSTRUCTIONS**
+
+      For each major section of the proposal:
+
+      **Executive Summary**
+      - 1-2 pages that a decision-maker can read in 3 minutes
+      - Lead with the customer's problem, not your company
+      - State each win theme with a supporting proof point
+      - Include a brief solution overview (not technical detail)
+      - Close with why {input.company_name} is uniquely qualified
+      - Must be compelling enough to create positive bias for the detailed evaluation
+
+      **Technical Approach / Solution**
+      For each technical requirement:
+      - Describe the specific solution with architecture details
+      - Include relevant methodologies, frameworks, and standards
+      - Reference specific tools and technologies
+      - Show understanding of the customer's environment and constraints
+      - Include risk mitigation strategies for complex requirements
+      - Add visuals descriptions where appropriate (architecture diagrams, process flows)
+
+      **Management Approach**
+      - Organizational structure and reporting lines
+      - Project management methodology (Agile, Waterfall, Hybrid - match to RFP preference)
+      - Communication plan and status reporting
+      - Quality assurance and quality control processes
+      - Risk management framework
+      - Transition and knowledge transfer plan
+
+      **Past Performance / Experience**
+      - Select the most relevant 3-5 past projects
+      - For each: client, scope, duration, team size, outcome, relevance to this RFP
+      - Include specific metrics and achievements
+      - Address any known weaknesses or past performance issues proactively
+
+      **Staffing / Key Personnel**
+      - Resume summaries for key personnel
+      - Relevance statements linking each person's experience to RFP requirements
+      - Team structure and collaboration model
+      - Succession planning and backup personnel
+
+      **WRITING QUALITY STANDARDS**
+
+      - Active voice, present tense for capabilities, future tense for proposed work
+      - No jargon unless it is the customer's terminology from the RFP
+      - Every paragraph earns its space - no filler, no corporate fluff
+      - Compliance matrix reference numbers in brackets after each requirement response
+      - Page limits must be respected - ruthlessly edit for conciseness if constrained
+      - Consistent terminology throughout (create a glossary if needed)
+
+      **OUTPUT FORMAT**
+
+      Return the complete proposal draft as structured JSON with:
+      1. "executive_summary" - Full draft text
+      2. "technical_sections" - Array of {section_id, title, draft_text, requirements_addressed}
+      3. "management_sections" - Array of {section_id, title, draft_text}
+      4. "past_performance" - Array of {project_name, narrative}
+      5. "staffing_section" - Key personnel summaries
+      6. "appendices" - Supporting material descriptions
+      7. "word_counts" - Per-section word counts vs any page/word limits
+      8. "win_theme_coverage" - Which win themes appear in which sections
+    model: sonnet
+    max_turns: 10
+
+  - id: compliance-matrix
+    depends_on: [section-drafting]
+    prompt: |
+      Generate a comprehensive compliance matrix that maps every RFP requirement to the
+      proposal response, verifying complete coverage and identifying any gaps.
+
+      Requirements: {steps.requirement-extraction.output}
+      Proposal draft: {steps.section-drafting.output}
+
+      You are a Compliance Manager for proposal submissions. Your task is to create a
+      rigorous compliance verification that ensures no requirement is missed and every
+      response is traceable.
+
+      **COMPLIANCE MATRIX STRUCTURE**
+
+      For each requirement extracted from the RFP:
+
+      | Field | Description |
+      |-------|-------------|
+      | Req ID | Requirement identifier (REQ-001, etc.) |
+      | RFP Section | Section reference in the original RFP |
+      | Requirement Summary | Brief summary of what is required |
+      | Requirement Type | MANDATORY / DESIRABLE / INFORMATIONAL |
+      | Proposal Section | Where in our proposal this is addressed |
+      | Proposal Page | Page number reference (estimate based on section position) |
+      | Compliance Status | FULL / PARTIAL / EXCEPTION / NOT_ADDRESSED |
+      | Response Summary | Brief summary of how we address this requirement |
+      | Evidence Type | How compliance is demonstrated (narrative, case study, cert, resume) |
+      | Evaluator Note | Key phrase evaluator should find when scoring |
+
+      **COMPLIANCE STATUS DEFINITIONS**
+
+      - **FULL**: Requirement fully addressed with clear compliance language
+      - **PARTIAL**: Requirement partially addressed - identify what is missing and
+        recommend additions to the draft
+      - **EXCEPTION**: We are taking an exception to this requirement - document the
+        exception and its justification
+      - **NOT_ADDRESSED**: Requirement exists but no response found in draft - FLAG AS
+        CRITICAL and provide recommended response text
+
+      **VERIFICATION PROCESS**
+
+      1. **Forward trace**: For every requirement, find where it is addressed in the proposal.
+         If not found, flag immediately.
+
+      2. **Reverse trace**: For every proposal section, verify it maps to a requirement.
+         Identify any "orphan" content that does not address a requirement (may be filler
+         that should be cut).
+
+      3. **Compliance language check**: Verify that mandatory requirements use
+         definitive compliance language ("shall", "will provide") not weak language
+         ("may", "could", "we aim to"). Flag any weak compliance language.
+
+      4. **Evaluation criteria alignment**: For each evaluation factor, verify the
+         proposal has sufficient content to score well. Identify factors that are
+         under-addressed relative to their weight.
+
+      5. **Cross-reference integrity**: Verify all internal cross-references in the
+         proposal are correct and lead to relevant content.
+
+      **GAP ANALYSIS AND RECOMMENDATIONS**
+
+      For any NOT_ADDRESSED or PARTIAL requirements:
+      - Draft recommended response text to fill the gap
+      - Identify which section of the proposal should incorporate it
+      - Estimate additional page count needed
+      - Priority: Critical (will cause non-responsive) / High / Medium / Low
+
+      **SUBMISSION CHECKLIST**
+
+      Final pre-submission verification:
+      - All required forms included?
+      - Page count within limits per section?
+      - File format and naming conventions correct?
+      - All required signatures identified?
+      - Pricing in correct format and separate from technical volume?
+      - Certifications and representations attached?
+      - Past performance references complete?
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "compliance_matrix" - Complete matrix with all fields per requirement
+      2. "compliance_summary" - Statistics (% FULL, % PARTIAL, % EXCEPTION, % NOT_ADDRESSED)
+      3. "critical_gaps" - Requirements not addressed that could cause non-responsive
+      4. "recommended_additions" - Draft text for gaps
+      5. "weak_language_flags" - Instances of weak compliance language needing revision
+      6. "evaluation_coverage" - Assessment of coverage per evaluation factor
+      7. "submission_checklist" - Pre-submission verification items with status
+      8. "orphan_content" - Proposal content not mapped to any requirement
+    model: haiku
+    max_turns: 10
+
+  - id: quality-scoring
+    depends_on: [section-drafting]
+    prompt: |
+      Score the proposal draft using the Shipley quality methodology, simulating an
+      evaluator review to identify weaknesses before submission.
+
+      Requirements: {steps.requirement-extraction.output}
+      Knowledge matches: {steps.knowledge-matching.output}
+      Proposal draft: {steps.section-drafting.output}
+      Win themes: {input.win_themes}
+
+      You are a Proposal Quality Reviewer using the Shipley Associates evaluation
+      methodology. You have reviewed 500+ proposals and know exactly what evaluators
+      look for and what makes proposals win or lose.
+
+      **SHIPLEY QUALITY SCORING MODEL**
+
+      Score the proposal on each dimension using a 0-10 scale:
+
+      **Dimension 1: Compliance (Weight: 25%)**
+      - Does every requirement have a clear, traceable response?
+      - Is compliance language definitive (shall/will) not aspirational (aim/hope)?
+      - Are there any requirements that could be interpreted as non-responsive?
+      - Score: 0-10 (10 = every requirement clearly and definitively addressed)
+
+      **Dimension 2: Understanding (Weight: 15%)**
+      - Does the proposal demonstrate deep understanding of the customer's situation?
+      - Are customer pain points acknowledged and addressed?
+      - Does it reference the customer's specific context, not just generic solutions?
+      - Is the customer's language and terminology used correctly?
+      - Score: 0-10 (10 = clearly written by someone who understands the customer deeply)
+
+      **Dimension 3: Solution Quality (Weight: 25%)**
+      - Is the technical approach sound, specific, and implementable?
+      - Are risks identified and mitigated?
+      - Is the solution appropriately scoped (not over-engineered or under-built)?
+      - Are innovative approaches proposed where appropriate?
+      - Is the solution clearly differentiated from what competitors would propose?
+      - Score: 0-10 (10 = superior solution that creates clear competitive advantage)
+
+      **Dimension 4: Proof and Evidence (Weight: 15%)**
+      - Are claims backed by specific metrics, dates, and references?
+      - Is past performance relevant and compelling?
+      - Are case studies specific enough to be verifiable?
+      - Is the evidence recent and from comparable engagements?
+      - Score: 0-10 (10 = every claim has credible, specific evidence)
+
+      **Dimension 5: Win Theme Integration (Weight: 10%)**
+      - Are win themes [{input.win_themes}] woven throughout, not just in the summary?
+      - Does each section reinforce at least one win theme?
+      - Are themes supported by evidence, not just stated?
+      - Is there a consistent narrative thread tying the proposal together?
+      - Score: 0-10 (10 = themes are pervasive, evidence-backed, and compelling)
+
+      **Dimension 6: Presentation Quality (Weight: 10%)**
+      - Is the writing clear, concise, and professional?
+      - Is the structure easy to navigate for evaluators?
+      - Are action captions/theme statements effective?
+      - Is formatting consistent and evaluation-friendly?
+      - Is the tone appropriate (confident but not arrogant)?
+      - Score: 0-10 (10 = exceptionally well-written and easy to evaluate)
+
+      **EVALUATOR SIMULATION**
+
+      Simulate the evaluation process:
+
+      1. **First impression** (30-second scan): What does an evaluator think after
+         scanning the executive summary and section headings? Is this a serious
+         contender or does it look like a also-ran?
+
+      2. **Scoring walkthrough**: Go through each evaluation factor from the RFP
+         and assign the rating the evaluator would likely give:
+         - Outstanding / Exceptional (exceeds requirements with significant benefit)
+         - Good / Acceptable (meets requirements fully)
+         - Marginal (meets some requirements, has weaknesses)
+         - Unacceptable (fails to meet requirements)
+         Document the rationale for each rating.
+
+      3. **Strength and weakness identification**: List what evaluators would note as:
+         - Significant Strengths (exceed requirements, create discriminating value)
+         - Strengths (meet requirements well)
+         - Weaknesses (aspects that detract but do not make non-responsive)
+         - Significant Weaknesses (major concerns, potential non-responsive elements)
+         - Deficiencies (failure to meet a requirement, automatic downgrade)
+
+      4. **Comparative assessment**: How would this proposal likely rank against
+         a strong competitor bid? What would need to change to win?
+
+      **IMPROVEMENT RECOMMENDATIONS**
+
+      For each weakness and deficiency identified:
+      - Specific recommended revision with example text
+      - Priority: Critical (must fix before submission), High, Medium, Low
+      - Effort to implement: Hours estimate
+      - Expected score improvement if implemented
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "dimension_scores" - Per-dimension scores, weights, and rationale
+      2. "composite_score" - Weighted overall score (0-100) with percentile estimate
+      3. "evaluator_simulation" - Full simulated evaluation results
+      4. "strengths" - Ranked list of proposal strengths
+      5. "weaknesses" - Ranked list of weaknesses with severity
+      6. "improvement_plan" - Prioritized revision recommendations
+      7. "win_probability_estimate" - Estimated win probability with confidence range
+      8. "executive_assessment" - 500-word summary suitable for a bid/no-bid decision
+    model: sonnet
+    max_turns: 10
+
+  - id: final-assembly
+    depends_on: [compliance-matrix, quality-scoring]
+    prompt: |
+      Assemble the final proposal package incorporating compliance gap fills, quality
+      improvements, and generate the submission-ready document with executive summary.
+
+      Company: {input.company_name}
+      Win themes: {input.win_themes}
+      Submission deadline: {input.submission_deadline}
+      Proposal draft: {steps.section-drafting.output}
+      Compliance matrix: {steps.compliance-matrix.output}
+      Quality scoring: {steps.quality-scoring.output}
+      Requirements: {steps.requirement-extraction.output}
+
+      You are the Proposal Manager responsible for final assembly and quality assurance
+      of the submission package. This is the last review before the proposal goes out the
+      door. Nothing can be missed.
+
+      **FINAL ASSEMBLY PROCESS**
+
+      **Phase 1: Gap Resolution**
+      Address every issue identified by the compliance matrix and quality scoring:
+
+      1. For each CRITICAL gap from the compliance matrix:
+         - Write the missing response text
+         - Insert it into the appropriate proposal section
+         - Verify the compliance matrix entry is now FULL
+
+      2. For each SIGNIFICANT WEAKNESS from quality scoring:
+         - Apply the recommended revision
+         - Rewrite the affected section to address the weakness
+         - Verify the improvement addresses the evaluator concern
+
+      3. For each instance of weak compliance language:
+         - Replace with definitive compliance statements
+         - Verify no "may", "could", "aim to" remains for mandatory requirements
+
+      **Phase 2: Win Theme Amplification**
+      Review the complete proposal for win theme consistency:
+      - Ensure each win theme [{input.win_themes}] appears in the executive summary
+        AND in at least 3 technical/management sections
+      - Verify proof points support each theme occurrence
+      - Add theme callout boxes or sidebars for visual emphasis
+      - Ensure the proposal tells a coherent STORY, not just answers questions
+
+      **Phase 3: Executive Summary Refinement**
+      Rewrite the executive summary as the final step, incorporating:
+      - All improvements made during assembly
+      - A compelling opening that addresses the customer's core challenge
+      - Each win theme stated with its strongest proof point
+      - A clear value proposition: why {input.company_name} is the best choice
+      - A forward-looking closing statement about the partnership vision
+      The executive summary is the single most important page - it sets the
+      evaluator's bias for everything that follows.
+
+      **Phase 4: Cross-Reference Verification**
+      - All section numbers are correct and consistent
+      - All "See Section X" references point to the right content
+      - Table of contents is accurate
+      - Acronym list is complete
+      - Page numbers are sequential
+
+      **Phase 5: Final Quality Check**
+      Run a final quality pass:
+      - Spell check and grammar review
+      - Consistency in terminology (no switching between terms for the same concept)
+      - Consistent formatting (fonts, heading styles, bullet styles)
+      - All tables complete and properly referenced
+      - No tracked changes, comments, or metadata from other proposals left in
+      - Confidentiality markings applied per RFP requirements
+      - Correct company name, RFP number, and date on every page
+
+      **SUBMISSION PACKAGE**
+
+      Prepare the final package:
+
+      1. **Cover Letter**: Professional, one-page letter with:
+         - RFP reference number and title
+         - Statement of interest and compliance
+         - Authorized signatory information
+         - Key contact for questions
+
+      2. **Volume I: Technical Proposal**
+         - Table of contents
+         - Executive summary
+         - Technical approach sections (in RFP-specified order)
+         - Management approach sections
+         - Past performance narratives
+         - Key personnel resumes / summaries
+
+      3. **Volume II: Pricing** (structure only, note actual pricing requires SME)
+         - Pricing summary
+         - Rate card structure
+         - Assumptions and exclusions
+
+      4. **Volume III: Administrative**
+         - Compliance matrix
+         - Required forms and certifications
+         - Representations and certifications
+
+      5. **Submission Instructions**
+         - Deadline: {input.submission_deadline}
+         - Required format and delivery method
+         - Number of copies needed
+         - File naming conventions
+
+      **OUTPUT FORMAT**
+
+      Return the complete final package as structured JSON:
+      1. "cover_letter" - Final cover letter text
+      2. "executive_summary_final" - Polished executive summary
+      3. "technical_volume" - All sections with revisions incorporated
+      4. "management_volume" - All sections with revisions incorporated
+      5. "past_performance_volume" - Finalized narratives
+      6. "compliance_matrix_final" - Updated matrix showing 100% coverage
+      7. "quality_score_final" - Re-scored quality metrics after improvements
+      8. "submission_checklist" - Final go/no-go checklist with all items verified
+      9. "risk_register_final" - Remaining risks and accepted exceptions
+      10. "proposal_statistics" - Word counts, page counts, requirement coverage stats
+    model: sonnet
+    max_turns: 10

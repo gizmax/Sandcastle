@@ -1,0 +1,654 @@
+# name: Insurance Claims Adjuster
+# description: Ingest insurance claims with documents and photos, extract damage assessments, cross-reference policy coverage, detect fraud indicators, estimate payouts, and generate adjuster-ready case summaries
+# tags: [Insurance, Claims, Fraud-Detection, Underwriting, FinTech]
+# category: general_ai
+
+name: insurance-claims-adjuster
+description: Ingest insurance claims with documents and photos, extract damage assessments, cross-reference policy coverage, detect fraud indicators, estimate payouts, and generate adjuster-ready case summaries
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["claim_id", "claim_type", "incident_description"]
+  properties:
+    claim_id:
+      type: string
+      description: "Unique claim identifier from the claims management system (e.g. 'CLM-2024-078342')"
+    claim_type:
+      type: string
+      description: "Type of insurance claim: 'auto', 'property', 'health', or 'liability'"
+    policy_details:
+      type: string
+      description: "Policy information including policy number, coverage type, limits, deductibles, endorsements, and effective dates"
+    claimant_info:
+      type: string
+      description: "Claimant details including name, contact information, relationship to policyholder, and any prior claims history"
+    incident_description:
+      type: string
+      description: "Detailed description of the incident including date, time, location, circumstances, parties involved, and injuries or damages claimed"
+
+steps:
+  - id: document-extraction
+    prompt: |
+      You are an expert insurance document analyst specializing in extracting structured data from claim submissions. Your task is to process all documents associated with this claim and extract every relevant data point for downstream analysis.
+
+      Claim ID: {input.claim_id}
+      Claim Type: {input.claim_type}
+      Policy Details: {input.policy_details}
+      Claimant Info: {input.claimant_info}
+      Incident Description: {input.incident_description}
+
+      Perform comprehensive document extraction and structuring:
+
+      **1. Document Inventory and Classification**
+      Catalog every document that should be associated with this claim type. For a {input.claim_type} claim, the expected document set includes:
+
+      For AUTO claims:
+      - Police accident report (PAR): accident date/time, location, parties involved, officer narrative, citations issued, diagram
+      - Insurance cards for all parties involved
+      - Driver's license information for all drivers
+      - Vehicle registration and VIN for all vehicles
+      - Photos of vehicle damage (all angles: front, rear, sides, undercarriage, interior)
+      - Photos of accident scene (road conditions, traffic signals, skid marks, debris)
+      - Repair estimates from body shops (itemized parts and labor)
+      - Tow truck receipts and storage invoices
+      - Rental car receipts (if applicable)
+      - Medical records and bills (if injuries claimed)
+      - Witness statements
+      - Dashcam or surveillance footage descriptions
+
+      For PROPERTY claims:
+      - Property deed or lease agreement
+      - Home/building insurance declarations page
+      - Photos of damage (before and after if available, all affected areas)
+      - Contractor repair estimates (minimum 2 if over threshold)
+      - Inventory of damaged personal property with replacement costs
+      - Receipts or proof of ownership for high-value items
+      - Weather reports or utility company reports (for weather-related claims)
+      - Fire department or police reports (for fire or theft claims)
+      - Building inspection reports
+      - Mortgage company notification
+      - Temporary living expense receipts (if displacement required)
+
+      For HEALTH claims:
+      - Medical records (admission notes, physician notes, discharge summary)
+      - Itemized hospital bills and physician invoices
+      - Prescription records and pharmacy receipts
+      - Lab results and diagnostic imaging reports
+      - Pre-authorization documentation
+      - Explanation of Benefits (EOB) from primary insurance
+      - Coordination of benefits information
+      - Disability documentation (if applicable)
+      - Employer verification of lost wages
+      - Prior medical history relevant to the claim
+
+      For LIABILITY claims:
+      - Incident report (internal or external)
+      - Witness statements and contact information
+      - Photos or video evidence of the incident
+      - Medical records and bills of the injured party
+      - Demand letter from claimant's attorney
+      - Expert opinions or evaluations
+      - Maintenance or inspection records (premises liability)
+      - Safety compliance documentation
+      - Prior incident history at the same location
+      - Insurance policy declarations with liability limits
+
+      **2. Data Extraction from Each Document**
+      For each document identified or provided:
+      - Extract all dates, names, amounts, and reference numbers
+      - Identify inconsistencies between documents (e.g. different dates, conflicting descriptions)
+      - Flag missing required documents
+      - Note document quality issues (illegible sections, missing pages, unsigned forms)
+      - Extract financial amounts and categorize them (medical, repair, replacement, lost wages, pain and suffering)
+
+      **3. Structured Claim Data Package**
+      Compile all extracted data into a structured format:
+
+      Claim Header:
+      - Claim ID, policy number, date of loss, date reported, claim type
+      - Reporting lag (days between incident and claim filing)
+
+      Parties Involved:
+      - For each party: name, role, contact info, insurance info, injuries claimed
+
+      Financial Summary:
+      - Total claimed amount (itemized by category)
+      - Deductible applicable
+      - Policy limits applicable
+      - Subrogation potential (if another party is liable)
+
+      Document Completeness Score:
+      - Percentage of expected documents received
+      - List of missing documents with priority (Critical/Important/Nice-to-Have)
+      - Recommended next steps for document collection
+
+      **4. Red Flags in Documentation**
+      Note any documentation anomalies:
+      - Documents that appear altered or inconsistent
+      - Timestamps that don't align with the incident narrative
+      - Estimates that are unusually high or low for the claimed damage
+      - Multiple claims with similar documentation patterns
+      - Documents from providers with known fraud associations
+    model: haiku
+    max_turns: 8
+
+  - id: damage-assessment
+    depends_on: [document-extraction]
+    prompt: |
+      You are a certified insurance damage assessor with expertise across auto, property, health, and liability claims. Your task is to perform a thorough damage assessment based on the extracted claim documents and incident details.
+
+      Document Extraction Results: {steps.document-extraction.output}
+      Claim Type: {input.claim_type}
+      Incident Description: {input.incident_description}
+
+      Conduct a comprehensive damage assessment:
+
+      **1. Damage Classification and Severity**
+      Classify all claimed damages by type and severity:
+
+      Severity Scale:
+      - Level 1 (Minor): cosmetic damage, temporary inconvenience, minimal medical treatment
+      - Level 2 (Moderate): functional impairment, multiple medical visits, significant repair needed
+      - Level 3 (Major): structural damage, hospitalization required, extended disability
+      - Level 4 (Severe/Total): total loss, permanent injury, catastrophic damage
+      - Level 5 (Catastrophic): life-threatening injuries, complete structure destruction
+
+      For each damage item:
+      | Item | Category | Severity | Claimed Amount | Assessed Amount | Variance | Notes |
+      |------|----------|----------|----------------|-----------------|----------|-------|
+
+      **2. Claim-Type-Specific Assessment**
+
+      For AUTO claims:
+      - Vehicle damage assessment:
+        - Determine if the vehicle is repairable or a total loss
+        - If repairable: validate repair estimate line items against industry databases (Mitchell, CCC, Audatex)
+        - Check labor rates against regional prevailing rates
+        - Verify parts pricing (OEM vs aftermarket vs salvage, betterment considerations)
+        - Assess diminished value claim if applicable
+        - If total loss: determine actual cash value (ACV) using comparable vehicle analysis
+      - Injury assessment:
+        - Correlate claimed injuries with accident mechanics (are injuries consistent with impact type and severity?)
+        - Review medical treatment timeline (is treatment frequency and duration reasonable?)
+        - Assess pre-existing conditions that may complicate the claim
+        - Calculate lost wages based on employment verification
+        - Evaluate pain and suffering based on jurisdiction-specific multipliers or per diem methods
+
+      For PROPERTY claims:
+      - Structural damage assessment:
+        - Evaluate scope of damage using Xactimate or equivalent estimating methodology
+        - Determine repair vs replacement for each damaged component
+        - Apply depreciation for replacement cost value (RCV) vs actual cash value (ACV)
+        - Account for code upgrade requirements (building code changes since original construction)
+        - Assess additional living expenses (ALE) reasonableness
+      - Personal property assessment:
+        - Verify ownership and pre-loss condition
+        - Apply depreciation by item category and age
+        - Determine replacement cost from current retail pricing
+        - Identify items that exceed policy sub-limits (jewelry, electronics, art, firearms)
+
+      For HEALTH claims:
+      - Medical necessity review:
+        - Evaluate whether treatments were medically necessary for the diagnosed conditions
+        - Review CPT and ICD-10 codes for accuracy and appropriateness
+        - Identify potential upcoding (billing for more expensive procedures than performed)
+        - Check for unbundling (separately billing procedures that should be billed together)
+        - Verify provider credentials and facility appropriateness
+      - Bill review:
+        - Compare billed amounts to usual and customary rates (UCR) for the geographic area
+        - Identify duplicate charges
+        - Verify coordination of benefits (COB) with other insurance
+        - Calculate allowed amounts based on fee schedules or network agreements
+
+      For LIABILITY claims:
+      - Liability determination:
+        - Assess comparative/contributory negligence percentages
+        - Review premises liability standards (duty of care, breach, causation, damages)
+        - Evaluate product liability considerations if applicable
+        - Consider assumption of risk and contributory negligence defenses
+      - Damages assessment:
+        - Economic damages: medical expenses, lost wages, property damage (past and future)
+        - Non-economic damages: pain and suffering, emotional distress, loss of consortium
+        - Apply jurisdiction-specific caps on damages if applicable
+        - Consider structured settlement options for long-term injuries
+
+      **3. Causation Analysis**
+      Determine whether claimed damages are causally related to the incident:
+      - Direct causation: damages that are a direct result of the incident
+      - Indirect/consequential damages: secondary impacts flowing from the incident
+      - Pre-existing conditions: damages that existed before the incident
+      - Aggravation: pre-existing conditions worsened by the incident
+      - Unrelated damages: items claimed that are not related to the incident
+
+      **4. Comparative Analysis**
+      Compare the claim against benchmarks:
+      - Similar claims in the same geographic region and time period
+      - Industry average for this claim type and severity
+      - Historical claims data for the same claimant (prior claims patterns)
+      - Provider billing patterns compared to peer providers
+
+      **5. Damage Assessment Summary**
+      Produce a structured damage assessment report:
+      - Total assessed damages by category (with justification for each assessment)
+      - Variance from claimed amounts (over-claimed, under-claimed, or appropriate)
+      - Confidence level in the assessment (High/Medium/Low) per damage category
+      - Items requiring additional investigation or independent assessment (e.g. IME, EUO, appraisal)
+      - Recommended reserves (case reserve recommendation based on assessment)
+    model: sonnet
+    max_turns: 10
+
+  - id: policy-coverage-matching
+    depends_on: [document-extraction]
+    prompt: |
+      You are an insurance policy analyst with deep expertise in coverage interpretation, policy language analysis, and claims coverage determination. Your task is to perform a thorough policy coverage analysis to determine what is and is not covered under the claimant's policy.
+
+      Document Extraction Results: {steps.document-extraction.output}
+      Claim Type: {input.claim_type}
+      Policy Details: {input.policy_details}
+      Incident Description: {input.incident_description}
+
+      Perform a detailed policy coverage analysis:
+
+      **1. Policy Structure Analysis**
+      Parse and analyze the policy structure:
+      - Declarations page: named insured, policy period, coverage types, limits, deductibles, endorsements
+      - Insuring agreement: what risks are covered, what triggers coverage
+      - Conditions: duties after loss, cooperation requirements, proof of loss deadlines
+      - Definitions: how key terms are defined in this specific policy (may differ from common usage)
+      - Named perils vs open perils (all-risk) coverage determination
+
+      **2. Coverage Determination by Claim Component**
+      For each damage item identified in the claim:
+      | Damage Item | Coverage Type | Policy Section | Covered (Y/N/Partial) | Applicable Limit | Deductible | Net Coverage |
+      |-------------|--------------|----------------|----------------------|------------------|------------|--------------|
+
+      For each coverage determination, provide:
+      - The specific policy language that grants or denies coverage
+      - Any ambiguity in policy language and how it would be resolved (pro-insured in most jurisdictions)
+      - Applicable case law or regulatory guidance for grey areas
+
+      **3. Exclusion Analysis**
+      Review all policy exclusions that may apply:
+
+      Common exclusions to evaluate:
+      - Intentional acts exclusion: does the incident involve any intentional conduct?
+      - Wear and tear exclusion: are any claimed damages attributable to normal deterioration?
+      - Maintenance exclusion: did the insured fail to maintain the property/vehicle?
+      - Pre-existing damage exclusion: were damages present before the policy period?
+      - Business use exclusion: was the insured property being used for commercial purposes?
+      - Named driver exclusion: was the vehicle operated by an excluded driver?
+      - War, nuclear, terrorism exclusions
+      - Pollution exclusion (for property and liability claims)
+      - Earth movement or flood exclusion (for property claims)
+      - Contractual liability exclusion (for liability claims)
+      - Professional liability exclusion
+      - Workers' compensation exclusion
+
+      For each potentially applicable exclusion:
+      - Quote the exact exclusion language
+      - Analyze whether the facts trigger the exclusion
+      - Identify any exceptions to the exclusion that might restore coverage
+      - Note if endorsements modify or eliminate the exclusion
+      - Assess the strength of an exclusion argument (Strong/Moderate/Weak)
+
+      **4. Limit and Deductible Application**
+      Calculate the applicable limits and deductibles:
+      - Per-occurrence limit vs aggregate limit
+      - Sub-limits for specific coverage types (e.g. jewelry, electronics, ALE)
+      - Deductible type (flat dollar, percentage, split)
+      - Multiple deductible scenarios (wind/hail vs all other perils)
+      - Stacking of coverage across multiple policy periods if applicable
+      - Umbrella or excess coverage availability
+
+      **5. Endorsement and Rider Analysis**
+      Review all policy endorsements that modify coverage:
+      - Endorsements that expand coverage (e.g. scheduled personal property, water backup)
+      - Endorsements that restrict coverage (e.g. animal liability exclusion, specific named perils)
+      - Endorsements that modify limits or deductibles
+      - Inflation guard endorsements and their impact on coverage calculations
+
+      **6. Subrogation and Contribution Analysis**
+      Assess subrogation and contribution rights:
+      - Is there a liable third party who should bear some or all costs?
+      - Are there other insurance policies that may cover the same loss?
+      - "Other insurance" clause analysis (pro rata, excess, or escape clause)
+      - Coordination of benefits for health claims
+      - Government benefits or programs that may offset the loss (Medicare, Medicaid, workers' comp)
+
+      **7. Coverage Opinion Summary**
+      Provide a formal coverage opinion:
+      - For each claim component: Covered, Not Covered, Coverage Questionable (with analysis)
+      - Total covered amount under the policy
+      - Total amount excluded or outside policy limits
+      - Recommended coverage position for the claims handler
+      - Areas where coverage counsel should be consulted
+      - Reservation of rights letter recommendations (if coverage is uncertain)
+      - Potential bad faith exposure if coverage is denied (assess the risk)
+    model: sonnet
+    max_turns: 10
+
+  - id: fraud-detection
+    depends_on: [document-extraction]
+    prompt: |
+      You are a certified fraud examiner (CFE) specializing in insurance fraud detection with expertise in Special Investigations Unit (SIU) referral criteria. Your task is to analyze this claim for fraud indicators and assess the probability of fraudulent activity.
+
+      Document Extraction Results: {steps.document-extraction.output}
+      Claim Type: {input.claim_type}
+      Claimant Info: {input.claimant_info}
+      Incident Description: {input.incident_description}
+      Claim ID: {input.claim_id}
+
+      Conduct a thorough fraud assessment using established SIU methodologies:
+
+      **1. Fraud Indicator Analysis**
+      Evaluate the claim against the following fraud indicators, scoring each on a 0-3 scale (0=Not Present, 1=Mild, 2=Moderate, 3=Strong):
+
+      **Timing and Circumstances Indicators:**
+      1. Recent policy inception or increase in coverage shortly before the loss
+      2. Claim filed near policy cancellation or renewal date
+      3. Financial distress indicators (recent bankruptcy, divorce, job loss, foreclosure)
+      4. Incident occurred with no independent witnesses
+      5. Incident occurred during unusual hours (late night, early morning)
+      6. Delay in reporting the incident to authorities or insurance
+      7. Prior claims history pattern (frequency, similarity, multiple insurers)
+
+      **Documentation Indicators:**
+      8. Inconsistencies between the incident description and physical evidence
+      9. Inconsistencies between documents (dates, amounts, descriptions don't match)
+      10. Documents appear altered, forged, or fabricated (font changes, whiteout, digital manipulation)
+      11. Repair estimates significantly exceed expected damage for the incident type
+      12. Medical treatment patterns inconsistent with injury mechanism (treatment mill indicators)
+      13. Bills from providers with known fraud histories or unusual billing patterns
+      14. Missing or refused documentation that should be readily available
+
+      **Behavioral Indicators:**
+      15. Claimant is unusually knowledgeable about the claims process or insurance terminology
+      16. Claimant is pushing aggressively for a quick settlement
+      17. Claimant is reluctant to provide recorded statements or examination under oath
+      18. Claimant's story changes between retellings or contains rehearsed language
+      19. Claimant is uncooperative with investigation or avoids direct contact
+      20. Claimant has relationships with repair shops, medical providers, or attorneys involved
+
+      **Claim-Type-Specific Indicators:**
+
+      For AUTO fraud:
+      - Staged accident indicators: low-speed rear-end impact, multiple occupants with soft tissue injuries, all occupants treating at the same medical facility
+      - Vehicle stripping disguised as theft
+      - Owner give-up (arson or abandonment)
+      - Jump-in claims (adding occupants who weren't in the vehicle)
+      - Phantom vehicle claims (hit-and-run with no corroborating evidence)
+      - Paper accidents (no actual collision occurred)
+      - Damage inconsistent with described accident mechanics (e.g. side damage claimed from rear-end)
+
+      For PROPERTY fraud:
+      - Inflated inventory claims (claiming items not owned or inflating values)
+      - Pre-existing damage claimed as new loss
+      - Arson indicators (incendiary origin, fire in areas with no contents, accelerant patterns)
+      - Theft staging indicators (forced entry from inside, no alarm activation, selective theft of only insured items)
+      - Natural disaster padding (adding unrelated damage to legitimate weather claims)
+      - Construction defect disguised as sudden event
+
+      For HEALTH fraud:
+      - Upcoding and unbundling by providers
+      - Phantom billing (services never rendered)
+      - Treatment mill referral patterns (attorney -> chiropractor -> imaging center -> attorney)
+      - Excessive or unnecessary medical treatment
+      - Provider kickback indicators
+      - Diagnosis inconsistent with treatment rendered
+
+      For LIABILITY fraud:
+      - Slip and fall staging indicators (no witnesses, no security footage, delayed reporting)
+      - Exaggerated injuries inconsistent with incident mechanism
+      - Prior litigation history pattern
+      - Attorney involvement before treatment (treatment directed by attorney, not physician)
+      - Social media activity inconsistent with claimed injuries
+
+      **2. Cross-Reference Analysis**
+      Check for patterns that indicate organized fraud:
+      - Common addresses, phone numbers, or representatives across multiple claims
+      - Common service providers (same body shop, same doctor, same attorney across unrelated claims)
+      - Network connections between claimant, witnesses, and service providers
+      - Geographic clustering of similar claims
+      - Temporal clustering of similar claims
+
+      **3. Fraud Scoring Model**
+      Calculate a composite fraud risk score:
+      - Sum all indicator scores (maximum possible: 60 for 20 indicators at 3 each)
+      - Normalize to a 0-100 scale
+      - Apply claim-type-specific weighting (some indicators matter more for certain claim types)
+      - Risk classification:
+        - 0-20: Low Risk - proceed with normal claims handling
+        - 21-40: Moderate Risk - enhanced scrutiny recommended
+        - 41-60: High Risk - SIU referral recommended
+        - 61-80: Very High Risk - SIU referral required, consider EUO
+        - 81-100: Critical Risk - SIU referral required, consider legal action
+
+      **4. SIU Referral Recommendation**
+      Based on the fraud score, provide:
+      - Referral decision: Refer / Monitor / No Referral
+      - Specific fraud indicators that triggered the referral
+      - Recommended investigation actions (surveillance, recorded statement, EUO, independent medical exam, cause and origin investigation)
+      - Evidence preservation requirements
+      - Legal considerations (anti-fraud statutes, regulatory reporting obligations)
+      - Estimated investigation cost vs potential recovery
+
+      **5. Fraud Detection Summary**
+      Produce a concise fraud assessment report:
+      - Overall fraud risk score and classification
+      - Top 5 fraud indicators identified (with detailed justification)
+      - Recommended next steps for claims handling
+      - NICB (National Insurance Crime Bureau) referral criteria assessment
+      - State insurance fraud bureau reporting requirements (if applicable)
+    model: sonnet
+    max_turns: 10
+
+  - id: payout-estimation
+    depends_on: [damage-assessment, policy-coverage-matching, fraud-detection]
+    prompt: |
+      You are a senior claims examiner responsible for calculating the appropriate claim payout based on the damage assessment, policy coverage analysis, and fraud detection findings. Your task is to produce a detailed, defensible payout recommendation.
+
+      Damage Assessment: {steps.damage-assessment.output}
+      Policy Coverage Analysis: {steps.policy-coverage-matching.output}
+      Fraud Detection Results: {steps.fraud-detection.output}
+      Claim ID: {input.claim_id}
+      Claim Type: {input.claim_type}
+
+      Calculate the payout recommendation following this methodology:
+
+      **1. Covered Damages Calculation**
+      Start with the assessed damages from the damage assessment and apply the coverage analysis:
+      - Begin with each assessed damage item
+      - Apply coverage determination (covered, excluded, partially covered)
+      - Apply applicable deductibles
+      - Apply policy limits (per-occurrence, sub-limits, aggregate)
+      - Account for depreciation (ACV vs RCV settlement)
+      - Apply coordination of benefits or other insurance offsets
+      - Apply subrogation offsets (if another party is liable)
+      - Calculate holdback amount for RCV policies (difference between ACV and RCV, payable upon proof of repair/replacement)
+
+      Show the calculation as a detailed financial waterfall:
+      | Line Item | Amount |
+      |-----------|--------|
+      | Total Claimed Amount | $X |
+      | - Items Not Covered (exclusions) | -$X |
+      | - Assessment Adjustments (damage overstatement) | -$X |
+      | = Total Assessed Covered Damages | $X |
+      | - Applicable Deductible | -$X |
+      | - Other Insurance Offset | -$X |
+      | - Depreciation Holdback (RCV policies) | -$X |
+      | = Initial Payment Amount | $X |
+      | + Supplemental Payment (upon proof of repair) | $X |
+      | = Total Potential Payout | $X |
+
+      **2. Fraud Impact Adjustment**
+      Based on the fraud detection results:
+      - If fraud risk is Low (0-20): no adjustment, proceed normally
+      - If fraud risk is Moderate (21-40): apply enhanced documentation requirements before payment, consider independent verification for largest line items
+      - If fraud risk is High (41-60): reduce or hold payout pending SIU investigation, require examination under oath before payment
+      - If fraud risk is Very High/Critical (61+): deny or suspend claim pending full investigation, engage legal counsel
+
+      Document how the fraud assessment affects the payout recommendation:
+      - Specific line items flagged for additional investigation
+      - Dollar amounts placed on hold pending verification
+      - Timeline for investigation completion and payment decision
+
+      **3. Reserve Recommendation**
+      Set appropriate case reserves:
+      - Indemnity reserve: expected total payout for damages
+      - Expense reserve: expected investigation and adjustment costs (legal, expert, independent assessments)
+      - Total incurred: indemnity + expense reserves
+      - Reserve adequacy check: is the reserve sufficient to cover worst-case scenario?
+      - Reserve development projection: expected changes over the life of the claim
+
+      **4. Settlement Strategy**
+      Recommend a settlement approach:
+      - Full payment: clear-cut covered claim with no issues
+      - Partial payment with holdback: legitimate claim but some items need verification
+      - Negotiated settlement: disputed items that may require compromise
+      - Structured settlement: for large, long-term injury claims
+      - Deny with explanation: clear exclusion or policy defense applies
+      - Refer to litigation: anticipated legal dispute
+
+      For negotiated settlements:
+      - Identify the claimant's likely negotiation position
+      - Calculate the range: minimum defensible offer to maximum reasonable payment
+      - Identify leverage points for negotiation
+      - Assess litigation risk and cost if settlement fails
+      - Recommend initial offer and settlement authority needed
+
+      **5. Regulatory Compliance Check**
+      Verify the payout decision complies with regulatory requirements:
+      - State-specific claims handling timeframes (acknowledgment, investigation, decision)
+      - Unfair claims settlement practices act compliance
+      - Prompt payment statutes and interest obligations
+      - Documentation requirements for claim decisions
+      - Bad faith avoidance considerations
+
+      **6. Payment Authorization Matrix**
+      Based on the payout amount, determine approval requirements:
+      | Payment Range | Authority Level |
+      |--------------|----------------|
+      | $0 - $5,000 | Claims Adjuster |
+      | $5,001 - $25,000 | Senior Adjuster |
+      | $25,001 - $100,000 | Claims Manager |
+      | $100,001 - $500,000 | Claims Director |
+      | $500,001+ | VP of Claims / Executive |
+
+      **7. Payout Summary**
+      Produce a clear payout recommendation:
+      - Recommended payment amount with detailed justification
+      - Payment method and timing
+      - Conditions for payment (if any)
+      - Supplemental payment triggers and amounts
+      - Subrogation recovery potential
+      - Total claim cost projection (payments + expenses)
+      - Approval level required
+    model: sonnet
+    max_turns: 10
+
+  - id: case-summary
+    depends_on: [payout-estimation]
+    prompt: |
+      You are a senior claims examiner preparing the final case summary for this insurance claim. Your task is to compile all analysis into a comprehensive, adjuster-ready case file that can serve as the official claim record and support any regulatory review or legal proceeding.
+
+      Document Extraction: {steps.document-extraction.output}
+      Damage Assessment: {steps.damage-assessment.output}
+      Policy Coverage Analysis: {steps.policy-coverage-matching.output}
+      Fraud Detection: {steps.fraud-detection.output}
+      Payout Estimation: {steps.payout-estimation.output}
+      Claim ID: {input.claim_id}
+      Claim Type: {input.claim_type}
+      Claimant Info: {input.claimant_info}
+      Incident Description: {input.incident_description}
+
+      Produce a comprehensive case summary following NAIC (National Association of Insurance Commissioners) best practices:
+
+      **1. Case Header**
+      - Claim ID: {input.claim_id}
+      - Claim Type: {input.claim_type}
+      - Date of Loss, Date Reported, Date File Opened
+      - Assigned Adjuster (to be assigned)
+      - Policy Number, Policy Period, Coverage Types
+      - Claimant Information Summary
+      - Current Claim Status: Open/Pending Investigation/Pending Payment/Closed
+
+      **2. Executive Summary (1 paragraph)**
+      A concise overview of the claim: what happened, what was claimed, what was determined, and the recommended action. This should be readable by a claims manager in under 30 seconds and capture the essential decision.
+
+      **3. Incident Narrative**
+      Reconstruct the incident in clear, factual language:
+      - Chronological account based on all evidence reviewed
+      - Points of agreement between parties
+      - Points of dispute between parties
+      - Evidence supporting each version of events
+      - Adjuster's assessment of the most likely sequence of events
+      - Gaps in the narrative that remain unresolved
+
+      **4. Coverage Analysis Summary**
+      Summarize the coverage determination:
+      - Coverages that apply with policy language citations
+      - Exclusions that apply with policy language citations
+      - Coverage disputes or grey areas identified
+      - Recommendation: full coverage, partial coverage, coverage denial, or coverage counsel referral
+      - Reservation of rights status
+
+      **5. Damage and Loss Summary**
+      Present the assessed damages in a clear format:
+      - Itemized damage list with claimed vs assessed amounts
+      - Total variance explained
+      - Supporting documentation for each assessment
+      - Items requiring additional independent evaluation
+
+      **6. Fraud Assessment Summary**
+      Summarize fraud findings:
+      - Overall fraud risk score and classification
+      - Key indicators identified (or confirmation of no indicators)
+      - SIU referral status
+      - Impact on claim handling and payout
+
+      **7. Financial Summary**
+      | Category | Claimed | Assessed | Covered | Net Payout |
+      |----------|---------|----------|---------|------------|
+      (Complete table for all damage categories)
+      - Total recommended payout
+      - Deductible applied
+      - Reserve amount set
+      - Subrogation potential
+      - Salvage potential (for total loss auto or property claims)
+
+      **8. Recommended Actions**
+      Prioritized list of next steps:
+      1. Immediate actions (payment processing, documentation requests)
+      2. Investigation actions (if fraud indicators present)
+      3. Legal actions (if coverage dispute or litigation anticipated)
+      4. Subrogation actions (if third party recovery possible)
+      5. Closure criteria (what must be completed before the file can be closed)
+
+      **9. Compliance Checklist**
+      Verify all regulatory requirements are met:
+      - [ ] Initial acknowledgment sent within X days (per state requirement)
+      - [ ] Investigation completed within X days
+      - [ ] Coverage decision communicated in writing
+      - [ ] Payment issued within X days of determination
+      - [ ] All required forms filed (state-specific)
+      - [ ] Bad faith exposure assessed and mitigated
+      - [ ] Claim file documentation complete and auditable
+
+      **10. Communication Log Template**
+      Provide a template for tracking all communications:
+      | Date | Time | Contact | Method | Summary | Follow-up Required |
+      |------|------|---------|--------|---------|-------------------|
+
+      **11. Appendix**
+      - Document inventory with status (received, pending, not applicable)
+      - Timeline of claim handling activities
+      - Calculation worksheets for payout determination
+      - Reference materials (applicable statutes, regulations, policy endorsements)
+      - Quality assurance checklist for file review
+
+      Format the entire case summary in clean, professional markdown. The document should be suitable for regulatory examination, litigation support, and internal quality review. Use precise, objective language throughout - avoid subjective assessments not supported by evidence.
+    model: sonnet
+    max_turns: 10
