@@ -97,6 +97,32 @@ class ApiKeyCreateRequest(BaseModel):
     max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run")
 
 
+class ApiKeyRotateRequest(BaseModel):
+    """Request to rotate an API key."""
+
+    grace_period_hours: int | None = Field(
+        None, description="Hours to keep old key active (default: server setting)"
+    )
+
+
+class ApiKeyRotateResponse(BaseModel):
+    """Response after rotating an API key."""
+
+    new_key: str = Field(..., description="New plaintext API key - shown only once")
+    new_key_id: str
+    old_key_id: str
+    old_key_expires_at: datetime
+    grace_period_hours: int
+
+
+class ApiKeyAllowlistRequest(BaseModel):
+    """Update IP allowlist for an API key."""
+
+    cidrs: list[str] = Field(
+        ..., description="List of CIDR ranges (e.g. ['10.0.0.0/8', '::1/128']). Empty list clears."
+    )
+
+
 class DeadLetterResolveRequest(BaseModel):
     """Request to manually resolve a dead letter item."""
 
@@ -354,6 +380,8 @@ class ApiKeyResponse(BaseModel):
     name: str
     is_active: bool
     max_cost_per_run_usd: float | None = None
+    expires_at: datetime | None = None
+    allowed_cidrs: list[str] | None = None
     created_at: datetime | None = None
     last_used_at: datetime | None = None
 

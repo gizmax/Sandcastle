@@ -107,6 +107,17 @@ class Settings(BaseSettings):
     memory_max_age_days: int = 90  # TTL for memory decay (0 = no expiry)
     memory_admit_threshold: float = 0.3  # Minimum importance score to store
 
+    # Security
+    credential_encryption_key: str = ""  # Fernet key for encrypting tool credentials at rest
+    key_rotation_grace_hours: int = 24  # Grace period for old key after rotation
+    csp_report_only: bool = False  # Set to True for Content-Security-Policy-Report-Only
+
+    # Docker hardening
+    docker_seccomp_profile: str = ""  # Path to seccomp JSON profile (empty = bundled default)
+    docker_pids_limit: int = 100  # Max PIDs per container
+    docker_cpu_period: int = 100_000  # CPU period in microseconds
+    docker_cpu_quota: int = 50_000  # CPU quota in microseconds (50% of one core)
+
     # Telemetry (opt-in error reporting)
     telemetry_enabled: bool = False  # Set to True to send error reports via Sentry
     sentry_dsn: str = ""  # Sentry DSN - get one free at sentry.io

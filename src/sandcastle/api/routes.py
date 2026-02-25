@@ -21,9 +21,12 @@ from sqlalchemy.orm import selectinload
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
+    ApiKeyAllowlistRequest,
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
     ApiKeyResponse,
+    ApiKeyRotateRequest,
+    ApiKeyRotateResponse,
     ApiResponse,
     ApprovalRespondRequest,
     ApprovalResponse,
@@ -1164,7 +1167,7 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
 @router.post("/workflows/run/sync")
 async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow synchronously. Blocks until complete."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -1293,7 +1296,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
 @router.post("/workflows/run")
 async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow asynchronously. Returns immediately with run_id."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -2072,7 +2075,7 @@ async def delete_run(run_id: str, req: Request) -> ApiResponse:
 @router.post("/runs/{run_id}/replay")
 async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiResponse:
     """Replay a run from a specific step using saved checkpoints."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -2212,7 +2215,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
 @router.post("/runs/{run_id}/fork")
 async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiResponse:
     """Fork a run from a specific step with overrides (prompt, model, etc.)."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -3619,6 +3622,8 @@ async def list_api_keys(
             name=k.name,
             is_active=k.is_active,
             max_cost_per_run_usd=k.max_cost_per_run_usd,
+            expires_at=k.expires_at,
+            allowed_cidrs=k.allowed_cidrs,
             created_at=k.created_at,
             last_used_at=k.last_used_at,
         )
@@ -4090,6 +4095,130 @@ async def deactivate_api_key(key_id: str, request: Request) -> ApiResponse:
         await session.commit()
 
     return ApiResponse(data={"deactivated": True, "id": key_id})
+
+
+@router.post("/api-keys/{key_id}/rotate")
+async def rotate_api_key(
+    key_id: str, body: ApiKeyRotateRequest, req: Request
+) -> ApiResponse:
+    """Rotate an API key. Creates a new key and sets expiry on the old one. Admin only."""
+    _require_admin(req)
+
+    grace_hours = body.grace_period_hours or settings.key_rotation_grace_hours
+
+    try:
+        key_uuid = uuid.UUID(key_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid key ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        old_key = await session.get(ApiKey, key_uuid)
+        if not old_key or not old_key.is_active:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="API key not found or inactive")
+                ).model_dump(),
+            )
+
+        # Set expiry on old key
+        old_expires_at = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
+        old_key.expires_at = old_expires_at
+
+        # Generate new key
+        plaintext_key = generate_api_key()
+        key_hash_value = hash_key(plaintext_key)
+        new_db_key = ApiKey(
+            key_hash=key_hash_value,
+            key_prefix=plaintext_key[:8],
+            tenant_id=old_key.tenant_id,
+            name=old_key.name,
+            max_cost_per_run_usd=old_key.max_cost_per_run_usd,
+            allowed_cidrs=old_key.allowed_cidrs,
+            rotated_from_id=old_key.id,
+        )
+        session.add(new_db_key)
+        await session.commit()
+        await session.refresh(new_db_key)
+
+    return ApiResponse(
+        data=ApiKeyRotateResponse(
+            new_key=plaintext_key,
+            new_key_id=str(new_db_key.id),
+            old_key_id=key_id,
+            old_key_expires_at=old_expires_at,
+            grace_period_hours=grace_hours,
+        )
+    )
+
+
+@router.put("/api-keys/{key_id}/allowlist")
+async def update_api_key_allowlist(
+    key_id: str, body: ApiKeyAllowlistRequest, req: Request
+) -> ApiResponse:
+    """Update the IP allowlist for an API key. Admin only."""
+    import ipaddress
+
+    _require_admin(req)
+
+    try:
+        key_uuid = uuid.UUID(key_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid key ID format")
+            ).model_dump(),
+        )
+
+    # Validate all CIDRs
+    for cidr in body.cidrs:
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_CIDR",
+                        message=f"Invalid CIDR notation: {cidr}",
+                    )
+                ).model_dump(),
+            )
+
+    async with async_session() as session:
+        db_key = await session.get(ApiKey, key_uuid)
+        if not db_key or not db_key.is_active:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="API key not found or inactive")
+                ).model_dump(),
+            )
+
+        db_key.allowed_cidrs = body.cidrs if body.cidrs else None
+        await session.commit()
+        await session.refresh(db_key)
+
+    return ApiResponse(
+        data=ApiKeyResponse(
+            id=str(db_key.id),
+            key_prefix=db_key.key_prefix,
+            tenant_id=db_key.tenant_id,
+            name=db_key.name,
+            is_active=db_key.is_active,
+            max_cost_per_run_usd=db_key.max_cost_per_run_usd,
+            expires_at=db_key.expires_at,
+            allowed_cidrs=db_key.allowed_cidrs,
+            created_at=db_key.created_at,
+            last_used_at=db_key.last_used_at,
+        )
+    )
 
 
 # --- Settings ---
@@ -4639,11 +4768,14 @@ async def _get_tool_connections(tool_name: str) -> list[ToolConnectionResponse]:
         tool = _get_tool(tool_name)
     except KeyError:
         return []
+    from sandcastle.engine.crypto import decrypt_credentials
+
     required_vars = set(tool.credential_env_vars)
     connections: list[ToolConnectionResponse] = []
     for row in rows:
-        present = [k for k in required_vars if row.credentials.get(k)]
-        missing = [k for k in required_vars if not row.credentials.get(k)]
+        creds = decrypt_credentials(row.credentials)
+        present = [k for k in required_vars if creds.get(k)]
+        missing = [k for k in required_vars if not creds.get(k)]
         connections.append(
             ToolConnectionResponse(
                 name=row.connection_name,
@@ -4698,12 +4830,15 @@ async def list_tools(category: str | None = Query(None)) -> ApiResponse:
     async with async_session() as session:
         result = await session.execute(select(ToolConnection))
         rows = result.scalars().all()
+    from sandcastle.engine.crypto import decrypt_credentials
+
     for row in rows:
         all_connections.setdefault(row.tool_name, [])
         tool_def = next((t for t in tools if t.name == row.tool_name), None)
         required_vars = set(tool_def.credential_env_vars) if tool_def else set()
-        present = [k for k in required_vars if row.credentials.get(k)]
-        missing = [k for k in required_vars if not row.credentials.get(k)]
+        creds = decrypt_credentials(row.credentials)
+        present = [k for k in required_vars if creds.get(k)]
+        missing = [k for k in required_vars if not creds.get(k)]
         all_connections[row.tool_name].append(
             ToolConnectionResponse(
                 name=row.connection_name,
@@ -4867,18 +5002,23 @@ async def create_tool_connection(
                 ).model_dump(),
             )
 
+        from sandcastle.engine.crypto import encrypt_credentials
+
         conn = ToolConnection(
             tool_name=tool_name,
             connection_name=body.name,
-            credentials=body.credentials,
+            credentials=encrypt_credentials(body.credentials),
         )
         session.add(conn)
         await session.commit()
         await session.refresh(conn)
 
+    from sandcastle.engine.crypto import decrypt_credentials
+
     required_vars = set(tool.credential_env_vars)
-    present = [k for k in required_vars if conn.credentials.get(k)]
-    missing = [k for k in required_vars if not conn.credentials.get(k)]
+    creds = decrypt_credentials(conn.credentials)
+    present = [k for k in required_vars if creds.get(k)]
+    missing = [k for k in required_vars if not creds.get(k)]
 
     return ApiResponse(
         data=ToolConnectionResponse(
@@ -4934,16 +5074,21 @@ async def update_tool_connection(
         if not conn:
             raise HTTPException(404, f"Connection '{conn_name}' not found for {tool_name}")
 
-        # Merge new credentials into existing
-        merged = dict(conn.credentials)
+        from sandcastle.engine.crypto import decrypt_credentials, encrypt_credentials
+
+        # Merge new credentials into existing (decrypt first)
+        merged = dict(decrypt_credentials(conn.credentials))
         merged.update(body.credentials)
-        conn.credentials = merged
+        conn.credentials = encrypt_credentials(merged)
         await session.commit()
         await session.refresh(conn)
 
+    from sandcastle.engine.crypto import decrypt_credentials as _dc
+
     required_vars = set(tool.credential_env_vars)
-    present = [k for k in required_vars if conn.credentials.get(k)]
-    missing = [k for k in required_vars if not conn.credentials.get(k)]
+    creds = _dc(conn.credentials)
+    present = [k for k in required_vars if creds.get(k)]
+    missing = [k for k in required_vars if not creds.get(k)]
 
     return ApiResponse(
         data=ToolConnectionResponse(

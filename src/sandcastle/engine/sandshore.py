@@ -205,12 +205,18 @@ class SandshoreRuntime:
         self._metrics = RuntimeMetrics()
 
         # Create the pluggable backend
+        from sandcastle.config import settings as _cfg
+
         self._backend: SandboxBackend = create_backend(
             sandbox_backend,
             e2b_api_key=e2b_api_key,
             template=template,
             docker_image=docker_image,
             docker_url=docker_url or None,
+            docker_seccomp_profile=_cfg.docker_seccomp_profile,
+            docker_pids_limit=_cfg.docker_pids_limit,
+            docker_cpu_period=_cfg.docker_cpu_period,
+            docker_cpu_quota=_cfg.docker_cpu_quota,
             cloudflare_worker_url=cloudflare_worker_url,
             timeout=timeout,
         )

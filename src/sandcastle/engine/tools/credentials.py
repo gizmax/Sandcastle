@@ -93,7 +93,9 @@ async def _resolve_named_connections_async(
             )
             conn = result.scalar_one_or_none()
             if conn and conn.credentials:
-                credentials.update(conn.credentials)
+                from sandcastle.engine.crypto import decrypt_credentials
+
+                credentials.update(decrypt_credentials(conn.credentials))
             else:
                 # Fallback to env vars
                 try:
