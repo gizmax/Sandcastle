@@ -215,7 +215,7 @@ export default function TemplatesPage() {
     () =>
       templates.map((t) => ({
         ...t,
-        category: t.category || resolveCategory(null, t.tags),
+        category: t.category || resolveCategory(null, t.tags || []),
       })),
     [templates]
   );
@@ -256,7 +256,7 @@ export default function TemplatesPage() {
         (t) =>
           t.name.toLowerCase().includes(q) ||
           t.description.toLowerCase().includes(q) ||
-          t.tags.some((tag) => tag.toLowerCase().includes(q))
+          (t.tags || []).some((tag) => tag.toLowerCase().includes(q))
       );
     }
     if (selectedTag) {
@@ -281,7 +281,7 @@ export default function TemplatesPage() {
       .map((ct) => ({
         name: ct.name,
         description: ct.description,
-        tags: ct.tags,
+        tags: ct.tags || [],
         step_count: ct.step_count,
         category: ct.category,
         source: "community" as const,
@@ -310,7 +310,7 @@ export default function TemplatesPage() {
           t.name.toLowerCase().includes(q) ||
           t.description.toLowerCase().includes(q) ||
           t.author.toLowerCase().includes(q) ||
-          t.tags.some((tag) => tag.toLowerCase().includes(q))
+          (t.tags || []).some((tag) => tag.toLowerCase().includes(q))
       );
     }
 
@@ -1029,7 +1029,7 @@ export default function TemplatesPage() {
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <p className="text-sm text-muted">{communityPreviewTarget.description}</p>
               <div className="flex flex-wrap gap-1.5">
-                {communityPreviewTarget.tags.map((tag) => (
+                {(communityPreviewTarget.tags || []).map((tag) => (
                   <span key={tag} className="rounded-full bg-border/40 px-2 py-0.5 text-xs text-muted">{tag}</span>
                 ))}
                 <span className="rounded-full bg-border/40 px-2.5 py-0.5 text-xs font-medium text-muted font-data">
@@ -1037,7 +1037,11 @@ export default function TemplatesPage() {
                 </span>
               </div>
               <div className="text-xs text-muted-foreground">
-                by <a href={communityPreviewTarget.author_url} target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover">@{communityPreviewTarget.author}</a>
+                by {communityPreviewTarget.author_url ? (
+                  <a href={communityPreviewTarget.author_url} target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover">@{communityPreviewTarget.author}</a>
+                ) : (
+                  <span className="text-muted-foreground">@{communityPreviewTarget.author}</span>
+                )}
               </div>
               {communityInstallLoading ? (
                 <div className="flex h-24 items-center justify-center"><LoadingSpinner size="md" /></div>
@@ -1280,7 +1284,7 @@ function PacksView({
       (t) =>
         t.name.toLowerCase().includes(q) ||
         t.description.toLowerCase().includes(q) ||
-        t.tags.some((tag) => tag.toLowerCase().includes(q))
+        (t.tags || []).some((tag) => tag.toLowerCase().includes(q))
     );
   }, [search, templatesWithCategory]);
 
