@@ -1,0 +1,51 @@
+name: Discord Incident Bot
+description: Monitor PagerDuty for new incidents, post alerts to Discord, and auto-acknowledge with status updates.
+category: devops
+tags: [Discord, PagerDuty, Incident Response, DevOps]
+default_model: haiku
+input_schema:
+  type: object
+  required: [discord_channel_id]
+  properties:
+    discord_channel_id:
+      type: string
+      description: Discord channel ID for incident alerts
+    severity:
+      type: string
+      description: Minimum severity to alert on (high or low)
+      default: high
+
+steps:
+  - id: check_incidents
+    prompt: |
+      List all triggered and acknowledged PagerDuty incidents.
+      Filter to only {input.severity} urgency incidents from the last hour.
+      Return a JSON array of incidents with id, title, status, urgency, and html_url.
+    tools: [pagerduty]
+    output_schema:
+      type: object
+      properties:
+        incidents:
+          type: array
+
+  - id: notify_discord
+    prompt: |
+      Post a summary of active incidents to Discord channel {input.discord_channel_id}.
+
+      Active incidents:
+      {steps.check_incidents.output}
+
+      Format each incident as:
+      **[SEVERITY] Title** - Status: status - [View](url)
+
+      If no incidents, post "All clear - no active incidents."
+    tools: [discord]
+
+  - id: auto_acknowledge
+    prompt: |
+      For any triggered (unacknowledged) incidents from:
+      {steps.check_incidents.output}
+
+      Acknowledge them via PagerDuty to prevent escalation.
+      Return the list of acknowledged incident IDs.
+    tools: [pagerduty]
