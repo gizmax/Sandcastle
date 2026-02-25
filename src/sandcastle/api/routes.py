@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -522,6 +523,87 @@ async def get_template(template_name: str) -> ApiResponse:
             "content": content,
             "input_schema": info.input_schema,
             "category": info.category,
+        }
+    )
+
+
+# --- Community Hub & Export ---
+
+
+def _sanitize_workflow_yaml(yaml_content: str) -> str:
+    """Remove sensitive data from workflow YAML for safe sharing."""
+    # Remove env var references like ${API_KEY} or $API_KEY
+    sanitized = re.sub(r'\$\{[A-Z_]+\}', '<REDACTED>', yaml_content)
+    sanitized = re.sub(r'\$[A-Z_]{3,}', '<REDACTED>', sanitized)
+    # Remove lines that look like they contain secrets
+    lines: list[str] = []
+    for line in sanitized.split('\n'):
+        lower = line.lower()
+        if any(kw in lower for kw in ('password:', 'secret:', 'token:', 'api_key:')) and '<REDACTED>' not in line:
+            # Check if it's a key-value with an actual value (not a variable reference)
+            if ':' in line:
+                key, _, val = line.partition(':')
+                val = val.strip()
+                if val and not val.startswith('{') and not val.startswith('<'):
+                    line = f"{key}: <REDACTED>"
+        lines.append(line)
+    return '\n'.join(lines)
+
+
+@router.get("/hub/registry")
+async def get_hub_registry() -> ApiResponse:
+    """Proxy the community hub registry for dashboard consumption.
+
+    Public endpoint - no authentication required.
+    """
+    registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(registry_url)
+            resp.raise_for_status()
+            return ApiResponse(data=resp.json())
+    except Exception:
+        # Fallback: return empty registry
+        return ApiResponse(
+            data={
+                "version": 1,
+                "templates": [],
+                "categories": [],
+                "stats": {"total_templates": 0},
+            }
+        )
+
+
+@router.get("/workflows/{name}/export")
+async def export_workflow(name: str, request: Request) -> ApiResponse:
+    """Export a saved workflow as sanitized YAML for sharing.
+
+    Removes environment variable references and sensitive data.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(WorkflowVersion)
+            .where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+            )
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        wv = result.scalar_one_or_none()
+        if not wv:
+            raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+
+    # Sanitize the YAML content
+    sanitized = _sanitize_workflow_yaml(wv.yaml_content)
+
+    return ApiResponse(
+        data={
+            "name": wv.workflow_name,
+            "description": wv.description or "",
+            "yaml_content": sanitized,
+            "step_count": wv.steps_count,
+            "version": wv.version,
         }
     )
 

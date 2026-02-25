@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Community Hub - Sandcastle</title>
+  <meta name="description" content="Browse, discover, and install AI workflows shared by the Sandcastle community. 35+ ready-to-use templates for sales, marketing, support, engineering, and more.">
+  <meta name="author" content="Tomas Pflanzer @gizmax">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Sandcastle Community Hub">
+  <meta property="og:description" content="Browse and install community AI workflows for Sandcastle. Sales, marketing, support, engineering templates ready to go.">
+  <meta property="og:url" content="https://gizmax.cz/sandcastle/hub/">
+  <meta property="og:type" content="website">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-hover: #1a1a1a;
+      --border: #262626;
+      --border-light: #333;
+      --text: #f5f5f5;
+      --text-muted: #a3a3a3;
+      --text-dim: #737373;
+      --accent: #f59e0b;
+      --accent-hover: #fbbf24;
+      --accent-dim: rgba(245, 158, 11, 0.15);
+      --code-bg: #0d0d0d;
+      --radius: 8px;
+      --radius-sm: 4px;
+      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+
+      --cat-sales_crm: #F59E0B;
+      --cat-marketing: #8B5CF6;
+      --cat-support: #F43F5E;
+      --cat-engineering: #3B82F6;
+      --cat-hr_legal: #10B981;
+      --cat-general_ai: #9CA3AF;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    a:hover {
+      color: var(--accent-hover);
+    }
+
+    code, .mono {
+      font-family: var(--font-mono);
+    }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ---- NAV ---- */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(10, 10, 10, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .nav-brand span {
+      font-size: 24px;
+    }
+
+    .nav-separator {
+      color: var(--border-light);
+      font-size: 20px;
+      font-weight: 300;
+    }
+
+    .nav-subtitle {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+      border-radius: var(--radius-sm);
+      transition: color 0.2s, background 0.2s;
+    }
+
+    .nav-link:hover {
+      color: var(--text);
+      background: var(--surface-hover);
+    }
+
+    .nav-link svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* ---- HERO ---- */
+    .hero {
+      padding: 140px 0 48px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(245, 158, 11, 0.12) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+      mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, black 20%, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, black 20%, transparent 70%);
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -40%);
+      width: 700px;
+      height: 500px;
+      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.08) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .hero > .container {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero h1 {
+      font-size: clamp(32px, 6vw, 56px);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .hero h1 .accent {
+      color: var(--accent);
+    }
+
+    .hero p {
+      font-size: clamp(15px, 2vw, 18px);
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 auto 32px;
+    }
+
+    /* Stats */
+    .stats-bar {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      margin-bottom: 40px;
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-number {
+      font-size: 32px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--accent);
+      display: block;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Search */
+    .search-wrapper {
+      max-width: 560px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+
+    .search-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    #search-input {
+      width: 100%;
+      padding: 14px 16px 14px 48px;
+      font-family: var(--font-sans);
+      font-size: 16px;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    #search-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    #search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    /* ---- FILTER BAR ---- */
+    .filter-bar {
+      padding: 0 0 32px;
+    }
+
+    .filter-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .category-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .pill:hover {
+      border-color: var(--border-light);
+      color: var(--text);
+    }
+
+    .pill.active {
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .pill[data-cat="all"].active {
+      background: var(--accent);
+      color: #000;
+    }
+    .pill[data-cat="sales_crm"].active { background: var(--cat-sales_crm); color: #000; }
+    .pill[data-cat="marketing"].active { background: var(--cat-marketing); }
+    .pill[data-cat="support"].active { background: var(--cat-support); }
+    .pill[data-cat="engineering"].active { background: var(--cat-engineering); }
+    .pill[data-cat="hr_legal"].active { background: var(--cat-hr_legal); color: #000; }
+    .pill[data-cat="general_ai"].active { background: var(--cat-general_ai); color: #000; }
+
+    /* Sort */
+    .sort-select {
+      padding: 7px 12px;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .sort-select:focus {
+      border-color: var(--accent);
+    }
+
+    /* ---- TEMPLATE GRID ---- */
+    .templates-section {
+      padding-bottom: 80px;
+    }
+
+    .results-info {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 20px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    /* Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      cursor: pointer;
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      opacity: 0.6;
+      transition: opacity 0.25s;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: var(--border-light);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .card:hover::before {
+      opacity: 1;
+    }
+
+    .card[data-cat="sales_crm"]::before { background: var(--cat-sales_crm); }
+    .card[data-cat="marketing"]::before { background: var(--cat-marketing); }
+    .card[data-cat="support"]::before { background: var(--cat-support); }
+    .card[data-cat="engineering"]::before { background: var(--cat-engineering); }
+    .card[data-cat="hr_legal"]::before { background: var(--cat-hr_legal); }
+    .card[data-cat="general_ai"]::before { background: var(--cat-general_ai); }
+
+    .card-category {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .card-category .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .card-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    .card-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      flex: 1;
+    }
+
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-sm);
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .card-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .card-meta .mono {
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .card-install-btn {
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #000;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .card-install-btn:hover {
+      background: var(--accent-hover);
+    }
+
+    /* CTA card */
+    .cta-card {
+      background: var(--surface);
+      border: 1px dashed var(--border-light);
+      border-radius: var(--radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.25s, transform 0.25s;
+      min-height: 240px;
+    }
+
+    .cta-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-3px);
+    }
+
+    .cta-card-icon {
+      font-size: 32px;
+      margin-bottom: 4px;
+    }
+
+    .cta-card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .cta-card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 220px;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 80px 24px;
+      grid-column: 1 / -1;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .empty-state h3 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    .empty-state button {
+      padding: 8px 20px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 500;
+      color: #000;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .empty-state button:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 80px 24px;
+      grid-column: 1 / -1;
+    }
+
+    .loading-spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading p {
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+
+    /* Error */
+    .error-state {
+      text-align: center;
+      padding: 80px 24px;
+      grid-column: 1 / -1;
+    }
+
+    .error-state h3 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #F43F5E;
+    }
+
+    .error-state p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* ---- MODAL ---- */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      max-width: 600px;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .modal-header {
+      padding: 24px 24px 0;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 24px;
+      cursor: pointer;
+      padding: 4px;
+      line-height: 1;
+      transition: color 0.2s;
+      flex-shrink: 0;
+    }
+
+    .modal-close:hover {
+      color: var(--text);
+    }
+
+    .modal-body {
+      padding: 20px 24px 24px;
+    }
+
+    .modal-category {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 8px;
+    }
+
+    .modal-category .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .modal-title {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      line-height: 1.2;
+    }
+
+    .modal-desc {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    .modal-meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .modal-meta-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .modal-meta-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+
+    .modal-meta-value {
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .modal-meta-value a {
+      color: var(--accent);
+    }
+
+    .modal-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 24px;
+    }
+
+    .modal-install-section {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+
+    .modal-install-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-install-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .modal-copy-btn {
+      padding: 4px 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .modal-copy-btn:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .modal-install-cmd {
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--accent);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .modal-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .modal-btn--primary {
+      color: #000;
+      background: var(--accent);
+    }
+
+    .modal-btn--primary:hover {
+      background: var(--accent-hover);
+      color: #000;
+    }
+
+    .modal-btn--secondary {
+      color: var(--text-muted);
+      background: transparent;
+      border: 1px solid var(--border);
+    }
+
+    .modal-btn--secondary:hover {
+      color: var(--text);
+      border-color: var(--border-light);
+    }
+
+    /* ---- FOOTER ---- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 48px 0;
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 24px;
+    }
+
+    .footer-left {
+      font-size: 14px;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    .footer-left a {
+      color: var(--text-muted);
+    }
+
+    .footer-left a:hover {
+      color: var(--accent);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+
+    .footer-links a {
+      font-size: 14px;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: var(--accent);
+    }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .stats-bar {
+        gap: 32px;
+      }
+
+      .modal-meta-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .hero {
+        padding: 120px 0 40px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .stats-bar {
+        gap: 24px;
+      }
+
+      .stat-number {
+        font-size: 24px;
+      }
+
+      .filter-inner {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .category-pills {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        max-width: 100%;
+        padding-bottom: 4px;
+      }
+
+      .nav-subtitle {
+        display: none;
+      }
+
+      .nav-separator {
+        display: none;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .footer-links {
+        justify-content: center;
+      }
+
+      .modal {
+        max-height: 90vh;
+      }
+
+      .modal-actions {
+        flex-direction: column;
+      }
+
+      .modal-btn {
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container nav-inner">
+      <div class="nav-left">
+        <a href="../index.html" class="nav-brand">
+          <span>🏰</span> Sandcastle
+        </a>
+        <span class="nav-separator">/</span>
+        <span class="nav-subtitle">Community Hub</span>
+      </div>
+      <div class="nav-links">
+        <a href="../index.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          <span class="link-text">Landing Page</span>
+        </a>
+        <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span class="link-text">GitHub</span>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>Community <span class="accent">Workflows</span></h1>
+      <p>Browse, discover, and install AI workflows shared by the community</p>
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="stat-number" data-target="0" id="stat-templates">0</span>
+          <span class="stat-label">Templates</span>
+        </div>
+        <div class="stat">
+          <span class="stat-number" data-target="0" id="stat-authors">0</span>
+          <span class="stat-label">Authors</span>
+        </div>
+        <div class="stat">
+          <span class="stat-number" data-target="0" id="stat-categories">0</span>
+          <span class="stat-label">Categories</span>
+        </div>
+      </div>
+      <div class="search-wrapper">
+        <div class="search-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <input type="text" id="search-input" placeholder="Search workflows by name, tag, or description...">
+      </div>
+    </div>
+  </section>
+
+  <!-- Filter + Sort -->
+  <section class="filter-bar">
+    <div class="container">
+      <div class="filter-inner">
+        <div class="category-pills" id="category-pills">
+          <button class="pill active" data-cat="all">All</button>
+          <button class="pill" data-cat="sales_crm">
+            <span class="dot" style="background:var(--cat-sales_crm)"></span>Sales &amp; CRM
+          </button>
+          <button class="pill" data-cat="marketing">
+            <span class="dot" style="background:var(--cat-marketing)"></span>Marketing
+          </button>
+          <button class="pill" data-cat="support">
+            <span class="dot" style="background:var(--cat-support)"></span>Support
+          </button>
+          <button class="pill" data-cat="engineering">
+            <span class="dot" style="background:var(--cat-engineering)"></span>Engineering
+          </button>
+          <button class="pill" data-cat="hr_legal">
+            <span class="dot" style="background:var(--cat-hr_legal)"></span>HR &amp; Legal
+          </button>
+          <button class="pill" data-cat="general_ai">
+            <span class="dot" style="background:var(--cat-general_ai)"></span>General AI
+          </button>
+        </div>
+        <select class="sort-select" id="sort-select">
+          <option value="name">Sort: A-Z</option>
+          <option value="newest">Sort: Newest</option>
+          <option value="steps">Sort: Step count</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <!-- Template Grid -->
+  <section class="templates-section">
+    <div class="container">
+      <div class="results-info" id="results-info"></div>
+      <div class="grid" id="template-grid">
+        <div class="loading">
+          <div class="loading-spinner"></div>
+          <p>Loading community workflows...</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-category" id="modal-category"></div>
+          <h2 class="modal-title" id="modal-title"></h2>
+        </div>
+        <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" id="modal-desc"></p>
+        <div class="modal-tags" id="modal-tags"></div>
+        <div class="modal-meta-grid" id="modal-meta"></div>
+        <div class="modal-install-section">
+          <div class="modal-install-header">
+            <span class="modal-install-label">Install via CLI</span>
+            <button class="modal-copy-btn" id="modal-copy-btn">copy</button>
+          </div>
+          <div class="modal-install-cmd" id="modal-install-cmd"></div>
+        </div>
+        <div class="modal-actions" id="modal-actions"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div class="footer-left">
+        Powered by <a href="../index.html">Sandcastle</a> - built by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer @gizmax</a>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/gizmax/Sandcastle/tree/main/src/sandcastle/templates" target="_blank" rel="noopener">Submit a workflow</a>
+        <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://pypi.org/project/sandcastle-ai/" target="_blank" rel="noopener">PyPI</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /* ---------- State ---------- */
+    let registry = null;
+    let activeCategory = 'all';
+    let searchQuery = '';
+    let sortBy = 'name';
+    let debounceTimer = null;
+
+    /* ---------- Category metadata ---------- */
+    const CAT_COLORS = {
+      sales_crm: '#F59E0B',
+      marketing: '#8B5CF6',
+      support: '#F43F5E',
+      engineering: '#3B82F6',
+      hr_legal: '#10B981',
+      general_ai: '#9CA3AF'
+    };
+
+    const CAT_LABELS = {
+      sales_crm: 'Sales & CRM',
+      marketing: 'Marketing',
+      support: 'Support',
+      engineering: 'Engineering',
+      hr_legal: 'HR & Legal',
+      general_ai: 'General AI'
+    };
+
+    /* ---------- Fetch ---------- */
+    async function fetchRegistry() {
+      try {
+        const res = await fetch('./registry.json');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        registry = await res.json();
+        animateStats(registry.stats);
+        renderTemplates();
+      } catch (err) {
+        document.getElementById('template-grid').innerHTML =
+          '<div class="error-state">' +
+            '<h3>Could not load workflows</h3>' +
+            '<p>Failed to fetch registry.json - <a href="https://github.com/gizmax/Sandcastle/tree/main/site/hub" target="_blank" rel="noopener">view on GitHub</a></p>' +
+          '</div>';
+      }
+    }
+
+    /* ---------- Animate count-up ---------- */
+    function animateStats(stats) {
+      animateNumber('stat-templates', stats.total_templates);
+      animateNumber('stat-authors', stats.total_authors);
+      animateNumber('stat-categories', stats.categories);
+    }
+
+    function animateNumber(id, target) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const duration = 800;
+      const start = performance.now();
+      function tick(now) {
+        const elapsed = now - start;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.round(eased * target);
+        if (progress < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    /* ---------- Filter + Sort ---------- */
+    function getFiltered() {
+      if (!registry) return [];
+      let items = registry.templates.slice();
+
+      if (activeCategory !== 'all') {
+        items = items.filter(t => t.category === activeCategory);
+      }
+
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        items = items.filter(t =>
+          t.name.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q) ||
+          t.tags.some(tag => tag.toLowerCase().includes(q))
+        );
+      }
+
+      if (sortBy === 'name') {
+        items.sort((a, b) => a.name.localeCompare(b.name));
+      } else if (sortBy === 'newest') {
+        items.sort((a, b) => b.created.localeCompare(a.created));
+      } else if (sortBy === 'steps') {
+        items.sort((a, b) => b.steps - a.steps);
+      }
+
+      return items;
+    }
+
+    /* ---------- Render ---------- */
+    function renderTemplates() {
+      const grid = document.getElementById('template-grid');
+      const info = document.getElementById('results-info');
+      const filtered = getFiltered();
+
+      if (filtered.length === 0) {
+        info.textContent = '';
+        grid.innerHTML =
+          '<div class="empty-state">' +
+            '<div class="empty-state-icon">🔍</div>' +
+            '<h3>No workflows found</h3>' +
+            '<p>Try a different search term or reset the category filter</p>' +
+            '<button onclick="resetFilters()">Reset filters</button>' +
+          '</div>';
+        return;
+      }
+
+      const catLabel = activeCategory === 'all' ? '' : ' in ' + (CAT_LABELS[activeCategory] || activeCategory);
+      info.textContent = filtered.length + ' workflow' + (filtered.length !== 1 ? 's' : '') + catLabel;
+
+      let html = '';
+      filtered.forEach(function(t) {
+        const color = CAT_COLORS[t.category] || '#9CA3AF';
+        const label = CAT_LABELS[t.category] || t.category;
+        const tagsHtml = t.tags.slice(0, 4).map(function(tag) {
+          return '<span class="tag">' + escHtml(tag) + '</span>';
+        }).join('');
+        const modelsStr = t.models.join(', ');
+
+        html +=
+          '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
+            '<div class="card-category" style="color:' + color + '">' +
+              '<span class="dot" style="background:' + color + '"></span>' + escHtml(label) +
+            '</div>' +
+            '<div class="card-title">' + escHtml(t.name) + '</div>' +
+            '<div class="card-desc">' + escHtml(t.description) + '</div>' +
+            '<div class="card-tags">' + tagsHtml + '</div>' +
+            '<div class="card-footer">' +
+              '<div class="card-meta">' +
+                '<span class="mono">' + t.steps + ' steps</span>' +
+                '<span>' + escHtml(t.author) + '</span>' +
+                (modelsStr ? '<span class="mono">' + escHtml(modelsStr) + '</span>' : '') +
+              '</div>' +
+              '<button class="card-install-btn" onclick="event.stopPropagation();showDetail(\'' + escAttr(t.slug) + '\')">Install</button>' +
+            '</div>' +
+          '</div>';
+      });
+
+      // CTA card
+      html +=
+        '<a href="https://github.com/gizmax/Sandcastle/tree/main/src/sandcastle/templates" target="_blank" rel="noopener" class="cta-card">' +
+          '<div class="cta-card-icon">+</div>' +
+          '<div class="cta-card-title">Submit your own</div>' +
+          '<div class="cta-card-desc">Share your workflow with the community via a pull request</div>' +
+        '</a>';
+
+      grid.innerHTML = html;
+    }
+
+    /* ---------- Modal ---------- */
+    function showDetail(slug) {
+      if (!registry) return;
+      var t = registry.templates.find(function(item) { return item.slug === slug; });
+      if (!t) return;
+
+      var color = CAT_COLORS[t.category] || '#9CA3AF';
+      var label = CAT_LABELS[t.category] || t.category;
+
+      document.getElementById('modal-category').innerHTML =
+        '<span class="dot" style="background:' + color + '"></span>' +
+        '<span style="color:' + color + '">' + escHtml(label) + '</span>';
+
+      document.getElementById('modal-title').textContent = t.name;
+      document.getElementById('modal-desc').textContent = t.description;
+
+      // Tags
+      var tagsHtml = t.tags.map(function(tag) {
+        return '<span class="tag">' + escHtml(tag) + '</span>';
+      }).join('');
+      document.getElementById('modal-tags').innerHTML = tagsHtml;
+
+      // Meta grid
+      var metaHtml =
+        metaItem('Author', '<a href="' + escAttr(t.author_url) + '" target="_blank" rel="noopener">@' + escHtml(t.author) + '</a>') +
+        metaItem('Steps', '<span class="mono">' + t.steps + '</span>') +
+        metaItem('Models', '<span class="mono">' + escHtml(t.models.join(', ')) + '</span>') +
+        metaItem('Tools', t.tools.length > 0 ? '<span class="mono">' + escHtml(t.tools.join(', ')) + '</span>' : '<span style="color:var(--text-dim)">None</span>') +
+        metaItem('Category', '<span style="color:' + color + '">' + escHtml(label) + '</span>') +
+        metaItem('Created', escHtml(t.created));
+      document.getElementById('modal-meta').innerHTML = metaHtml;
+
+      // Install command
+      var cmd = 'sandcastle hub install ' + t.slug;
+      document.getElementById('modal-install-cmd').textContent = cmd;
+
+      // Copy button
+      var copyBtn = document.getElementById('modal-copy-btn');
+      copyBtn.textContent = 'copy';
+      copyBtn.onclick = function() {
+        navigator.clipboard.writeText(cmd).then(function() {
+          copyBtn.textContent = 'copied!';
+          setTimeout(function() { copyBtn.textContent = 'copy'; }, 2000);
+        });
+      };
+
+      // Action buttons
+      document.getElementById('modal-actions').innerHTML =
+        '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--primary">Download YAML</a>' +
+        '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--secondary">View Source</a>';
+
+      document.getElementById('modal-overlay').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function hideDetail() {
+      document.getElementById('modal-overlay').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    function metaItem(label, value) {
+      return '<div class="modal-meta-item">' +
+        '<div class="modal-meta-label">' + label + '</div>' +
+        '<div class="modal-meta-value">' + value + '</div>' +
+      '</div>';
+    }
+
+    /* ---------- Reset ---------- */
+    function resetFilters() {
+      activeCategory = 'all';
+      searchQuery = '';
+      document.getElementById('search-input').value = '';
+      document.querySelectorAll('.pill').forEach(function(p) {
+        p.classList.toggle('active', p.dataset.cat === 'all');
+      });
+      renderTemplates();
+    }
+
+    /* ---------- Escape helpers ---------- */
+    function escHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function escAttr(str) {
+      return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    /* ---------- Event listeners ---------- */
+    // Search with debounce
+    document.getElementById('search-input').addEventListener('input', function(e) {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function() {
+        searchQuery = e.target.value.trim();
+        renderTemplates();
+      }, 300);
+    });
+
+    // Category pills
+    document.getElementById('category-pills').addEventListener('click', function(e) {
+      var pill = e.target.closest('.pill');
+      if (!pill) return;
+      activeCategory = pill.dataset.cat;
+      document.querySelectorAll('.pill').forEach(function(p) { p.classList.remove('active'); });
+      pill.classList.add('active');
+      renderTemplates();
+    });
+
+    // Sort
+    document.getElementById('sort-select').addEventListener('change', function(e) {
+      sortBy = e.target.value;
+      renderTemplates();
+    });
+
+    // Modal close
+    document.getElementById('modal-close').addEventListener('click', hideDetail);
+    document.getElementById('modal-overlay').addEventListener('click', function(e) {
+      if (e.target === this) hideDetail();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') hideDetail();
+    });
+
+    /* ---------- Init ---------- */
+    fetchRegistry();
+  </script>
+</body>
+</html>
