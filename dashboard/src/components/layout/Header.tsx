@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Menu, Search, PlayCircle, GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
@@ -24,6 +24,34 @@ interface HeaderProps {
   onClickNotification: (notification: Notification) => void;
 }
 
+// Map pathname to a readable page title
+const PAGE_TITLES: Record<string, string> = {
+  "/": "Overview",
+  "/runs": "Runs",
+  "/workflows": "Workflows",
+  "/workflows/builder": "Workflow Builder",
+  "/templates": "Template Hub",
+  "/integrations": "Integrations",
+  "/approvals": "Approvals",
+  "/evaluations": "Evaluations",
+  "/autopilot": "AutoPilot",
+  "/violations": "Violations",
+  "/optimizer": "Optimizer",
+  "/schedules": "Schedules",
+  "/dead-letter": "Dead Letter",
+  "/api-keys": "API Keys",
+  "/settings": "Settings",
+};
+
+function getPageTitle(pathname: string): string {
+  // Direct match first
+  if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
+  // Handle dynamic segments like /runs/:id
+  if (pathname.startsWith("/runs/")) return "Run Detail";
+  if (pathname.startsWith("/workflows/")) return "Workflow Detail";
+  return "Sandcastle";
+}
+
 export function Header({
   onMenuToggle,
   notifications,
@@ -31,11 +59,14 @@ export function Header({
   onClickNotification,
 }: HeaderProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const pageTitle = getPageTitle(location.pathname);
 
   const search = useCallback(async (q: string) => {
     if (q.length < 2) {
@@ -122,6 +153,11 @@ export function Header({
         <Menu className="h-5 w-5" />
       </button>
 
+      {/* Page title / breadcrumb */}
+      <h2 className="hidden text-sm font-semibold text-foreground lg:block">
+        {pageTitle}
+      </h2>
+
       {/* Mobile search toggle */}
       <button
         onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
@@ -130,7 +166,8 @@ export function Header({
         <Search className="h-5 w-5" />
       </button>
 
-      <div ref={wrapperRef} className="relative hidden flex-1 sm:block">
+      {/* Command palette trigger - desktop */}
+      <div ref={wrapperRef} className="relative ml-auto hidden flex-1 sm:block sm:max-w-sm lg:ml-8">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
@@ -140,16 +177,19 @@ export function Header({
             setOpen(true);
           }}
           onFocus={() => { if (results.length > 0) setOpen(true); }}
-          placeholder="Search runs, workflows..."
+          placeholder="Search..."
           className={cn(
-            "h-9 w-full max-w-sm rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
+            "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-16 text-sm",
             "placeholder:text-muted-foreground/50",
             "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
             "transition-all duration-200"
           )}
         />
+        <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {"\u2318"}K
+        </kbd>
         {open && results.length > 0 && (
-          <div className="absolute left-0 top-full mt-1 w-full max-w-sm rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
+          <div className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
             {results.map((r, i) => (
               <button
                 key={`${r.link}-${i}`}
@@ -169,13 +209,13 @@ export function Header({
           </div>
         )}
         {open && query.length >= 2 && results.length === 0 && (
-          <div className="absolute left-0 top-full mt-1 w-full max-w-sm rounded-lg border border-border bg-surface shadow-lg z-50 px-3 py-3">
+          <div className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg z-50 px-3 py-3">
             <p className="text-xs text-muted-foreground">No results for "{query}"</p>
           </div>
         )}
       </div>
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className={cn("flex items-center gap-1", "sm:ml-0 ml-auto")}>
         <LiveIndicator />
         <ThemeToggle />
         <NotificationCenter
@@ -198,7 +238,7 @@ export function Header({
                 setOpen(true);
               }}
               onFocus={() => { if (results.length > 0) setOpen(true); }}
-              placeholder="Search runs, workflows..."
+              placeholder="Search..."
               autoFocus
               className={cn(
                 "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",

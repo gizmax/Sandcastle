@@ -15,24 +15,32 @@ const cards = [
     label: "Total Runs Today",
     icon: Activity,
     format: (v: number) => String(v),
+    delta: "+12%",
+    deltaUp: true,
   },
   {
     key: "rate",
     label: "Success Rate",
     icon: CheckCircle,
     format: (v: number) => `${Math.round(v * 100)}%`,
+    delta: "+2.4%",
+    deltaUp: true,
   },
   {
     key: "cost",
     label: "Total Cost Today",
     icon: DollarSign,
     format: (v: number) => formatCost(v),
+    delta: "-8%",
+    deltaUp: false,
   },
   {
     key: "duration",
     label: "Avg Duration",
     icon: Timer,
     format: (v: number) => formatDuration(v),
+    delta: "-3%",
+    deltaUp: false,
   },
 ] as const;
 
@@ -55,9 +63,19 @@ export function StatsCards({ totalRuns, successRate, totalCost, avgDuration }: S
             </div>
             <div>
               <p className="text-xs font-medium text-muted">{card.label}</p>
-              <p className="text-xl font-semibold tracking-tight text-foreground">
-                {card.format(values[card.key])}
-              </p>
+              <div className="flex items-baseline gap-2">
+                <p className="font-data text-xl font-semibold tracking-tight text-foreground">
+                  {card.format(values[card.key])}
+                </p>
+                <span
+                  className={cn(
+                    "text-[11px] font-medium",
+                    card.deltaUp ? "text-success" : "text-error"
+                  )}
+                >
+                  {card.delta}
+                </span>
+              </div>
             </div>
           </div>
         </div>

@@ -57,19 +57,22 @@ const STEP_TYPE_COLORS: Record<string, string> = {
   delegate: "text-indigo-400",
 };
 
-const STEP_TYPE_BORDER: Record<string, string> = {
-  http: "border-l-emerald-400/50",
-  code: "border-l-amber-400/50",
-  condition: "border-l-violet-400/50",
-  classify: "border-l-pink-400/50",
-  loop: "border-l-cyan-400/50",
-  llm: "border-l-accent/50",
-  race: "border-l-purple-400/50",
-  sensor: "border-l-teal-400/50",
-  gate: "border-l-red-400/50",
-  transform: "border-l-cyan-400/50",
-  notify: "border-l-pink-400/50",
-  delegate: "border-l-indigo-400/50",
+// Raw color values for left border and background tint
+const STEP_TYPE_RAW_COLORS: Record<string, string> = {
+  standard: "115 115 115",
+  llm: "245 158 11",
+  http: "52 211 153",
+  code: "251 191 36",
+  condition: "167 139 250",
+  classify: "244 114 182",
+  loop: "34 211 238",
+  approval: "245 158 11",
+  race: "192 132 252",
+  sensor: "45 212 191",
+  gate: "248 113 113",
+  transform: "34 211 238",
+  notify: "244 114 182",
+  delegate: "129 140 248",
 };
 
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
@@ -79,17 +82,24 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const stepType = data.stepType || "standard";
   const TypeIcon = STEP_TYPE_ICONS[stepType] || Cpu;
   const iconColor = STEP_TYPE_COLORS[stepType] || "text-muted";
-  const leftBorder = STEP_TYPE_BORDER[stepType] || "";
+  const rawColor = STEP_TYPE_RAW_COLORS[stepType] || "115 115 115";
+  const isRunning = status === "running";
 
   return (
     <div
       className={cn(
         "rounded-lg border bg-surface px-4 py-3 shadow-sm min-w-[140px]",
         "transition-all duration-200",
-        leftBorder && "border-l-2",
-        leftBorder,
-        selected ? "border-accent shadow-md ring-2 ring-accent/20" : "border-border"
+        isRunning && "step-running-glow border-accent/60",
+        selected
+          ? "border-accent ring-2 ring-accent/30 shadow-[0_0_16px_rgba(245,158,11,0.2)]"
+          : !isRunning && "border-border"
       )}
+      style={{
+        borderLeftWidth: "3px",
+        borderLeftColor: `rgb(${rawColor})`,
+        backgroundColor: `rgba(${rawColor}, 0.04)`,
+      }}
     >
       <Handle
         type="target"
@@ -100,7 +110,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       <div className="flex items-center gap-2">
         <div className={cn("h-2 w-2 rounded-full", dotColor)} />
         <TypeIcon className={cn("h-3.5 w-3.5", iconColor)} />
-        <span className="text-xs font-medium text-foreground">{data.label}</span>
+        <span className="font-mono text-xs font-medium text-foreground">{data.label}</span>
       </div>
 
       <div className="mt-1.5 flex items-center gap-1">
