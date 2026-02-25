@@ -25,6 +25,7 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const IntegrationsPage = lazy(() => import("@/pages/IntegrationsPage"));
 const EvaluationsPage = lazy(() => import("@/pages/EvaluationsPage"));
+const SystemHealthPage = lazy(() => import("@/pages/SystemHealthPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 function NotFound() {
@@ -90,6 +91,7 @@ export default function App() {
               <Route path="/dead-letter" element={<DeadLetterPage />} />
               <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/system-health" element={<SystemHealthPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

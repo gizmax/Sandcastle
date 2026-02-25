@@ -6,6 +6,7 @@ import {
   FlaskConical,
   Gauge,
   GitBranch,
+  HeartPulse,
   Inbox,
   Key,
   Layers,
@@ -72,6 +73,7 @@ const navSections: NavSection[] = [
   {
     label: "SYSTEM",
     items: [
+      { to: "/system-health", icon: HeartPulse, label: "System Health" },
       { to: "/api-keys", icon: Key, label: "API Keys" },
       { to: "/settings", icon: Settings, label: "Settings" },
     ],
