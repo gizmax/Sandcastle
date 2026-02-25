@@ -1,0 +1,969 @@
+# name: Video to Shorts
+# description: Analyze long-form video content, identify viral-worthy segments, generate optimized short clips with captions and hooks for TikTok, Reels, and Shorts
+# tags: [Video, TikTok, Reels, Shorts, Social-Media, Marketing]
+# category: marketing
+
+name: video-to-shorts
+description: Analyze long-form video content, identify viral-worthy segments, generate optimized short clips with captions and hooks for TikTok, Reels, and Shorts
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["video_url", "target_platforms"]
+  properties:
+    video_url:
+      type: string
+      description: "URL of the long-form video to analyze (YouTube, Vimeo, or direct link)"
+    target_platforms:
+      type: string
+      description: "Comma-separated target platforms (e.g. 'TikTok, Instagram Reels, YouTube Shorts')"
+    brand_voice:
+      type: string
+      description: "Brand voice and tone guidelines (e.g. 'professional but approachable', 'bold and provocative', 'educational and calm')"
+      default: "engaging and authentic"
+    content_goals:
+      type: string
+      description: "Primary goals for the short-form content (e.g. 'drive newsletter signups', 'build thought leadership', 'increase brand awareness', 'drive product sales')"
+      default: "maximize engagement and reach"
+
+steps:
+  - id: content-analysis
+    prompt: |
+      You are a video content strategist and analyst with deep expertise in
+      short-form content creation. Your task is to perform a comprehensive analysis
+      of a long-form video to identify its content structure, key moments, and
+      short-form potential.
+
+      Video URL: {input.video_url}
+      Target platforms: {input.target_platforms}
+      Brand voice: {input.brand_voice}
+      Content goals: {input.content_goals}
+
+      === VIDEO CONTENT ANALYSIS PROTOCOL ===
+
+      Analyze the video comprehensively across these dimensions:
+
+      --- STRUCTURAL ANALYSIS ---
+
+      **Overall Video Breakdown:**
+      - Total duration (minutes:seconds)
+      - Content format: Interview, monologue, tutorial, panel, vlog, presentation,
+        documentary, podcast with video, webinar, live stream replay
+      - Number of distinct segments or topic changes
+      - Pacing analysis: fast-paced vs slow-burn, consistent vs variable energy
+      - Production quality: professional studio, home office, on-location, screen share
+
+      **Segment-by-Segment Mapping:**
+      For each distinct segment of the video, document:
+      - Timestamp range (start - end)
+      - Segment topic or theme (1-2 sentence summary)
+      - Speaker(s) in this segment
+      - Energy level (1-10): How dynamic and engaging is the delivery?
+      - Information density (1-10): How much valuable content per minute?
+      - Visual interest (1-10): Are there visuals, demos, or just talking heads?
+      - Standalone potential (1-10): Could this segment make sense without context?
+      - Emotional arc: Does this segment build tension, deliver a payoff, inspire, educate?
+
+      --- SPEAKER ANALYSIS ---
+
+      For each speaker in the video:
+      - Name and role/credentials (if identifiable)
+      - Speaking style: Fast/slow, animated/measured, storyteller/analytical
+      - Charisma score (1-10): Natural screen presence, confidence, expressiveness
+      - Quotability score (1-10): Do they deliver concise, memorable statements?
+      - Best moments: Timestamps where this speaker is most compelling
+      - Worst moments: Timestamps where energy drops or content meanders
+      - Signature phrases or recurring themes they use
+
+      --- CONTENT VALUE MAPPING ---
+
+      Categorize all content in the video into these value buckets:
+
+      **Educational content (teaches something):**
+      - Specific tips, tactics, or how-to instructions
+      - Frameworks, models, or mental shortcuts
+      - Counter-intuitive insights or myth-busting
+      - Data points, statistics, or research citations
+      - Step-by-step processes or workflows
+
+      **Emotional content (makes you feel something):**
+      - Personal stories or vulnerability
+      - Humor (intentional jokes, witty observations, funny reactions)
+      - Inspirational or motivational statements
+      - Controversial or provocative opinions
+      - Surprise moments or plot twists in narrative
+
+      **Social proof content (builds credibility):**
+      - Results, metrics, or case study outcomes
+      - Name-drops of respected figures or companies
+      - Before/after transformations
+      - Client or customer testimonials within the video
+      - Expertise demonstrations or live problem-solving
+
+      **Relatable content (creates connection):**
+      - Common struggles or pain points articulated well
+      - "That is so true" moments that resonate universally
+      - Behind-the-scenes or authentic/unpolished moments
+      - Cultural references or trending topic connections
+      - Self-deprecating humor or honest admissions
+
+      --- ENGAGEMENT PATTERN ANALYSIS ---
+
+      If the video has public engagement metrics (views, likes, comments), analyze:
+      - Overall engagement rate
+      - Comment sentiment themes (what are people responding to)
+      - Most replied-to moments (if comment timestamps available)
+      - Questions viewers ask (indicates information gaps to fill in shorts)
+      - Shares or saves count (indicates high-value content)
+
+      If no public metrics, predict engagement potential based on:
+      - Content novelty (is this saying something new vs repeating common knowledge)
+      - Controversy potential (does it challenge conventional wisdom)
+      - Practical applicability (can viewers use this immediately)
+      - Emotional resonance (does it evoke strong feelings)
+      - Share motivation (would someone share this to look smart, helpful, or funny)
+
+      --- VIRALITY POTENTIAL SCORING ---
+
+      For the entire video, assess viral potential factors:
+
+      **Hook potential (1-10):** Does the video contain statements that would make
+      someone stop scrolling in the first 1-3 seconds?
+
+      **Completion potential (1-10):** Does it contain segments where tension or
+      curiosity builds and viewers need to watch until the end?
+
+      **Share potential (1-10):** Does it contain moments that trigger the
+      "I need to send this to someone" response?
+
+      **Comment potential (1-10):** Does it contain opinions, questions, or prompts
+      that would make viewers want to add their perspective?
+
+      **Save potential (1-10):** Does it contain actionable advice or reference
+      material people would want to return to?
+
+      **Duet/Stitch potential (1-10):** Does it contain statements that creators
+      would want to react to, add to, or debate?
+
+      === OUTPUT ===
+
+      Return:
+      1. Complete structural analysis with segment map
+      2. Speaker profiles with scoring
+      3. Content value map organized by category
+      4. Engagement pattern analysis
+      5. Virality potential scores
+      6. Top 15 candidate moments for short-form content (timestamp, type, potential score)
+      7. Recommended number of shorts that can be extracted (realistic, not forced)
+    model: sonnet
+    max_turns: 10
+
+  - id: moment-detection
+    depends_on: [content-analysis]
+    prompt: |
+      You are a short-form video producer who has created viral content across
+      TikTok, Instagram Reels, and YouTube Shorts. Your task is to identify
+      the exact segments from the analyzed video that will perform best as
+      standalone short-form clips.
+
+      Content analysis: {steps.content-analysis.output}
+      Target platforms: {input.target_platforms}
+      Brand voice: {input.brand_voice}
+      Content goals: {input.content_goals}
+
+      === MOMENT DETECTION FRAMEWORK ===
+
+      Using the content analysis, identify and score every viable short-form
+      clip candidate using the following multi-dimensional evaluation.
+
+      --- CLIP IDENTIFICATION CRITERIA ---
+
+      A viable clip must meet ALL of these baseline requirements:
+      - Duration: 15-90 seconds (platform-dependent, see optimization later)
+      - Self-contained: Makes sense without watching the full video
+      - Has a natural start and end point (not mid-sentence, not trailing off)
+      - Contains at least ONE of: insight, emotion, humor, controversy, or actionable tip
+      - Audio is clear enough for the segment duration
+
+      --- CLIP TYPE TAXONOMY ---
+
+      Classify each identified clip into one of these proven short-form formats:
+
+      **1. The Hot Take (15-30 seconds)**
+      - A bold, opinionated statement that challenges conventional wisdom
+      - Works best when the speaker is confident and concise
+      - High comment and duet potential
+      - Example structure: Setup (5s) - Bold claim (10s) - Brief justification (15s)
+
+      **2. The Golden Nugget (20-45 seconds)**
+      - A single actionable tip, hack, or insight that provides immediate value
+      - Works best when specific and implementable
+      - High save and share potential
+      - Example structure: Problem (5s) - Solution (20s) - Result/benefit (10s)
+
+      **3. The Story Moment (30-60 seconds)**
+      - A compelling personal story with a clear narrative arc
+      - Works best when emotionally engaging with a payoff
+      - High completion and share potential
+      - Example structure: Setup (10s) - Tension/conflict (20s) - Resolution/lesson (20s)
+
+      **4. The Mic Drop (15-30 seconds)**
+      - A single powerful statement delivered with conviction
+      - Works best as a quotable, screenshot-worthy moment
+      - High share and duet/stitch potential
+      - Example structure: Context (5s) - The statement (10s) - Reaction/pause (5s)
+
+      **5. The Tutorial Bite (30-60 seconds)**
+      - A quick how-to or step-by-step demonstration
+      - Works best with visual demonstration or screen share
+      - High save potential, especially on Instagram and YouTube
+      - Example structure: "Here is how" intro (5s) - Steps (30-40s) - Result (10s)
+
+      **6. The Debate Starter (20-45 seconds)**
+      - A statement or question designed to polarize the audience
+      - Works best when the speaker presents both sides briefly then picks one
+      - Highest comment and engagement potential
+      - Example structure: "People say X, but..." (10s) - Counter-argument (20s) - Challenge (10s)
+
+      **7. The Behind-the-Scenes (15-45 seconds)**
+      - Raw, authentic moment showing process, mistakes, or real reactions
+      - Works best when it humanizes the brand or speaker
+      - High relatability and connection building
+      - Example structure: Natural moment captured (15-45s)
+
+      **8. The Listicle Tease (30-60 seconds)**
+      - "3 things you need to know about X" format
+      - Works best when each point is surprising or non-obvious
+      - High completion potential (viewers stay for all 3)
+      - Example structure: Hook (5s) - Point 1 (15s) - Point 2 (15s) - Point 3 (15s)
+
+      --- SCORING MATRIX (per clip candidate) ---
+
+      Score each candidate clip on these 12 dimensions (1-10 each):
+
+      **Content Quality Scores:**
+      1. Value density - How much value per second? (avoid filler or meandering)
+      2. Clarity - Is the message immediately clear without additional context?
+      3. Novelty - Is this saying something viewers have not heard before?
+      4. Specificity - Are there concrete details, numbers, or examples?
+
+      **Engagement Prediction Scores:**
+      5. Hook strength - Would this stop a scroll in the first 2 seconds?
+      6. Retention curve - Will viewers watch to the end? (no dead spots)
+      7. Emotional trigger - Does this evoke a strong emotion? (any emotion)
+      8. Reply motivation - Would viewers feel compelled to comment?
+
+      **Platform Fit Scores:**
+      9. Audio independence - Does this work with sound off? (captions + visuals)
+      10. Visual appeal - Is there visual variety or just a static talking head?
+      11. Trend alignment - Does this connect to any current platform trends or sounds?
+      12. Rewatch value - Would someone watch this more than once or share it?
+
+      **Composite Score Calculation:**
+      Clip Score = (Quality_avg * 0.30) + (Engagement_avg * 0.45) + (Platform_avg * 0.25)
+
+      Normalize to 0-100 scale.
+
+      --- CLIP BOUNDARY OPTIMIZATION ---
+
+      For each high-scoring clip (score > 60), fine-tune the exact boundaries:
+
+      **Start point optimization:**
+      - Begin at the most compelling word or visual, not before it
+      - If there is a "here is what I think" preamble, cut it - start at the actual thought
+      - If context is needed, use the minimum viable context (shorten setup)
+      - Consider starting mid-action or mid-sentence for pattern interrupt effect
+
+      **End point optimization:**
+      - End on the strongest possible note (the punchline, not the explanation after)
+      - If there is a natural laugh, gasp, or reaction - end right after it
+      - For tutorials, end with the completed result visible
+      - For stories, end at the climax or lesson - not the wind-down
+      - Consider ending on a cliffhanger for "part 2" potential
+
+      **Pacing assessment:**
+      - Flag segments with dead air, "um/uh" filler, or low-energy patches
+      - Identify natural jump-cut points where pauses can be removed
+      - Assess if 1.1x or 1.2x speed would improve pacing without feeling rushed
+      - Note any visual B-roll opportunities during speaking segments
+
+      === CLIP PRIORITIZATION ===
+
+      Rank all identified clips by composite score and produce:
+      1. **A-tier clips (score 80-100):** Publish first, highest confidence in performance
+      2. **B-tier clips (score 60-79):** Strong secondary content, publish on a regular cadence
+      3. **C-tier clips (score 40-59):** Usable with additional editing or hooks, backup content
+      4. **D-tier clips (score <40):** Not recommended for standalone use, maybe stitch material
+
+      === OUTPUT ===
+
+      For each identified clip, return:
+      1. Clip ID and rank
+      2. Timestamp range (MM:SS - MM:SS) with optimized boundaries
+      3. Clip type (from taxonomy above)
+      4. Duration in seconds
+      5. All 12 dimension scores and composite score
+      6. Tier classification (A/B/C/D)
+      7. One-sentence summary of the clip's content
+      8. Why this clip will perform well (2-3 sentences)
+      9. Potential risks or weaknesses of this clip
+      10. Editing notes (speed adjustments, jump cuts, B-roll suggestions)
+      11. Recommended platform(s) from {input.target_platforms} ranked by fit
+    model: sonnet
+    max_turns: 10
+
+  - id: hook-generation
+    depends_on: [moment-detection]
+    prompt: |
+      You are a short-form content copywriter who specializes in hooks - the
+      critical first 1-3 seconds that determine whether viewers watch or scroll
+      past. Your task is to generate multiple hook options for each identified
+      clip from the video analysis.
+
+      Detected moments: {steps.moment-detection.output}
+      Content analysis: {steps.content-analysis.output}
+      Brand voice: {input.brand_voice}
+      Content goals: {input.content_goals}
+      Target platforms: {input.target_platforms}
+
+      === HOOK GENERATION FRAMEWORK ===
+
+      A hook is the FIRST thing a viewer sees/hears/reads. It must accomplish one
+      goal: make them NOT scroll. The hook is more important than the content itself
+      because without it, no one sees the content.
+
+      --- THE PSYCHOLOGY OF HOOKS ---
+
+      Effective hooks trigger one or more of these psychological responses:
+
+      **1. Curiosity Gap:**
+      Create an information gap that the brain compulsively needs to close.
+      - "The thing nobody tells you about X..."
+      - "This changed how I think about X forever"
+      - "I made $X doing something most people think is wrong"
+      - "Stop doing X. Here is why."
+      Pattern: Promise information the viewer does not yet have.
+
+      **2. Pattern Interrupt:**
+      Break the viewer's expectations to trigger involuntary attention.
+      - Start with an unexpected visual, sound, or statement
+      - Contradict a widely held belief in the first sentence
+      - Begin mid-action or mid-story without preamble
+      - Use a jarring statistic or fact
+      Pattern: Defy what the algorithm has conditioned them to expect.
+
+      **3. Identity Targeting:**
+      Make the viewer feel personally called out or spoken to.
+      - "If you are a [specific role/type], you need to hear this"
+      - "This is for the people who [specific behavior or situation]"
+      - "POV: You are a [role] who just discovered [thing]"
+      Pattern: Viewers watch things that feel personally relevant.
+
+      **4. Social Proof Trigger:**
+      Leverage authority, numbers, or results to earn instant credibility.
+      - "[Impressive credential/result] taught me this..."
+      - "After [impressive number] of [thing], here is what I know"
+      - "The strategy that [impressive company/person] uses"
+      Pattern: Authority signals reduce the perceived risk of investing attention.
+
+      **5. Emotional Provocation:**
+      Trigger a strong emotional reaction within the first second.
+      - Bold claim that will anger some and excite others
+      - Vulnerable confession that creates empathy
+      - Humor that earns a smile before the content starts
+      - Fear or urgency that demands immediate attention
+      Pattern: Emotion overrides the rational decision to scroll.
+
+      **6. Visual Hook (for text overlays and thumbnails):**
+      Design what appears on screen in the first frame:
+      - Bold text overlay with the hook statement
+      - Split-screen with contrasting before/after
+      - Unexpected object or setting in frame
+      - Progress bar or countdown creating anticipation
+      Pattern: Visual hooks work even when sound is off (critical for Reels feed).
+
+      --- HOOK FORMATS BY PLATFORM ---
+
+      **TikTok hooks (optimize for sound-on, vertical, fast-scrolling):**
+      - Lead with audio hook - the first words spoken must grab attention
+      - Text overlay that complements (not duplicates) the audio
+      - Movement in the first 0.5 seconds (hand gesture, object, camera move)
+      - Direct address to camera feels native on TikTok
+      - Trending sound integration can boost initial distribution
+
+      **Instagram Reels hooks (optimize for visual-first, often sound-off):**
+      - Text overlay is critical - assume sound is off for 50%+ of viewers
+      - First frame must be visually striking (good lighting, contrast, color)
+      - "Cover image" of the reel should work as a standalone thumbnail
+      - Carousel-style text hooks perform well ("5 things..." format)
+      - Professional polish expected more on Reels than TikTok
+
+      **YouTube Shorts hooks (optimize for search-discovery, sound-on):**
+      - Title and first frame work together (YouTube shows title prominently)
+      - Thumbnail is not customizable on Shorts but first frame matters
+      - YouTube audience expects slightly higher production value
+      - Can reference the full-length video ("full breakdown on my channel")
+      - Keyword-rich hooks can improve search discoverability
+
+      --- HOOK GENERATION (per clip) ---
+
+      For each A-tier and B-tier clip identified in moment detection, generate:
+
+      **5 text overlay hook options:**
+      - Each under 10 words (must be readable in 1.5 seconds)
+      - Varied styles: question, bold statement, statistic, "how to", challenge
+      - Optimized for the specific brand voice: {input.brand_voice}
+      - Include text placement recommendation (top, center, bottom of frame)
+      - Include suggested font style (bold sans-serif, handwritten, minimalist)
+
+      **5 spoken/audio hook options:**
+      - The exact first sentence the clip should start with
+      - If the original video does not start with this sentence, provide editing
+        guidance for adding a voice-over or re-cutting the start
+      - Include tone direction (whisper, excited, casual, authoritative)
+      - Include pacing direction (fast burst, deliberate pause, conversational)
+
+      **3 opening visual hook options:**
+      - What should be on screen in the first frame (before any text or speech)
+      - Camera angle or framing suggestion if re-editing is possible
+      - Color treatment or filter suggestion that stops scrolls
+      - Motion suggestion (zoom, pan, reveal, split-screen)
+
+      **1 thumbnail/cover concept:**
+      - Description of the ideal cover frame for the short
+      - Text overlay on the cover (if applicable)
+      - Facial expression or body language recommendation for the speaker
+
+      --- HOOK SCORING ---
+
+      For each generated hook, score:
+      - Scroll-stop power (1-10): Would this physically stop a thumb mid-scroll?
+      - Curiosity creation (1-10): Does this create an itch to keep watching?
+      - Brand alignment (1-10): Does this match the voice "{input.brand_voice}"?
+      - Content accuracy (1-10): Does this honestly represent what follows?
+      - Clickbait risk (1-10, lower is better): Could this feel misleading?
+
+      Flag any hooks that cross the line from compelling to misleading. The goal
+      is attention earned through genuine value promise, not bait-and-switch.
+
+      --- A/B TESTING RECOMMENDATIONS ---
+
+      For the top 3 clips, recommend:
+      - Primary hook (highest scored, most aligned with goals)
+      - Variant A hook (different psychological trigger, for A/B testing)
+      - Variant B hook (different format entirely, for learning)
+      - What metric to track to determine the winner (watch-through rate,
+        shares, comments, profile visits, link clicks)
+
+      === OUTPUT ===
+
+      For each clip, return:
+      1. Clip ID and reference to moment detection
+      2. All 5 text overlay hooks with scores
+      3. All 5 spoken hooks with scores and tone direction
+      4. All 3 visual hook concepts
+      5. Thumbnail/cover concept
+      6. Recommended primary hook combination (text + audio + visual)
+      7. A/B testing variants
+      8. Platform-specific hook adaptations (which hook for which platform)
+      9. Editing instructions for implementing each hook
+    model: sonnet
+    max_turns: 10
+
+  - id: caption-generation
+    depends_on: [moment-detection]
+    prompt: |
+      You are a short-form video caption specialist who creates captions that
+      maximize accessibility, engagement, and algorithmic distribution. Your task
+      is to generate complete caption packages for each identified clip.
+
+      Detected moments: {steps.moment-detection.output}
+      Content analysis: {steps.content-analysis.output}
+      Target platforms: {input.target_platforms}
+      Brand voice: {input.brand_voice}
+      Content goals: {input.content_goals}
+
+      === CAPTION GENERATION PROTOCOL ===
+
+      Captions serve four purposes simultaneously:
+      1. **Accessibility** - Deaf and hard-of-hearing viewers
+      2. **Sound-off viewing** - Users scrolling in public without headphones
+      3. **Engagement** - Reinforcing key points visually increases retention
+      4. **Algorithmic** - Platforms index caption text for search and recommendations
+
+      --- ON-SCREEN CAPTIONS (Burned-in subtitles) ---
+
+      For each A-tier and B-tier clip, generate word-by-word timed captions:
+
+      **Caption timing rules:**
+      - Display 3-7 words at a time (never more, readability drops sharply)
+      - Each caption group displays for 1.5-3 seconds
+      - Key words and phrases get emphasis (bold, color change, or size increase)
+      - Caption transitions should align with speech rhythm, not mid-word
+      - Use natural pause points for group breaks (commas, periods, breath pauses)
+      - If speaker talks fast, prioritize readability over exact sync
+
+      **Caption styling recommendations:**
+      - Font: Bold sans-serif (Montserrat, Inter, or platform-native)
+      - Size: Large enough to read on mobile (minimum 36pt equivalent)
+      - Position: Bottom-center or center of frame (avoid top on TikTok due to UI overlay)
+      - Background: Semi-transparent dark box or drop shadow for legibility
+      - Color: White text with key words in brand accent color or yellow for emphasis
+      - Animation: Word-by-word reveal (karaoke style) or phrase pop-in
+
+      **Emphasis strategy:**
+      Identify and emphasize words that carry the most meaning:
+      - Numbers and statistics (always emphasize)
+      - Action verbs that drive the point home
+      - Emotional words (never, always, incredible, devastating)
+      - Names and proper nouns
+      - The core lesson or takeaway phrase
+      - Any word the speaker naturally emphasizes in their delivery
+
+      For each clip, provide the complete caption script in this format:
+      [00:00-00:02] "The biggest mistake" (emphasize: biggest)
+      [00:02-00:04] "people make with their" (no emphasis)
+      [00:04-00:06] "marketing budget" (emphasize: marketing budget)
+      ... and so on for the entire clip duration.
+
+      --- PLATFORM POST CAPTIONS (Description/Text) ---
+
+      For each clip, generate platform-specific post captions:
+
+      **TikTok caption (max 2,200 characters but optimal is 50-150):**
+      - Short, punchy, conversation-starting
+      - Include 1-2 relevant hashtags (not hashtag spam)
+      - End with a question or CTA that encourages comments
+      - Use line breaks for readability
+      - Include relevant trending hashtags only if genuinely applicable
+      - Consider adding "Follow for more [topic]" if brand building
+
+      TikTok hashtag strategy:
+      - 1 broad hashtag (1B+ views, for discoverability): e.g., #LearnOnTikTok
+      - 1-2 medium hashtags (100M-1B views, niche relevance): e.g., #MarketingTips
+      - 1-2 specific hashtags (1M-100M views, highly targeted): e.g., #B2BMarketing
+      - 0-1 branded hashtag if applicable
+      - Total: 3-5 hashtags maximum (more reduces performance)
+
+      **Instagram Reels caption (max 2,200 characters, optimal 100-300):**
+      - More polished tone than TikTok
+      - First line is critical (only ~125 characters show before "more")
+      - Include a mix of hashtags (up to 10, mix of sizes)
+      - Add a clear CTA (save this, share with a friend, comment your experience)
+      - Consider using line breaks and emojis for visual structure
+      - Tag relevant accounts if mentioned in the content
+
+      Instagram hashtag strategy:
+      - 5-10 hashtags total (Instagram penalizes 30-hashtag spam)
+      - Mix: 2 large (1M+), 3-4 medium (100K-1M), 2-3 small (<100K)
+      - Place hashtags in comment or at end of caption (not inline)
+      - Rotate hashtag sets across posts to avoid shadowban risk
+
+      **YouTube Shorts caption (title: max 100 chars, description: up to 5,000):**
+      - Title: Clear, keyword-rich, curiosity-inducing
+      - Description: Include keywords for search, link to full video if applicable
+      - Tags are less important for Shorts but include 3-5 relevant ones
+      - Consider adding chapters if the short has distinct sections
+      - Include a subscribe CTA in the description
+      - Reference the full-length video with link and timestamp
+
+      YouTube SEO considerations:
+      - Primary keyword should appear in the first 5 words of the title
+      - Description should contain the primary keyword 2-3 times naturally
+      - Include related keywords and phrases the target audience would search
+      - Avoid clickbait titles that do not match content (YouTube penalizes this)
+
+      --- CALL-TO-ACTION (CTA) GENERATION ---
+
+      For each clip, generate CTAs aligned with the content goals: {input.content_goals}
+
+      **CTA types by goal:**
+      - Engagement: "Comment below with your experience" / "Agree or disagree?"
+      - Follows: "Follow for daily [topic] tips" / "Part 2 on my profile"
+      - Saves: "Save this for later" / "Bookmark this framework"
+      - Shares: "Tag someone who needs to hear this" / "Send this to your [role] friend"
+      - Website traffic: "Link in bio for the full guide" / "Free template in bio"
+      - Product sales: "Use code X for 20% off" / "Link in bio to try free"
+      - Newsletter: "Join 10K+ subscribers - link in bio"
+      - Full video: "Full breakdown in the long-form video on my channel"
+
+      Generate 3 CTA options per clip, scored by:
+      - Goal alignment (does it serve {input.content_goals})
+      - Natural fit (does it feel organic, not forced)
+      - Platform appropriateness (CTAs that work on each specific platform)
+
+      --- ACCESSIBILITY COMPLIANCE ---
+
+      Ensure all captions meet accessibility standards:
+      - Accurate representation of spoken words (no paraphrasing that changes meaning)
+      - Sound effects described in brackets when relevant: [laughter], [music], [applause]
+      - Speaker identification when multiple speakers: [Speaker Name:]
+      - Readability at standard playback speed (minimum 150ms per word on screen)
+      - Sufficient contrast ratio between caption text and background (4.5:1 minimum)
+      - No caption text overlapping with platform UI elements
+
+      === OUTPUT ===
+
+      For each clip, return:
+      1. Complete timed on-screen caption script with emphasis markers
+      2. Caption styling specification (font, size, color, position, animation)
+      3. TikTok post caption with hashtags and CTA
+      4. Instagram Reels caption with hashtags and CTA
+      5. YouTube Shorts title, description, and tags
+      6. 3 CTA options with goal alignment scores
+      7. Accessibility compliance checklist (pass/fail per criterion)
+      8. Estimated caption-driven retention impact (how much captions improve watch-through)
+    model: haiku
+    max_turns: 10
+
+  - id: platform-optimization
+    depends_on: [hook-generation, caption-generation]
+    prompt: |
+      You are a multi-platform short-form content strategist who understands the
+      nuances of each platform's algorithm, audience behavior, and technical
+      requirements. Your task is to create platform-specific optimization plans
+      for each clip to maximize performance on {input.target_platforms}.
+
+      Hook generation: {steps.hook-generation.output}
+      Caption generation: {steps.caption-generation.output}
+      Moment detection: {steps.moment-detection.output}
+      Content analysis: {steps.content-analysis.output}
+      Brand voice: {input.brand_voice}
+      Content goals: {input.content_goals}
+
+      === PLATFORM-SPECIFIC OPTIMIZATION ===
+
+      For each target platform in {input.target_platforms}, create a detailed
+      optimization plan covering every aspect that affects performance.
+
+      --- TIKTOK OPTIMIZATION ---
+
+      **Technical Specifications:**
+      - Aspect ratio: 9:16 (1080x1920 pixels), NEVER letterboxed
+      - Duration sweet spots: 15-21 seconds (highest completion rate),
+        30-45 seconds (best engagement), 60-90 seconds (best for tutorials/stories)
+      - File format: MP4, H.264 codec
+      - Frame rate: 30fps minimum, 60fps preferred for dynamic content
+      - Audio: AAC, clear voice over background music, voice should be 6dB above music
+      - Upload natively (never cross-post from Reels - TikTok detects and suppresses)
+
+      **Algorithm Signals (ranked by importance):**
+      1. Watch-through rate (% who watch to the end) - THE most important signal
+      2. Rewatch rate (loops) - triggers algorithmic boost
+      3. Share rate - signals content worth distributing wider
+      4. Comment rate and comment quality (longer comments weight more)
+      5. Profile visits after watching - signals content drove curiosity
+      6. Follow rate from the video - signals lasting value
+      7. Save rate - signals reference-worthy content
+      8. Like rate - weakest signal but still relevant
+
+      **Content Strategy for TikTok:**
+      - Front-load the value - deliver the payoff early, then elaborate
+      - Use native TikTok features: green screen, duet layout, text-to-speech
+      - Natural lighting and vertical framing look native; overly produced looks like an ad
+      - Respond to comments with video replies (boosts original video)
+      - Post 1-3 times per day for maximum algorithmic favor
+      - First 30 minutes of engagement determine distribution trajectory
+      - Use TikTok trending sounds when they align with content (do NOT force it)
+
+      **Posting Time Optimization:**
+      - General best times: 7-9 AM, 12-1 PM, 7-11 PM (audience timezone)
+      - Tuesday-Thursday typically outperform weekends for B2B content
+      - Weekend mornings for consumer/lifestyle content
+      - Test and iterate based on actual analytics after first 5-10 posts
+
+      --- INSTAGRAM REELS OPTIMIZATION ---
+
+      **Technical Specifications:**
+      - Aspect ratio: 9:16 (1080x1920 pixels)
+      - Duration sweet spots: 15-30 seconds (best reach), 30-60 seconds (best engagement),
+        up to 90 seconds maximum
+      - Cover image: Can select or upload (critical for profile grid aesthetic)
+      - Audio: Original audio or licensed music from Instagram library
+      - Avoid watermarks from other platforms (Instagram suppresses TikTok watermarks)
+
+      **Algorithm Signals:**
+      1. Watch-through rate and rewatch loops
+      2. Shares (especially via DM - strongest signal on Instagram)
+      3. Saves - very strong signal on Instagram specifically
+      4. Reach from non-followers (Reels are the #1 discovery mechanism)
+      5. Comments (especially when creator responds - boosts distribution)
+      6. Likes
+      7. Audio page visits (if using trending audio)
+
+      **Content Strategy for Instagram:**
+      - Higher production value expected than TikTok
+      - Consistent visual aesthetic matters (lighting, color grading, fonts)
+      - Caption text overlays should match brand fonts and colors
+      - First frame is the thumbnail - make it visually striking
+      - Use Instagram's built-in text and sticker features for native look
+      - Cross-promote to Stories with "New Reel" sticker
+      - Pin top-performing Reels to profile grid
+      - Collaborate feature for co-created content (doubles reach)
+
+      **Instagram-Specific Features to Leverage:**
+      - Remix (Instagram's version of duet)
+      - Add Yours sticker for user-generated content chains
+      - Shopping tags if promoting products
+      - Location tags for local discovery
+      - Collab posts for dual-profile distribution
+
+      --- YOUTUBE SHORTS OPTIMIZATION ---
+
+      **Technical Specifications:**
+      - Aspect ratio: 9:16 (1080x1920 pixels)
+      - Duration: Up to 60 seconds (YouTube extended to 3 minutes for some creators)
+      - Title: Max 100 characters, keyword-rich
+      - Auto-looping: Shorts loop automatically, design the end to flow into the start
+      - Thumbnail: YouTube may auto-select, but first frame is influential
+
+      **Algorithm Signals:**
+      1. Swipe-away rate (inverse - lower is better, means people did NOT skip)
+      2. Watch time and completion rate
+      3. Likes and engagement rate
+      4. Subscriber conversion rate (critical metric YouTube optimizes for)
+      5. Click-through from Shorts to long-form content (signals channel depth)
+      6. Comments and community engagement
+
+      **Content Strategy for YouTube:**
+      - YouTube Shorts viewers are more search-intent driven than TikTok/Reels
+      - Use keyword-rich titles that match what people search for
+      - Connect Shorts to long-form content: "Full video on my channel"
+      - YouTube audience expects educational or informational content more
+      - Less trend-driven than TikTok, more evergreen content performs well
+      - Consistent posting schedule matters more on YouTube (daily or 3-5x/week)
+      - YouTube Shorts can drive long-form subscribers (funnel strategy)
+
+      **YouTube-Specific Loop Optimization:**
+      - Design the last frame to connect to the first frame visually
+      - End on a statement that makes the viewer want to watch again
+      - Keep the loop seamless - avoid jarring transitions at the loop point
+      - 15-second shorts that loop 3-4 times perform exceptionally well
+
+      === CROSS-PLATFORM ADAPTATION MATRIX ===
+
+      For each clip, create an adaptation plan:
+
+      | Aspect | TikTok | Instagram Reels | YouTube Shorts |
+      |--------|--------|-----------------|----------------|
+      | Duration | [optimized length] | [optimized length] | [optimized length] |
+      | Hook style | [platform-specific] | [platform-specific] | [platform-specific] |
+      | Caption style | [casual/trendy] | [polished/branded] | [informational] |
+      | CTA | [platform-specific] | [platform-specific] | [platform-specific] |
+      | Hashtags | [3-5 TikTok tags] | [5-10 IG tags] | [title keywords] |
+      | Posting time | [optimal time] | [optimal time] | [optimal time] |
+      | Music/Audio | [trending sound?] | [licensed track?] | [original audio] |
+      | Text overlay | [style guide] | [style guide] | [style guide] |
+
+      === CONTENT CALENDAR RECOMMENDATION ===
+
+      Based on the number of clips identified, create a posting schedule:
+      - Recommended posting cadence per platform
+      - Optimal order to release clips (lead with strongest, build momentum)
+      - Spacing between posts (avoid flooding, but maintain consistency)
+      - Best day/time slots for each platform
+      - Re-posting strategy (when and how to recycle top performers)
+      - Series potential (can clips be connected as a multi-part series)
+
+      === EDITING SPECIFICATION DOCUMENT ===
+
+      For each clip, produce a complete editing brief:
+      1. Source timestamp (original video start-end)
+      2. Platform-specific duration target
+      3. Hook implementation (text overlay, first words, opening frame)
+      4. Caption style and timing reference
+      5. Music/sound recommendation (with specific track suggestions if applicable)
+      6. Color grading/filter recommendation
+      7. Speed adjustments (1.0x, 1.1x, 1.2x for specific segments)
+      8. Jump cut points (remove filler, tighten pacing)
+      9. B-roll or overlay suggestions
+      10. End frame specification (CTA, logo, loop point)
+      11. Export settings per platform
+
+      === OUTPUT ===
+
+      Return:
+      1. Platform-specific optimization plans (one per target platform)
+      2. Cross-platform adaptation matrix for each clip
+      3. Content calendar recommendation
+      4. Complete editing specification per clip per platform
+      5. Predicted performance tier per clip per platform (viral/strong/moderate/low)
+      6. Risk assessment (what could cause poor performance and mitigation)
+    model: sonnet
+    max_turns: 10
+
+  - id: distribution-plan
+    depends_on: [platform-optimization]
+    prompt: |
+      You are a social media distribution strategist who maximizes the reach and
+      impact of short-form video content. Your task is to create a comprehensive
+      distribution plan for all the generated short-form clips across
+      {input.target_platforms}, aligned with the goals: {input.content_goals}.
+
+      Platform optimization: {steps.platform-optimization.output}
+      Hook generation: {steps.hook-generation.output}
+      Caption generation: {steps.caption-generation.output}
+      Moment detection: {steps.moment-detection.output}
+      Brand voice: {input.brand_voice}
+
+      === DISTRIBUTION STRATEGY ===
+
+      --- PHASE 1: PRE-LAUNCH PREPARATION ---
+
+      **Content Asset Checklist:**
+      For each clip, verify all assets are ready before any publishing:
+      - [ ] Platform-specific video file (correct aspect ratio, duration, codec)
+      - [ ] Burned-in captions version and clean version (for platforms with auto-captions)
+      - [ ] Post caption with hashtags (per platform)
+      - [ ] Cover image / thumbnail (for Instagram Reels and YouTube Shorts)
+      - [ ] Hook text overlay graphic
+      - [ ] CTA graphic or end card
+      - [ ] Tracking links with UTM parameters (for link-in-bio CTAs)
+      - [ ] A/B variants prepared (for high-priority clips)
+
+      **Profile Optimization:**
+      Before launching the short-form content campaign, ensure:
+      - Bio is updated with relevant CTA and link (link-in-bio tool recommended)
+      - Profile picture and banner are current and professional
+      - Pinned posts/videos are updated to support the campaign
+      - Highlight covers updated (Instagram)
+      - Channel page organized (YouTube)
+
+      **Audience Priming:**
+      - Post a "teaser" story or post announcing new content series (if applicable)
+      - Engage with target audience's content for 3-5 days before launch
+      - Respond to comments on recent posts to boost algorithm favor
+      - Join relevant conversations in the niche to increase visibility
+
+      --- PHASE 2: LAUNCH SEQUENCE ---
+
+      **Week 1 - Flagship Launch:**
+
+      Day 1: Publish the #1 ranked clip (highest composite score) on ALL platforms
+      - Stagger by 2-4 hours per platform (allows monitoring and adjustment)
+      - Platform order: TikTok first (fastest feedback loop), then Reels, then Shorts
+      - Monitor first 30 minutes of engagement on each platform
+      - Respond to EVERY comment in the first 2 hours (critical for algorithm)
+      - Share to Stories (Instagram) with engagement sticker (poll, question)
+      - Pin to TikTok profile if it gains traction
+
+      Day 2: Publish the #2 ranked clip
+      - If Day 1 clip performed well, use a similar hook style
+      - If Day 1 underperformed, switch to a different hook/format
+      - Cross-reference Day 1 analytics to adjust posting time
+
+      Day 3-4: Publish clips #3 and #4
+      - Maintain momentum without flooding
+      - Alternate clip types (educational, emotional, controversial) for variety
+      - Post behind-the-scenes content on Stories between Reels/Shorts
+
+      Day 5-7: Publish remaining A-tier clips
+      - By now, early analytics will show which formats resonate
+      - Double down on the format that is performing best
+      - Hold back B-tier clips for Week 2
+
+      **Week 2 - Momentum Building:**
+
+      - Publish B-tier clips at a sustainable cadence (1 per day per platform)
+      - Create "response" content to top comments on Week 1 clips
+      - Duet/Stitch popular reactions to your clips (TikTok)
+      - Remix feature engagement (Instagram)
+      - Begin cross-promoting between platforms ("full version on YouTube")
+      - Analyze which clips drove the most profile visits and follows
+
+      **Week 3-4 - Optimization and Recycling:**
+
+      - Republish top performers with new hooks (A/B test results)
+      - Compile a "best of" or compilation clip from top moments
+      - Repurpose clip audio as podcast snippets or audiograms
+      - Create carousel posts (Instagram) from key moments with screenshots
+      - Write a blog post or newsletter expanding on the most popular clip topic
+      - Share clips in relevant communities (subreddits, Facebook groups, LinkedIn)
+
+      --- PHASE 3: ENGAGEMENT AMPLIFICATION ---
+
+      **Community Engagement Protocol:**
+      - Reply to every comment within 4 hours (24 hours maximum)
+      - Ask follow-up questions in replies to encourage threads
+      - Heart/like comments that add value to the conversation
+      - Pin the best comment on each post (social proof + rewards engagement)
+      - Create video replies to interesting comments (TikTok + Instagram)
+
+      **Cross-Promotion Strategy:**
+      - Share TikToks to Instagram Stories (drives cross-platform follows)
+      - Reference YouTube Shorts in TikTok ("full breakdown on my YouTube")
+      - Link Reels in email newsletter
+      - Embed Shorts in blog posts and website
+      - Share clips in Slack/Discord communities where the audience exists
+      - LinkedIn video posts for B2B content (repurpose with professional framing)
+      - Twitter/X clips with quote-tweet-worthy framing
+
+      **Paid Amplification (if applicable):**
+      - Identify the top 1-2 organic performers after 7 days
+      - Boost with $20-50/day targeted spend for 3-5 days
+      - Target lookalike audiences based on engaged viewers
+      - A/B test targeting: interest-based vs behavioral vs lookalike
+      - Monitor cost-per-view and cost-per-follow for ROI
+
+      --- PHASE 4: ANALYTICS AND ITERATION ---
+
+      **Key Metrics to Track (per clip, per platform):**
+
+      Performance metrics:
+      - Views (total and unique)
+      - Watch-through rate (% who watched to the end)
+      - Average watch time
+      - Engagement rate (likes + comments + shares + saves / views)
+      - Share rate specifically (strongest virality signal)
+      - Save rate (content reference value indicator)
+      - Comment sentiment (positive/negative/questions)
+
+      Growth metrics:
+      - New followers gained from each clip
+      - Profile visits driven by each clip
+      - Website clicks from bio (tracked via UTM)
+      - Email signups or conversions attributed to clip
+      - Long-form video clicks driven by Shorts (YouTube)
+
+      Content learning metrics:
+      - Best performing hook type (curiosity, identity, social proof, etc.)
+      - Best performing clip type (hot take, tutorial, story, etc.)
+      - Optimal clip duration by platform
+      - Best posting time by platform
+      - Hashtag effectiveness (reach from hashtag discovery)
+
+      **Weekly Report Template:**
+      1. Total views across all platforms
+      2. Top performing clip (and why it won)
+      3. Worst performing clip (and why it underperformed)
+      4. Follower growth rate
+      5. Goal progress ({input.content_goals} specific metrics)
+      6. Insights for next batch of content
+      7. A/B test results (which hooks/formats won)
+
+      **Iteration Protocol:**
+      Based on Week 1-2 data, adjust strategy:
+      - If watch-through rate is low: Hooks need improvement, tighten pacing
+      - If engagement rate is low but views are high: Content is not resonating emotionally
+      - If shares are low: Content lacks share motivation (make it more helpful or surprising)
+      - If follows are low: Content is entertaining but not establishing expertise
+      - If website clicks are low: CTA is not compelling or not visible enough
+
+      === OUTPUT ===
+
+      Return:
+      1. Complete distribution plan with day-by-day publishing schedule
+      2. Pre-launch checklist and preparation tasks
+      3. Launch sequence for Week 1-4
+      4. Engagement amplification playbook
+      5. Cross-promotion strategy map
+      6. Analytics tracking framework with KPI targets
+      7. Weekly report template
+      8. Iteration decision tree (if metric X is low, do Y)
+      9. Content recycling plan (how to extend the life of top performers)
+      10. Estimated timeline to achieve content goals: {input.content_goals}
+      11. Budget recommendation (organic-only vs paid boost scenarios)
+    model: sonnet
+    max_turns: 10

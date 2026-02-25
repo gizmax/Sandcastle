@@ -1,0 +1,892 @@
+# name: Freelancer Proposal Generator
+# description: Generate winning freelancer proposals by analyzing project requirements, matching portfolio pieces, crafting personalized pitches, and optimizing pricing strategy
+# tags: [Freelance, Proposals, Upwork, Pricing, Business]
+# category: general_ai
+
+name: freelancer-proposal-generator
+description: Generate winning freelancer proposals by analyzing project requirements, matching portfolio pieces, crafting personalized pitches, and optimizing pricing strategy
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: []
+
+input_schema:
+  required: ["project_description", "freelancer_skills"]
+  properties:
+    project_description:
+      type: string
+      description: "Full text of the client's project posting, job description, or RFP (paste the complete listing)"
+    freelancer_skills:
+      type: string
+      description: "Comma-separated list of your core skills and expertise areas (e.g. 'React, Node.js, AWS, PostgreSQL, 8 years experience')"
+    portfolio_highlights:
+      type: string
+      description: "Description of relevant past projects, case studies, or portfolio pieces to reference in the proposal"
+      default: "no specific portfolio provided"
+    hourly_rate:
+      type: string
+      description: "Your standard hourly rate or rate range (e.g. '$85/hr', '$75-100/hr', '$5000 fixed for this type')"
+      default: "market rate"
+    platform:
+      type: string
+      description: "Freelance platform the proposal is for (affects formatting and optimization strategy)"
+      default: "upwork"
+
+steps:
+  - id: project-analysis
+    prompt: |
+      Perform deep analysis of the client's project posting to understand their true needs,
+      unstated requirements, budget psychology, and decision-making criteria.
+
+      Project description: {input.project_description}
+      Platform: {input.platform}
+
+      You are an expert freelance business consultant who has analyzed over 10,000 project
+      postings and understands the psychology behind client requirements. Your job is to
+      decode everything the client is really saying - and not saying - to inform a
+      perfectly targeted proposal.
+
+      ## PROJECT ANALYSIS FRAMEWORK
+
+      ### Layer 1: Explicit Requirements Extraction
+
+      Parse the project posting and extract every explicit requirement into a structured format:
+
+      **Project Fundamentals:**
+      - Project type classification: website, web app, mobile app, API/backend, data project,
+        design, content, marketing, consulting, automation, integration, or hybrid
+      - Primary deliverable(s): what tangible output does the client expect?
+      - Technology stack mentioned: languages, frameworks, platforms, tools, APIs
+      - Timeline expectations: any deadlines, milestones, or urgency indicators
+      - Budget signals: fixed price mentioned, hourly range, budget level (entry/mid/expert)
+      - Scope boundaries: what is explicitly in-scope and out-of-scope
+
+      **Functional Requirements:**
+      - List every feature, functionality, or capability mentioned
+      - Categorize as: must-have (explicitly stated), should-have (implied), nice-to-have (mentioned in passing)
+      - Note any requirements that are technically contradictory or unrealistic
+      - Identify requirements that are underspecified and will need clarification
+
+      **Non-Functional Requirements:**
+      - Performance expectations (speed, scale, concurrent users)
+      - Security and compliance mentions (HIPAA, SOC2, GDPR, PCI)
+      - Accessibility requirements
+      - Browser/device compatibility
+      - Integration requirements with existing systems
+      - Maintenance and support expectations post-delivery
+
+      ### Layer 2: Implicit Signals and Client Psychology
+
+      Decode what the client is really communicating through their writing:
+
+      **Client Sophistication Level:**
+      - Technical literacy: do they use correct technical terminology or describe things
+        in business/layman terms? This affects how to pitch (technical depth vs. business outcomes)
+      - Project management experience: have they done this before or is this their first time
+        hiring for this type of work? Look for signs: detailed specs = experienced, vague
+        descriptions = first-timer
+      - Budget awareness: do they understand what this project actually costs? Look for
+        unrealistic budget-to-scope ratios
+
+      **Pain Points and Motivations:**
+      - Why are they doing this project NOW? (competitive pressure, growth, technical debt,
+        compliance deadline, investor requirement, personal project)
+      - What problem is this solving for their business? (revenue generation, cost reduction,
+        operational efficiency, customer satisfaction, compliance)
+      - What is the cost of NOT doing this project? (this informs urgency and willingness to pay)
+      - Have they been burned before? Look for phrases like "looking for reliable",
+        "previous developer left", "need someone who can actually deliver"
+
+      **Decision-Making Criteria (inferred):**
+      Rank the likely importance of each factor for THIS client:
+      1. Price (how price-sensitive do they appear?)
+      2. Speed (is timeline the primary driver?)
+      3. Quality (are they willing to pay more for excellence?)
+      4. Experience (do they want someone who has done this exact thing before?)
+      5. Communication (do they emphasize availability, updates, responsiveness?)
+      6. Trust (do they need reassurance, references, guarantees?)
+      7. Simplicity (do they want someone who makes it easy for them?)
+
+      **Red Flags and Concerns:**
+      - Scope creep indicators (vague requirements with fixed price)
+      - Unrealistic expectations (enterprise app on a $500 budget)
+      - Communication style concerns (demanding tone, micromanagement signals)
+      - Multiple failed attempts mentioned (why did previous freelancers fail?)
+      - "Quick and easy" language for complex projects (expectation mismatch)
+
+      ### Layer 3: Competitive Landscape Assessment
+
+      Based on the project characteristics and platform, estimate:
+      - **Number of competing proposals:** low (<10), medium (10-30), high (30+)
+        Based on: project type popularity, budget level, technical specificity
+      - **Typical competitor profile:** who else will bid on this?
+        Junior freelancers competing on price? Agencies competing on scale?
+        Specialists competing on expertise?
+      - **Differentiation opportunities:** what can set your proposal apart?
+        Speed? Specialized expertise? Unique approach? Portfolio match?
+        Personality and communication style?
+      - **Win probability factors:** what would make a proposal win this specific project?
+
+      ### Layer 4: Platform-Specific Intelligence
+
+      For {input.platform}, apply these optimization insights:
+
+      **If Upwork:**
+      - Connects are precious - is this project worth bidding on? (ROI assessment)
+      - Client hiring history: new client (more hand-holding needed) vs. experienced hirer
+      - Job Success Score impact: how does this project type affect your JSS?
+      - Boost strategy: is this project worth boosting?
+      - Interview-to-hire ratio expectations for this project type
+      - "Invite only" vs. "open" posting implications
+
+      **If Fiverr:**
+      - Gig relevance matching and search ranking implications
+      - Package tier strategy (Basic/Standard/Premium alignment)
+      - Revision policy implications
+      - Quick response time importance
+
+      **If Freelancer.com / Toptal / other:**
+      - Platform-specific bidding strategies
+      - Contest vs. direct hire dynamics
+      - Screening process considerations
+
+      ### Output Format
+
+      Return a structured analysis with:
+      1. Project classification and complexity assessment (1-10 scale)
+      2. Complete requirements breakdown (explicit + implicit)
+      3. Client psychology profile
+      4. Competitive landscape assessment
+      5. Top 3 differentiation angles to emphasize in the proposal
+      6. Top 3 concerns to proactively address
+      7. Recommended proposal tone (technical, business-focused, casual-professional, consultative)
+      8. Win probability estimate with reasoning
+    model: sonnet
+    max_turns: 10
+
+  - id: portfolio-matching
+    depends_on: [project-analysis]
+    prompt: |
+      Match the freelancer's skills and portfolio to the project requirements, identifying
+      the strongest proof points and addressing any gaps.
+
+      Project analysis: {steps.project-analysis.output}
+      Freelancer skills: {input.freelancer_skills}
+      Portfolio highlights: {input.portfolio_highlights}
+      Platform: {input.platform}
+
+      You are a freelance career strategist who specializes in positioning freelancers
+      to win projects by mapping their experience to client needs with maximum relevance
+      and credibility.
+
+      ## PORTFOLIO MATCHING FRAMEWORK
+
+      ### Step 1: Skills Gap Analysis
+
+      Create a complete mapping of project requirements to freelancer capabilities:
+
+      | Requirement | Freelancer Skill Match | Strength Level | Evidence Available |
+      |-------------|----------------------|----------------|-------------------|
+      | (from analysis) | (from skills list) | Strong/Moderate/Weak/Gap | Yes/Partial/No |
+
+      For each requirement:
+      - **Strong match:** freelancer has direct, demonstrable experience
+      - **Moderate match:** freelancer has related experience that transfers
+      - **Weak match:** freelancer has theoretical knowledge but limited practical experience
+      - **Gap:** freelancer lacks this skill (need mitigation strategy)
+
+      ### Step 2: Portfolio Piece Ranking
+
+      For each portfolio item provided, score its relevance to this specific project:
+
+      **Relevance Scoring (0-100):**
+      - Technology overlap (same stack, same tools): 0-30 points
+      - Problem domain overlap (same industry, same type of solution): 0-25 points
+      - Scale/complexity similarity: 0-15 points
+      - Recency (more recent = more relevant): 0-10 points
+      - Outcome demonstrability (can you show measurable results?): 0-20 points
+
+      Rank all portfolio pieces by relevance score. Select the top 3 to feature in the proposal.
+
+      For each selected portfolio piece, prepare:
+      - **One-sentence description** that mirrors the client's project language
+      - **Key similarity** to the current project (make the connection explicit)
+      - **Measurable outcome** if available (X% improvement, $Y saved, Z users served)
+      - **Technical detail** that demonstrates depth without overwhelming
+      - **Visual or link** if available for the portfolio piece
+
+      ### Step 3: Gap Mitigation Strategies
+
+      For any skill gaps identified, develop mitigation approaches:
+
+      **Strategy A: Transferable Skills Bridge**
+      - Identify adjacent skills that demonstrate learning ability
+      - Frame gaps as "fresh perspective" advantages where possible
+      - Example: "While I haven't used [Framework X] specifically, my deep experience with
+        [similar Framework Y] means I can be productive within days"
+
+      **Strategy B: Rapid Acquisition Proof**
+      - If the gap is small, demonstrate willingness and ability to learn fast
+      - Reference past examples of quickly learning new technologies
+      - Offer a brief ramp-up period at reduced rate if the gap is significant
+
+      **Strategy C: Ecosystem Expertise**
+      - Position broader ecosystem knowledge as more valuable than narrow tool experience
+      - "I've built 15 production applications in the [ecosystem] - picking up [specific tool]
+        is a natural extension"
+
+      **Strategy D: Honest Acknowledgment with Plan**
+      - For significant gaps, acknowledge honestly and present a concrete learning plan
+      - This builds trust and positions you as honest (differentiation from oversellers)
+      - Only use this for non-critical requirements
+
+      ### Step 4: Unique Value Proposition Construction
+
+      Based on the skills match and project analysis, craft:
+
+      **Primary UVP (one sentence):**
+      - What makes this freelancer uniquely qualified for THIS specific project?
+      - Must reference a specific skill-project intersection, not generic claims
+      - Example: "Having built 3 similar [X] platforms for [industry] companies, I can
+        deliver your MVP in half the typical timeline because I already have reusable
+        components and battle-tested architecture patterns"
+
+      **Supporting Proof Points (3-5 bullets):**
+      - Each must be specific, measurable, and relevant to THIS project
+      - Prioritize results over activities ("increased conversion 34%" > "built a website")
+      - Include social proof if available (client testimonials, platform ratings, certifications)
+
+      **Differentiation Statement:**
+      - Based on competitive landscape from project analysis, what sets this freelancer apart?
+      - "Unlike most [platform] freelancers who [common approach], I [unique approach] which
+        results in [specific benefit to client]"
+
+      ### Step 5: Credibility Amplifiers
+
+      Identify and prepare additional credibility signals:
+      - Platform-specific metrics (Upwork JSS, Fiverr level, total earnings, completion rate)
+      - Relevant certifications (AWS, Google Cloud, Scrum, etc.)
+      - Open source contributions related to the project's technology
+      - Published content (blog posts, tutorials, conference talks) on relevant topics
+      - Team or network capabilities (if you can bring in specialists for gaps)
+
+      ### Output Format
+
+      Return:
+      1. Complete skills-to-requirements mapping table
+      2. Top 3 ranked portfolio pieces with prepared descriptions
+      3. Gap mitigation strategies for each identified gap
+      4. Primary UVP statement
+      5. Supporting proof points
+      6. Differentiation statement
+      7. Credibility amplifiers list
+      8. Overall match strength score (0-100) with honest assessment
+    model: haiku
+    max_turns: 10
+
+  - id: pitch-crafting
+    depends_on: [project-analysis, portfolio-matching]
+    prompt: |
+      Craft a compelling, personalized proposal pitch that speaks directly to the client's
+      needs and positions the freelancer as the obvious choice.
+
+      Project analysis: {steps.project-analysis.output}
+      Portfolio matching: {steps.portfolio-matching.output}
+      Freelancer skills: {input.freelancer_skills}
+      Platform: {input.platform}
+
+      You are an elite freelance proposal writer who has helped freelancers win over
+      $10M in contracts. You understand that proposals are sales documents, not resumes.
+      Every sentence must earn the right to the next sentence. The goal is to make the
+      client feel understood, confident, and excited to work with this freelancer.
+
+      ## PITCH CRAFTING FRAMEWORK
+
+      ### Principle 1: The Hook (first 2-3 sentences)
+
+      The first sentences determine whether the client reads the rest. On {input.platform},
+      only the first 2-3 lines are visible before "Read more". These sentences MUST:
+
+      - Demonstrate that you READ and UNDERSTOOD the project (not a template)
+      - Reference a specific detail from THEIR posting (proves personalization)
+      - Immediately signal relevant expertise or a unique insight
+      - Create curiosity or confidence that compels them to read more
+
+      **Hook Formulas (choose the best fit for this client's psychology profile):**
+
+      Formula A - The Insight Hook:
+      "I noticed you mentioned [specific detail]. In my experience building [similar thing],
+      this is the part that [insight about the challenge]. Here's how I'd approach it..."
+
+      Formula B - The Results Hook:
+      "I recently completed a project very similar to yours - [portfolio piece] - which
+      [measurable result]. I can bring the same approach to your [project]."
+
+      Formula C - The Understanding Hook:
+      "I understand you're looking for [their real need, not just the technical requirement].
+      Having worked with [X] companies in your space, I know that [domain insight]."
+
+      Formula D - The Problem Hook:
+      "[Specific challenge from their posting] is a challenge I've solved [X] times.
+      The key insight most developers miss is [unique perspective]."
+
+      Formula E - The Question Hook:
+      "Before diving into technical details, I want to make sure I understand your vision
+      correctly: [insightful question that shows deep understanding]."
+
+      Do NOT use:
+      - "Hi, my name is..." (wastes precious first-line real estate)
+      - "I read your job posting and..." (obvious, says nothing)
+      - "I am a [title] with [X] years of experience" (resume language, not sales language)
+      - "Dear Hiring Manager" (impersonal on freelance platforms)
+
+      ### Principle 2: The Understanding Section
+
+      After the hook, demonstrate deep comprehension of the project:
+
+      **Reframe their project in your own words:**
+      - Summarize what they need in 2-3 sentences (proves you read and understood)
+      - Use THEIR vocabulary and terminology (mirror their language)
+      - Identify the business outcome behind the technical request
+      - Acknowledge any complexity or challenges that show you're realistic, not naive
+
+      **Address their unstated concerns:**
+      Based on the psychology profile from project analysis:
+      - If they've been burned before: "I understand reliability is critical..."
+      - If they're budget-conscious: "I believe in transparent pricing with no surprises..."
+      - If speed matters: "I can start immediately and have a working [deliverable] by..."
+      - If quality matters: "My approach includes [testing/review/QA process]..."
+
+      ### Principle 3: The Solution Section
+
+      Present your approach to THEIR specific project:
+
+      **High-level approach (3-5 sentences):**
+      - Describe HOW you would build/execute this project
+      - Use specific technical choices relevant to their requirements
+      - Explain WHY you chose this approach (shows expertise, not just execution)
+      - Reference how this approach served you in similar past projects
+
+      **Proposed milestones (3-5 milestones):**
+      - Break the project into logical phases
+      - Each milestone should produce a tangible, reviewable deliverable
+      - Include estimated timeline for each phase
+      - Build in a review/feedback checkpoint at each milestone
+      - Show that you think in terms of iterative delivery, not waterfall
+
+      **Technical specifics (only if client is technical):**
+      - Architecture decisions you'd make and why
+      - Technology choices and trade-offs considered
+      - Scalability and maintenance considerations
+      - Testing and quality assurance approach
+
+      ### Principle 4: The Proof Section
+
+      Back up your proposal with evidence:
+
+      **Portfolio showcase (2-3 pieces, max):**
+      - Use the top-ranked portfolio pieces from the matching analysis
+      - For each: one sentence describing the project, one sentence about the result,
+        one sentence connecting it to THIS project
+      - If links available, include them naturally
+      - Focus on OUTCOMES, not features
+
+      **Social proof:**
+      - Client testimonial quote if available (one sentence, attributed)
+      - Platform metrics (completion rate, satisfaction score, JSS)
+      - Relevant numbers (projects completed, years of experience, users served)
+
+      **Credibility signals:**
+      - Certifications or specialized training relevant to the project
+      - Notable clients or brands worked with (if NDA allows)
+      - Open source contributions or published work in the domain
+
+      ### Principle 5: The Close
+
+      End with a clear, confident call to action:
+
+      **Availability and next steps:**
+      - State your availability ("I can start this week / Monday / immediately")
+      - Propose a specific next step ("I'd love to schedule a quick 15-minute call to
+        discuss [specific aspect]")
+      - Include a thoughtful question that demonstrates engagement and invites response
+      - Express genuine enthusiasm for the project (but don't be desperate)
+
+      **Closing tone:**
+      - Warm but professional
+      - Confident but not arrogant
+      - Eager but not desperate
+      - End on the client's outcome, not your needs
+
+      ### Principle 6: Platform-Specific Optimization
+
+      **For {input.platform}:**
+
+      *If Upwork:*
+      - Keep total length to 200-350 words (clients skim)
+      - First 2 lines must stand alone (visible in notification preview)
+      - Include 1-2 portfolio links inline (not at the end)
+      - Ask 1-2 screening questions that show expertise
+      - Reference specific phrases from their posting
+      - If they asked specific questions in the posting, answer each one directly
+      - Use short paragraphs (2-3 sentences max)
+      - Consider including a small value-add (quick suggestion or insight)
+
+      *If Fiverr:*
+      - Align language with gig descriptions
+      - Reference package tiers naturally
+      - Emphasize revision policy and support
+      - Keep more concise (100-200 words for initial contact)
+
+      *For direct/email proposals:*
+      - Can be longer and more detailed (500-800 words)
+      - Include more technical depth
+      - Attach portfolio document if appropriate
+      - More formal structure with clear sections
+
+      ### Output Format
+
+      Produce:
+      1. The complete proposal text, ready to submit
+      2. A "proposal strategy notes" section explaining the choices made
+      3. 2-3 alternative hook variations the freelancer can choose from
+      4. 1-2 follow-up message templates (if the client doesn't respond in 3-5 days)
+      5. A list of questions to ask during the interview/call stage
+    model: sonnet
+    max_turns: 10
+
+  - id: pricing-strategy
+    depends_on: [project-analysis, portfolio-matching]
+    prompt: |
+      Develop an optimized pricing strategy for this specific project that maximizes
+      win probability while protecting the freelancer's value.
+
+      Project analysis: {steps.project-analysis.output}
+      Portfolio matching: {steps.portfolio-matching.output}
+      Freelancer standard rate: {input.hourly_rate}
+      Freelancer skills: {input.freelancer_skills}
+      Platform: {input.platform}
+
+      You are a freelance pricing strategist who has helped hundreds of freelancers
+      increase their effective hourly rate by 40-60% through strategic pricing. You
+      understand that pricing is not just a number - it is a positioning tool, a trust
+      signal, and a negotiation framework.
+
+      ## PRICING STRATEGY FRAMEWORK
+
+      ### Analysis 1: Project Scope Estimation
+
+      Break down the project into estimable work units:
+
+      **Task Decomposition:**
+      For each major deliverable identified in the project analysis, estimate:
+      - Hours for planning and architecture: X hours
+      - Hours for core implementation: X hours
+      - Hours for testing and QA: X hours
+      - Hours for revisions and iterations: X hours (buffer)
+      - Hours for communication and project management: X hours
+      - Hours for deployment and handoff: X hours
+
+      **Complexity Multipliers:**
+      Apply multipliers for:
+      - Integration complexity (each third-party API = 1.2x on affected tasks)
+      - Ambiguity risk (vague requirements = 1.3x buffer on implementation)
+      - Client experience level (first-time client = 1.2x for extra communication)
+      - Technology unfamiliarity (new tool/framework = 1.2-1.5x for learning curve)
+      - Perfectionism signals from client (1.2x for extra revision cycles)
+
+      **Total Estimated Hours:**
+      - Optimistic estimate (everything goes smoothly): X hours
+      - Realistic estimate (some challenges, normal revisions): X hours
+      - Pessimistic estimate (scope issues, difficult communication): X hours
+      - Use realistic estimate as the baseline for pricing
+
+      ### Analysis 2: Market Rate Research
+
+      Estimate the competitive pricing landscape for this specific project:
+
+      **Platform rate analysis for {input.platform}:**
+      - Entry-level rate range for this project type: $X-Y/hr
+      - Mid-level rate range: $X-Y/hr
+      - Expert-level rate range: $X-Y/hr
+      - Where does the freelancer's rate ({input.hourly_rate}) fall?
+
+      **Project budget signals:**
+      - Did the client specify a budget? If so, analyze feasibility
+      - If no budget specified, estimate based on: project complexity, client sophistication,
+        industry, and platform norms
+      - Is the implied budget realistic for the scope? Flag any budget-scope mismatches
+
+      **Value anchoring:**
+      - What would this project cost from a professional agency? (usually 3-5x freelancer rate)
+      - What would an in-house developer cost for the equivalent time? (salary + overhead)
+      - What is the business value to the client? (revenue impact, cost savings, time saved)
+      - What did the client's competitors likely pay for similar solutions?
+
+      ### Analysis 3: Pricing Model Selection
+
+      Choose the optimal pricing model for this specific project:
+
+      **Option A: Fixed Price**
+      Best when:
+      - Requirements are clearly defined and bounded
+      - You have done very similar projects before (accurate estimation)
+      - Client is price-sensitive and wants certainty
+      - Scope is small enough to absorb variance
+
+      If recommending fixed price:
+      - Base price = Realistic hours x hourly rate
+      - Risk premium = +15-25% for scope uncertainty
+      - Round to psychologically appealing number ($X,950 or $X,500)
+      - Define exactly what is included and what constitutes an add-on
+
+      **Option B: Hourly Rate**
+      Best when:
+      - Requirements are evolving or unclear
+      - Project is ongoing or maintenance-oriented
+      - Client prefers flexibility and control
+      - Trust is already established (existing relationship)
+
+      If recommending hourly:
+      - Standard rate: {input.hourly_rate}
+      - Premium rate: for rush work, weekends, or specialized tasks (+20-40%)
+      - Discounted rate: for long-term commitment or volume (propose at -10-15% for 3+ months)
+      - Weekly cap option: offer a weekly maximum to give client budget comfort
+
+      **Option C: Milestone-Based**
+      Best when:
+      - Project has natural phases with distinct deliverables
+      - Client needs confidence that value is delivered incrementally
+      - Trust needs to be built progressively
+      - Both parties benefit from go/no-go checkpoints
+
+      If recommending milestones:
+      - Phase 1 (discovery/planning): 10-15% of total
+      - Phase 2 (core build): 40-50% of total
+      - Phase 3 (refinement/testing): 20-25% of total
+      - Phase 4 (launch/handoff): 15-20% of total
+      - Each milestone has clear acceptance criteria
+
+      **Option D: Value-Based Pricing**
+      Best when:
+      - Business impact is quantifiable (revenue, cost savings)
+      - Client understands ROI framing
+      - Your expertise creates outsized value relative to time spent
+      - You can articulate and defend the value equation
+
+      If recommending value-based:
+      - Quantify client's expected return (even conservatively)
+      - Price at 10-20% of the first-year value created
+      - Frame as investment, not cost ("For $X, you'll gain $Y in the first 6 months")
+      - Include ROI projection in the proposal
+
+      ### Analysis 4: Negotiation Strategy
+
+      Prepare for the pricing conversation:
+
+      **Anchor strategy:**
+      - What price to present first in the proposal?
+      - Should you present a range or a single number?
+      - Where is your walk-away point (minimum acceptable rate)?
+
+      **Concession planning:**
+      - If the client pushes back on price, what can you offer?
+        * Reduced scope (remove nice-to-have features)
+        * Extended timeline (less urgency premium)
+        * Different payment terms (more upfront = lower total)
+        * Phased delivery (start with MVP, expand later)
+      - What should you NEVER concede? (quality, testing, your hourly floor)
+
+      **Package options (Good/Better/Best):**
+      Create three pricing tiers to anchor the conversation:
+      - **Basic package**: Core deliverables only, minimal revisions
+      - **Standard package**: Full scope with standard revisions (recommended, highlight this)
+      - **Premium package**: Full scope plus extras (priority support, extended warranty,
+        additional features, faster delivery)
+
+      This three-tier approach:
+      - Gives the client agency (they choose, rather than accept/reject)
+      - Anchors the Standard tier as reasonable (contrast effect)
+      - Captures upside from clients willing to pay for Premium
+      - Provides a natural negotiation landing zone
+
+      ### Analysis 5: Risk-Adjusted Pricing
+
+      Factor in project-specific risks:
+      - Scope creep probability: Low/Medium/High -> +0/10/20% buffer
+      - Payment risk (new client, no reviews): -> request larger upfront deposit
+      - Communication overhead (timezone, language, complexity): -> factor into hours
+      - Technology risk (unfamiliar tools, unproven approaches): -> learning time included
+      - Revision risk (perfectionist client signals): -> specify revision limits clearly
+
+      ### Output Format
+
+      Return:
+      1. Recommended pricing model with detailed justification
+      2. Specific price recommendation (or range) with all calculations shown
+      3. Three-tier package options with pricing for each
+      4. Negotiation playbook (responses to common objections)
+      5. Payment schedule and terms recommendation
+      6. Scope boundary definition (what's included vs. out of scope)
+      7. Risk assessment and how pricing accounts for it
+      8. Confidence level in winning at this price (high/medium/low)
+    model: sonnet
+    max_turns: 10
+
+  - id: proposal-assembly
+    depends_on: [pitch-crafting, pricing-strategy]
+    prompt: |
+      Assemble the final, polished proposal by integrating the pitch, pricing, and
+      supporting materials into a submission-ready document.
+
+      Pitch draft: {steps.pitch-crafting.output}
+      Pricing strategy: {steps.pricing-strategy.output}
+      Portfolio matching: {steps.portfolio-matching.output}
+      Project analysis: {steps.project-analysis.output}
+      Platform: {input.platform}
+      Freelancer skills: {input.freelancer_skills}
+
+      You are a proposal editor and conversion optimization specialist. Your job is to
+      take all the component pieces and assemble them into a cohesive, compelling,
+      and perfectly formatted proposal that maximizes the probability of being hired.
+
+      ## PROPOSAL ASSEMBLY FRAMEWORK
+
+      ### Step 1: Structure Integration
+
+      Merge the pitch and pricing into a natural flow. The proposal should read as one
+      cohesive document, not as separate sections stapled together.
+
+      **For {input.platform} proposals:**
+
+      *If Upwork (200-350 words ideal):*
+      ```
+      [Hook - 2-3 sentences, personalized]
+
+      [Understanding - 2-3 sentences showing you get the project]
+
+      [Approach - 3-5 sentences on how you'd execute]
+
+      [Proof - 2-3 bullet points with portfolio links/results]
+
+      [Pricing - 1-2 sentences with transparent pricing]
+
+      [Close - 2 sentences with availability + next step + question]
+      ```
+
+      *If direct/email (500-800 words):*
+      ```
+      [Professional greeting]
+
+      [Hook paragraph]
+
+      [Understanding and approach section]
+
+      [Proposed milestones and timeline]
+
+      [Portfolio evidence section]
+
+      [Pricing and packages section]
+
+      [Terms and next steps]
+
+      [Professional closing]
+      ```
+
+      ### Step 2: Pricing Integration
+
+      Weave the pricing naturally into the proposal narrative:
+
+      **Do:**
+      - Present pricing confidently (never apologize for your rate)
+      - Tie price to value ("For $X, you'll receive...")
+      - Include the three-tier options if the platform supports longer proposals
+      - Specify what's included to justify the investment
+      - Make the payment structure feel safe (milestones, escrow)
+
+      **Don't:**
+      - Lead with price (price should come after value is established)
+      - Use vague pricing ("we can discuss budget later" - wastes everyone's time)
+      - Undercut your own price ("I know that might seem high but...")
+      - Present price without context (always price + what you get)
+
+      ### Step 3: Tone and Voice Calibration
+
+      Based on the client psychology profile, calibrate the entire proposal's tone:
+
+      **If client is technical:** More architectural details, code-level references, specific
+      technology trade-off discussions. Less hand-holding, more peer-to-peer.
+
+      **If client is business-focused:** Emphasize outcomes, timelines, ROI, and process.
+      Minimize technical jargon. Focus on reliability and communication.
+
+      **If client seems nervous/cautious:** More reassurance, references to process,
+      emphasis on communication, mention of revision policies, and guarantees.
+
+      **If client seems experienced/decisive:** Be direct and concise. Skip excessive
+      explanation. Show that you respect their time and knowledge.
+
+      ### Step 4: Conversion Optimization
+
+      Apply these proven conversion techniques:
+
+      **Pattern interrupts:**
+      - Start with something unexpected (an insight, a question, a relevant observation)
+      - Break the pattern of generic proposals the client is reading
+
+      **Specificity signals:**
+      - Use exact numbers, not ranges ("I can deliver the first prototype in 5 days"
+        vs. "within 1-2 weeks")
+      - Reference specific pages, features, or details from their posting
+      - Name specific technologies and explain choices briefly
+
+      **Risk reversal:**
+      - Offer something that reduces the client's perceived risk
+      - Examples: "I'll deliver a clickable prototype before you commit to the full build"
+      - "If the first milestone doesn't meet your expectations, you owe nothing for it"
+      - "I include 2 rounds of revisions at no extra charge"
+
+      **Urgency and scarcity (used authentically):**
+      - "I have availability starting [specific date]"
+      - "I'm currently wrapping up a project and have a window opening next week"
+      - Never fabricate urgency, but be honest about your schedule
+
+      **Social proof integration:**
+      - Weave testimonials or results into the narrative naturally
+      - "When I built a similar system for [client type], they saw [result]"
+      - Platform rating/score mentioned casually ("my 98% job success score reflects...")
+
+      ### Step 5: Formatting and Readability
+
+      Optimize the proposal for scanning (most clients spend 30-60 seconds on initial review):
+
+      - Short paragraphs (2-3 sentences maximum)
+      - Bold key phrases that a scanner would notice
+      - Bullet points for lists (but not everything - mix prose and lists)
+      - White space between sections
+      - No walls of text
+      - Key message in the first sentence of each paragraph (inverted pyramid)
+      - Platform character limits respected
+
+      ### Step 6: Pre-Submission Checklist
+
+      Verify the proposal against these criteria:
+      - [ ] First 2 sentences would make the client want to read more
+      - [ ] References at least one specific detail from the project posting
+      - [ ] Includes at least one relevant portfolio piece with measurable outcome
+      - [ ] Pricing is clear and justified
+      - [ ] Includes a specific call to action
+      - [ ] No grammar or spelling errors
+      - [ ] Tone matches client sophistication level
+      - [ ] No generic/template-sounding language
+      - [ ] Under platform character limits
+      - [ ] Addresses the client's top 2-3 decision criteria
+      - [ ] No desperate or needy language
+      - [ ] Professional but warm sign-off
+
+      ### Output Format
+
+      Return:
+      1. **FINAL PROPOSAL** - the complete, ready-to-submit proposal text
+      2. **SUBMISSION NOTES** - any platform-specific submission tips
+      3. **ATTACHMENTS/LINKS** - what portfolio links or documents to include
+      4. **FOLLOW-UP PLAN** - what to do if no response in 3, 5, and 7 days
+      5. **INTERVIEW PREP** - key points to emphasize if invited to interview
+    model: sonnet
+    max_turns: 10
+
+  - id: optimization-review
+    depends_on: [proposal-assembly]
+    prompt: |
+      Perform a final optimization review of the assembled proposal, scoring it against
+      best practices and suggesting improvements.
+
+      Assembled proposal: {steps.proposal-assembly.output}
+      Project analysis: {steps.project-analysis.output}
+      Pricing strategy: {steps.pricing-strategy.output}
+      Platform: {input.platform}
+
+      You are a proposal quality assurance specialist who reviews freelance proposals
+      before submission. Your job is to catch weaknesses, optimize language, and ensure
+      the proposal is in the top 5% of submissions the client will receive.
+
+      ## OPTIMIZATION REVIEW FRAMEWORK
+
+      ### Review Dimension 1: Client Alignment Score (0-100)
+
+      Score how well the proposal addresses the client's specific needs:
+      - Does it reference specific details from the project posting? (0-20)
+      - Does it address the client's implied concerns? (0-20)
+      - Does the proposed approach match the project's actual requirements? (0-20)
+      - Is the pricing aligned with the client's budget signals? (0-20)
+      - Does the tone match the client's communication style? (0-20)
+
+      For each sub-score below 15, provide a specific revision suggestion.
+
+      ### Review Dimension 2: Persuasion Score (0-100)
+
+      Evaluate the proposal's persuasive effectiveness:
+      - **Hook strength** (0-20): Would the first 2 sentences stop a client from scrolling?
+      - **Proof density** (0-20): Is every claim backed by specific evidence?
+      - **Emotional resonance** (0-20): Does the client feel understood and confident?
+      - **Differentiation clarity** (0-20): Is it clear why THIS freelancer vs. others?
+      - **Call to action strength** (0-20): Does the close create momentum toward hiring?
+
+      ### Review Dimension 3: Red Flag Detection
+
+      Scan for common proposal mistakes:
+
+      **Credibility killers:**
+      - Promises that sound too good ("I guarantee 10x ROI")
+      - Obvious exaggeration of experience or results
+      - Inconsistencies between claimed skills and proposed approach
+      - Spelling or grammar errors (instant credibility loss)
+      - Incorrect use of the client's company name or project details
+
+      **Trust eroders:**
+      - Being too salesy or pushy
+      - Negative language about competitors or previous clients
+      - Overly casual language that signals lack of professionalism
+      - Failing to answer questions the client specifically asked in their posting
+      - Using obvious template language ("As a highly experienced professional...")
+
+      **Conversion blockers:**
+      - Price buried at the end without value context
+      - No clear next step or call to action
+      - Too long for the platform (client stops reading)
+      - Too short (client feels you didn't invest time)
+      - Missing portfolio evidence for key claims
+
+      ### Review Dimension 4: Competitive Differentiation
+
+      Compare this proposal against what a typical competitor would submit:
+      - What does this proposal say that 90% of competitors won't?
+      - Is there a unique insight, approach, or proof point?
+      - Does the proposal position the freelancer as a specialist, not a generalist?
+      - Would the client remember this proposal after reading 20 others?
+
+      ### Review Dimension 5: Platform Optimization
+
+      **For {input.platform}:**
+      - Character count within optimal range?
+      - Keywords present that match the job posting (search/algorithm optimization)?
+      - Profile consistency (does the proposal match the freelancer's profile claims)?
+      - Response time optimization (is this being sent quickly enough after posting)?
+      - Portfolio links working and relevant?
+
+      ### Final Verdict
+
+      Provide:
+      1. **Overall score** (0-100) with breakdown by dimension
+      2. **Top 3 strengths** of the proposal
+      3. **Top 3 weaknesses** with specific fix suggestions
+      4. **Revised proposal** incorporating all improvements (the final-final version)
+      5. **Win probability assessment**: percentage chance of getting an interview + percentage
+         chance of being hired (with reasoning)
+      6. **A/B test suggestions**: 2-3 alternative approaches the freelancer could test
+         on similar projects to optimize their win rate over time
+      7. **Platform-specific tips**: any additional optimization for {input.platform}
+         algorithm and client experience
+    model: sonnet
+    max_turns: 10

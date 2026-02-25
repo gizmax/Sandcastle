@@ -1,0 +1,990 @@
+# name: Invoice Processor
+# description: Extract data from invoices using OCR patterns, validate against PO records, detect anomalies, route for approval, and generate accounting entries
+# tags: [Finance, Invoices, AP, Accounting, Audit]
+# category: general_ai
+
+name: invoice-processor
+description: Extract data from invoices using OCR patterns, validate against PO records, detect anomalies, route for approval, and generate accounting entries
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["invoice_source", "company_name"]
+  properties:
+    invoice_source:
+      type: string
+      description: "Invoice data source or batch identifier (e.g. 'email inbox', 'AP folder', 'EDI feed', or raw invoice text/data)"
+    company_name:
+      type: string
+      description: "Company name for matching against internal records"
+    approval_threshold:
+      type: string
+      description: "Dollar amount above which invoices require additional approval (default: 10000)"
+      default: "10000"
+    accounting_system:
+      type: string
+      description: "Target accounting system for journal entries (e.g. 'QuickBooks', 'NetSuite', 'Xero', 'SAP')"
+      default: "QuickBooks"
+
+steps:
+  - id: document-extraction
+    prompt: |
+      You are an accounts payable document processing specialist with expertise in
+      invoice data extraction, OCR interpretation, and structured data normalization.
+      Your task is to extract all relevant data fields from incoming invoices for
+      "{input.company_name}".
+
+      Invoice source: {input.invoice_source}
+      Company: {input.company_name}
+
+      === EXTRACTION PROTOCOL ===
+
+      For each invoice document in the batch, extract ALL of the following fields.
+      If a field is not present or not legible, mark it as "NOT_FOUND" with a
+      confidence note explaining why.
+
+      --- HEADER FIELDS ---
+
+      **Invoice Identification:**
+      - Invoice number (exact alphanumeric string, preserve leading zeros)
+      - Invoice date (normalize to YYYY-MM-DD format regardless of source format)
+      - Due date (normalize to YYYY-MM-DD, calculate from payment terms if not explicit)
+      - Payment terms (Net 30, Net 60, 2/10 Net 30, Due on Receipt, etc.)
+      - Purchase Order (PO) number referenced on the invoice
+      - Currency (ISO 4217 code, default to USD if not specified)
+      - Invoice type: Standard, Credit Memo, Debit Memo, Proforma, Recurring
+
+      **Vendor Information:**
+      - Vendor/Supplier legal name (as printed on invoice)
+      - Vendor DBA or trade name (if different from legal name)
+      - Vendor address (full: street, city, state/province, postal code, country)
+      - Vendor tax ID / EIN / VAT number
+      - Vendor bank details (if present: bank name, routing number, account number)
+      - Vendor contact (name, email, phone if listed)
+      - Vendor account number (our account with them)
+
+      **Buyer Information (verify it matches {input.company_name}):**
+      - Bill-to name and address
+      - Ship-to name and address (if different from bill-to)
+      - Buyer contact or department referenced
+      - Internal cost center or department code (if present)
+
+      --- LINE ITEMS ---
+
+      For EACH line item on the invoice, extract:
+      - Line number / sequence
+      - Item description (full text, do not truncate)
+      - Item code / SKU / part number (if present)
+      - Quantity (with unit of measure: each, hour, kg, box, etc.)
+      - Unit price (before any discounts)
+      - Line discount (percentage or dollar amount)
+      - Line subtotal (quantity * unit price - discount)
+      - Tax rate applied to this line (if line-level tax)
+      - GL account code or expense category (if specified on invoice)
+
+      Validate: Sum of line subtotals should equal the invoice subtotal.
+      Flag any discrepancy with the calculated vs stated amount.
+
+      --- TOTALS AND TAXES ---
+
+      - Subtotal (sum of all line items before tax)
+      - Discount amount (invoice-level discount, if any)
+      - Tax breakdown:
+        - Tax type (sales tax, VAT, GST, HST, etc.)
+        - Tax rate (percentage)
+        - Taxable amount (base amount tax is calculated on)
+        - Tax amount
+        - Tax jurisdiction (state, province, country)
+      - Shipping / freight charges
+      - Other charges or fees (itemize each)
+      - Total amount due
+      - Amount already paid / deposits applied
+      - Balance due
+
+      Cross-validate: Subtotal - Discounts + Taxes + Shipping + Other = Total Amount Due.
+      Flag any mathematical inconsistency.
+
+      --- PAYMENT INFORMATION ---
+
+      - Accepted payment methods listed
+      - Wire transfer instructions (if present)
+      - ACH details (if present)
+      - Check payable to (name)
+      - Early payment discount terms (e.g., "2% if paid within 10 days")
+      - Late payment penalty terms (e.g., "1.5% per month on overdue balances")
+      - Remittance address (if different from vendor address)
+
+      --- SPECIAL FIELDS ---
+
+      - Contract reference number
+      - Project or job number
+      - Delivery receipt or BOL number
+      - Approval signatures present (yes/no, whose)
+      - Notes or special instructions from vendor
+      - Attachments referenced (time sheets, receipts, SOWs)
+
+      === OCR CONFIDENCE SCORING ===
+
+      For each extracted field, assign a confidence score:
+      - HIGH (95-100%): Clear text, standard format, unambiguous
+      - MEDIUM (75-94%): Slightly unclear but best interpretation is likely correct
+      - LOW (50-74%): Ambiguous, multiple possible readings, manual review recommended
+      - FAILED (<50%): Could not extract reliably, manual entry required
+
+      Track overall document confidence: average of all field confidence scores.
+      Flag entire invoices for manual review if overall confidence < 80%.
+
+      === NORMALIZATION RULES ===
+
+      - Dates: Always YYYY-MM-DD
+      - Currency amounts: Always to 2 decimal places, no currency symbols in data
+      - Phone numbers: +1-XXX-XXX-XXXX format for US
+      - Addresses: Standardize to structured fields (street, city, state, zip, country)
+      - Vendor names: Trim whitespace, normalize capitalization, remove trailing punctuation
+      - PO numbers: Preserve exact format including hyphens and leading zeros
+
+      === OUTPUT ===
+
+      Return a structured JSON array of extracted invoices, each containing:
+      1. All extracted fields organized by section (header, line_items, totals, payment)
+      2. Per-field confidence scores
+      3. Overall document confidence score
+      4. List of validation warnings (math discrepancies, missing required fields)
+      5. OCR quality notes (pages that were blurry, handwritten sections, stamps)
+      6. Recommended action: AUTO_PROCESS (high confidence) or MANUAL_REVIEW (low confidence)
+
+      Also provide batch summary statistics:
+      - Total invoices processed
+      - Total dollar amount across all invoices
+      - Invoices by confidence tier (high/medium/low/failed)
+      - Most common vendors in the batch
+      - Date range of invoices
+    model: haiku
+    max_turns: 10
+
+  - id: validation-matching
+    depends_on: [document-extraction]
+    prompt: |
+      You are an accounts payable validation specialist. Your task is to perform
+      comprehensive validation and three-way matching on the extracted invoice data
+      for "{input.company_name}".
+
+      Extracted invoice data: {steps.document-extraction.output}
+      Company: {input.company_name}
+      Approval threshold: {input.approval_threshold}
+
+      === THREE-WAY MATCHING PROTOCOL ===
+
+      For each invoice, perform three-way matching between:
+      1. **Purchase Order (PO)** - What was ordered
+      2. **Goods Receipt / Delivery Note** - What was received
+      3. **Invoice** - What the vendor is billing for
+
+      --- MATCH LEVEL 1: INVOICE TO PO ---
+
+      Compare each invoice against its referenced PO number:
+
+      **Header-level matching:**
+      - Does the PO number exist in our system? (MATCH / NO_MATCH / PO_NOT_FOUND)
+      - Does the vendor on the invoice match the vendor on the PO?
+      - Is the invoice date after the PO date? (invoice before PO is a red flag)
+      - Is the PO still open (not fully received/invoiced/closed)?
+      - Has this PO already been invoiced? (duplicate invoice risk)
+      - Does the currency match?
+      - Is the bill-to address correct for our company?
+
+      **Line-level matching:**
+      For each invoice line item, find the corresponding PO line:
+      - Match by item code/SKU first, then by description similarity
+      - Compare quantities: invoice qty <= PO qty? (over-billing check)
+      - Compare unit prices: do they match within tolerance (0.5%)?
+      - Compare line totals: invoice amount <= PO line amount?
+      - Check units of measure match (each vs dozen, hours vs days, etc.)
+      - Flag any invoice line items NOT found on the PO (unauthorized charges)
+      - Flag any PO line items NOT on the invoice (partial delivery)
+
+      **Total-level matching:**
+      - Invoice total <= PO total? (within tolerance)
+      - Cumulative invoiced amount (this + previous invoices) <= PO total?
+      - Tax calculations verified against applicable rates for jurisdiction
+      - Shipping charges within expected range for order size
+
+      Match tolerance thresholds:
+      - Price tolerance: +/- 2% or $0.50 per unit (whichever is greater)
+      - Quantity tolerance: +/- 5% for commodity items, exact for services
+      - Total tolerance: +/- $50 or 1% (whichever is greater)
+
+      --- MATCH LEVEL 2: INVOICE TO GOODS RECEIPT ---
+
+      Verify that invoiced items were actually received:
+      - Match invoice line items to receiving records by PO number and item
+      - Verify invoiced quantities do not exceed received quantities
+      - Check receipt dates precede invoice dates
+      - For service invoices: verify time sheets or deliverable sign-off exists
+      - Flag "billed but not received" items
+
+      --- MATCH LEVEL 3: PO TO GOODS RECEIPT ---
+
+      Cross-validate the PO and receipt match:
+      - Identify items ordered but not yet received (pending deliveries)
+      - Identify items received in excess of PO quantities
+      - Check for partial receipts that may explain partial invoicing
+
+      === BUSINESS RULE VALIDATION ===
+
+      Apply these validation rules to every invoice:
+
+      **Required Field Validation:**
+      - Invoice number is present and unique (not previously processed)
+      - Invoice date is within acceptable range (not future, not older than 180 days)
+      - PO number is present (or invoice is flagged as non-PO purchase with justification)
+      - Vendor tax ID is present (required for 1099 reporting if US vendor)
+      - Payment terms are specified
+      - At least one line item exists with non-zero amount
+
+      **Duplicate Detection:**
+      - Same invoice number from same vendor (exact duplicate)
+      - Same amount from same vendor within 5 days (potential duplicate)
+      - Same line items and quantities from same vendor within 30 days (re-bill)
+      - Same PO referenced by multiple invoices that together exceed PO total
+
+      **Amount Validation:**
+      - Invoice total > $0 (unless credit memo)
+      - Line item math is internally consistent
+      - Tax calculation is correct for the jurisdiction
+      - Early payment discount is correctly calculated
+      - No negative line items (unless credit memo or return)
+      - Amount is within budget allocation for the cost center (if available)
+
+      **Vendor Validation:**
+      - Vendor exists in our approved vendor master list
+      - Vendor bank details match our records (changed bank details = high risk)
+      - Vendor is not on any sanctions or blocked vendor list
+      - Vendor tax status is current (W-9 on file if US)
+
+      **Compliance Validation:**
+      - Sales tax is charged only where applicable (nexus rules)
+      - Exempt items are not being taxed
+      - Correct tax rates for the ship-to jurisdiction
+      - Inter-company transactions follow transfer pricing rules
+      - Foreign currency invoices have a valid exchange rate basis
+
+      === MATCH RESULT CLASSIFICATION ===
+
+      Classify each invoice into one of these statuses:
+
+      **FULL_MATCH:** All three-way matches pass within tolerance, all business rules
+      satisfied. Ready for auto-approval (if under threshold).
+
+      **PARTIAL_MATCH:** Some discrepancies exist but are within acceptable ranges.
+      Flag discrepancies but allow processing with noted exceptions.
+
+      **MISMATCH:** Significant discrepancies found. Route to AP analyst for resolution.
+      Specify which match level failed and the nature of the discrepancy.
+
+      **EXCEPTION:** Critical validation failure. Block processing until resolved.
+      Examples: duplicate invoice, vendor not in master, PO not found, amount exceeds PO.
+
+      **MANUAL_REVIEW:** Insufficient data for automated matching (no PO, low OCR
+      confidence, non-standard format). Requires human judgment.
+
+      === OUTPUT ===
+
+      For each invoice, return:
+      1. Three-way match results (per match level, per line item)
+      2. Business rule validation results (pass/fail per rule)
+      3. Overall match classification (FULL_MATCH through MANUAL_REVIEW)
+      4. List of specific discrepancies with severity (INFO/WARNING/ERROR/CRITICAL)
+      5. Recommended resolution for each discrepancy
+      6. Suggested GL coding based on PO and historical patterns
+
+      Batch summary:
+      - Match rate by classification
+      - Most common discrepancy types
+      - Total value of fully matched vs exception invoices
+      - Vendors with highest discrepancy rates
+    model: haiku
+    max_turns: 10
+
+  - id: anomaly-detection
+    depends_on: [document-extraction]
+    prompt: |
+      You are a forensic accounting and fraud detection specialist. Your task is to
+      analyze the extracted invoice data for "{input.company_name}" to identify
+      anomalies, fraud indicators, and patterns that warrant investigation.
+
+      Extracted invoice data: {steps.document-extraction.output}
+      Company: {input.company_name}
+      Approval threshold: {input.approval_threshold}
+
+      === ANOMALY DETECTION FRAMEWORK ===
+
+      Apply each of the following detection methods to every invoice in the batch.
+      Score each anomaly indicator on a scale of 1-10 (1=benign, 10=highly suspicious).
+
+      --- CATEGORY 1: DUPLICATE AND PHANTOM INVOICE FRAUD ---
+
+      **Duplicate invoice schemes:**
+      - Exact duplicate: same invoice number, vendor, amount (Score: 9)
+      - Near duplicate: same vendor and amount but different invoice number (Score: 7)
+      - Split duplicate: original invoice amount split across two new invoices (Score: 8)
+      - Re-dated duplicate: same invoice resent with a new date (Score: 8)
+      - Cross-entity duplicate: same invoice sent to multiple subsidiaries (Score: 7)
+
+      Detection methods:
+      - Compare invoice number + vendor combinations against 12-month history
+      - Compare vendor + amount combinations within 30-day windows
+      - Look for invoice amounts that sum to a previously rejected invoice
+      - Check for sequential invoice numbers from a vendor with gaps then repeats
+
+      **Phantom vendor indicators:**
+      - Vendor address is a residential address or PO Box (Score: 5)
+      - Vendor has no phone number or non-working phone (Score: 4)
+      - Vendor name is similar to an employee name (Score: 7)
+      - Vendor was recently added to the vendor master (Score: 3 alone, 7 if combined with other flags)
+      - Vendor has only one contact person who is also the payee (Score: 6)
+      - Vendor TIN/EIN fails validation check (Score: 8)
+
+      --- CATEGORY 2: PRICING AND QUANTITY MANIPULATION ---
+
+      **Price inflation:**
+      - Unit price is >10% above the PO price (Score: 6)
+      - Unit price is >10% above market rate for comparable goods/services (Score: 7)
+      - Unit price has increased significantly from vendor's previous invoices (Score: 5)
+      - Extended price does not equal quantity times unit price (Score: 8)
+
+      **Quantity padding:**
+      - Invoiced quantity exceeds ordered quantity by >5% (Score: 6)
+      - Invoiced quantity exceeds received quantity (Score: 8)
+      - Round quantities that seem estimated rather than actual (Score: 4)
+      - Quantity on invoice does not match attached delivery receipt (Score: 7)
+
+      **Unbundling/Splitting:**
+      - Multiple invoices from same vendor on the same day (Score: 5)
+      - Invoice amounts that cluster just below the approval threshold of
+        ${input.approval_threshold} (Score: 8)
+      - Pattern of invoices at $X,999 or just under round thresholds (Score: 7)
+      - Vendor that previously sent consolidated invoices now sending multiples (Score: 6)
+
+      --- CATEGORY 3: BENFORD'S LAW ANALYSIS ---
+
+      Apply Benford's Law to the first digit distribution of all invoice amounts:
+      - Expected distribution: 1=30.1%, 2=17.6%, 3=12.5%, 4=9.7%, 5=7.9%,
+        6=6.7%, 7=5.8%, 8=5.1%, 9=4.6%
+      - Calculate the actual first-digit distribution across all invoices
+      - Compute the chi-squared statistic against the expected distribution
+      - If p-value < 0.05, flag the batch for potential manipulation
+      - Also apply to second-digit distribution for additional sensitivity
+
+      Apply Benford's Law to line item amounts separately:
+      - Higher sensitivity for detecting made-up numbers
+      - Sales tax amounts should also follow Benford's Law
+      - Flag specific amounts whose digit patterns are statistical outliers
+
+      --- CATEGORY 4: ROUND NUMBER ANALYSIS ---
+
+      Flag invoices with suspicious round numbers:
+      - Total amounts that are exact round numbers ($5,000.00, $10,000.00) (Score: 3)
+      - All line items are round numbers (Score: 5)
+      - Amount is exactly at a known approval threshold (Score: 7)
+      - Hourly rates at clean round numbers ($100/hr, $150/hr) for professional services (Score: 2, common but note)
+      - Tax amounts that are suspiciously round (Score: 6)
+
+      --- CATEGORY 5: TIMING AND PATTERN ANOMALIES ---
+
+      **Temporal patterns:**
+      - Invoice dated on weekend or holiday (Score: 3)
+      - Invoice dated in a month-end cluster (many invoices on last 2 days) (Score: 4)
+      - Invoice date precedes PO date (Score: 8)
+      - Invoice date precedes vendor's business registration date (Score: 9)
+      - Unusual invoice frequency change from this vendor (Score: 5)
+
+      **Velocity anomalies:**
+      - Vendor's invoicing volume increased >50% vs previous period (Score: 5)
+      - New vendor with immediate high-volume invoicing (Score: 7)
+      - Invoice submitted and requesting urgent payment (Score: 5)
+      - Payment terms changed from Net 60 to Due on Receipt (Score: 6)
+
+      **Seasonal anomalies:**
+      - Large purchases at fiscal year-end (budget dumping) (Score: 4)
+      - Services invoiced during periods the company was known to be closed (Score: 7)
+      - Inventory purchases inconsistent with business seasonality (Score: 5)
+
+      --- CATEGORY 6: VENDOR COLLUSION INDICATORS ---
+
+      **Related vendor patterns:**
+      - Multiple vendors sharing the same address (Score: 7)
+      - Multiple vendors sharing the same bank account (Score: 9)
+      - Multiple vendors with similar names or name variants (Score: 6)
+      - Vendors that always invoice on the same day (coordinated billing) (Score: 5)
+      - Vendor contact information matches an employee's personal details (Score: 9)
+
+      **Kickback indicators:**
+      - Consistent use of one vendor when cheaper alternatives exist (Score: 5)
+      - Vendor consistently receives contracts just below competitive bid threshold (Score: 7)
+      - Same approver always processes a specific vendor's invoices (Score: 5)
+      - Vendor provides unusually generous payment terms (Score: 4)
+
+      === COMPOSITE RISK SCORING ===
+
+      For each invoice, calculate a Fraud Risk Score (0-100):
+
+      Risk Score = Sum of (anomaly_score * category_weight) normalized to 0-100
+
+      Category weights:
+      - Duplicate/Phantom: 1.5x (highest impact)
+      - Pricing/Quantity: 1.3x
+      - Benford's Law: 1.0x
+      - Round Numbers: 0.8x
+      - Timing/Pattern: 1.0x
+      - Vendor Collusion: 1.5x
+
+      Risk classification:
+      - 0-20: LOW RISK - Process normally
+      - 21-40: MODERATE RISK - Flag for AP supervisor review
+      - 41-60: HIGH RISK - Hold payment, require investigation
+      - 61-80: VERY HIGH RISK - Escalate to finance director
+      - 81-100: CRITICAL RISK - Escalate to CFO and internal audit
+
+      === OUTPUT ===
+
+      For each invoice, return:
+      1. Complete anomaly scan results (each indicator with score and evidence)
+      2. Composite fraud risk score with classification
+      3. Top 3 risk factors driving the score
+      4. Recommended action (process, review, hold, investigate, escalate)
+      5. Specific questions for the investigator to pursue
+
+      Batch-level analysis:
+      - Benford's Law results for the full batch
+      - Cross-vendor relationship map (shared addresses, bank accounts, etc.)
+      - Risk distribution histogram
+      - Top 5 highest-risk invoices with detailed reasoning
+      - Vendor risk rankings
+      - Estimated potential exposure (dollar amount of high-risk invoices)
+    model: sonnet
+    max_turns: 10
+
+  - id: approval-routing
+    depends_on: [validation-matching, anomaly-detection]
+    prompt: |
+      You are an accounts payable workflow automation specialist. Your task is to
+      determine the correct approval routing for each invoice based on validation
+      results, anomaly detection findings, and the company's approval policies
+      for "{input.company_name}".
+
+      Validation results: {steps.validation-matching.output}
+      Anomaly detection: {steps.anomaly-detection.output}
+      Extracted data: {steps.document-extraction.output}
+      Approval threshold: {input.approval_threshold}
+      Company: {input.company_name}
+
+      === APPROVAL ROUTING ENGINE ===
+
+      For each invoice, determine the approval pathway by evaluating these factors
+      in sequence. The most restrictive pathway triggered takes precedence.
+
+      --- TIER 1: AUTOMATIC APPROVAL (No human review required) ---
+
+      An invoice qualifies for auto-approval ONLY if ALL of these conditions are met:
+      - Match classification: FULL_MATCH
+      - Fraud risk score: LOW (0-20)
+      - Invoice amount: Below ${input.approval_threshold}
+      - OCR confidence: HIGH (>95%)
+      - Vendor: Existing approved vendor with >6 months history
+      - PO: Valid, open PO with sufficient remaining balance
+      - No duplicate indicators
+      - Payment terms match contracted terms
+      - Tax calculations verified correct
+      - No line items flagged for price or quantity variance
+
+      Auto-approval processing:
+      - Log the approval with timestamp and "AUTO-APPROVED" designation
+      - Apply standard payment schedule based on payment terms
+      - Generate accounting entries automatically
+      - Send confirmation notification to the PO owner
+      - Queue for next payment batch run
+
+      --- TIER 2: SINGLE APPROVER (Department manager or PO owner) ---
+
+      Route to single approver when:
+      - Match classification: FULL_MATCH or PARTIAL_MATCH with minor discrepancies
+      - Fraud risk score: LOW to MODERATE (0-40)
+      - Invoice amount: Below ${input.approval_threshold}
+      - Minor validation warnings present (price variance within 5%, quantity within 10%)
+      - New vendor with first invoice (verify vendor legitimacy)
+      - Non-PO invoice under threshold (e.g., recurring subscriptions, utilities)
+
+      Determine the appropriate approver:
+      - If PO exists: Route to the PO requester/owner
+      - If cost center specified: Route to cost center manager
+      - If department identified: Route to department head
+      - If none of the above: Route to AP supervisor
+
+      Approval packet must include:
+      - Invoice summary (vendor, amount, date, PO reference)
+      - List of validation warnings requiring review
+      - Anomaly flags with explanations
+      - Historical context (previous invoices from this vendor, average amount)
+      - One-click approve/reject with mandatory rejection reason field
+
+      --- TIER 3: DUAL APPROVAL (Two approvers required) ---
+
+      Route to dual approval when:
+      - Invoice amount: At or above ${input.approval_threshold}
+      - Match classification: MISMATCH with resolvable discrepancies
+      - Fraud risk score: MODERATE to HIGH (21-60)
+      - Vendor bank details changed since last invoice
+      - First invoice from vendor exceeding $5,000
+      - Invoice references a contract that is expiring within 30 days
+      - Cross-departmental charges (affects multiple cost centers)
+
+      Approval chain:
+      1. First approver: PO owner or department manager
+      2. Second approver: Finance director or VP Finance
+      Both must approve; either can reject.
+
+      --- TIER 4: EXCEPTION HANDLING (Investigation required) ---
+
+      Route to exception queue when:
+      - Match classification: EXCEPTION
+      - Fraud risk score: HIGH to CRITICAL (41-100)
+      - Duplicate invoice detected
+      - Vendor not in approved vendor master
+      - PO not found and amount exceeds $1,000
+      - Invoice amount exceeds PO total by >10%
+      - Multiple anomaly indicators triggered simultaneously
+      - Vendor on watch list or sanctions list
+
+      Exception handling process:
+      1. Payment is HELD - no payment can be issued until resolved
+      2. Assign to AP analyst for investigation
+      3. If fraud risk is VERY HIGH or CRITICAL, also notify:
+        - Internal audit team
+        - Finance director
+        - Compliance officer (if vendor sanctions flag)
+      4. Analyst must document resolution in writing
+      5. Resolution options: Approve with justification, Reject with vendor notification,
+         Request credit memo, Escalate to legal
+
+      --- TIER 5: MANUAL PROCESSING (Insufficient data for automation) ---
+
+      Route to manual processing when:
+      - Match classification: MANUAL_REVIEW
+      - OCR confidence: LOW or FAILED
+      - Missing critical fields (no invoice number, no vendor name, no amount)
+      - Handwritten invoices or non-standard formats
+      - Foreign language invoices requiring translation
+      - Invoices with attached supporting documents that need review
+
+      Manual processing packet:
+      - Original document/image for human review
+      - Extracted data with confidence scores (highlighting low-confidence fields)
+      - Suggested field values for manual verification
+      - Pre-populated data entry form with extracted fields
+
+      === ESCALATION AND SLA TRACKING ===
+
+      For each approval tier, define SLA expectations:
+      - Tier 1 (Auto): Immediate processing
+      - Tier 2 (Single): 2 business days for approval decision
+      - Tier 3 (Dual): 3 business days for first approval, 2 additional for second
+      - Tier 4 (Exception): 5 business days for investigation completion
+      - Tier 5 (Manual): 3 business days for data entry and initial routing
+
+      Escalation rules:
+      - If SLA is breached by 1 business day: Reminder notification to approver
+      - If SLA is breached by 2 business days: Escalate to approver's manager
+      - If SLA is breached by 5 business days: Escalate to VP Finance
+      - Early payment discounts at risk: Priority flag with discount expiration date
+
+      === OUTPUT ===
+
+      For each invoice, return:
+      1. Assigned approval tier (1-5) with complete reasoning
+      2. Specific approver(s) identified by role
+      3. Approval packet contents (customized per tier)
+      4. SLA deadline
+      5. Early payment discount at risk (yes/no, amount)
+      6. Priority flag (normal, high, urgent)
+      7. Routing instructions in workflow-system-compatible format
+
+      Batch routing summary:
+      - Distribution by approval tier
+      - Total value per tier
+      - Estimated processing time for the full batch
+      - Bottleneck identification (approvers with many pending invoices)
+      - Early payment discounts at risk (total dollar amount)
+    model: sonnet
+    max_turns: 10
+
+  - id: accounting-entries
+    depends_on: [approval-routing]
+    prompt: |
+      You are a certified public accountant specializing in accounts payable journal
+      entries and general ledger coding. Your task is to generate proper accounting
+      entries for all approved invoices for "{input.company_name}" targeting the
+      {input.accounting_system} accounting system.
+
+      Approval routing results: {steps.approval-routing.output}
+      Validation results: {steps.validation-matching.output}
+      Extracted invoice data: {steps.document-extraction.output}
+      Accounting system: {input.accounting_system}
+      Company: {input.company_name}
+
+      === JOURNAL ENTRY GENERATION PROTOCOL ===
+
+      Generate journal entries ONLY for invoices classified as:
+      - Tier 1 (Auto-approved)
+      - Tier 2 (Single approval - generate as PENDING, to be posted after approval)
+      - Tier 3 (Dual approval - generate as PENDING, to be posted after both approvals)
+      For Tier 4 and Tier 5, do NOT generate entries until resolved.
+
+      --- STANDARD AP INVOICE ENTRY ---
+
+      For each approved invoice, generate the standard accounts payable entry:
+
+      **Debit entries (one per line item):**
+      - Account: Expense account or asset account based on item category
+      - Amount: Line item amount (pre-tax)
+      - Department/Cost Center: From PO or invoice department code
+      - Project/Job: From PO or invoice project reference
+      - Description: Vendor name - Invoice number - Line item description
+
+      **Debit entries (tax):**
+      - Account: Input Tax / Sales Tax Receivable (if reclaimable) or Tax Expense (if not)
+      - Amount: Tax amount per jurisdiction
+      - Tax code: Jurisdiction-specific tax code
+
+      **Debit entries (other charges):**
+      - Account: Freight/Shipping Expense or appropriate account
+      - Amount: Shipping and other charges
+
+      **Credit entry:**
+      - Account: Accounts Payable (main AP control account)
+      - Amount: Total invoice amount
+      - Vendor sub-ledger: Vendor ID
+      - Due date: Payment due date
+      - Description: Vendor name - Invoice number - Payment terms
+
+      Verify: Total debits = Total credits (to the penny)
+
+      --- GL ACCOUNT MAPPING ---
+
+      Map each line item to the correct GL account using this hierarchy:
+      1. GL code specified on the invoice line item (if present and valid)
+      2. GL code from the corresponding PO line item
+      3. Default GL mapping for the item category/type
+      4. Vendor-specific default account (based on historical coding for this vendor)
+      5. If none of the above, use a suspense account and flag for manual review
+
+      Common account mapping rules:
+      - Office supplies and consumables: Office Expense (6100-6199 range)
+      - Software and SaaS subscriptions: Software Expense (6200-6299 range)
+      - Professional services (legal, accounting, consulting): Professional Fees (6300-6399 range)
+      - Hardware and equipment under capitalization threshold: Equipment Expense (6400-6499 range)
+      - Hardware and equipment above capitalization threshold: Fixed Assets (1500-1599 range)
+      - Travel and entertainment: T&E Expense (6500-6599 range)
+      - Marketing and advertising: Marketing Expense (6600-6699 range)
+      - Raw materials and inventory: Inventory (1300-1399 range)
+      - Maintenance and repairs: Maintenance Expense (6700-6799 range)
+      - Utilities: Utilities Expense (6800-6899 range)
+      - Rent and occupancy: Rent Expense (6900-6999 range)
+
+      Capitalization threshold: Items > $2,500 should be capitalized as fixed assets
+      rather than expensed, unless the company policy specifies a different threshold.
+
+      --- SPECIAL ENTRY TYPES ---
+
+      **Credit Memo Processing:**
+      - Reverse the debit/credit from the original invoice
+      - Credit: Expense account (reduces expense)
+      - Debit: Accounts Payable (reduces vendor liability)
+      - Reference the original invoice number in the description
+      - Net the credit against outstanding AP balance for the vendor
+
+      **Prepaid Expense Recognition:**
+      - If invoice covers a future period (insurance, annual subscriptions):
+      - Debit: Prepaid Expense asset account
+      - Credit: Accounts Payable
+      - Set up amortization schedule: monthly entries to move from prepaid to expense
+      - Number of periods = service period covered by the invoice
+
+      **Foreign Currency Invoices:**
+      - Record at the exchange rate on the invoice date
+      - Debit: Expense in functional currency equivalent
+      - Credit: AP in functional currency equivalent
+      - At payment time, record gain/loss on exchange rate difference
+      - Use the rate source specified in company policy (Fed, ECB, Bloomberg)
+
+      **Accrual Entries (period-end):**
+      - For invoices received after month-end close but relating to the prior period:
+      - Debit: Expense account (prior period)
+      - Credit: Accrued Liabilities (not AP, since invoice not yet formally entered)
+      - Reverse the accrual in the next period when the invoice is formally processed
+
+      **Retainage / Holdback:**
+      - If contract specifies retainage (common in construction):
+      - Debit: Full expense amount
+      - Credit: AP for payable portion
+      - Credit: Retainage Payable for holdback portion
+
+      --- SYSTEM-SPECIFIC FORMATTING ---
+
+      Format the journal entries for {input.accounting_system}:
+
+      **QuickBooks format:**
+      - Bill entry with vendor, date, due date, terms, and line items
+      - Each line: Account, Amount, Description, Class (department), Customer:Job
+      - Memo field: Invoice number and PO reference
+
+      **NetSuite format:**
+      - Vendor Bill with subsidiary, currency, exchange rate
+      - Expense lines: Account, Amount, Department, Class, Location
+      - Item lines: Item, Quantity, Rate, Amount, Tax Code
+      - Custom fields for project and approval tracking
+
+      **Xero format:**
+      - Accounts Payable invoice with contact, date, due date
+      - Line items: Description, Quantity, Unit Amount, Account Code, Tax Type
+      - Tracking categories for department and project
+
+      **SAP format:**
+      - FI document: Company Code, Document Type (KR), Posting Date, Reference
+      - Vendor line: Account, Amount, Payment Terms, Business Area
+      - GL lines: Account, Amount, Cost Center, Profit Center, WBS Element
+
+      === VALIDATION CHECKS ===
+
+      Before finalizing entries, verify:
+      1. Debits equal credits for every journal entry
+      2. All GL accounts used are valid and active in the chart of accounts
+      3. All cost centers and departments are valid
+      4. Posting dates are within an open accounting period
+      5. Vendor sub-ledger entries reconcile to the AP control account
+      6. Tax entries comply with tax reporting requirements
+      7. No entries are posted to closed or restricted accounts
+      8. Capitalization rules are correctly applied
+
+      === OUTPUT ===
+
+      For each invoice, return:
+      1. Complete journal entry (all debit and credit lines)
+      2. System-specific formatted entry for {input.accounting_system}
+      3. Entry status: READY_TO_POST, PENDING_APPROVAL, or NEEDS_REVIEW
+      4. Validation check results
+      5. Any coding recommendations or flags for the accounting team
+
+      Batch summary:
+      - Total entries generated
+      - Total debits and credits (should balance)
+      - Entries by status
+      - GL account distribution (top 10 accounts by dollar volume)
+      - Department/cost center distribution
+      - Prepaid entries requiring amortization schedules
+      - Foreign currency entries requiring rate monitoring
+    model: haiku
+    max_turns: 10
+
+  - id: audit-report
+    depends_on: [approval-routing, anomaly-detection, validation-matching, accounting-entries]
+    prompt: |
+      You are an internal audit and compliance reporting specialist. Your task is
+      to produce a comprehensive audit report for the invoice processing batch
+      at "{input.company_name}" that documents the entire process, findings,
+      and recommendations for controls improvement.
+
+      Approval routing: {steps.approval-routing.output}
+      Anomaly detection: {steps.anomaly-detection.output}
+      Validation results: {steps.validation-matching.output}
+      Accounting entries: {steps.accounting-entries.output}
+      Extracted data: {steps.document-extraction.output}
+      Company: {input.company_name}
+      Accounting system: {input.accounting_system}
+
+      === AUDIT REPORT STRUCTURE ===
+
+      --- SECTION 1: EXECUTIVE SUMMARY ---
+
+      One-page overview for CFO and audit committee:
+
+      **Processing Metrics:**
+      - Total invoices processed in this batch
+      - Total dollar value processed
+      - Auto-approval rate (% processed without human intervention)
+      - Exception rate (% requiring investigation)
+      - Average processing time per invoice
+      - Estimated cost savings from automation vs manual processing
+
+      **Risk Summary:**
+      - Number of high-risk invoices identified (fraud risk score > 40)
+      - Total dollar exposure of high-risk invoices
+      - Number of invoices held for investigation
+      - Number of duplicate invoices caught
+      - Total dollar amount of prevented overpayments
+
+      **Key Findings (top 3):**
+      - Most significant finding with business impact
+      - Second most significant finding
+      - Third most significant finding
+
+      **Recommended Actions (top 3):**
+      - Most urgent action needed with owner and deadline
+      - Second priority action
+      - Third priority action
+
+      --- SECTION 2: PROCESSING STATISTICS ---
+
+      **Volume Analysis:**
+      - Invoices by source channel (email, EDI, portal, mail)
+      - Invoices by vendor (top 20 vendors by volume and value)
+      - Invoices by department/cost center
+      - Invoices by dollar amount band ($0-1K, $1K-5K, $5K-25K, $25K-100K, $100K+)
+      - Invoice date distribution (daily, weekly)
+      - Processing backlog age analysis
+
+      **Quality Metrics:**
+      - OCR extraction confidence distribution
+      - Fields most commonly requiring manual correction
+      - Vendors with highest data quality issues
+      - Document format analysis (PDF, image, EDI, email)
+
+      **Matching Metrics:**
+      - Three-way match results distribution (FULL/PARTIAL/MISMATCH/EXCEPTION/MANUAL)
+      - Most common match failure reasons
+      - Match rate by vendor (identify vendors with chronic matching issues)
+      - Match rate by PO type (goods vs services)
+      - Price variance distribution (how often and by how much do prices deviate)
+      - Quantity variance distribution
+
+      --- SECTION 3: ANOMALY AND FRAUD ANALYSIS ---
+
+      **Anomaly Detection Results:**
+      - Total anomaly flags triggered across all invoices
+      - Distribution by anomaly category
+      - False positive analysis (flags that were investigated and cleared)
+      - Confirmed issues requiring action
+
+      **Benford's Law Analysis:**
+      - First-digit distribution chart vs expected
+      - Chi-squared test results
+      - Specific amounts flagged as statistical outliers
+      - Trend comparison vs previous batches (if available)
+
+      **Duplicate Detection:**
+      - Exact duplicates caught (count and dollar value)
+      - Near-duplicates flagged for review
+      - Historical duplicate rate trend
+      - Vendors most prone to duplicate submissions
+
+      **Threshold Analysis:**
+      - Distribution of invoice amounts relative to approval thresholds
+      - Number of invoices clustering just below ${input.approval_threshold}
+      - Split invoice analysis (same vendor, same day, amounts summing to > threshold)
+      - Trend in threshold-adjacent invoicing
+
+      **Vendor Risk Assessment:**
+      - Vendor risk score ranking (top 10 highest risk)
+      - New vendors requiring enhanced due diligence
+      - Vendors with changed bank details
+      - Vendors with relationship flags (shared addresses, bank accounts, etc.)
+
+      --- SECTION 4: APPROVAL WORKFLOW AUDIT ---
+
+      **Routing Analysis:**
+      - Distribution by approval tier
+      - Average approval turnaround time by tier
+      - SLA compliance rate
+      - Escalation frequency and reasons
+      - Approvers with highest backlog
+      - Segregation of duties verification (no one approves their own PO invoices)
+
+      **Override Analysis:**
+      - Any auto-approval rules that were overridden
+      - Any threshold exceptions granted
+      - Any invoices processed without required approvals
+      - Any vendors removed from approved list during the batch period
+
+      --- SECTION 5: ACCOUNTING ENTRY AUDIT ---
+
+      **Entry Quality:**
+      - GL coding accuracy (% matching historical patterns and PO codes)
+      - Entries requiring manual GL override
+      - Suspense account postings (items needing manual classification)
+      - Prepaid expense entries correctly identified
+      - Capital vs expense classification accuracy
+      - Tax code accuracy
+
+      **Reconciliation:**
+      - AP sub-ledger to GL control account reconciliation
+      - Vendor statement reconciliation status
+      - Aged AP analysis (current, 30, 60, 90, 120+ days)
+      - Unmatched credit memos or debit memos
+
+      --- SECTION 6: CONTROL EFFECTIVENESS ASSESSMENT ---
+
+      Evaluate the effectiveness of each internal control:
+
+      **Preventive Controls:**
+      - PO requirement enforcement: Are non-PO invoices being properly flagged?
+      - Vendor master management: Are new vendor additions properly authorized?
+      - Segregation of duties: Is there proper separation between PO creation,
+        goods receipt, invoice processing, and payment authorization?
+      - Threshold controls: Are approval thresholds being consistently enforced?
+      - Duplicate detection: What percentage of duplicates are caught before payment?
+
+      **Detective Controls:**
+      - Three-way matching: How effective is the matching process?
+      - Anomaly detection: What is the false positive rate vs catch rate?
+      - Management review: Are exception reports reviewed timely?
+      - Reconciliation: Are vendor statements reconciled monthly?
+
+      **Corrective Controls:**
+      - Exception resolution: Are flagged items resolved within SLA?
+      - Vendor communication: Are discrepancies communicated to vendors promptly?
+      - Credit recovery: Are overpayments identified and recovered?
+      - Process improvement: Are recurring issues leading to process changes?
+
+      Rate each control: EFFECTIVE, PARTIALLY EFFECTIVE, INEFFECTIVE, or NOT TESTED
+
+      --- SECTION 7: RECOMMENDATIONS ---
+
+      For each finding, provide:
+      1. **Finding:** Clear statement of the issue
+      2. **Risk:** What could go wrong if not addressed (with dollar impact estimate)
+      3. **Root Cause:** Why this is happening
+      4. **Recommendation:** Specific, actionable steps to remediate
+      5. **Priority:** Critical / High / Medium / Low
+      6. **Owner:** Role responsible for implementing
+      7. **Timeline:** Suggested implementation deadline
+      8. **Cost of Implementation:** Estimated effort and cost
+      9. **Expected Benefit:** Dollar value of risk reduction or efficiency gain
+
+      Categories of recommendations:
+      - Process improvements (workflow changes, policy updates)
+      - Technology enhancements (system configurations, new integrations)
+      - Training needs (staff education on new procedures)
+      - Vendor management (vendor communication, master data cleanup)
+      - Policy changes (threshold adjustments, approval chain modifications)
+
+      --- SECTION 8: APPENDICES ---
+
+      - Full list of all invoices processed with final status
+      - Detailed anomaly flags for all high-risk invoices
+      - Complete journal entries generated
+      - Vendor risk score details
+      - Methodology documentation for all scoring models used
+      - Glossary of terms and abbreviations
+
+      === OUTPUT FORMAT ===
+
+      Return the complete audit report formatted for professional presentation.
+      Use clear section headers, tables for data, and bullet points for findings.
+      Include a table of contents at the beginning.
+      All dollar amounts should be formatted with currency symbols and comma separators.
+      All percentages should be to one decimal place.
+      Flag any data limitations or caveats that affect the reliability of findings.
+    model: sonnet
+    max_turns: 10

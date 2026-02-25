@@ -2331,28 +2331,507 @@
       "remix_count": 4,
       "forked_from": null,
       "license": "MIT"
+    },
+    {
+      "slug": "gizmax/product-feedback-prioritizer",
+      "name": "Product Feedback Prioritizer",
+      "description": "Aggregate product feedback from multiple channels, deduplicate, cluster by theme, score by business impact, and produce a prioritized roadmap",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Product",
+        "Feedback",
+        "Prioritization",
+        "Roadmap",
+        "RICE"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/product_feedback_prioritizer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~12s",
+      "downloads": 30,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/invoice-processor",
+      "name": "Invoice Processor",
+      "description": "Extract data from invoices using OCR patterns, validate against PO records, detect anomalies, route for approval, and generate accounting entries",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Finance",
+        "Invoices",
+        "AP",
+        "Accounting",
+        "Audit"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/invoice_processor.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0132,
+      "avg_execution_time": "~14s",
+      "downloads": 36,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/video-to-shorts",
+      "name": "Video to Shorts",
+      "description": "Analyze long-form video content, identify viral-worthy segments, generate optimized short clips with captions and hooks for TikTok, Reels, and Shorts",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Video",
+        "TikTok",
+        "Reels",
+        "Shorts",
+        "Social-Media",
+        "Marketing"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/video_to_shorts.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~14s",
+      "downloads": 53,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/rag-knowledge-base",
+      "name": "RAG Knowledge Base Builder",
+      "description": "Build and optimize a RAG knowledge base from documents - chunk, embed, evaluate retrieval quality, and generate optimization recommendations",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "RAG",
+        "Embeddings",
+        "Knowledge-Base",
+        "Retrieval",
+        "NLP"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/rag_knowledge_base.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~13s",
+      "downloads": 180,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/client-onboarding-orchestrator",
+      "name": "Client Onboarding Orchestrator",
+      "description": "Orchestrate multi-step client onboarding with CRM updates, welcome sequences, provisioning checklists, and health score tracking",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Onboarding",
+        "CRM",
+        "Customer-Success",
+        "Sales"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/client_onboarding_orchestrator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~12s",
+      "downloads": 34,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/course-creator",
+      "name": "Course Creator",
+      "description": "Generate complete online course content from a topic - outline, lesson scripts, quizzes, assignments, and platform-ready export",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Education",
+        "Course-Design",
+        "E-Learning",
+        "Content"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/course_creator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 103,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/real-estate-listing",
+      "name": "Real Estate Listing Optimizer",
+      "description": "Optimize real estate listings with AI-enhanced descriptions, comparative market analysis, pricing recommendations, and multi-platform distribution strategy",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Real Estate",
+        "Listing",
+        "CMA",
+        "Marketing",
+        "Property"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/real_estate_listing.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~12s",
+      "downloads": 122,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/social-media-calendar",
+      "name": "Social Media Content Calendar",
+      "description": "Plan, create, and schedule a complete social media content calendar with platform-specific content, hashtag strategies, and performance predictions",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Social Media",
+        "Content Calendar",
+        "Marketing",
+        "Hashtags",
+        "Engagement"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/social_media_calendar.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~12s",
+      "downloads": 120,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/grant-proposal",
+      "name": "Grant Proposal Builder",
+      "description": "Parse grant RFPs, check eligibility, draft comprehensive proposals with budgets, and generate compliance checklists",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Grant",
+        "Proposal",
+        "RFP",
+        "Funding",
+        "Compliance"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/grant_proposal.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~13s",
+      "downloads": 125,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/agency-report-generator",
+      "name": "Agency Report Generator",
+      "description": "Generate comprehensive multi-client agency performance reports with cross-channel analytics, benchmarking, and strategic recommendations",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "Analytics",
+        "Reporting",
+        "Agency",
+        "Multi-Channel"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/agency_report_generator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~13s",
+      "downloads": 123,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/clinical-notes",
+      "name": "Clinical Notes Processor",
+      "description": "Process clinical encounter data into structured SOAP notes, extract diagnoses with ICD-10 codes, generate billing codes, and flag compliance issues",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Healthcare",
+        "Clinical",
+        "SOAP",
+        "ICD-10",
+        "Compliance"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/clinical_notes.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 145,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/ecommerce-catalog",
+      "name": "E-Commerce Catalog Enrichment",
+      "description": "Enrich e-commerce product catalogs with SEO-optimized descriptions, attribute extraction, cross-sell mapping, and A/B title variants",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "E-Commerce",
+        "SEO",
+        "Catalog",
+        "Product",
+        "Marketing"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ecommerce_catalog.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0132,
+      "avg_execution_time": "~12s",
+      "downloads": 108,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/voice-agent-pipeline",
+      "name": "Voice Agent Pipeline",
+      "description": "Process call recordings with transcription, sentiment analysis, coaching insights, compliance checks, and agent performance scoring",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Call-Center",
+        "QA",
+        "Coaching",
+        "Compliance"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/voice_agent_pipeline.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 144,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/freelancer-proposal",
+      "name": "Freelancer Proposal Generator",
+      "description": "Generate winning freelancer proposals by analyzing project requirements, matching portfolio pieces, crafting personalized pitches, and optimizing pricing strategy",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Freelance",
+        "Proposals",
+        "Upwork",
+        "Pricing",
+        "Business"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/freelancer_proposal.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~12s",
+      "downloads": 70,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/product-design-spec",
+      "name": "Product Design Specification",
+      "description": "Transform user stories and requirements into comprehensive product design specifications with wireframe descriptions, interaction patterns, and developer handoff documentation",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Design",
+        "UX",
+        "Product",
+        "Wireframes",
+        "Accessibility"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/product_design_spec.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~13s",
+      "downloads": 116,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
     }
   ],
   "categories": [
     {
       "id": "sales_crm",
       "name": "Sales & CRM",
-      "count": 14
+      "count": 15
     },
     {
       "id": "marketing",
       "name": "Marketing",
-      "count": 16
+      "count": 20
     },
     {
       "id": "support",
       "name": "Support",
-      "count": 7
+      "count": 8
     },
     {
       "id": "engineering",
       "name": "Engineering",
-      "count": 15
+      "count": 17
     },
     {
       "id": "hr_legal",
@@ -2362,13 +2841,13 @@
     {
       "id": "general_ai",
       "name": "General AI",
-      "count": 10
+      "count": 17
     }
   ],
   "stats": {
-    "total_templates": 73,
+    "total_templates": 88,
     "total_authors": 9,
-    "total_downloads": 15856,
+    "total_downloads": 17365,
     "last_updated": "2026-02-25T20:00:00Z"
   },
   "collections": [
@@ -2512,6 +2991,58 @@
         "gizmax/seo-content"
       ],
       "downloads": 289
+    },
+    {
+      "id": "professional-services",
+      "name": "Professional Services",
+      "description": "Agency reports, freelancer proposals, grant writing, and course creation for service businesses",
+      "icon": "briefcase",
+      "template_slugs": [
+        "gizmax/agency-report-generator",
+        "gizmax/freelancer-proposal",
+        "gizmax/grant-proposal",
+        "gizmax/course-creator"
+      ],
+      "downloads": 195
+    },
+    {
+      "id": "commerce-catalog",
+      "name": "Commerce & Catalog",
+      "description": "E-commerce catalog enrichment, real estate listings, invoice processing, and pricing optimization",
+      "icon": "shopping-cart",
+      "template_slugs": [
+        "gizmax/ecommerce-catalog",
+        "gizmax/real-estate-listing",
+        "gizmax/invoice-processor",
+        "gizmax/dynamic-pricing"
+      ],
+      "downloads": 130
+    },
+    {
+      "id": "content-creation",
+      "name": "Content Creation Studio",
+      "description": "Video shorts, social media calendars, product feedback loops, and design specs",
+      "icon": "film",
+      "template_slugs": [
+        "gizmax/video-to-shorts",
+        "gizmax/social-media-calendar",
+        "gizmax/product-feedback-prioritizer",
+        "gizmax/product-design-spec"
+      ],
+      "downloads": 125
+    },
+    {
+      "id": "knowledge-ops",
+      "name": "Knowledge & AI Ops",
+      "description": "RAG knowledge bases, clinical documentation, voice agent QA, and client onboarding",
+      "icon": "database",
+      "template_slugs": [
+        "gizmax/rag-knowledge-base",
+        "gizmax/clinical-notes",
+        "gizmax/voice-agent-pipeline",
+        "gizmax/client-onboarding-orchestrator"
+      ],
+      "downloads": 146
     }
   ]
 }

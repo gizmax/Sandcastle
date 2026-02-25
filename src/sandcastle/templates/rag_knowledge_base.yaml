@@ -1,0 +1,905 @@
+# name: RAG Knowledge Base Builder
+# description: Build and optimize a RAG knowledge base from documents - chunk, embed, evaluate retrieval quality, and generate optimization recommendations
+# tags: [RAG, Embeddings, Knowledge-Base, Retrieval, NLP]
+# category: engineering
+
+name: rag-knowledge-base
+description: Build and optimize a RAG knowledge base from documents - chunk, embed, evaluate retrieval quality, and generate optimization recommendations
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["document_sources", "domain"]
+  properties:
+    document_sources:
+      type: string
+      description: "Comma-separated document paths or URLs to ingest into the knowledge base (e.g. 'docs/api-reference.md, https://example.com/faq, docs/guides/')"
+    domain:
+      type: string
+      description: "Knowledge domain for tuning chunking and retrieval heuristics (e.g. 'legal contracts', 'medical research', 'software documentation', 'financial reports')"
+    chunk_strategy:
+      type: string
+      description: "Chunking strategy to use: 'semantic', 'fixed', 'recursive', 'document', or 'hybrid' (default: 'semantic')"
+      default: "semantic"
+    embedding_model:
+      type: string
+      description: "Embedding model for vectorization (default: 'text-embedding-3-small'). Options include text-embedding-3-small, text-embedding-3-large, voyage-3, cohere-embed-v3"
+      default: "text-embedding-3-small"
+
+steps:
+  - id: document-analysis
+    prompt: |
+      Perform a comprehensive document corpus analysis to understand the structure, content
+      types, and characteristics of the source material that will form this RAG knowledge base.
+
+      Document sources: {input.document_sources}
+      Domain: {input.domain}
+      Requested chunk strategy: {input.chunk_strategy}
+      Requested embedding model: {input.embedding_model}
+
+      You are a senior knowledge engineering specialist. Your task is to deeply analyze the
+      provided document corpus and produce a detailed characterization report that will drive
+      all downstream decisions about chunking, embedding, and retrieval optimization.
+
+      --- DOCUMENT INVENTORY AND CLASSIFICATION ---
+
+      For each document source provided, determine and report:
+
+      1. **Document type classification** - Categorize each source into one of these types:
+         - Structured reference (API docs, specifications, schemas, data dictionaries)
+         - Semi-structured narrative (guides, tutorials, how-to articles, READMEs)
+         - Unstructured prose (research papers, reports, essays, blog posts)
+         - Tabular data (CSVs, spreadsheets, database exports with textual content)
+         - Conversational (FAQ pages, support tickets, chat logs, forum threads)
+         - Legal/regulatory (contracts, policies, compliance documents, terms of service)
+         - Code-heavy (source files, notebooks, code samples with comments)
+         - Mixed media (documents combining multiple types above)
+
+      2. **Content structure analysis** - For each document, identify:
+         - Header/section hierarchy depth (flat, 2-level, deeply nested)
+         - Average section length in approximate word count
+         - Presence of cross-references (internal links, "see also" references, footnotes)
+         - Use of lists, tables, code blocks, or other structured elements
+         - Presence of metadata (front matter, tags, categories, dates, authors)
+         - Language complexity score (simple/technical/highly-specialized vocabulary)
+
+      3. **Semantic density mapping** - Assess information density patterns:
+         - Are there sections with extremely high information density (definitions, API
+           parameter tables, legal clauses) vs low density (introductions, transitions)?
+         - Identify "anchor concepts" - key terms or entities that appear repeatedly and
+           serve as semantic hubs across the corpus
+         - Map topic distribution - which subjects are well-covered vs sparse?
+         - Identify redundancy patterns - are the same concepts explained multiple times
+           across different documents with varying levels of detail?
+
+      4. **Domain-specific characteristics for {input.domain}** - Analyze:
+         - Domain-specific terminology and jargon frequency
+         - Abbreviation and acronym usage patterns
+         - Named entity types prevalent in the corpus (people, products, versions, dates,
+           legal entities, medical terms, financial instruments, etc.)
+         - Temporal sensitivity - does the content have time-dependent validity?
+         - Hierarchical relationships - are there parent-child concept taxonomies?
+         - Causal relationships - does the content describe cause-effect chains?
+
+      --- CORPUS STATISTICS ---
+
+      Provide aggregate statistics:
+      - Estimated total word count across all sources
+      - Number of distinct documents/pages
+      - Average document length
+      - Vocabulary richness estimate (unique terms / total terms ratio)
+      - Top 20 most frequent domain-specific terms
+      - Estimated number of distinct topics or subject clusters
+      - Content freshness distribution (if dates are available)
+
+      --- CHALLENGE IDENTIFICATION ---
+
+      Identify specific challenges this corpus presents for RAG:
+
+      1. **Boundary ambiguity** - sections where topic transitions are gradual rather than
+         sharp, making chunk boundary decisions difficult
+      2. **Context dependency** - content that requires preceding context to be meaningful
+         (e.g., pronoun references, "as mentioned above" patterns, continuation from
+         previous sections)
+      3. **Multi-hop reasoning requirements** - questions that would require information
+         from multiple non-adjacent sections to answer correctly
+      4. **Contradiction potential** - areas where different documents might provide
+         conflicting information (version differences, outdated content, opinion pieces)
+      5. **Sparse coverage gaps** - topics that are mentioned but insufficiently covered,
+         which could lead to hallucination risk during retrieval-augmented generation
+      6. **Format heterogeneity** - significant differences in formatting, structure, or
+         style across documents that complicate uniform processing
+
+      --- OUTPUT FORMAT ---
+
+      Produce a structured JSON-compatible report with the following top-level keys:
+      - "corpus_summary": overview statistics and classification breakdown
+      - "document_profiles": array of per-document analysis objects
+      - "semantic_map": topic clusters with associated document sections
+      - "challenge_register": prioritized list of RAG-specific challenges
+      - "recommendations_preview": preliminary notes on how these characteristics
+        should influence chunking and embedding decisions
+
+      Be thorough and precise. Every observation you make here directly impacts the
+      quality of the entire RAG pipeline downstream.
+    model: haiku
+    max_turns: 10
+
+  - id: chunking-strategy
+    depends_on: [document-analysis]
+    prompt: |
+      Design and specify a comprehensive chunking strategy for this RAG knowledge base,
+      informed by the document corpus analysis.
+
+      Document analysis: {steps.document-analysis.output}
+      Domain: {input.domain}
+      Requested chunk strategy: {input.chunk_strategy}
+      Embedding model: {input.embedding_model}
+
+      You are a RAG chunking architect with deep expertise in information retrieval and
+      natural language processing. Your task is to design a production-grade chunking
+      pipeline that maximizes retrieval precision and recall for the specific corpus
+      and domain characteristics identified in the analysis phase.
+
+      --- CHUNKING STRATEGY EVALUATION FRAMEWORK ---
+
+      First, evaluate ALL major chunking strategies against this specific corpus. For each
+      strategy, provide a suitability score (1-10) and detailed rationale:
+
+      1. **Fixed-size chunking**
+         - Character-based splitting with configurable chunk size and overlap
+         - Optimal chunk sizes to evaluate: 256, 512, 1024, 2048 tokens
+         - Overlap ratios to consider: 0%, 10%, 20%, 50%
+         - Strengths: simple, predictable chunk sizes, easy to implement and debug
+         - Weaknesses: breaks semantic units, splits sentences/paragraphs, loses context
+         - Suitability for this corpus: [score and rationale based on document analysis]
+
+      2. **Semantic chunking**
+         - Embedding-based boundary detection using cosine similarity between sentences
+         - Sliding window of sentence embeddings, split where similarity drops below threshold
+         - Breakpoint detection methods: percentile, standard deviation, gradient
+         - Dynamic threshold calibration based on document type
+         - Strengths: respects semantic boundaries, produces coherent chunks
+         - Weaknesses: computationally expensive, requires embedding model at chunking time,
+           sensitive to threshold selection, can produce highly variable chunk sizes
+         - Suitability for this corpus: [score and rationale]
+
+      3. **Recursive character/token splitting**
+         - Hierarchical splitting using ordered separators: \n\n > \n > . > space
+         - Respects document structure while maintaining size constraints
+         - Configurable separator priority chain for different document types
+         - Strengths: balances structure preservation with size control
+         - Weaknesses: separator-dependent, may not capture semantic boundaries
+         - Suitability for this corpus: [score and rationale]
+
+      4. **Document-aware chunking**
+         - Markdown/HTML header-based splitting, preserving section hierarchy
+         - Includes parent section headers as context prefixes in child chunks
+         - Respects code blocks, tables, and lists as atomic units
+         - Strengths: leverages document structure, maintains hierarchy context
+         - Weaknesses: requires structured documents, uneven chunk sizes
+         - Suitability for this corpus: [score and rationale]
+
+      5. **Hybrid/adaptive chunking** (recommended for production)
+         - Route documents to different strategies based on document type classification
+         - Example: API docs -> document-aware; prose -> semantic; code -> AST-based
+         - Merge small chunks that are below minimum threshold
+         - Split oversized chunks using semantic boundaries within the large section
+         - Post-processing: add metadata headers, strip formatting artifacts, normalize
+         - Suitability for this corpus: [score and rationale]
+
+      --- SELECTED STRATEGY SPECIFICATION ---
+
+      Based on the evaluation above and the user's preference for "{input.chunk_strategy}",
+      specify the complete chunking pipeline:
+
+      1. **Primary strategy selection** - which strategy (or combination) to use and why
+      2. **Configuration parameters**:
+         - Target chunk size (tokens): min, target, max
+         - Overlap size or method
+         - Separator chain (for recursive strategies)
+         - Similarity threshold (for semantic strategies)
+         - Section depth preservation level
+      3. **Document type routing rules** - if using hybrid, specify which strategy
+         applies to which document types from the corpus analysis
+      4. **Atomic unit preservation rules**:
+         - Code blocks: never split mid-block, include language identifier
+         - Tables: keep entire table in one chunk if under max size, otherwise split by row
+           groups with header repetition
+         - Lists: keep list items with their parent context
+         - Equations/formulas: never split, include surrounding context
+         - Image references: include alt text and caption in the chunk
+      5. **Context enrichment strategy**:
+         - Prepend parent section headers (how many levels?)
+         - Include document title and path as metadata
+         - Add previous chunk's last sentence as overlap context
+         - Generate chunk summaries for long chunks (over N tokens)
+         - Tag chunks with extracted entities and topic labels
+
+      --- CHUNK METADATA SCHEMA ---
+
+      Define the metadata schema that will be attached to every chunk for filtering
+      and hybrid search:
+
+      ```
+      {
+        "chunk_id": "unique identifier",
+        "document_id": "source document identifier",
+        "document_title": "title of source document",
+        "section_path": "hierarchical path (e.g., 'Guide > Authentication > OAuth2')",
+        "chunk_index": "position within document",
+        "total_chunks": "total chunks from this document",
+        "content_type": "prose | code | table | list | mixed",
+        "domain_entities": ["extracted named entities"],
+        "topic_labels": ["inferred topic tags"],
+        "token_count": "actual token count",
+        "has_code": true/false,
+        "has_table": true/false,
+        "language": "detected language",
+        "created_at": "timestamp",
+        "source_url": "original URL if applicable"
+      }
+      ```
+
+      --- EDGE CASE HANDLING ---
+
+      Specify handling for these common edge cases:
+      - Documents shorter than minimum chunk size
+      - Extremely long single sections (over 5000 tokens)
+      - Mixed-language content within a single document
+      - Deeply nested hierarchies (5+ levels)
+      - Documents with no clear structure (wall of text)
+      - Duplicate or near-duplicate content across documents
+      - Content with heavy cross-referencing
+
+      --- EXPECTED OUTPUT ---
+
+      Provide the complete chunking specification as a structured configuration that
+      could be directly implemented. Include estimated chunk count based on corpus
+      statistics, expected chunk size distribution, and any preprocessing steps
+      required before chunking begins (e.g., format normalization, metadata extraction,
+      deduplication).
+    model: sonnet
+    max_turns: 10
+
+  - id: embedding-evaluation
+    depends_on: [chunking-strategy]
+    prompt: |
+      Evaluate embedding model options and design the vector storage architecture for
+      this RAG knowledge base.
+
+      Chunking strategy: {steps.chunking-strategy.output}
+      Document analysis: {steps.document-analysis.output}
+      Domain: {input.domain}
+      Requested embedding model: {input.embedding_model}
+
+      You are a vector search and embedding specialist. Your task is to evaluate embedding
+      model choices, design the vector index architecture, and specify the complete
+      embedding pipeline for production deployment.
+
+      --- EMBEDDING MODEL COMPARISON ---
+
+      Evaluate the following embedding models for this specific corpus and domain.
+      For each model, assess along these dimensions with scores from 1-10:
+
+      1. **OpenAI text-embedding-3-small** (1536 dimensions)
+         - Semantic quality: How well does it capture meaning in {input.domain} content?
+         - Vocabulary coverage: Does its training data cover domain-specific terminology?
+         - Dimensionality efficiency: 1536 dims - adequate for corpus complexity?
+         - Cost efficiency: ~$0.02 per 1M tokens - calculate estimated corpus cost
+         - Latency: ~50ms per batch of 100 chunks
+         - Matryoshka support: Can reduce dimensions (512, 256) with graceful degradation
+         - Overall suitability score and rationale
+
+      2. **OpenAI text-embedding-3-large** (3072 dimensions)
+         - Higher fidelity semantic representations
+         - Better for specialized/technical domains with nuanced terminology
+         - ~$0.13 per 1M tokens - calculate estimated corpus cost
+         - Matryoshka support for dimension reduction
+         - When to prefer over small: corpus with high semantic complexity, many
+           near-synonyms, or fine-grained distinctions that matter for retrieval
+         - Overall suitability score and rationale
+
+      3. **Voyage AI voyage-3** (1024 dimensions)
+         - Strong performance on code and technical documentation
+         - Optimized for retrieval tasks specifically (not general-purpose)
+         - Good multilingual support
+         - Overall suitability score and rationale
+
+      4. **Cohere embed-v3** (1024 dimensions)
+         - Input type parameter (search_document vs search_query) for asymmetric search
+         - Compression support (binary, int8) for cost-effective storage
+         - Strong multilingual and cross-lingual retrieval
+         - Overall suitability score and rationale
+
+      5. **Open-source alternatives** (for self-hosted deployments)
+         - BGE-large-en-v1.5 (1024 dims) - strong English retrieval
+         - E5-mistral-7b-instruct (4096 dims) - instruction-tuned, high quality
+         - GTE-Qwen2 (various sizes) - multilingual, competitive quality
+         - Considerations: hosting cost, GPU requirements, maintenance burden
+         - Overall suitability score and rationale
+
+      --- RECOMMENDED MODEL SELECTION ---
+
+      Based on the evaluation above:
+      - Primary recommendation with full justification
+      - Whether the user's choice of "{input.embedding_model}" is optimal for this use case
+      - If not optimal, explain the tradeoffs and suggest the better alternative
+      - Dimension reduction recommendation (if using Matryoshka-capable model)
+      - Quantization recommendation for storage efficiency
+
+      --- VECTOR INDEX ARCHITECTURE ---
+
+      Design the complete vector storage and indexing setup:
+
+      1. **Index type selection** (evaluate each):
+         - HNSW (Hierarchical Navigable Small World): best for recall, higher memory
+           - Recommended parameters: M (connections per layer), efConstruction, efSearch
+           - Memory estimate for this corpus size
+         - IVF-PQ (Inverted File with Product Quantization): lower memory, good for large scale
+           - Number of centroids, PQ segments, bits per segment
+         - Flat (brute force): baseline for quality comparison, impractical at scale
+         - ScaNN: Google's efficient similarity search, good for large corpora
+
+      2. **Vector database selection** (evaluate for this use case):
+         - Pinecone: managed service, serverless option, metadata filtering
+         - Weaviate: hybrid search (vector + keyword), schema-based, self-hostable
+         - Qdrant: Rust-based, advanced filtering, payload indexing
+         - ChromaDB: lightweight, good for prototyping, embedded mode
+         - pgvector: PostgreSQL extension, integrates with existing Postgres stack
+         - Recommendation with justification based on corpus size and query patterns
+
+      3. **Hybrid search configuration**:
+         - Dense vector search weight (0.0-1.0)
+         - Sparse/keyword search weight (BM25 component)
+         - Recommended fusion method: Reciprocal Rank Fusion (RRF) vs linear combination
+         - When to prefer keyword search over semantic (exact matches, IDs, codes)
+         - Metadata filter strategy for pre-filtering vs post-filtering
+
+      4. **Namespace and collection design**:
+         - How to partition chunks across collections/namespaces
+         - Separate collections per document type? Per domain area? Single collection?
+         - Metadata indexing strategy for efficient filtering
+         - Multi-tenancy considerations if applicable
+
+      --- EMBEDDING PIPELINE SPECIFICATION ---
+
+      Define the end-to-end embedding pipeline:
+
+      1. **Preprocessing before embedding**:
+         - Text normalization (lowercasing? punctuation handling? Unicode normalization?)
+         - Query vs document embedding differences (instruction prefixes)
+         - Truncation strategy for chunks exceeding model's context window
+         - Batch size optimization for throughput vs latency
+
+      2. **Embedding generation**:
+         - Batch processing configuration (batch size, concurrent requests, rate limits)
+         - Error handling and retry strategy for API-based models
+         - Caching strategy for re-embedding during updates
+         - Estimated total embedding time and cost for the corpus
+
+      3. **Post-processing**:
+         - Normalization (L2 normalization for cosine similarity)
+         - Dimension reduction application (if recommended)
+         - Quality validation - detect and flag anomalous embeddings
+
+      4. **Update and maintenance pipeline**:
+         - Incremental indexing for new/updated documents
+         - Stale chunk detection and removal
+         - Re-embedding triggers (model update, strategy change)
+         - Index optimization scheduling (compaction, rebalancing)
+
+      Produce the complete embedding pipeline specification as a structured configuration
+      document with all parameters, estimated costs, and performance projections.
+    model: sonnet
+    max_turns: 10
+
+  - id: quality-baseline
+    depends_on: [chunking-strategy]
+    prompt: |
+      Generate a comprehensive retrieval quality evaluation framework and baseline
+      test suite for this RAG knowledge base.
+
+      Chunking strategy: {steps.chunking-strategy.output}
+      Document analysis: {steps.document-analysis.output}
+      Domain: {input.domain}
+
+      You are a retrieval evaluation specialist. Your task is to design a rigorous
+      evaluation framework that will measure RAG retrieval quality across multiple
+      dimensions and establish baseline metrics that optimization efforts will improve upon.
+
+      --- EVALUATION QUERY SET GENERATION ---
+
+      Design a diverse test query set that covers the full spectrum of retrieval scenarios.
+      Generate at least 5 example queries for each category:
+
+      1. **Factoid queries** - direct fact lookup
+         - "What is the default timeout for X?"
+         - "Who is the author of Y?"
+         - These test precise retrieval of specific facts from the corpus
+         - Expected: single chunk contains the answer
+
+      2. **Conceptual queries** - explanation and understanding
+         - "How does authentication work in this system?"
+         - "Explain the difference between X and Y"
+         - These test retrieval of explanatory content
+         - Expected: 2-3 chunks needed for a complete answer
+
+      3. **Procedural queries** - step-by-step instructions
+         - "How do I set up X from scratch?"
+         - "What are the steps to migrate from version A to B?"
+         - These test retrieval of sequential, ordered content
+         - Expected: multiple chunks in correct order
+
+      4. **Multi-hop queries** - require synthesizing information from multiple sources
+         - "What impact does configuration X have on feature Y's performance?"
+         - "Can I use tool A together with tool B for use case C?"
+         - These test the system's ability to retrieve related but non-adjacent content
+         - Expected: 3+ chunks from different sections/documents
+
+      5. **Comparative queries** - require retrieving multiple items to compare
+         - "What are the pros and cons of approach A vs approach B?"
+         - "Which option is better for use case X?"
+         - These test retrieval breadth and balance
+
+      6. **Negative queries** - information NOT in the corpus
+         - "How do I do X?" (where X is out of scope)
+         - These test the system's ability to not hallucinate
+         - Expected: low confidence scores, no highly relevant chunks
+
+      7. **Ambiguous queries** - multiple valid interpretations
+         - Queries where the same term means different things in different contexts
+         - These test disambiguation and context-sensitivity
+
+      8. **Domain-specific queries for {input.domain}**
+         - Queries using domain jargon, abbreviations, and specialized terminology
+         - Queries referencing domain-specific entities, processes, or regulations
+         - These test the embedding model's domain vocabulary coverage
+
+      --- RETRIEVAL METRICS FRAMEWORK ---
+
+      Define the complete metrics suite for evaluation:
+
+      1. **Precision metrics**:
+         - Precision@K (K=1, 3, 5, 10): fraction of retrieved chunks that are relevant
+         - Formula: relevant_retrieved / total_retrieved at cutoff K
+         - Target thresholds for each K value based on domain requirements
+
+      2. **Recall metrics**:
+         - Recall@K (K=1, 3, 5, 10, 20): fraction of all relevant chunks that are retrieved
+         - Formula: relevant_retrieved / total_relevant at cutoff K
+         - Especially important for multi-hop queries where missing a chunk = wrong answer
+
+      3. **Ranking quality metrics**:
+         - MRR (Mean Reciprocal Rank): average of 1/rank of first relevant result
+           - Formula: (1/N) * sum(1/rank_i for each query i)
+           - Target: MRR > 0.7 for factoid queries, > 0.5 for complex queries
+         - NDCG@K (Normalized Discounted Cumulative Gain): measures ranking quality
+           with graded relevance (0=irrelevant, 1=partial, 2=relevant, 3=highly relevant)
+           - Formula: DCG@K / IDCG@K where DCG = sum(rel_i / log2(i+1))
+           - Target: NDCG@10 > 0.6 for the overall query set
+         - MAP (Mean Average Precision): average precision across all recall points
+           - Useful for queries with multiple relevant documents
+
+      4. **Retrieval quality indicators**:
+         - Hit Rate@K: percentage of queries where at least one relevant chunk is in top K
+         - Context Relevance Score: semantic similarity between query and retrieved chunks
+         - Chunk Coherence Score: measure how self-contained and coherent each chunk is
+         - Answer Coverage: percentage of the ground-truth answer covered by retrieved chunks
+
+      5. **Hallucination risk metrics**:
+         - Confidence Calibration: correlation between retrieval score and actual relevance
+         - Out-of-scope Detection Rate: percentage of negative queries correctly identified
+           as having no relevant content in the knowledge base
+         - Attribution Accuracy: can the answer be directly traced to retrieved chunks?
+         - Faithfulness Score: percentage of generated answer supported by retrieved context
+
+      6. **Latency metrics**:
+         - P50, P95, P99 query latency (embedding + retrieval + reranking)
+         - Throughput: queries per second at various concurrency levels
+         - Target latency budget allocation: embedding (30%), vector search (40%),
+           reranking (20%), overhead (10%)
+
+      --- BASELINE MEASUREMENT PROTOCOL ---
+
+      Specify the exact protocol for establishing baseline metrics:
+
+      1. **Ground truth construction**:
+         - For each test query, manually identify all relevant chunks and their relevance grade
+         - Document the reasoning for each relevance judgment
+         - Include edge cases where relevance is debatable
+         - Minimum inter-annotator agreement threshold: 80% for binary relevance
+
+      2. **Baseline conditions**:
+         - Run retrieval with default parameters (no reranking, no query expansion)
+         - Use the specified embedding model "{input.embedding_model}" with default settings
+         - Retrieve top-20 chunks for each test query
+         - Record all metrics defined above
+
+      3. **Statistical rigor**:
+         - Minimum 50 test queries across all categories
+         - Bootstrap confidence intervals for each metric
+         - Paired significance testing for comparing configurations
+
+      --- A/B TESTING FRAMEWORK ---
+
+      Design the framework for comparing chunking and retrieval variations:
+
+      1. **Variables to test**:
+         - Chunk size: 256 vs 512 vs 1024 tokens
+         - Overlap: 0% vs 10% vs 20%
+         - Embedding model comparison (if multiple are viable)
+         - With/without reranking
+         - With/without query expansion
+         - Hybrid search weight ratios
+
+      2. **Statistical methodology**:
+         - Paired t-test or Wilcoxon signed-rank for metric comparison
+         - Bonferroni correction for multiple comparisons
+         - Minimum detectable effect size: 5% improvement in NDCG@10
+         - Required sample size calculation
+
+      Produce the complete evaluation framework as a structured specification with
+      example queries, metric formulas, target thresholds, and the baseline measurement
+      protocol ready for implementation.
+    model: haiku
+    max_turns: 10
+
+  - id: retrieval-optimization
+    depends_on: [embedding-evaluation, quality-baseline]
+    prompt: |
+      Design a comprehensive retrieval optimization strategy to maximize RAG quality
+      based on the embedding architecture and quality baseline.
+
+      Embedding evaluation: {steps.embedding-evaluation.output}
+      Quality baseline: {steps.quality-baseline.output}
+      Document analysis: {steps.document-analysis.output}
+      Domain: {input.domain}
+
+      You are a senior retrieval optimization engineer. Your task is to design a
+      multi-layered optimization strategy that systematically improves retrieval
+      quality from baseline to production-grade performance.
+
+      --- QUERY UNDERSTANDING LAYER ---
+
+      Design the query preprocessing pipeline:
+
+      1. **Query classification**:
+         - Classify incoming queries by type (factoid, conceptual, procedural, comparative)
+         - Route different query types to optimized retrieval strategies
+         - Confidence threshold for classification: use fallback strategy when uncertain
+         - Implementation: lightweight classifier (few-shot LLM or fine-tuned model)
+
+      2. **Query expansion techniques**:
+         - **Synonym expansion**: domain-specific synonym dictionaries for {input.domain}
+           - Build from corpus co-occurrence analysis
+           - Abbreviation and acronym expansion (e.g., "K8s" -> "Kubernetes")
+         - **Hypothetical Document Embeddings (HyDE)**:
+           - Generate a hypothetical answer to the query using an LLM
+           - Embed the hypothetical answer instead of (or in addition to) the raw query
+           - When to use: complex conceptual queries where the query embedding is far
+             from the answer embedding in vector space
+           - When NOT to use: factoid queries, keyword-heavy queries
+           - LLM model recommendation: haiku (fast, cost-effective for generation)
+         - **Multi-query generation**:
+           - Generate 3-5 rephrased versions of the original query
+           - Retrieve for each variant, then merge and deduplicate results
+           - Improves recall for ambiguous or poorly-formed queries
+         - **Sub-query decomposition**:
+           - For multi-hop questions, decompose into atomic sub-queries
+           - Retrieve separately for each sub-query, then combine contexts
+           - Critical for complex questions that span multiple topics
+
+      3. **Query intent detection**:
+         - Detect whether the user wants: a specific fact, an explanation, a comparison,
+           a procedure, or is exploring broadly
+         - Adjust retrieval parameters based on intent:
+           - Factoid: high precision, top-K=3, strict similarity threshold
+           - Exploration: high recall, top-K=10, lower similarity threshold
+           - Procedural: ordered retrieval, temporal/sequential awareness
+
+      --- RETRIEVAL STRATEGY OPTIMIZATION ---
+
+      Design the multi-stage retrieval pipeline:
+
+      1. **Stage 1 - Candidate generation** (high recall, fast):
+         - Vector similarity search with relaxed threshold (top-50 candidates)
+         - Parallel BM25 keyword search (top-50 candidates)
+         - Metadata-based pre-filtering to reduce search space
+         - Estimated latency budget: 50ms
+
+      2. **Stage 2 - Hybrid fusion**:
+         - Reciprocal Rank Fusion (RRF) to merge dense and sparse results
+           - RRF formula: score(d) = sum(1 / (k + rank_i(d))) across all rankers
+           - Recommended k parameter: 60 (standard) - tune based on baseline results
+         - Alternative: Weighted linear combination with learned weights
+         - Output: top-30 candidates with fused scores
+         - Estimated latency budget: 10ms
+
+      3. **Stage 3 - Cross-encoder reranking** (high precision, slower):
+         - Apply a cross-encoder model to re-score the top-30 candidates
+         - Recommended models:
+           - ms-marco-MiniLM-L-12-v2 (fast, good quality, 33M params)
+           - bge-reranker-v2-m3 (multilingual, higher quality, 568M params)
+           - Cohere rerank-v3 (API-based, highest quality, no hosting needed)
+         - Reranking dramatically improves precision by considering query-document
+           interaction (bi-encoder embeddings miss this)
+         - Estimated latency budget: 100ms for 30 candidates
+         - Output: top-K candidates (K based on query intent classification)
+
+      4. **Stage 4 - Context assembly**:
+         - Select final chunks based on reranked scores
+         - Apply diversity filtering: ensure retrieved chunks cover different aspects
+           - Maximal Marginal Relevance (MMR) to reduce redundancy
+           - lambda parameter: 0.7 (balance relevance and diversity)
+         - Retrieve neighboring chunks for context continuity
+           - If chunk N is selected, optionally include chunks N-1 and N+1
+           - Decision based on chunk coherence score from metadata
+         - Assemble final context window respecting LLM token limits
+         - Order chunks: by document structure (preferred) or by relevance score
+
+      --- ADVANCED OPTIMIZATION TECHNIQUES ---
+
+      1. **Contextual compression**:
+         - After retrieval, use an LLM to extract only the relevant portions of each chunk
+         - Reduces noise in the context window, improves answer quality
+         - Tradeoff: adds latency (50-100ms) but can dramatically improve precision
+         - Recommended for: long chunks, mixed-content chunks, large K values
+
+      2. **Adaptive retrieval**:
+         - First attempt retrieval with strict parameters
+         - If confidence is low (no chunks above threshold), automatically:
+           a. Expand query using HyDE
+           b. Reduce similarity threshold
+           c. Increase top-K
+           d. Try alternative query formulations
+         - Implement as a retrieval retry loop with escalating strategies
+
+      3. **Semantic caching**:
+         - Cache query-result pairs with semantic similarity matching
+         - If a new query is semantically similar to a cached query (cosine > 0.95),
+           return cached results instead of re-executing the full pipeline
+         - Cache invalidation: when underlying chunks are updated or re-embedded
+         - Expected cache hit rate: 20-40% for production workloads
+
+      4. **Feedback loop integration**:
+         - Capture implicit signals: which retrieved chunks users actually reference
+         - Capture explicit signals: thumbs up/down on retrieval quality
+         - Use feedback to:
+           a. Fine-tune reranker on domain-specific relevance judgments
+           b. Adjust hybrid search weights
+           c. Identify chunks that are frequently retrieved but never useful (noise)
+           d. Identify queries that consistently fail (coverage gaps)
+
+      5. **Domain-specific optimizations for {input.domain}**:
+         - Custom tokenization rules for domain terminology
+         - Entity-aware retrieval: boost chunks containing entities mentioned in the query
+         - Temporal awareness: prefer recent content for time-sensitive queries
+         - Authority weighting: boost chunks from authoritative sources
+         - Relationship-aware retrieval: when entity X is queried, also retrieve
+           chunks about related entities Y and Z
+
+      --- HALLUCINATION PREVENTION ---
+
+      Design safeguards against hallucination in the RAG pipeline:
+
+      1. **Retrieval confidence gating**:
+         - Set minimum similarity threshold below which no chunks are returned
+         - Calibrate threshold using negative query test set from quality baseline
+         - Response when below threshold: "I don't have sufficient information to answer"
+
+      2. **Source attribution enforcement**:
+         - Every claim in the generated answer must cite a specific chunk
+         - Implement post-generation verification: check each sentence against sources
+         - Flag unsupported claims for review or removal
+
+      3. **Contradiction detection**:
+         - When multiple retrieved chunks provide conflicting information,
+           flag the conflict explicitly in the response
+         - Preference ordering: newer content > older content, official docs > community
+
+      Produce the complete retrieval optimization specification with all pipeline stages,
+      parameters, model recommendations, latency budgets, and expected improvement
+      over baseline metrics.
+    model: sonnet
+    max_turns: 10
+
+  - id: deployment-config
+    depends_on: [retrieval-optimization]
+    prompt: |
+      Generate a complete production deployment configuration and operations playbook
+      for this RAG knowledge base.
+
+      Retrieval optimization: {steps.retrieval-optimization.output}
+      Embedding evaluation: {steps.embedding-evaluation.output}
+      Chunking strategy: {steps.chunking-strategy.output}
+      Quality baseline: {steps.quality-baseline.output}
+      Document analysis: {steps.document-analysis.output}
+      Domain: {input.domain}
+      Document sources: {input.document_sources}
+
+      You are a senior MLOps engineer specializing in RAG system deployment. Your task
+      is to produce a comprehensive, production-ready deployment configuration that
+      covers infrastructure, monitoring, scaling, and operational procedures.
+
+      --- INFRASTRUCTURE ARCHITECTURE ---
+
+      1. **System architecture diagram** (text-based):
+         - Document ingestion pipeline (sources -> preprocessor -> chunker -> embedder -> index)
+         - Query pipeline (user query -> query processor -> retriever -> reranker -> assembler -> LLM)
+         - Feedback loop (user signals -> metrics store -> retraining pipeline)
+         - Storage layer (vector DB, metadata store, document store, cache)
+
+      2. **Component specifications**:
+         - Vector database: instance type, storage size, replica count
+         - Embedding service: API-based vs self-hosted, GPU requirements if self-hosted
+         - Reranker service: deployment mode, batch size, GPU requirements
+         - Cache layer: Redis/Memcached configuration, eviction policy, TTL
+         - API gateway: rate limiting, authentication, request routing
+         - Queue system: for async document ingestion (Redis/RabbitMQ/SQS)
+
+      3. **Scaling configuration**:
+         - Horizontal scaling triggers (CPU > 70%, latency P95 > 500ms, queue depth > 100)
+         - Auto-scaling rules for each component
+         - Read replicas for vector database
+         - Embedding service concurrency limits
+         - Estimated resource requirements for the corpus size from document analysis
+
+      --- DEPLOYMENT CONFIGURATION FILES ---
+
+      Generate production-ready configuration for each component:
+
+      1. **Vector database configuration** (for the recommended DB):
+         ```yaml
+         # Collection/index configuration
+         collection_name: "{input.domain}-knowledge-base"
+         embedding_dimension: [from embedding evaluation]
+         distance_metric: cosine
+         index_type: hnsw
+         hnsw_config:
+           m: 16
+           ef_construction: 200
+           ef_search: 128
+         # Payload indexing for metadata filtering
+         payload_indexes:
+           - field: content_type
+             type: keyword
+           - field: domain_entities
+             type: keyword
+           - field: created_at
+             type: datetime
+         ```
+
+      2. **Ingestion pipeline configuration**:
+         ```yaml
+         preprocessing:
+           normalize_unicode: true
+           strip_html: true
+           extract_metadata: true
+         chunking:
+           strategy: [from chunking strategy]
+           target_size: [tokens]
+           max_size: [tokens]
+           overlap: [tokens or percentage]
+           preserve_atomic: [code_blocks, tables, lists]
+         embedding:
+           model: [from embedding evaluation]
+           batch_size: 100
+           max_concurrent: 5
+           retry_attempts: 3
+           retry_backoff: exponential
+         ```
+
+      3. **Retrieval pipeline configuration**:
+         ```yaml
+         query_processing:
+           expansion_enabled: true
+           hyde_enabled: true
+           hyde_model: haiku
+           sub_query_decomposition: true
+           max_sub_queries: 5
+         retrieval:
+           top_k_candidates: 50
+           hybrid_search: true
+           bm25_weight: 0.3
+           vector_weight: 0.7
+           rrf_k: 60
+         reranking:
+           enabled: true
+           model: [from optimization]
+           top_k_rerank: 30
+           final_top_k: 5
+         context_assembly:
+           max_context_tokens: 4096
+           include_neighbors: true
+           mmr_lambda: 0.7
+           diversity_threshold: 0.85
+         ```
+
+      4. **Monitoring and alerting configuration**:
+         ```yaml
+         metrics:
+           - name: retrieval_latency_p95
+             threshold: 500ms
+             alert: warning
+           - name: retrieval_latency_p99
+             threshold: 1000ms
+             alert: critical
+           - name: average_relevance_score
+             threshold: 0.6
+             alert: warning
+             window: 1h
+           - name: empty_result_rate
+             threshold: 0.15
+             alert: warning
+             window: 1h
+           - name: embedding_api_error_rate
+             threshold: 0.05
+             alert: critical
+             window: 5m
+           - name: index_staleness_hours
+             threshold: 24
+             alert: warning
+         dashboards:
+           - retrieval_quality (MRR, NDCG, precision, recall over time)
+           - system_performance (latency, throughput, error rates)
+           - usage_analytics (query volume, popular topics, failed queries)
+           - cost_tracking (embedding API costs, compute costs, storage costs)
+         ```
+
+      --- OPERATIONAL PLAYBOOK ---
+
+      1. **Initial deployment checklist**:
+         - [ ] Provision vector database instance
+         - [ ] Configure embedding API credentials and rate limits
+         - [ ] Run document ingestion pipeline
+         - [ ] Verify chunk count and metadata quality
+         - [ ] Execute baseline evaluation test suite
+         - [ ] Confirm all metrics meet minimum thresholds
+         - [ ] Enable monitoring and alerting
+         - [ ] Configure backup and disaster recovery
+         - [ ] Load test with expected peak query volume
+         - [ ] Security review: API authentication, data encryption, access logging
+
+      2. **Document update procedures**:
+         - New document addition: ingest -> chunk -> embed -> index -> verify
+         - Document update: detect changes -> re-chunk affected sections -> re-embed -> update index
+         - Document removal: mark chunks as deleted -> remove from index -> cleanup
+         - Bulk re-indexing: schedule during low-traffic window, blue-green deployment
+
+      3. **Incident response procedures**:
+         - High latency: check embedding API, vector DB performance, cache hit rate
+         - Low relevance: check for index corruption, embedding model changes, query drift
+         - Empty results: verify index health, check query preprocessing, review recent changes
+         - Hallucination reports: check retrieval confidence, review chunk quality, audit sources
+
+      4. **Cost optimization**:
+         - Embedding cost projection: monthly estimate based on document update frequency
+         - Storage cost projection: vector DB storage growth rate
+         - Compute cost projection: query volume scaling
+         - Optimization levers: dimension reduction, caching, batch processing, off-peak indexing
+
+      5. **Quality maintenance schedule**:
+         - Daily: monitor key metrics dashboards
+         - Weekly: review failed queries and low-confidence retrievals
+         - Monthly: run full evaluation test suite, compare to baseline
+         - Quarterly: reassess chunking strategy, evaluate new embedding models,
+           review domain coverage gaps, consider reranker fine-tuning
+
+      --- EXECUTIVE SUMMARY ---
+
+      Conclude with a one-page executive summary covering:
+      - Architecture overview and key design decisions
+      - Expected performance characteristics (latency, quality, throughput)
+      - Total cost of ownership estimate (monthly)
+      - Key risks and mitigation strategies
+      - Recommended timeline for initial deployment (phases and milestones)
+      - Success criteria and KPIs to track
+
+      Format the entire deployment configuration as a clean, well-structured document
+      that an engineering team can directly use to implement and operate this RAG
+      knowledge base in production.
+    model: sonnet
+    max_turns: 10
