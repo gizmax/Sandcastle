@@ -56,17 +56,28 @@ export async function query(sql) {
     );
   }
 
-  const output = runPsql(sql, true);
+  // Run psql once with headers (no --tuples-only) to get columns + data
+  if (!PG_URL) throw new Error("TOOL_POSTGRESQL_URL is not configured");
+  const escapedSql = sql.replace(/'/g, "'\\''");
+  const flags = [
+    `"${PG_URL}"`,
+    "--no-password",
+    "--no-align",
+    "-F '\\t'",
+    "--set=ON_ERROR_STOP=1",
+    `-c '${escapedSql}'`,
+  ];
 
-  // Parse tab-separated output into rows
-  const lines = output.split("\n").filter(Boolean);
-  if (lines.length === 0) return { rows: [], count: 0 };
-
-  // First, get column names by running with headers
-  const headerOutput = execSync(
-    `psql "${PG_URL}" --no-password --no-align -F '\\t' -c '${sql.replace(/'/g, "'\\''")}'`,
-    { encoding: "utf-8", timeout: 30000 }
-  ).trim();
+  let headerOutput;
+  try {
+    headerOutput = execSync(`psql ${flags.join(" ")}`, {
+      encoding: "utf-8",
+      timeout: 30000,
+      maxBuffer: 5 * 1024 * 1024,
+    }).trim();
+  } catch (err) {
+    throw new Error(`PostgreSQL error: ${err.stderr || err.message}`);
+  }
 
   const headerLines = headerOutput.split("\n").filter(Boolean);
   if (headerLines.length === 0) return { rows: [], count: 0 };

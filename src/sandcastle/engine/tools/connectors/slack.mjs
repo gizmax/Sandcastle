@@ -9,6 +9,8 @@ const TOKEN = process.env.TOOL_SLACK_BOT_TOKEN || "";
 const BASE = "https://slack.com/api";
 
 async function api(method, body = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const resp = await fetch(`${BASE}/${method}`, {
     method: "POST",
     headers: {
@@ -16,7 +18,9 @@ async function api(method, body = {}) {
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(body),
+    signal: controller.signal,
   });
+  clearTimeout(timer);
   const data = await resp.json();
   if (!data.ok) throw new Error(`Slack API error: ${data.error}`);
   return data;

@@ -11,20 +11,27 @@ const API_KEY = process.env.TOOL_MONGODB_API_KEY || "";
 const BASE = "https://data.mongodb-api.com/app/data-api/endpoint/data/v1";
 
 async function api(path, method = "POST", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "api-key": API_KEY,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`MongoDB API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`MongoDB API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function find_documents(database, collection, filter = {}, limit = 20) {

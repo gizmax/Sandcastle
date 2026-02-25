@@ -9,6 +9,8 @@ const ACCESS_TOKEN = process.env.TOOL_INTERCOM_ACCESS_TOKEN || "";
 const BASE = "https://api.intercom.io";
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
@@ -16,14 +18,19 @@ async function api(path, method = "GET", body = null) {
       "Content-Type": "application/json",
       "Intercom-Version": "2.10",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Intercom API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Intercom API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function search_contacts(query = "", limit = 20) {

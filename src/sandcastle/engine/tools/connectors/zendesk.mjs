@@ -13,20 +13,27 @@ const BASE = `https://${SUBDOMAIN}.zendesk.com/api/v2`;
 const AUTH = Buffer.from(`${EMAIL}/token:${API_TOKEN}`).toString("base64");
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Basic ${AUTH}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Zendesk API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Zendesk API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function create_ticket(subject, description, priority = "normal", requester_email = "") {

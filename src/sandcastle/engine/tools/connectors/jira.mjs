@@ -12,6 +12,8 @@ const EMAIL = process.env.TOOL_JIRA_EMAIL || "";
 const AUTH = Buffer.from(`${EMAIL}:${TOKEN}`).toString("base64");
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
@@ -19,9 +21,11 @@ async function api(path, method = "GET", body = null) {
       "Content-Type": "application/json",
       "Accept": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(`${BASE_URL}/rest/api/3${path}`, opts);
+  clearTimeout(timer);
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`Jira API ${resp.status}: ${text.slice(0, 500)}`);

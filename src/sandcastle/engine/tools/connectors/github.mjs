@@ -9,6 +9,8 @@ const TOKEN = process.env.TOOL_GITHUB_TOKEN || "";
 const BASE = "https://api.github.com";
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
@@ -16,12 +18,14 @@ async function api(path, method = "GET", body = null) {
       "Accept": "application/vnd.github.v3+json",
       "User-Agent": "Sandcastle-Tool",
     },
+    signal: controller.signal,
   };
   if (body) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
   const resp = await fetch(`${BASE}${path}`, opts);
+  clearTimeout(timer);
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`GitHub API ${resp.status}: ${text.slice(0, 500)}`);

@@ -1363,6 +1363,1575 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="browser.mjs",
         icon="browser",
     ),
+    # --- Tier 1: Core integrations ---
+    "google-sheets": ToolDefinition(
+        name="google-sheets",
+        description="Read, write, and append data in Google Sheets spreadsheets",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="read_range",
+                description="Read cells from a range (e.g. Sheet1!A1:D10)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "range": {
+                            "type": "string",
+                            "description": "Range to read (e.g. Sheet1!A1:D10)",
+                        },
+                    },
+                    "required": ["range"],
+                },
+            ),
+            ToolFunction(
+                name="write_range",
+                description="Write a 2D array of values to a range",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "range": {"type": "string"},
+                        "values": {
+                            "type": "array",
+                            "description": "2D array of values",
+                        },
+                    },
+                    "required": ["range", "values"],
+                },
+            ),
+            ToolFunction(
+                name="append_rows",
+                description="Append rows to a sheet",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "range": {"type": "string"},
+                        "values": {"type": "array"},
+                    },
+                    "required": ["range", "values"],
+                },
+            ),
+            ToolFunction(
+                name="get_sheets",
+                description="List all sheets in the spreadsheet",
+                parameters={"type": "object", "properties": {}},
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_GOOGLE_SHEETS_SERVICE_ACCOUNT",
+            "TOOL_GOOGLE_SHEETS_SPREADSHEET_ID",
+        ],
+        connector_file="google-sheets.mjs",
+        icon="google-sheets",
+    ),
+    "airtable": ToolDefinition(
+        name="airtable",
+        description="CRUD operations on Airtable bases and tables",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="list_records",
+                description="List records with optional filter and sort",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["table"],
+                },
+            ),
+            ToolFunction(
+                name="get_record",
+                description="Get a single record by ID",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "recordId": {"type": "string"},
+                    },
+                    "required": ["table", "recordId"],
+                },
+            ),
+            ToolFunction(
+                name="create_records",
+                description="Create one or more records",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "records": {"type": "array"},
+                    },
+                    "required": ["table", "records"],
+                },
+            ),
+            ToolFunction(
+                name="update_records",
+                description="Update existing records",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "records": {"type": "array"},
+                    },
+                    "required": ["table", "records"],
+                },
+            ),
+            ToolFunction(
+                name="delete_records",
+                description="Delete records by IDs",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "recordIds": {"type": "array"},
+                    },
+                    "required": ["table", "recordIds"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_AIRTABLE_API_KEY", "TOOL_AIRTABLE_BASE_ID"],
+        connector_file="airtable.mjs",
+        icon="airtable",
+    ),
+    "linear": ToolDefinition(
+        name="linear",
+        description="Create, search, and manage issues in Linear",
+        category="project_management",
+        functions=[
+            ToolFunction(
+                name="create_issue",
+                description="Create a new issue",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "description": {"type": "string"},
+                        "teamId": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["title", "teamId"],
+                },
+            ),
+            ToolFunction(
+                name="get_issues",
+                description="Search and filter issues",
+                parameters={
+                    "type": "object",
+                    "properties": {"filter": {"type": "object"}},
+                },
+            ),
+            ToolFunction(
+                name="update_issue",
+                description="Update issue fields",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "issueId": {"type": "string"},
+                        "updates": {"type": "object"},
+                    },
+                    "required": ["issueId", "updates"],
+                },
+            ),
+            ToolFunction(
+                name="get_teams",
+                description="List all teams",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="add_comment",
+                description="Add a comment to an issue",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "issueId": {"type": "string"},
+                        "body": {"type": "string"},
+                    },
+                    "required": ["issueId", "body"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_LINEAR_API_KEY"],
+        connector_file="linear.mjs",
+        icon="linear",
+    ),
+    "discord": ToolDefinition(
+        name="discord",
+        description="Send messages, create threads in Discord channels",
+        category="communication",
+        functions=[
+            ToolFunction(
+                name="send_message",
+                description="Send a message to a channel",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "channelId": {"type": "string"},
+                        "content": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["channelId", "content"],
+                },
+            ),
+            ToolFunction(
+                name="send_webhook",
+                description="Send via webhook URL (no bot token needed)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["content"],
+                },
+            ),
+            ToolFunction(
+                name="get_messages",
+                description="Read recent messages from a channel",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "channelId": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["channelId"],
+                },
+            ),
+            ToolFunction(
+                name="create_thread",
+                description="Create a thread in a channel",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "channelId": {"type": "string"},
+                        "name": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["channelId", "name"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_DISCORD_BOT_TOKEN",
+            "TOOL_DISCORD_WEBHOOK_URL",
+        ],
+        connector_file="discord.mjs",
+        icon="discord",
+    ),
+    "openai": ToolDefinition(
+        name="openai",
+        description=(
+            "OpenAI API - chat completions, embeddings, image generation, "
+            "speech-to-text, text-to-speech"
+        ),
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="chat_completion",
+                description="Generate chat completion with GPT-4o/mini",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "messages": {"type": "array"},
+                        "model": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["messages"],
+                },
+            ),
+            ToolFunction(
+                name="create_embedding",
+                description="Generate text embeddings",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "input": {"type": "string"},
+                        "model": {"type": "string"},
+                    },
+                    "required": ["input"],
+                },
+            ),
+            ToolFunction(
+                name="generate_image",
+                description="Generate image with DALL-E 3",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["prompt"],
+                },
+            ),
+            ToolFunction(
+                name="transcribe_audio",
+                description="Transcribe audio with Whisper",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "fileUrl": {"type": "string"},
+                    },
+                    "required": ["fileUrl"],
+                },
+            ),
+            ToolFunction(
+                name="text_to_speech",
+                description="Convert text to speech audio",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "voice": {"type": "string"},
+                    },
+                    "required": ["text"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_OPENAI_API_KEY"],
+        connector_file="openai.mjs",
+        icon="openai",
+    ),
+    "anthropic": ToolDefinition(
+        name="anthropic",
+        description="Anthropic Claude API - chat completions and messages",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="chat_completion",
+                description="Generate completion with Claude models",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "messages": {"type": "array"},
+                        "model": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["messages"],
+                },
+            ),
+            ToolFunction(
+                name="create_message",
+                description="Simple single-turn message",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "system": {"type": "string"},
+                        "userMessage": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["userMessage"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_ANTHROPIC_API_KEY"],
+        connector_file="anthropic.mjs",
+        icon="anthropic",
+    ),
+    "aws-s3": ToolDefinition(
+        name="aws-s3",
+        description="AWS S3 object storage - list, get, put, delete objects",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="list_objects",
+                description="List objects in bucket with optional prefix",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prefix": {"type": "string"},
+                        "maxKeys": {"type": "integer"},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_object",
+                description="Download object content",
+                parameters={
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                    "required": ["key"],
+                },
+            ),
+            ToolFunction(
+                name="put_object",
+                description="Upload object to bucket",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "body": {"type": "string"},
+                        "contentType": {"type": "string"},
+                    },
+                    "required": ["key", "body"],
+                },
+            ),
+            ToolFunction(
+                name="delete_object",
+                description="Delete object from bucket",
+                parameters={
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                    "required": ["key"],
+                },
+            ),
+            ToolFunction(
+                name="generate_presigned_url",
+                description="Generate presigned URL for sharing",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "expiresIn": {"type": "integer"},
+                    },
+                    "required": ["key"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_AWS_ACCESS_KEY_ID",
+            "TOOL_AWS_SECRET_ACCESS_KEY",
+            "TOOL_AWS_REGION",
+            "TOOL_AWS_S3_BUCKET",
+        ],
+        connector_file="aws-s3.mjs",
+        icon="aws-s3",
+    ),
+    "redis": ToolDefinition(
+        name="redis",
+        description="Redis key-value store - get, set, delete, pub/sub",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="get",
+                description="Get value by key",
+                parameters={
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                    "required": ["key"],
+                },
+            ),
+            ToolFunction(
+                name="set",
+                description="Set key-value with optional TTL",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "value": {"type": "string"},
+                        "ttl": {"type": "integer"},
+                    },
+                    "required": ["key", "value"],
+                },
+            ),
+            ToolFunction(
+                name="delete",
+                description="Delete key",
+                parameters={
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                    "required": ["key"],
+                },
+            ),
+            ToolFunction(
+                name="list_keys",
+                description="List keys matching pattern",
+                parameters={
+                    "type": "object",
+                    "properties": {"pattern": {"type": "string"}},
+                    "required": ["pattern"],
+                },
+            ),
+            ToolFunction(
+                name="publish",
+                description="Publish message to channel",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "channel": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["channel", "message"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_REDIS_URL", "TOOL_REDIS_TOKEN"],
+        connector_file="redis.mjs",
+        icon="redis",
+    ),
+    # --- Tier 2: Differentiators ---
+    "supabase": ToolDefinition(
+        name="supabase",
+        description="Supabase - Postgres queries, RPC, and file storage",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="query",
+                description="Select rows with filters",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["table"],
+                },
+            ),
+            ToolFunction(
+                name="insert",
+                description="Insert rows into table",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "records": {"type": "array"},
+                    },
+                    "required": ["table", "records"],
+                },
+            ),
+            ToolFunction(
+                name="update",
+                description="Update matching rows",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "table": {"type": "string"},
+                        "match": {"type": "object"},
+                        "data": {"type": "object"},
+                    },
+                    "required": ["table", "match", "data"],
+                },
+            ),
+            ToolFunction(
+                name="rpc",
+                description="Call a Postgres function",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "functionName": {"type": "string"},
+                        "params": {"type": "object"},
+                    },
+                    "required": ["functionName"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_SUPABASE_URL", "TOOL_SUPABASE_SERVICE_KEY"],
+        connector_file="supabase.mjs",
+        icon="supabase",
+    ),
+    "pinecone": ToolDefinition(
+        name="pinecone",
+        description="Pinecone vector database - upsert, query, delete vectors",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="upsert",
+                description="Upsert vectors with metadata",
+                parameters={
+                    "type": "object",
+                    "properties": {"vectors": {"type": "array"}},
+                    "required": ["vectors"],
+                },
+            ),
+            ToolFunction(
+                name="query",
+                description="Similarity search",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "vector": {"type": "array"},
+                        "topK": {"type": "integer"},
+                        "filter": {"type": "object"},
+                    },
+                    "required": ["vector", "topK"],
+                },
+            ),
+            ToolFunction(
+                name="delete_vectors",
+                description="Delete vectors by IDs",
+                parameters={
+                    "type": "object",
+                    "properties": {"ids": {"type": "array"}},
+                    "required": ["ids"],
+                },
+            ),
+            ToolFunction(
+                name="describe_index",
+                description="Get index statistics",
+                parameters={"type": "object", "properties": {}},
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_PINECONE_API_KEY",
+            "TOOL_PINECONE_INDEX_HOST",
+        ],
+        connector_file="pinecone.mjs",
+        icon="pinecone",
+    ),
+    "resend": ToolDefinition(
+        name="resend",
+        description="Resend - modern developer email API",
+        category="communication",
+        functions=[
+            ToolFunction(
+                name="send_email",
+                description="Send an email",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "from": {"type": "string"},
+                        "to": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "html": {"type": "string"},
+                    },
+                    "required": ["from", "to", "subject", "html"],
+                },
+            ),
+            ToolFunction(
+                name="get_email",
+                description="Get email delivery status",
+                parameters={
+                    "type": "object",
+                    "properties": {"emailId": {"type": "string"}},
+                    "required": ["emailId"],
+                },
+            ),
+            ToolFunction(
+                name="list_emails",
+                description="List sent emails",
+                parameters={"type": "object", "properties": {}},
+            ),
+        ],
+        credential_env_vars=["TOOL_RESEND_API_KEY"],
+        connector_file="resend.mjs",
+        icon="resend",
+    ),
+    "vercel": ToolDefinition(
+        name="vercel",
+        description="Vercel - deployments, projects, and domains",
+        category="devops",
+        functions=[
+            ToolFunction(
+                name="list_deployments",
+                description="List recent deployments",
+                parameters={
+                    "type": "object",
+                    "properties": {"limit": {"type": "integer"}},
+                },
+            ),
+            ToolFunction(
+                name="get_deployment",
+                description="Get deployment details and URL",
+                parameters={
+                    "type": "object",
+                    "properties": {"deploymentId": {"type": "string"}},
+                    "required": ["deploymentId"],
+                },
+            ),
+            ToolFunction(
+                name="list_projects",
+                description="List all projects",
+                parameters={"type": "object", "properties": {}},
+            ),
+        ],
+        credential_env_vars=["TOOL_VERCEL_TOKEN"],
+        connector_file="vercel.mjs",
+        icon="vercel",
+    ),
+    "cloudflare-workers": ToolDefinition(
+        name="cloudflare-workers",
+        description="Cloudflare Workers - deploy edge functions and KV storage",
+        category="devops",
+        functions=[
+            ToolFunction(
+                name="list_workers",
+                description="List all workers",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="deploy_worker",
+                description="Deploy or update a worker script",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "scriptName": {"type": "string"},
+                        "script": {"type": "string"},
+                    },
+                    "required": ["scriptName", "script"],
+                },
+            ),
+            ToolFunction(
+                name="kv_get",
+                description="Read KV value",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespaceId": {"type": "string"},
+                        "key": {"type": "string"},
+                    },
+                    "required": ["namespaceId", "key"],
+                },
+            ),
+            ToolFunction(
+                name="kv_put",
+                description="Write KV value",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "namespaceId": {"type": "string"},
+                        "key": {"type": "string"},
+                        "value": {"type": "string"},
+                    },
+                    "required": ["namespaceId", "key", "value"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_CLOUDFLARE_API_TOKEN",
+            "TOOL_CLOUDFLARE_ACCOUNT_ID",
+        ],
+        connector_file="cloudflare-workers.mjs",
+        icon="cloudflare",
+    ),
+    "firecrawl": ToolDefinition(
+        name="firecrawl",
+        description="Firecrawl - web scraping and crawling API",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="scrape",
+                description="Scrape a URL to markdown/HTML",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["url"],
+                },
+            ),
+            ToolFunction(
+                name="crawl",
+                description="Crawl a website",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["url"],
+                },
+            ),
+            ToolFunction(
+                name="map",
+                description="Get site map of URLs",
+                parameters={
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_FIRECRAWL_API_KEY"],
+        connector_file="firecrawl.mjs",
+        icon="firecrawl",
+    ),
+    "tavily": ToolDefinition(
+        name="tavily",
+        description="Tavily - AI-optimized web search",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="search",
+                description="AI-powered web search",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            ToolFunction(
+                name="extract",
+                description="Extract content from URLs",
+                parameters={
+                    "type": "object",
+                    "properties": {"urls": {"type": "array"}},
+                    "required": ["urls"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_TAVILY_API_KEY"],
+        connector_file="tavily.mjs",
+        icon="tavily",
+    ),
+    "elevenlabs": ToolDefinition(
+        name="elevenlabs",
+        description="ElevenLabs - text-to-speech and voice synthesis",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="text_to_speech",
+                description="Generate speech audio from text",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "voiceId": {"type": "string"},
+                    },
+                    "required": ["text", "voiceId"],
+                },
+            ),
+            ToolFunction(
+                name="list_voices",
+                description="List available voices",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="get_voice",
+                description="Get voice details",
+                parameters={
+                    "type": "object",
+                    "properties": {"voiceId": {"type": "string"}},
+                    "required": ["voiceId"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_ELEVENLABS_API_KEY"],
+        connector_file="elevenlabs.mjs",
+        icon="elevenlabs",
+    ),
+    # --- Tier 3: Bold integrations ---
+    "zapier": ToolDefinition(
+        name="zapier",
+        description="Zapier webhook triggers - connect to 5000+ apps",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="trigger",
+                description="Send data to Zapier webhook",
+                parameters={
+                    "type": "object",
+                    "properties": {"data": {"type": "object"}},
+                    "required": ["data"],
+                },
+            ),
+            ToolFunction(
+                name="trigger_with_response",
+                description="Send data and wait for Zapier response",
+                parameters={
+                    "type": "object",
+                    "properties": {"data": {"type": "object"}},
+                    "required": ["data"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_ZAPIER_WEBHOOK_URL"],
+        connector_file="zapier.mjs",
+        icon="zapier",
+    ),
+    "shopify": ToolDefinition(
+        name="shopify",
+        description="Shopify Admin API - products, orders, inventory",
+        category="erp",
+        functions=[
+            ToolFunction(
+                name="get_products",
+                description="List products",
+                parameters={
+                    "type": "object",
+                    "properties": {"options": {"type": "object"}},
+                },
+            ),
+            ToolFunction(
+                name="get_orders",
+                description="List orders with filters",
+                parameters={
+                    "type": "object",
+                    "properties": {"options": {"type": "object"}},
+                },
+            ),
+            ToolFunction(
+                name="create_product",
+                description="Create a new product",
+                parameters={
+                    "type": "object",
+                    "properties": {"data": {"type": "object"}},
+                    "required": ["data"],
+                },
+            ),
+            ToolFunction(
+                name="update_inventory",
+                description="Adjust inventory level",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "inventoryItemId": {"type": "string"},
+                        "quantity": {"type": "integer"},
+                    },
+                    "required": ["inventoryItemId", "quantity"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_SHOPIFY_STORE",
+            "TOOL_SHOPIFY_ACCESS_TOKEN",
+        ],
+        connector_file="shopify.mjs",
+        icon="shopify",
+    ),
+    "quickbooks": ToolDefinition(
+        name="quickbooks",
+        description="QuickBooks Online - invoices, payments, accounting queries",
+        category="erp",
+        functions=[
+            ToolFunction(
+                name="query",
+                description="Run a QuickBooks query",
+                parameters={
+                    "type": "object",
+                    "properties": {"sql": {"type": "string"}},
+                    "required": ["sql"],
+                },
+            ),
+            ToolFunction(
+                name="create_invoice",
+                description="Create an invoice",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customerRef": {"type": "string"},
+                        "lineItems": {"type": "array"},
+                    },
+                    "required": ["customerRef", "lineItems"],
+                },
+            ),
+            ToolFunction(
+                name="create_payment",
+                description="Record a payment",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "customerRef": {"type": "string"},
+                        "amount": {"type": "number"},
+                        "invoiceRef": {"type": "string"},
+                    },
+                    "required": ["customerRef", "amount"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_QUICKBOOKS_CLIENT_ID",
+            "TOOL_QUICKBOOKS_CLIENT_SECRET",
+            "TOOL_QUICKBOOKS_REFRESH_TOKEN",
+            "TOOL_QUICKBOOKS_REALM_ID",
+        ],
+        connector_file="quickbooks.mjs",
+        icon="quickbooks",
+    ),
+    "calendly": ToolDefinition(
+        name="calendly",
+        description="Calendly - event types, scheduled events, cancellations",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="list_event_types",
+                description="List available event types",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="list_events",
+                description="List scheduled events",
+                parameters={
+                    "type": "object",
+                    "properties": {"options": {"type": "object"}},
+                },
+            ),
+            ToolFunction(
+                name="get_event",
+                description="Get event details with invitees",
+                parameters={
+                    "type": "object",
+                    "properties": {"eventUuid": {"type": "string"}},
+                    "required": ["eventUuid"],
+                },
+            ),
+            ToolFunction(
+                name="cancel_event",
+                description="Cancel a scheduled event",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "eventUuid": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["eventUuid"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_CALENDLY_API_KEY"],
+        connector_file="calendly.mjs",
+        icon="calendly",
+    ),
+    "whatsapp": ToolDefinition(
+        name="whatsapp",
+        description="WhatsApp Business - messages, templates, media",
+        category="communication",
+        functions=[
+            ToolFunction(
+                name="send_message",
+                description="Send a text message",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["to", "text"],
+                },
+            ),
+            ToolFunction(
+                name="send_template",
+                description="Send a template message",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string"},
+                        "templateName": {"type": "string"},
+                        "parameters": {"type": "array"},
+                    },
+                    "required": ["to", "templateName"],
+                },
+            ),
+            ToolFunction(
+                name="send_media",
+                description="Send image, video, or document",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string"},
+                        "mediaUrl": {"type": "string"},
+                        "type": {"type": "string"},
+                    },
+                    "required": ["to", "mediaUrl"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_WHATSAPP_TOKEN",
+            "TOOL_WHATSAPP_PHONE_ID",
+        ],
+        connector_file="whatsapp.mjs",
+        icon="whatsapp",
+    ),
+    "figma": ToolDefinition(
+        name="figma",
+        description="Figma - files, image exports, comments, components",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="get_file",
+                description="Get file metadata and page structure",
+                parameters={
+                    "type": "object",
+                    "properties": {"fileKey": {"type": "string"}},
+                    "required": ["fileKey"],
+                },
+            ),
+            ToolFunction(
+                name="get_images",
+                description="Export nodes as PNG/SVG images",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "fileKey": {"type": "string"},
+                        "nodeIds": {"type": "string"},
+                        "format": {"type": "string"},
+                    },
+                    "required": ["fileKey", "nodeIds"],
+                },
+            ),
+            ToolFunction(
+                name="post_comment",
+                description="Add comment to a file",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "fileKey": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["fileKey", "message"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_FIGMA_ACCESS_TOKEN"],
+        connector_file="figma.mjs",
+        icon="figma",
+    ),
+    "datadog": ToolDefinition(
+        name="datadog",
+        description="Datadog - metrics, logs, monitors, incidents",
+        category="devops",
+        functions=[
+            ToolFunction(
+                name="query_metrics",
+                description="Query time-series metrics",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "from": {"type": "string"},
+                        "to": {"type": "string"},
+                    },
+                    "required": ["query", "from", "to"],
+                },
+            ),
+            ToolFunction(
+                name="search_logs",
+                description="Search logs",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "from": {"type": "string"},
+                        "to": {"type": "string"},
+                    },
+                    "required": ["query", "from", "to"],
+                },
+            ),
+            ToolFunction(
+                name="list_monitors",
+                description="List monitors with status",
+                parameters={
+                    "type": "object",
+                    "properties": {"options": {"type": "object"}},
+                },
+            ),
+            ToolFunction(
+                name="create_incident",
+                description="Create an incident",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "severity": {"type": "string"},
+                    },
+                    "required": ["title", "severity"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_DATADOG_API_KEY",
+            "TOOL_DATADOG_APP_KEY",
+        ],
+        connector_file="datadog.mjs",
+        icon="datadog",
+    ),
+    "plaid": ToolDefinition(
+        name="plaid",
+        description="Plaid - bank accounts, transactions, balances",
+        category="payments",
+        functions=[
+            ToolFunction(
+                name="get_accounts",
+                description="List linked bank accounts",
+                parameters={
+                    "type": "object",
+                    "properties": {"accessToken": {"type": "string"}},
+                    "required": ["accessToken"],
+                },
+            ),
+            ToolFunction(
+                name="get_transactions",
+                description="Get account transactions",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "accessToken": {"type": "string"},
+                        "startDate": {"type": "string"},
+                        "endDate": {"type": "string"},
+                    },
+                    "required": ["accessToken", "startDate", "endDate"],
+                },
+            ),
+            ToolFunction(
+                name="get_balance",
+                description="Get real-time account balances",
+                parameters={
+                    "type": "object",
+                    "properties": {"accessToken": {"type": "string"}},
+                    "required": ["accessToken"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_PLAID_CLIENT_ID",
+            "TOOL_PLAID_SECRET",
+        ],
+        connector_file="plaid.mjs",
+        icon="plaid",
+    ),
+    "docusign": ToolDefinition(
+        name="docusign",
+        description="DocuSign - create, track, and download signed documents",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="create_envelope",
+                description="Send document for signature",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "subject": {"type": "string"},
+                        "recipients": {"type": "array"},
+                        "documentBase64": {"type": "string"},
+                    },
+                    "required": ["subject", "recipients", "documentBase64"],
+                },
+            ),
+            ToolFunction(
+                name="get_envelope",
+                description="Get envelope/signature status",
+                parameters={
+                    "type": "object",
+                    "properties": {"envelopeId": {"type": "string"}},
+                    "required": ["envelopeId"],
+                },
+            ),
+            ToolFunction(
+                name="list_envelopes",
+                description="List envelopes with filters",
+                parameters={
+                    "type": "object",
+                    "properties": {"options": {"type": "object"}},
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_DOCUSIGN_ACCESS_TOKEN",
+            "TOOL_DOCUSIGN_ACCOUNT_ID",
+        ],
+        connector_file="docusign.mjs",
+        icon="docusign",
+    ),
+    "pagerduty": ToolDefinition(
+        name="pagerduty",
+        description="PagerDuty - incidents, acknowledgments, resolution",
+        category="devops",
+        functions=[
+            ToolFunction(
+                name="create_incident",
+                description="Create/trigger an incident",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "serviceId": {"type": "string"},
+                        "urgency": {"type": "string"},
+                    },
+                    "required": ["title", "serviceId"],
+                },
+            ),
+            ToolFunction(
+                name="list_incidents",
+                description="List incidents",
+                parameters={
+                    "type": "object",
+                    "properties": {"options": {"type": "object"}},
+                },
+            ),
+            ToolFunction(
+                name="acknowledge_incident",
+                description="Acknowledge an incident",
+                parameters={
+                    "type": "object",
+                    "properties": {"incidentId": {"type": "string"}},
+                    "required": ["incidentId"],
+                },
+            ),
+            ToolFunction(
+                name="resolve_incident",
+                description="Resolve an incident",
+                parameters={
+                    "type": "object",
+                    "properties": {"incidentId": {"type": "string"}},
+                    "required": ["incidentId"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_PAGERDUTY_API_KEY"],
+        connector_file="pagerduty.mjs",
+        icon="pagerduty",
+    ),
+    # --- Tier 4: AI-native tools ---
+    "mcp-bridge": ToolDefinition(
+        name="mcp-bridge",
+        description="MCP Bridge - connect any MCP server as a tool",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="list_tools",
+                description="Discover tools from MCP server",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="call_tool",
+                description="Call a tool on the MCP server",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "toolName": {"type": "string"},
+                        "arguments": {"type": "object"},
+                    },
+                    "required": ["toolName"],
+                },
+            ),
+            ToolFunction(
+                name="list_resources",
+                description="List MCP resources",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="read_resource",
+                description="Read an MCP resource",
+                parameters={
+                    "type": "object",
+                    "properties": {"uri": {"type": "string"}},
+                    "required": ["uri"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_MCP_SERVER_URL"],
+        connector_file="mcp-bridge.mjs",
+        icon="mcp",
+    ),
+    "human-input": ToolDefinition(
+        name="human-input",
+        description=(
+            "Human-in-the-Loop - collect structured input, approvals, "
+            "and content reviews from humans"
+        ),
+        category="general",
+        functions=[
+            ToolFunction(
+                name="request_input",
+                description="Request structured data from a human",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "schema": {"type": "object"},
+                    },
+                    "required": ["prompt", "schema"],
+                },
+            ),
+            ToolFunction(
+                name="check_input",
+                description="Check if human has responded",
+                parameters={
+                    "type": "object",
+                    "properties": {"requestId": {"type": "string"}},
+                    "required": ["requestId"],
+                },
+            ),
+            ToolFunction(
+                name="request_approval",
+                description="Request yes/no approval",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "details": {"type": "string"},
+                    },
+                    "required": ["title"],
+                },
+            ),
+        ],
+        credential_env_vars=[],
+        connector_file="human-input.mjs",
+        icon="human",
+    ),
+    "filesystem": ToolDefinition(
+        name="filesystem",
+        description="File system operations in sandbox - read, write, list, search",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="read_file",
+                description="Read file content",
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            ),
+            ToolFunction(
+                name="write_file",
+                description="Write content to file",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                },
+            ),
+            ToolFunction(
+                name="list_directory",
+                description="List directory contents",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["path"],
+                },
+            ),
+            ToolFunction(
+                name="search_files",
+                description="Search files by glob pattern",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "directory": {"type": "string"},
+                        "pattern": {"type": "string"},
+                    },
+                    "required": ["directory", "pattern"],
+                },
+            ),
+        ],
+        credential_env_vars=[],
+        connector_file="filesystem.mjs",
+        icon="filesystem",
+    ),
+    "shell": ToolDefinition(
+        name="shell",
+        description="Execute shell commands and scripts in sandbox",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="execute",
+                description="Run a shell command",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["command"],
+                },
+            ),
+            ToolFunction(
+                name="execute_script",
+                description="Run a multi-line script",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "script": {"type": "string"},
+                        "interpreter": {"type": "string"},
+                    },
+                    "required": ["script"],
+                },
+            ),
+        ],
+        credential_env_vars=[],
+        connector_file="shell.mjs",
+        icon="shell",
+    ),
+    "python-runtime": ToolDefinition(
+        name="python-runtime",
+        description="Execute Python code snippets with data processing",
+        category="general",
+        functions=[
+            ToolFunction(
+                name="execute",
+                description="Run Python code",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["code"],
+                },
+            ),
+            ToolFunction(
+                name="execute_with_data",
+                description="Run code with JSON data input",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"},
+                        "inputData": {"type": "object"},
+                    },
+                    "required": ["code", "inputData"],
+                },
+            ),
+            ToolFunction(
+                name="install_packages",
+                description="Install Python packages",
+                parameters={
+                    "type": "object",
+                    "properties": {"packages": {"type": "array"}},
+                    "required": ["packages"],
+                },
+            ),
+        ],
+        credential_env_vars=[],
+        connector_file="python-runtime.mjs",
+        icon="python",
+    ),
+    "code-interpreter": ToolDefinition(
+        name="code-interpreter",
+        description=(
+            "Jupyter-style code execution with data analysis and charting"
+        ),
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="run_cell",
+                description="Execute a code cell",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"},
+                        "language": {"type": "string"},
+                    },
+                    "required": ["code"],
+                },
+            ),
+            ToolFunction(
+                name="run_analysis",
+                description="Auto-analyze data with pandas",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "data": {"type": "object"},
+                        "question": {"type": "string"},
+                    },
+                    "required": ["data", "question"],
+                },
+            ),
+            ToolFunction(
+                name="create_chart",
+                description="Generate a chart as base64 PNG",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "data": {"type": "object"},
+                        "chartType": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["data", "chartType"],
+                },
+            ),
+        ],
+        credential_env_vars=[],
+        connector_file="code-interpreter.mjs",
+        icon="code",
+    ),
 }
 
 # All known tool names (for YAML validation)
