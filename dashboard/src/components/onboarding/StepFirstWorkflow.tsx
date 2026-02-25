@@ -106,8 +106,8 @@ export function StepFirstWorkflow({ selected, onSelect, onNext, onBack }: StepFi
       </div>
 
       {/* Search */}
-      <div className="group relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted transition-all duration-200 group-focus-within:text-accent group-focus-within:scale-110" />
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
         <input
           type="text"
           value={search}
@@ -116,7 +116,7 @@ export function StepFirstWorkflow({ selected, onSelect, onNext, onBack }: StepFi
           className={cn(
             "w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground",
             "placeholder:text-muted/50",
-            "focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent focus:shadow-[0_0_12px_rgba(245,158,11,0.15)]",
+            "focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent",
             "transition-all duration-200"
           )}
         />
@@ -133,10 +133,10 @@ export function StepFirstWorkflow({ selected, onSelect, onNext, onBack }: StepFi
         ) : (
           categories.map((category) => (
             <div key={category}>
-              <p className="mb-2 text-xs font-semibold text-muted uppercase tracking-wider border-l-2 border-accent/40 pl-2 animate-[fade-in-left_0.3s_ease-out_both]">
+              <p className="mb-2 text-xs font-semibold text-muted uppercase tracking-wider">
                 {category}
               </p>
-              <div className="grid gap-2 stagger-children">
+              <div className="grid gap-2">
                 {grouped[category].map((t) => {
                   const isSelected = selected === t.name;
                   return (
@@ -146,8 +146,8 @@ export function StepFirstWorkflow({ selected, onSelect, onNext, onBack }: StepFi
                       className={cn(
                         "flex items-start gap-3 rounded-xl border p-3 text-left transition-all duration-200",
                         isSelected
-                          ? "border-accent bg-accent/5 glow-accent card-selected"
-                          : "border-border hover:border-accent/40 card-hover-lift"
+                          ? "border-accent bg-accent/5 glow-accent"
+                          : "border-border hover:border-accent/40"
                       )}
                     >
                       <div

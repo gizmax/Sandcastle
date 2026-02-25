@@ -83,15 +83,15 @@ export function StepBackendSelect({
               className={cn(
                 "relative flex flex-col items-start gap-2 rounded-xl border p-4 text-left transition-all duration-200",
                 isSelected
-                  ? "border-accent bg-accent/5 glow-accent card-selected"
-                  : "border-border hover:border-accent/40 hover:bg-accent/[0.02] card-hover-lift"
+                  ? "border-accent bg-accent/5 glow-accent"
+                  : "border-border hover:border-accent/40 hover:bg-accent/[0.02]"
               )}
             >
               {/* Badge */}
               {backend.badge && (
                 <span
                   className={cn(
-                    "absolute top-3 right-3 rounded-full px-2 py-0.5 text-[10px] font-semibold animate-[fade-in-left_0.3s_ease-out_0.2s_both]",
+                    "absolute top-3 right-3 rounded-full px-2 py-0.5 text-[10px] font-semibold",
                     backend.badge === "Recommended"
                       ? "bg-accent/15 text-accent"
                       : "bg-muted/15 text-muted"
@@ -139,7 +139,7 @@ export function StepBackendSelect({
                     stroke="currentColor"
                     strokeWidth={3}
                   >
-                    <path className="checkmark-draw" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 )}
               </div>

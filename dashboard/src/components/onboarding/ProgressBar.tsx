@@ -7,9 +7,8 @@ interface ProgressBarProps {
 
 /**
  * Horizontal stepped progress bar with amber fill.
- * Completed steps are solid amber with animated checkmark draw,
- * current step glows and pulses, future steps are muted gray.
- * Connectors animate their fill left-to-right.
+ * Completed steps are solid amber, current step glows,
+ * future steps are muted gray.
  */
 export function ProgressBar({ steps, currentStep }: ProgressBarProps) {
   return (
@@ -27,8 +26,8 @@ export function ProgressBar({ steps, currentStep }: ProgressBarProps) {
                 <div
                   className={cn(
                     "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300",
-                    isCompleted && "bg-accent text-accent-foreground scale-in-bounce",
-                    isCurrent && "bg-accent text-accent-foreground glow-accent ring-2 ring-accent/30 step-indicator-pulse",
+                    isCompleted && "bg-accent text-accent-foreground",
+                    isCurrent && "bg-accent text-accent-foreground glow-accent ring-2 ring-accent/30",
                     isFuture && "bg-border text-muted"
                   )}
                 >
@@ -40,12 +39,7 @@ export function ProgressBar({ steps, currentStep }: ProgressBarProps) {
                       stroke="currentColor"
                       strokeWidth={2.5}
                     >
-                      <path
-                        className="checkmark-draw"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M5 13l4 4L19 7"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   ) : (
                     i + 1
@@ -63,20 +57,15 @@ export function ProgressBar({ steps, currentStep }: ProgressBarProps) {
                 </span>
               </div>
 
-              {/* Connector line between steps - two layers for animated fill */}
+              {/* Connector line between steps */}
               {i < steps.length - 1 && (
-                <div className="relative mx-2 mt-[-18px] h-0.5 flex-1">
-                  {/* Background track */}
-                  <div className="absolute inset-0 rounded-full bg-border" />
-                  {/* Amber overlay with animated scaleX */}
-                  {i < currentStep && (
-                    <div
-                      className="absolute inset-0 rounded-full bg-accent origin-left"
-                      style={{
-                        animation: `connector-fill 0.5s ease-out ${i * 0.15}s both`,
-                      }}
-                    />
-                  )}
+                <div className="mx-2 mt-[-18px] h-px flex-1">
+                  <div
+                    className={cn(
+                      "h-full w-full transition-colors duration-300",
+                      i < currentStep ? "bg-accent" : "bg-border"
+                    )}
+                  />
                 </div>
               )}
             </li>

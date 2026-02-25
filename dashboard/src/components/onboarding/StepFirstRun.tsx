@@ -244,10 +244,10 @@ export function StepFirstRun({ selectedTemplate, onNext, onBack }: StepFirstRunP
           <Loader2 className="h-4 w-4 animate-spin text-accent" />
         )}
         {status === "completed" && (
-          <CheckCircle className="h-4 w-4 text-success scale-in-bounce" />
+          <CheckCircle className="h-4 w-4 text-success" />
         )}
         {status === "failed" && (
-          <XCircle className="h-4 w-4 text-error scale-in-bounce" />
+          <XCircle className="h-4 w-4 text-error" />
         )}
         <span
           className={cn(
@@ -259,16 +259,7 @@ export function StepFirstRun({ selectedTemplate, onNext, onBack }: StepFirstRunP
         >
           {status === "idle" && "Preparing..."}
           {status === "starting" && "Starting..."}
-          {status === "running" && (
-            <>
-              Running
-              <span className="inline-flex ml-1 gap-0.5">
-                <span className="inline-block h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:0ms]" />
-                <span className="inline-block h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:150ms]" />
-                <span className="inline-block h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:300ms]" />
-              </span>
-            </>
-          )}
+          {status === "running" && "Running..."}
           {status === "completed" && "Completed"}
           {status === "failed" && "Failed"}
         </span>
@@ -282,22 +273,10 @@ export function StepFirstRun({ selectedTemplate, onNext, onBack }: StepFirstRunP
       {/* Terminal-style log display */}
       <div
         ref={logRef}
-        className={cn(
-          "h-56 overflow-y-auto rounded-xl border bg-[#0A0A0A] p-4 font-mono text-xs leading-relaxed",
-          (status === "starting" || status === "running") && "terminal-running",
-          status === "completed" && "terminal-success",
-          status === "failed" && "terminal-error",
-          status === "idle" && "border-border"
-        )}
+        className="h-56 overflow-y-auto rounded-xl border border-border bg-[#0A0A0A] p-4 font-mono text-xs leading-relaxed"
       >
         {logs.map((log, i) => (
-          <div
-            key={i}
-            className="flex gap-2"
-            style={{
-              animation: `log-line-enter 0.2s ease-out ${Math.min(i * 0.05, 0.5)}s both`,
-            }}
-          >
+          <div key={i} className="flex gap-2">
             <span className="shrink-0 text-[#555]">{log.time}</span>
             <span
               className={cn(

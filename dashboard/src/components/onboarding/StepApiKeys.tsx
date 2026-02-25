@@ -131,7 +131,7 @@ export function StepApiKeys({
       </div>
 
       {/* Key fields */}
-      <div className="space-y-4 stagger-children">
+      <div className="space-y-4">
         {fields.map((field) => (
           <div key={field.id} className="space-y-1.5">
             <label className="flex items-center gap-1.5 text-sm font-medium text-foreground">
@@ -147,7 +147,7 @@ export function StepApiKeys({
                 className={cn(
                   "w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground font-mono",
                   "placeholder:text-muted/50",
-                  "focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent focus:shadow-[0_0_12px_rgba(245,158,11,0.15)]",
+                  "focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent",
                   "transition-all duration-200"
                 )}
               />
@@ -191,13 +191,13 @@ export function StepApiKeys({
         </button>
 
         {testResult === "success" && (
-          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-success scale-in-bounce">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-success">
             <CheckCircle className="h-4 w-4" />
             Connected
           </span>
         )}
         {testResult === "error" && (
-          <span className="inline-flex items-center gap-1.5 text-sm text-error scale-in-bounce">
+          <span className="inline-flex items-center gap-1.5 text-sm text-error">
             <XCircle className="h-4 w-4" />
             Connection failed
           </span>
