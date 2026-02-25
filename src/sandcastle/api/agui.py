@@ -18,12 +18,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from sandcastle.engine.events import event_bus
-from sandcastle.models.db import Run, RunStatus, async_session
+from sandcastle.models.db import Run, async_session
 
 logger = logging.getLogger(__name__)
 
