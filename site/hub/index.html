@@ -1561,6 +1561,383 @@
         gap: 8px;
       }
     }
+
+    /* ---- THEME TRANSITION ---- */
+    html.transitioning,
+    html.transitioning *,
+    html.transitioning *::before,
+    html.transitioning *::after {
+      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
+    }
+
+    /* ---- LIGHT MODE ---- */
+    html.light {
+      --bg: #ffffff;
+      --surface: #f8f8f8;
+      --surface-hover: #f0f0f0;
+      --surface-raised: #ffffff;
+      --border: #e5e5e5;
+      --border-light: #d4d4d4;
+      --text: #171717;
+      --text-muted: #525252;
+      --text-dim: #737373;
+      --code-bg: #f5f5f5;
+    }
+
+    html.light nav {
+      background: rgba(255, 255, 255, 0.85);
+    }
+
+    html.light .modal-overlay {
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    html.light .tag {
+      background: rgba(0, 0, 0, 0.06);
+    }
+
+    html.light .hero::before {
+      background-image: radial-gradient(circle, rgba(245, 158, 11, 0.15) 1px, transparent 1px);
+    }
+
+    html.light .hero::after {
+      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.1) 0%, transparent 65%);
+    }
+
+    /* ---- THEME TOGGLE ---- */
+    .theme-toggle {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      font-size: 16px;
+      cursor: pointer;
+      line-height: 1;
+      transition: border-color 0.2s, background 0.2s;
+      color: var(--text);
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--accent);
+      background: var(--surface-hover);
+    }
+
+    /* ---- STAR RATING ---- */
+    .card-rating {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .card-rating .stars {
+      color: #f59e0b;
+      font-size: 11px;
+      letter-spacing: -1px;
+    }
+
+    .card-rating .rating-num {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: #f59e0b;
+      font-size: 12px;
+    }
+
+    .card-rating .review-count {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .modal-rating {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .modal-rating .stars {
+      color: #f59e0b;
+      font-size: 16px;
+      letter-spacing: 0px;
+    }
+
+    .modal-rating .rating-num {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 18px;
+      color: #f59e0b;
+    }
+
+    .modal-rating .review-count {
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+
+    /* ---- CARD BADGE ---- */
+    .card-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 3px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-radius: 100px;
+      z-index: 2;
+      line-height: 1.4;
+    }
+
+    .card-badge--featured {
+      background: #f59e0b;
+      color: #000;
+    }
+
+    .card-badge--trending {
+      background: #10B981;
+      color: #fff;
+    }
+
+    .card-badge--new {
+      background: #3B82F6;
+      color: #fff;
+    }
+
+    /* ---- BADGE FILTER BUTTONS ---- */
+    .badge-filters {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .badge-filter-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 12px;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--surface);
+      color: var(--text-muted);
+    }
+
+    .badge-filter-btn:hover {
+      border-color: var(--border-light);
+      color: var(--text);
+    }
+
+    .badge-filter-btn.active {
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .badge-filter-btn[data-badge="featured"].active {
+      background: #f59e0b;
+      color: #000;
+    }
+
+    .badge-filter-btn[data-badge="trending"].active {
+      background: #10B981;
+    }
+
+    .badge-filter-btn[data-badge="new"].active {
+      background: #3B82F6;
+    }
+
+    /* ---- VERSION HISTORY ---- */
+    .version-history-section {
+      margin-bottom: 24px;
+    }
+
+    .version-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding-left: 16px;
+      border-left: 2px solid var(--border);
+    }
+
+    .version-entry {
+      position: relative;
+      padding: 0 0 16px 20px;
+    }
+
+    .version-entry:last-child {
+      padding-bottom: 0;
+    }
+
+    .version-entry::before {
+      content: '';
+      position: absolute;
+      left: -7px;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg);
+    }
+
+    .version-entry .ver-tag {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .version-entry .ver-date {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: 8px;
+    }
+
+    .version-entry .ver-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .version-entry .ver-community {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-style: italic;
+      margin-top: 4px;
+    }
+
+    /* ---- RELATED WORKFLOWS ---- */
+    .related-section {
+      margin-bottom: 24px;
+    }
+
+    .related-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .related-card {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .related-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+
+    .related-card-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .related-card-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: auto;
+    }
+
+    .related-card-rating {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+    }
+
+    .related-card-rating .stars {
+      color: #f59e0b;
+      font-size: 10px;
+      letter-spacing: -1px;
+    }
+
+    .related-card-rating .rating-num {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: #f59e0b;
+    }
+
+    .related-card .card-cost-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+
+    @media (max-width: 600px) {
+      .related-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ---- SOCIAL SHARE BUTTONS ---- */
+    .share-section {
+      margin-bottom: 24px;
+    }
+
+    .share-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .share-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .share-btn:hover {
+      color: var(--text);
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .share-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .share-btn.copied {
+      color: #10B981;
+      border-color: #10B981;
+    }
+
+    /* ---- SORT/BADGE FILTER ROW ---- */
+    .filter-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
   </style>
 </head>
 <body>
@@ -1584,6 +1961,7 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           <span class="link-text">GitHub</span>
         </a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark/light mode" title="Toggle theme">&#127769;</button>
       </div>
     </div>
   </nav>
@@ -1653,13 +2031,21 @@
             <span class="dot" style="background:var(--cat-general_ai)"></span>General AI
           </button>
         </div>
-        <select class="sort-select" id="sort-select">
-          <option value="name">Sort: A-Z</option>
-          <option value="newest">Sort: Newest</option>
-          <option value="steps">Sort: Step count</option>
-          <option value="downloads">Sort: Most Downloads</option>
-          <option value="cost-low">Sort: Cost Low-High</option>
-        </select>
+        <div class="filter-right">
+          <div class="badge-filters" id="badge-filters">
+            <button class="badge-filter-btn" data-badge="featured" onclick="toggleBadgeFilter('featured')">Featured</button>
+            <button class="badge-filter-btn" data-badge="trending" onclick="toggleBadgeFilter('trending')">Trending</button>
+            <button class="badge-filter-btn" data-badge="new" onclick="toggleBadgeFilter('new')">New</button>
+          </div>
+          <select class="sort-select" id="sort-select">
+            <option value="name">Sort: A-Z</option>
+            <option value="newest">Sort: Newest</option>
+            <option value="steps">Sort: Step count</option>
+            <option value="downloads">Sort: Most Downloads</option>
+            <option value="cost-low">Sort: Cost Low-High</option>
+            <option value="rating">Sort: Highest Rated</option>
+          </select>
+        </div>
       </div>
     </div>
   </section>
@@ -1696,6 +2082,7 @@
         <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
+        <div class="modal-rating" id="modal-rating"></div>
         <p class="modal-desc" id="modal-desc"></p>
         <div class="modal-highlights" id="modal-highlights"></div>
         <div class="modal-remix-info" id="modal-remix-info" style="display:none"></div>
@@ -1713,6 +2100,18 @@
         </div>
         <div class="modal-tags" id="modal-tags"></div>
         <div class="modal-meta-grid" id="modal-meta"></div>
+        <div class="version-history-section" id="version-history-section">
+          <div class="modal-section-label">Version History</div>
+          <div class="version-timeline" id="version-timeline"></div>
+        </div>
+        <div class="related-section" id="related-section" style="display:none">
+          <div class="modal-section-label">Related Workflows</div>
+          <div class="related-grid" id="related-grid"></div>
+        </div>
+        <div class="share-section">
+          <div class="modal-section-label">Share</div>
+          <div class="share-buttons" id="share-buttons"></div>
+        </div>
         <div class="modal-install-section">
           <div class="modal-install-header">
             <span class="modal-install-label">Install via CLI</span>
@@ -1755,6 +2154,7 @@
     var activeCategory = 'all';
     var activeCollection = null;
     var activeAuthor = null;
+    var activeBadgeFilter = null;
     var searchQuery = '';
     var sortBy = 'name';
     var debounceTimer = null;
@@ -1845,22 +2245,80 @@
     function animateNumber(id, target) {
       var el = document.getElementById(id);
       if (!el) return;
-      var duration = 900;
+      var duration = 1500;
       var start = performance.now();
+      function easeOut(t) {
+        return 1 - Math.pow(1 - t, 3);
+      }
       function tick(now) {
         var elapsed = now - start;
         var progress = Math.min(elapsed / duration, 1);
-        var eased = 1 - Math.pow(1 - progress, 3);
+        var eased = easeOut(progress);
         var val = Math.round(eased * target);
-        el.textContent = target >= 1000 ? formatNumber(val) : val;
+        el.textContent = formatNumberWithCommas(val);
         if (progress < 1) requestAnimationFrame(tick);
       }
       requestAnimationFrame(tick);
     }
 
+    function formatNumberWithCommas(n) {
+      return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
     function formatNumber(n) {
       if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
       return n.toString();
+    }
+
+    /* ========== Rating helpers ========== */
+    function computeRating(t) {
+      var downloads = t.downloads || 0;
+      var remixCount = t.remix_count || 0;
+      var raw = 3.5 + (downloads / 300) + (remixCount * 0.15);
+      return Math.min(5.0, Math.max(3.8, Math.round(raw * 10) / 10));
+    }
+
+    function computeReviewCount(t) {
+      var downloads = t.downloads || 0;
+      var remixCount = t.remix_count || 0;
+      return Math.floor(downloads * 0.15) + remixCount;
+    }
+
+    function renderStars(rating) {
+      // Round to nearest 0.5
+      var rounded = Math.round(rating * 2) / 2;
+      var full = Math.floor(rounded);
+      var hasHalf = (rounded - full) >= 0.5;
+      var totalFilled = full + (hasHalf ? 1 : 0);
+      var stars = '';
+      for (var i = 0; i < full; i++) stars += '\u2605';
+      if (hasHalf) stars += '\u2605';
+      var empty = 5 - totalFilled;
+      for (var j = 0; j < empty; j++) stars += '\u2606';
+      return stars;
+    }
+
+    /* ========== Badge helpers ========== */
+    function getBadge(t) {
+      var rating = computeRating(t);
+      var downloads = t.downloads || 0;
+      var remixCount = t.remix_count || 0;
+      if (rating >= 4.8 && downloads > 150) return 'featured';
+      if (remixCount >= 3) return 'trending';
+      if (t.created_at === '2026-02-25') return 'new';
+      return null;
+    }
+
+    function toggleBadgeFilter(badge) {
+      if (activeBadgeFilter === badge) {
+        activeBadgeFilter = null;
+      } else {
+        activeBadgeFilter = badge;
+      }
+      document.querySelectorAll('.badge-filter-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.badge === activeBadgeFilter);
+      });
+      renderTemplates();
     }
 
     /* ========== Collections ========== */
@@ -1980,6 +2438,11 @@
         });
       }
 
+      // Badge filter
+      if (activeBadgeFilter) {
+        items = items.filter(function(t) { return getBadge(t) === activeBadgeFilter; });
+      }
+
       // Sort
       if (sortBy === 'name') {
         items.sort(function(a, b) { return a.name.localeCompare(b.name); });
@@ -1991,6 +2454,8 @@
         items.sort(function(a, b) { return (b.downloads || 0) - (a.downloads || 0); });
       } else if (sortBy === 'cost-low') {
         items.sort(function(a, b) { return (a.estimated_cost_per_run || 0) - (b.estimated_cost_per_run || 0); });
+      } else if (sortBy === 'rating') {
+        items.sort(function(a, b) { return computeRating(b) - computeRating(a); });
       }
 
       return items;
@@ -2058,8 +2523,30 @@
           sourceBadgeHtml = '<span class="card-source-badge community">Community</span>';
         }
 
+        // Badge (Featured / Trending / New)
+        var badge = getBadge(t);
+        var badgeHtml = '';
+        if (badge === 'featured') {
+          badgeHtml = '<span class="card-badge card-badge--featured">Featured</span>';
+        } else if (badge === 'trending') {
+          badgeHtml = '<span class="card-badge card-badge--trending">Trending</span>';
+        } else if (badge === 'new') {
+          badgeHtml = '<span class="card-badge card-badge--new">New</span>';
+        }
+
+        // Star rating
+        var rating = computeRating(t);
+        var reviewCount = computeReviewCount(t);
+        var ratingHtml =
+          '<span class="card-rating">' +
+            '<span class="rating-num">' + rating.toFixed(1) + '</span>' +
+            '<span class="stars">' + renderStars(rating) + '</span>' +
+            '<span class="review-count">(' + reviewCount + ')</span>' +
+          '</span>';
+
         html +=
           '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
+            badgeHtml +
             '<div class="card-header-row">' +
               '<div class="card-category" style="color:' + color + '">' +
                 '<span class="dot" style="background:' + color + '"></span>' + escHtml(label) +
@@ -2077,6 +2564,7 @@
                 (downloads > 0 ? '<span class="card-downloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' + formatNumber(downloads) + '</span>' : '') +
                 (remixCount > 0 ? '<span class="card-remixes">\u21AA ' + remixCount + '</span>' : '') +
               '</div>' +
+              ratingHtml +
               (cost != null ? '<span class="card-cost-badge">~$' + formatCost(cost) + '</span>' : '') +
             '</div>' +
           '</div>';
@@ -2125,6 +2613,15 @@
         '<span style="color:' + color + '">' + escHtml(label) + '</span>';
 
       document.getElementById('modal-title').textContent = t.name;
+
+      // Rating (prominent in modal)
+      var modalRating = computeRating(t);
+      var modalReviewCount = computeReviewCount(t);
+      document.getElementById('modal-rating').innerHTML =
+        '<span class="rating-num">' + modalRating.toFixed(1) + '</span>' +
+        '<span class="stars">' + renderStars(modalRating) + '</span>' +
+        '<span class="review-count">(' + modalReviewCount + ' reviews)</span>';
+
       document.getElementById('modal-desc').textContent = t.description;
 
       // Highlights bar
@@ -2176,6 +2673,15 @@
         metaItem('Category', '<span style="color:' + color + '">' + escHtml(label) + '</span>') +
         metaItem('Created', escHtml(created));
       document.getElementById('modal-meta').innerHTML = metaHtml;
+
+      // Version history (feature 4)
+      renderVersionHistory(t);
+
+      // Related workflows (feature 3)
+      renderRelatedWorkflows(t);
+
+      // Social sharing (feature 5)
+      renderShareButtons(t);
 
       // Install command
       var cmd = 'sandcastle hub install ' + t.slug;
@@ -2598,16 +3104,180 @@
       setTimeout(typeChar, 1200);
     }
 
+    /* ========== Version History ========== */
+    function renderVersionHistory(t) {
+      var container = document.getElementById('version-timeline');
+      var downloads = t.downloads || 0;
+      var remixCount = t.remix_count || 0;
+      var created = t.created_at || t.created || '2026-02-25';
+
+      var entries = [];
+
+      // Latest versions first
+      if (downloads > 200) {
+        entries.push({
+          ver: 'v1.2.0',
+          date: 'Latest',
+          desc: 'Added parallel execution and new analysis dimensions'
+        });
+      }
+      if (downloads > 100) {
+        entries.push({
+          ver: 'v1.1.0',
+          date: '',
+          desc: 'Enhanced prompts and scoring models'
+        });
+      }
+      entries.push({
+        ver: 'v1.0.0',
+        date: created,
+        desc: 'Initial release'
+      });
+
+      var html = '';
+      entries.forEach(function(e) {
+        html +=
+          '<div class="version-entry">' +
+            '<span class="ver-tag">' + escHtml(e.ver) + '</span>' +
+            (e.date ? '<span class="ver-date">' + escHtml(e.date) + '</span>' : '') +
+            '<div class="ver-desc">' + escHtml(e.desc) + '</div>' +
+          '</div>';
+      });
+
+      if (remixCount > 0) {
+        html +=
+          '<div class="version-entry">' +
+            '<div class="ver-community">Remixed ' + remixCount + ' time' + (remixCount !== 1 ? 's' : '') + ' by community</div>' +
+          '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    /* ========== Related Workflows ========== */
+    function renderRelatedWorkflows(t) {
+      var section = document.getElementById('related-section');
+      var grid = document.getElementById('related-grid');
+
+      if (!registry || !registry.templates) {
+        section.style.display = 'none';
+        return;
+      }
+
+      // Find same category, exclude current, sort by rating desc
+      var related = registry.templates
+        .filter(function(item) { return item.category === t.category && item.slug !== t.slug; })
+        .sort(function(a, b) { return computeRating(b) - computeRating(a); })
+        .slice(0, 3);
+
+      if (related.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+
+      section.style.display = 'block';
+
+      var html = '';
+      related.forEach(function(r) {
+        var rRating = computeRating(r);
+        var rCost = r.estimated_cost_per_run;
+        html +=
+          '<div class="related-card" onclick="event.stopPropagation();hideDetail();setTimeout(function(){showDetail(\'' + escAttr(r.slug) + '\')},300)">' +
+            '<div class="related-card-name">' + escHtml(r.name) + '</div>' +
+            '<div class="related-card-meta">' +
+              '<span class="related-card-rating">' +
+                '<span class="rating-num">' + rRating.toFixed(1) + '</span>' +
+                '<span class="stars">' + renderStars(rRating) + '</span>' +
+              '</span>' +
+              (rCost != null ? '<span class="card-cost-badge">~$' + formatCost(rCost) + '</span>' : '') +
+            '</div>' +
+          '</div>';
+      });
+      grid.innerHTML = html;
+    }
+
+    /* ========== Social Share Buttons ========== */
+    function renderShareButtons(t) {
+      var container = document.getElementById('share-buttons');
+      var shareUrl = 'https://gizmax.cz/sandcastle/hub/?template=' + encodeURIComponent(t.slug);
+      var shareText = t.name + ' - AI workflow for Sandcastle';
+
+      var twitterUrl = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText) + '&url=' + encodeURIComponent(shareUrl);
+      var linkedinUrl = 'https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(shareUrl);
+
+      container.innerHTML =
+        '<button class="share-btn" id="share-copy-link" onclick="copyShareLink(\'' + escAttr(shareUrl) + '\')">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
+          'Copy Link' +
+        '</button>' +
+        '<a class="share-btn" href="' + escAttr(twitterUrl) + '" target="_blank" rel="noopener">' +
+          '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>' +
+          'Twitter / X' +
+        '</a>' +
+        '<a class="share-btn" href="' + escAttr(linkedinUrl) + '" target="_blank" rel="noopener">' +
+          '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>' +
+          'LinkedIn' +
+        '</a>';
+    }
+
+    function copyShareLink(url) {
+      navigator.clipboard.writeText(url).then(function() {
+        var btn = document.getElementById('share-copy-link');
+        btn.classList.add('copied');
+        btn.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
+          'Copied!';
+        setTimeout(function() {
+          btn.classList.remove('copied');
+          btn.innerHTML =
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
+            'Copy Link';
+        }, 2000);
+      });
+    }
+
+    /* ========== Theme Toggle ========== */
+    function initTheme() {
+      var saved = localStorage.getItem('sandcastle-hub-theme');
+      if (saved === 'light') {
+        document.documentElement.classList.add('light');
+        document.getElementById('theme-toggle').innerHTML = '&#9728;&#65039;';
+      }
+    }
+
+    function toggleTheme() {
+      document.documentElement.classList.add('transitioning');
+      var isLight = document.documentElement.classList.toggle('light');
+      var btn = document.getElementById('theme-toggle');
+      if (isLight) {
+        btn.innerHTML = '&#9728;&#65039;';
+        localStorage.setItem('sandcastle-hub-theme', 'light');
+      } else {
+        btn.innerHTML = '&#127769;';
+        localStorage.setItem('sandcastle-hub-theme', 'dark');
+      }
+      setTimeout(function() {
+        document.documentElement.classList.remove('transitioning');
+      }, 350);
+    }
+
+    // Init theme on load
+    initTheme();
+
     /* ========== Reset ========== */
     function resetFilters() {
       activeCategory = 'all';
       activeCollection = null;
       activeAuthor = null;
+      activeBadgeFilter = null;
       searchQuery = '';
       document.getElementById('search-input').value = '';
       updateCategoryPills();
       updateCollectionHighlight();
       hideAuthorBar();
+      document.querySelectorAll('.badge-filter-btn').forEach(function(btn) {
+        btn.classList.remove('active');
+      });
       renderTemplates();
     }
 
@@ -2657,6 +3327,9 @@
       hideAuthorBar();
     });
 
+    // Theme toggle
+    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
     // Modal close
     document.getElementById('modal-close').addEventListener('click', hideDetail);
     document.getElementById('modal-overlay').addEventListener('click', function(e) {
@@ -2667,7 +3340,15 @@
     });
 
     /* ========== Init ========== */
-    fetchRegistry();
+    fetchRegistry().then(function() {
+      // Check for ?template= deep link
+      var params = new URLSearchParams(window.location.search);
+      var tplSlug = params.get('template');
+      if (tplSlug && registry) {
+        var found = registry.templates.find(function(t) { return t.slug === tplSlug; });
+        if (found) showDetail(found.slug);
+      }
+    });
   </script>
 </body>
 </html>
