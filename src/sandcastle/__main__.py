@@ -724,6 +724,22 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     except OSError:
         _pass(f"Port {port} is available")
 
+    # --- Section 6: Telemetry ---
+    print()
+    print(_color("  Telemetry", _C.BOLD))
+    print(_color("  ---------", _C.BOLD))
+
+    if cfg and cfg.telemetry_enabled and cfg.sentry_dsn:
+        try:
+            importlib.import_module("sentry_sdk")
+            _pass(f"Sentry DSN configured ({cfg.sentry_dsn[:20]}...)")
+        except ImportError:
+            _fail("sentry-sdk not installed (pip install sandcastle-ai[telemetry])")
+    elif cfg and cfg.telemetry_enabled:
+        _warn("TELEMETRY_ENABLED=true but SENTRY_DSN not set")
+    else:
+        _pass("Telemetry disabled (opt-in with TELEMETRY_ENABLED=true)")
+
     # --- Summary ---
     print()
     if failures == 0:

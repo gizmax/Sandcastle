@@ -31,7 +31,7 @@ class TestToolRegistry:
             assert tool.description
             assert tool.category in (
                 "communication", "project_management", "crm", "data",
-                "general", "erp", "payments"
+                "general", "erp", "payments", "ai", "devops"
             )
             assert tool.connector_file.endswith(".mjs")
             assert len(tool.functions) > 0
