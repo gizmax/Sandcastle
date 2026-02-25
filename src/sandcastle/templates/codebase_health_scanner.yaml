@@ -1,0 +1,754 @@
+# name: Codebase Health Scanner
+# description: Analyze codebase for technical debt signals - complexity hotspots, test coverage gaps, dependency vulnerabilities, dead code, API contract drift, and documentation staleness with prioritized remediation roadmap
+# tags: [Engineering, Technical Debt, Code Quality, Security, DevOps]
+# category: engineering
+
+name: codebase-health-scanner
+description: Analyze codebase for technical debt signals - complexity hotspots, test coverage gaps, dependency vulnerabilities, dead code, API contract drift, and documentation staleness with prioritized remediation roadmap
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [code_interpreter]
+
+input_schema:
+  required: ["repo_url", "language"]
+  properties:
+    repo_url:
+      type: string
+      description: "Repository URL or local path to the codebase to analyze"
+    language:
+      type: string
+      description: "Primary programming language (e.g. 'python', 'typescript', 'java', 'go', 'rust')"
+    focus_areas:
+      type: string
+      description: "Comma-separated areas to focus on (default: all). Options: complexity, dependencies, coverage, dead_code, api_drift, docs"
+      default: "all"
+    tech_debt_budget:
+      type: string
+      description: "Hours available per sprint for tech debt reduction (used for roadmap planning)"
+      default: "20"
+
+steps:
+  - id: static-analysis
+    prompt: |
+      Perform comprehensive static analysis on the codebase to establish baseline
+      health metrics and identify code quality signals.
+
+      Repository: {input.repo_url}
+      Language: {input.language}
+      Focus areas: {input.focus_areas}
+
+      You are a Senior Software Engineer specializing in code quality analysis and
+      static analysis tooling. Your task is to perform a thorough static analysis
+      of the codebase and produce a detailed health report.
+
+      **REPOSITORY STRUCTURE ANALYSIS**
+
+      First, understand the codebase layout:
+      - Total files, lines of code (LOC), and lines of comments
+      - Directory structure and module organization
+      - Build system and configuration files
+      - Identify the architectural pattern (monolith, microservices, modular monolith)
+      - Entry points (main files, API routes, CLI commands)
+      - Configuration management approach (.env, config files, environment variables)
+
+      **LANGUAGE-SPECIFIC STATIC ANALYSIS**
+
+      For {input.language}, analyze:
+
+      **Python:**
+      - Type hint coverage (% of functions with type annotations)
+      - Docstring coverage (% of public functions/classes with docstrings)
+      - PEP 8 compliance indicators
+      - Import organization (absolute vs relative, circular imports)
+      - Exception handling patterns (bare except, generic Exception catches)
+      - Mutable default arguments
+      - Global variable usage
+      - Class vs function organization balance
+
+      **TypeScript/JavaScript:**
+      - TypeScript strict mode adoption and `any` type usage
+      - ESLint/Prettier configuration and rule coverage
+      - Import/export patterns (barrel files, tree-shaking readiness)
+      - Promise/async-await consistency (no mixing callbacks and promises)
+      - Null safety patterns (optional chaining, nullish coalescing)
+      - React-specific: prop types, key props, dependency arrays
+
+      **Java:**
+      - Null safety annotations (@NonNull, @Nullable)
+      - Exception handling patterns (checked vs unchecked, swallowed exceptions)
+      - Generics usage and raw type warnings
+      - Thread safety analysis for concurrent code
+      - Serialization concerns
+
+      **Go:**
+      - Error handling patterns (checked errors vs ignored)
+      - goroutine leak potential
+      - Race condition indicators
+      - Interface compliance and abstraction level
+      - Package organization
+
+      **CROSS-LANGUAGE ANALYSIS**
+
+      Regardless of language, analyze:
+
+      1. **Code Duplication Detection**
+         - Identify duplicated code blocks (>10 lines of identical or near-identical code)
+         - Calculate duplication percentage
+         - Map duplicate clusters (which files contain copies of the same logic)
+         - Classify: exact duplicates, parameterized duplicates, structural duplicates
+
+      2. **Naming Quality**
+         - Identify single-character variable names (outside of loops/lambdas)
+         - Inconsistent naming conventions (camelCase vs snake_case mixing)
+         - Misleading names (e.g., `data`, `temp`, `result` used pervasively)
+         - Abbreviations that reduce readability
+
+      3. **Function/Method Analysis**
+         - Functions exceeding 50 lines (long method smell)
+         - Functions with >5 parameters (too many params smell)
+         - Functions with high nesting depth (>4 levels)
+         - God classes/modules (>500 lines with mixed responsibilities)
+         - Utility/helper file bloat
+
+      4. **Comment Quality**
+         - TODO/FIXME/HACK/XXX comments with count and age
+         - Commented-out code blocks (should be removed and managed in VCS)
+         - Comment-to-code ratio per module
+         - Outdated comments (referencing non-existent code)
+
+      5. **Security Static Analysis**
+         - Hardcoded secrets (API keys, passwords, tokens in source)
+         - SQL injection potential (string concatenation in queries)
+         - Path traversal vulnerabilities
+         - Unsafe deserialization patterns
+         - SSRF potential in URL handling
+         - Missing input validation
+
+      6. **Configuration Analysis**
+         - Environment-specific hardcoding
+         - Magic numbers and magic strings
+         - Feature flags and technical switches
+         - Build configuration consistency
+
+      **METRICS SUMMARY**
+
+      Produce a codebase health scorecard:
+      | Metric | Value | Rating (A-F) |
+      |--------|-------|--------------|
+      | Lines of Code | | |
+      | Code Duplication % | | |
+      | Type Safety Coverage % | | |
+      | Documentation Coverage % | | |
+      | Long Functions Count | | |
+      | God Classes Count | | |
+      | Security Findings | | |
+      | TODO/FIXME Count | | |
+      | Comment-to-Code Ratio | | |
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "repository_profile" - Codebase structure, size, and architecture overview
+      2. "static_analysis_findings" - All findings categorized by severity (Critical/High/Medium/Low)
+      3. "duplication_report" - Duplicate code clusters with file locations
+      4. "security_findings" - Security-relevant static analysis results
+      5. "code_quality_scorecard" - Metrics table with ratings
+      6. "hotspot_files" - Top 20 files ranked by number of issues
+      7. "positive_patterns" - Good practices found (acknowledge what is done well)
+    model: haiku
+    max_turns: 10
+
+  - id: complexity-mapping
+    depends_on: [static-analysis]
+    prompt: |
+      Perform deep complexity analysis to identify the highest-risk areas of the codebase
+      where technical debt is most concentrated and refactoring will have the greatest impact.
+
+      Repository: {input.repo_url}
+      Language: {input.language}
+      Static analysis: {steps.static-analysis.output}
+
+      You are a Software Architecture Analyst specializing in complexity metrics and
+      code maintainability assessment. Your task is to create a comprehensive complexity
+      map of the codebase.
+
+      **COMPLEXITY METRICS FRAMEWORK**
+
+      **Metric 1: Cyclomatic Complexity (CC)**
+      For every function/method in the codebase, estimate cyclomatic complexity:
+      - Count decision points: if, else, elif, case, for, while, and, or, try/catch
+      - CC = edges - nodes + 2P (simplified: 1 + decision points)
+      - Classification:
+        * 1-5: Simple, low risk
+        * 6-10: Moderate complexity, some risk
+        * 11-20: High complexity, should refactor
+        * 21-50: Very high, dangerous to modify
+        * 50+: Untestable, critical debt
+      - Identify the top 20 most complex functions with file locations and CC scores
+
+      **Metric 2: Cognitive Complexity**
+      Goes beyond cyclomatic by measuring how hard code is to UNDERSTAND:
+      - Nesting penalty: Each level of nesting adds increasing cognitive load
+      - Flow-breaking structures: break, continue, early return, goto
+      - Recursion adds cognitive complexity
+      - Boolean expression complexity (compound conditions)
+      - For top 20 cyclomatic complexity functions, also estimate cognitive complexity
+      - Identify "cognitive cliffs" - functions where understanding drops sharply
+
+      **Metric 3: Halstead Metrics**
+      Estimate software science metrics for critical modules:
+      - Vocabulary (n): number of distinct operators + operands
+      - Length (N): total number of operators + operands
+      - Volume (V): N * log2(n) - information content
+      - Difficulty (D): (n1/2) * (N2/n2) - error proneness
+      - Effort (E): D * V - estimated implementation effort
+      - These predict bug density and maintenance effort
+
+      **Metric 4: Coupling Analysis**
+      Map the dependency relationships between modules:
+      - **Afferent Coupling (Ca)**: How many modules depend ON this module
+        (high Ca = high-risk to change, many things break)
+      - **Efferent Coupling (Ce)**: How many modules this module depends ON
+        (high Ce = high sensitivity to external changes)
+      - **Instability (I)**: Ce / (Ca + Ce) - 0 is maximally stable, 1 is maximally unstable
+      - **Abstractness (A)**: Ratio of abstract classes/interfaces to total classes
+      - **Distance from Main Sequence**: |A + I - 1| - deviation from ideal balance
+        * Zone of Pain: low A, low I (concrete and stable - hard to change but everything depends on it)
+        * Zone of Uselessness: high A, high I (abstract but nothing uses it)
+
+      **Metric 5: Churn-Complexity Correlation**
+      The most valuable metric for prioritizing refactoring:
+      - Analyze git history to identify files with highest change frequency (churn)
+      - Cross-reference with complexity scores
+      - Files with HIGH churn AND HIGH complexity are the #1 technical debt priority
+        (they change often and are hard to change safely)
+      - Files with HIGH complexity but LOW churn may be acceptable debt (stable, rarely touched)
+      - Create a churn-complexity quadrant map:
+        * Q1 (High churn, High complexity): REFACTOR IMMEDIATELY
+        * Q2 (High churn, Low complexity): Good - frequently changed, easy to maintain
+        * Q3 (Low churn, High complexity): Monitor - complex but stable, refactor when next touched
+        * Q4 (Low churn, Low complexity): Ideal - no action needed
+
+      **DEPENDENCY GRAPH ANALYSIS**
+
+      Map the module dependency graph:
+      - Identify circular dependencies (A depends on B depends on A)
+      - Identify dependency bottlenecks (single modules that everything depends on)
+      - Layer violations (e.g., presentation layer directly accessing data layer)
+      - Identify the "risk surface area" of each module:
+        Risk = (CC * Ca * churn) - modules that are complex, depended-upon, and change often
+
+      **ARCHITECTURE DEBT SIGNALS**
+
+      Identify structural problems:
+      - God objects/modules: classes or files that do too many things
+      - Leaky abstractions: implementation details exposed across module boundaries
+      - Shotgun surgery patterns: a single conceptual change requires editing many files
+      - Feature envy: code that uses methods/data from another class more than its own
+      - Inappropriate intimacy: classes that know too much about each other's internals
+      - Divergent change: one module is changed for multiple unrelated reasons
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "complexity_hotspots" - Top 20 most complex functions with all metrics
+      2. "churn_complexity_matrix" - Quadrant classification for all significant files
+      3. "coupling_analysis" - Module coupling metrics and dependency graph summary
+      4. "architecture_debt" - Structural anti-patterns identified
+      5. "refactoring_priorities" - Ranked list of what to refactor first (by risk reduction per effort)
+      6. "complexity_trends" - Is complexity growing or shrinking? (based on recent commits)
+      7. "positive_findings" - Well-structured, low-complexity areas to learn from
+    model: sonnet
+    max_turns: 10
+
+  - id: dependency-audit
+    depends_on: [static-analysis]
+    prompt: |
+      Audit all third-party dependencies for security vulnerabilities, license compliance,
+      maintenance health, and supply chain risk.
+
+      Repository: {input.repo_url}
+      Language: {input.language}
+      Static analysis: {steps.static-analysis.output}
+
+      You are a Supply Chain Security Analyst specializing in dependency auditing and
+      software composition analysis (SCA). Your task is to assess every third-party
+      dependency for risk.
+
+      **DEPENDENCY INVENTORY**
+
+      Catalog all dependencies from the package manifest:
+      - For Python: requirements.txt, pyproject.toml, setup.py, Pipfile, poetry.lock
+      - For JS/TS: package.json, package-lock.json, yarn.lock
+      - For Java: pom.xml, build.gradle
+      - For Go: go.mod, go.sum
+      - For Rust: Cargo.toml, Cargo.lock
+
+      For each dependency record:
+      - Package name and current version
+      - Latest available version
+      - Version constraint type (pinned, range, wildcard)
+      - Direct dependency or transitive (pulled in by another dep)
+      - Purpose/category (runtime, dev, test, build)
+
+      **VULNERABILITY ASSESSMENT (CVE ANALYSIS)**
+
+      For each dependency, check for known vulnerabilities:
+      - CVE identifiers and severity (CVSS score)
+      - Affected version ranges
+      - Whether current version is affected
+      - Whether a patched version is available
+      - Exploitability: Is there a known exploit in the wild?
+      - Attack vector: network, local, or physical
+
+      Severity classification:
+      - CRITICAL (CVSS 9.0-10.0): Actively exploited, remote code execution,
+        authentication bypass. Must fix immediately.
+      - HIGH (CVSS 7.0-8.9): Significant security risk. Fix within current sprint.
+      - MEDIUM (CVSS 4.0-6.9): Moderate risk, may require specific conditions. Plan fix.
+      - LOW (CVSS 0.1-3.9): Minor risk, fix when convenient.
+
+      **DEPENDENCY HEALTH ASSESSMENT**
+
+      For each dependency, evaluate maintenance health:
+      - Last release date (stale if >12 months, concerning if >6 months)
+      - GitHub stars and recent star trajectory
+      - Open issues count and trend
+      - Contributors: single maintainer (bus factor 1) vs active community
+      - Release cadence: regular releases or sporadic
+      - Is the project archived or deprecated?
+      - Are there known successors or recommended alternatives?
+
+      Health classification:
+      - HEALTHY: Active development, regular releases, responsive maintainers
+      - STABLE: Mature, low activity but not abandoned, no critical issues
+      - DECLINING: Decreasing activity, growing unresolved issues
+      - ABANDONED: No updates in >18 months, unresponsive maintainers
+      - RISKY: Single maintainer, no succession plan, critical to our app
+
+      **LICENSE COMPLIANCE**
+
+      Audit all dependency licenses:
+      - Identify the license for each dependency (MIT, Apache 2.0, GPL, LGPL, BSD, etc.)
+      - Flag copyleft licenses (GPL, AGPL) that may require source disclosure
+      - Flag non-OSS or proprietary licenses
+      - Check for license compatibility with the project's own license
+      - Identify dependencies with no license specified (legal risk)
+      - Check for license changes between versions (a common supply chain risk)
+
+      License risk classification:
+      - PERMISSIVE: MIT, Apache 2.0, BSD - low risk
+      - WEAK_COPYLEFT: LGPL, MPL - moderate risk, review usage
+      - STRONG_COPYLEFT: GPL, AGPL - high risk, may require source disclosure
+      - NO_LICENSE: Unknown - high risk, seek clarification
+      - COMMERCIAL: Proprietary - verify terms
+
+      **SUPPLY CHAIN RISK ANALYSIS**
+
+      Assess advanced supply chain risks:
+      - Typosquatting potential: are we using the correct package name?
+      - Dependency confusion: private vs public package name conflicts
+      - Transitive dependency depth: How deep is our dependency tree?
+      - Pinning strategy: Are versions pinned or floating?
+      - Lock file presence and integrity
+      - Build reproducibility: can we reproduce exact same build?
+      - Are pre/post-install scripts present in any dependency? (potential malicious code vector)
+
+      **UPDATE STRATEGY**
+
+      For each outdated dependency:
+      - Current version vs latest version
+      - Breaking changes between versions (major, minor, patch)
+      - Migration effort estimate (trivial, moderate, significant)
+      - Recommended update priority based on vulnerability + staleness + effort
+      - Suggested update sequence (which deps to update first based on compatibility)
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "dependency_inventory" - Complete list with versions and metadata
+      2. "vulnerability_report" - All CVEs found, sorted by severity
+      3. "health_assessment" - Per-dependency health classification
+      4. "license_audit" - License compliance report
+      5. "supply_chain_risks" - Advanced risk findings
+      6. "update_roadmap" - Prioritized update plan with effort estimates
+      7. "risk_summary" - Aggregate risk score (0-100) with breakdown
+      8. "immediate_actions" - Critical items requiring action within 48 hours
+    model: haiku
+    max_turns: 10
+
+  - id: test-coverage-analysis
+    depends_on: [static-analysis]
+    prompt: |
+      Analyze test quality, coverage patterns, and testing strategy effectiveness to
+      identify gaps that create risk for the codebase.
+
+      Repository: {input.repo_url}
+      Language: {input.language}
+      Static analysis: {steps.static-analysis.output}
+
+      You are a Quality Engineering Lead specializing in testing strategy and coverage
+      analysis. Your task is to assess the testing health of the codebase beyond simple
+      coverage percentages.
+
+      **TEST INVENTORY**
+
+      Catalog the testing infrastructure:
+      - Test framework(s) used (pytest, jest, JUnit, go test, etc.)
+      - Test runner configuration
+      - CI/CD test integration (which tests run on which triggers)
+      - Total test count (unit, integration, e2e, other)
+      - Test execution time (fast enough for developer workflow?)
+      - Test data management approach (fixtures, factories, mocks, real data)
+
+      **COVERAGE ANALYSIS**
+
+      Beyond simple line coverage percentage:
+
+      **Line/Statement Coverage:**
+      - Overall coverage percentage
+      - Per-module/package coverage breakdown
+      - Coverage variance: identify modules with 0% coverage
+      - Coverage trend: based on recently added code, is coverage improving or declining?
+
+      **Branch Coverage:**
+      - Percentage of conditional branches tested
+      - Identify untested branches in critical code paths
+      - Error handling branch coverage (are catch/except blocks tested?)
+      - Edge case coverage for boundary conditions
+
+      **Function Coverage:**
+      - Percentage of functions with at least one test
+      - Identify completely untested functions
+      - Critical path function coverage (entry points, API handlers, core business logic)
+
+      **Critical Path Coverage Mapping:**
+      The most important analysis - map business-critical code paths and their coverage:
+      - API endpoints: Which endpoints have no integration tests?
+      - Authentication/authorization: Is the auth chain fully tested?
+      - Payment/billing: Is financial logic covered?
+      - Data mutations: Are all write paths (create, update, delete) tested?
+      - Error paths: Are failure modes tested (network errors, invalid input, timeouts)?
+      - Concurrency: Are race conditions tested?
+
+      For each critical path:
+      - Coverage status: TESTED / PARTIALLY_TESTED / UNTESTED
+      - Risk if untested: CRITICAL / HIGH / MEDIUM / LOW
+      - Recommended test type: unit, integration, e2e, property-based, fuzz
+      - Estimated effort to close the gap
+
+      **TEST QUALITY ASSESSMENT**
+
+      Coverage percentage alone is misleading. Assess test quality:
+
+      1. **Assertion Density**: Tests with no assertions or only trivial assertions
+         (testing that code runs without error, but not testing behavior)
+      2. **Mock Abuse**: Tests that mock so heavily they test nothing real
+      3. **Test Independence**: Tests that depend on execution order or shared state
+      4. **Test Determinism**: Flaky tests that pass/fail non-deterministically
+      5. **Test Readability**: Can a developer understand what a test verifies?
+      6. **Arrange-Act-Assert Pattern**: Tests that follow clear structure
+      7. **Edge Case Coverage**: Do tests cover boundary values, nulls, empty inputs,
+         maximum lengths, concurrent access?
+      8. **Negative Testing**: Tests for expected failures, not just happy paths
+      9. **Performance Tests**: Are there load/stress tests for critical paths?
+      10. **Security Tests**: Are there tests for authentication, authorization,
+          input validation, injection prevention?
+
+      **TESTING ANTI-PATTERNS**
+
+      Identify problematic testing patterns:
+      - God tests: Single tests that verify too many things
+      - Test duplication: Multiple tests checking the same behavior
+      - Brittle tests: Tests that break when implementation changes (overtight coupling)
+      - Slow tests: Tests that are too slow for the developer feedback loop
+      - Missing test isolation: Tests that share database state or file system
+      - Hardcoded test data: Magic values without explanation
+      - Incomplete teardown: Tests that leave artifacts
+
+      **TESTING STRATEGY GAPS**
+
+      Assess the overall testing strategy:
+      - Is there a testing pyramid? (many unit, fewer integration, few e2e)
+        Or an ice cream cone? (few unit, many slow e2e - anti-pattern)
+      - Contract testing for API consumers/providers?
+      - Mutation testing readiness?
+      - Property-based testing for algorithmic code?
+      - Chaos/resilience testing for distributed systems?
+      - Accessibility testing for UI components?
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "test_inventory" - Complete test infrastructure overview
+      2. "coverage_metrics" - Line, branch, function coverage with per-module breakdown
+      3. "critical_path_coverage" - Business-critical paths and their test status
+      4. "test_quality_assessment" - Quality metrics beyond coverage
+      5. "anti_patterns" - Testing anti-patterns found with examples
+      6. "strategy_gaps" - Missing test types and approaches
+      7. "priority_test_backlog" - Recommended tests to write, ranked by risk reduction
+      8. "quick_wins" - Tests that would significantly improve coverage with minimal effort
+    model: haiku
+    max_turns: 10
+
+  - id: architecture-review
+    depends_on: [complexity-mapping, dependency-audit, test-coverage-analysis]
+    prompt: |
+      Synthesize all analysis results into a comprehensive architecture health assessment,
+      identifying systemic issues and their interconnections.
+
+      Repository: {input.repo_url}
+      Language: {input.language}
+      Focus areas: {input.focus_areas}
+      Static analysis: {steps.static-analysis.output}
+      Complexity mapping: {steps.complexity-mapping.output}
+      Dependency audit: {steps.dependency-audit.output}
+      Test coverage: {steps.test-coverage-analysis.output}
+
+      You are a Principal Software Architect conducting a formal architecture review.
+      Your task is to synthesize all preceding analyses into a holistic view of codebase
+      health, identifying systemic patterns and compound risks.
+
+      **COMPOUND RISK ANALYSIS**
+
+      Cross-reference findings to identify dangerous combinations:
+
+      1. **High Complexity + Low Coverage**: Modules that are complex AND poorly tested
+         represent the highest risk. A bug in these areas is hard to find, hard to fix,
+         and likely to cause regressions. List all modules in this intersection.
+
+      2. **High Churn + Vulnerable Dependencies**: Files that change frequently AND
+         depend on packages with known CVEs create an active attack surface. Map these.
+
+      3. **Tight Coupling + No Tests**: Tightly coupled modules without test coverage
+         create cascading failure risk - a change in one module silently breaks others.
+
+      4. **Dead Code + Active Dependencies**: Dead code that still imports active
+         dependencies wastes bundle size and creates unnecessary supply chain exposure.
+
+      5. **Complex Error Handling + Missing Negative Tests**: Complex error handling
+         paths that are never tested are almost certainly buggy.
+
+      **ARCHITECTURAL PATTERN ASSESSMENT**
+
+      Evaluate the architecture against established principles:
+
+      **SOLID Principles:**
+      - Single Responsibility: Are modules focused or do they have mixed concerns?
+      - Open/Closed: Can the system be extended without modifying existing code?
+      - Liskov Substitution: Do abstractions hold their contracts?
+      - Interface Segregation: Are interfaces lean or bloated?
+      - Dependency Inversion: Do high-level modules depend on abstractions or concretions?
+
+      **Clean Architecture Alignment:**
+      - Are domain entities independent of frameworks and infrastructure?
+      - Do dependencies point inward (infrastructure -> domain, not domain -> infrastructure)?
+      - Is business logic testable without external dependencies?
+
+      **Modularity Assessment:**
+      - Module cohesion: Do modules contain related functionality?
+      - Module coupling: Can modules be changed independently?
+      - Module boundary clarity: Are interfaces between modules well-defined?
+      - Deployment independence: Could modules be deployed separately if needed?
+
+      **API CONTRACT ANALYSIS**
+
+      If the codebase exposes APIs:
+      - Are API contracts documented (OpenAPI, GraphQL schema, protobuf)?
+      - Is there contract drift between documentation and implementation?
+      - Are API versions managed properly?
+      - Are breaking changes introduced without version bumps?
+      - Are there API endpoints with no consumers (dead endpoints)?
+      - Request/response validation completeness
+
+      **DOCUMENTATION ASSESSMENT**
+
+      Evaluate documentation health:
+      - README accuracy: Does it reflect current project state?
+      - Architecture decision records (ADRs): Are major decisions documented?
+      - API documentation: Complete and current?
+      - Onboarding documentation: Could a new developer get productive in <1 day?
+      - Runbook/operations documentation: Is there operational knowledge documented?
+      - Code comments: Are they helpful or misleading?
+      - Last documentation update dates vs last code changes
+
+      **DEAD CODE ANALYSIS**
+
+      Identify unused code that should be removed:
+      - Unreachable functions (no callers in the codebase)
+      - Unused imports
+      - Commented-out code blocks
+      - Feature flag guarded code where the flag was resolved long ago
+      - Deprecated endpoints or functions still in the codebase
+      - Unused configuration parameters
+      Estimate the total dead code as LOC and percentage.
+
+      **MAINTAINABILITY INDEX**
+
+      Calculate an overall maintainability score (0-100):
+      - Based on complexity, duplication, test coverage, documentation, and dependencies
+      - Weighted by the business criticality of each module
+      - Compare to industry benchmarks for {input.language} codebases
+      - Trend direction: improving, stable, or declining?
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "compound_risks" - Cross-referenced risk matrix with severity ratings
+      2. "architecture_assessment" - SOLID, clean architecture, modularity evaluation
+      3. "api_contract_health" - API documentation and drift analysis
+      4. "documentation_assessment" - Documentation completeness and freshness
+      5. "dead_code_inventory" - Unused code catalog with removal recommendations
+      6. "maintainability_index" - Overall score with breakdown and benchmarks
+      7. "systemic_issues" - Top 5 architectural problems that affect everything
+      8. "bright_spots" - Areas of the codebase that are exemplary
+    model: sonnet
+    max_turns: 10
+
+  - id: remediation-roadmap
+    depends_on: [architecture-review]
+    prompt: |
+      Create a prioritized, actionable remediation roadmap that fits within the team's
+      tech debt budget and maximizes risk reduction per effort invested.
+
+      Repository: {input.repo_url}
+      Language: {input.language}
+      Tech debt budget: {input.tech_debt_budget} hours per sprint
+      Architecture review: {steps.architecture-review.output}
+      Complexity mapping: {steps.complexity-mapping.output}
+      Dependency audit: {steps.dependency-audit.output}
+      Test coverage: {steps.test-coverage-analysis.output}
+
+      You are a Technical Program Manager specializing in tech debt reduction programs.
+      Your task is to convert the analysis into an executable roadmap that engineering
+      leadership can approve and the team can follow.
+
+      **PRIORITIZATION FRAMEWORK**
+
+      Score every remediation item on these axes:
+
+      **Risk Reduction Score (0-10):**
+      What is the probability and severity of a problem if we do NOT fix this?
+      - 10: Active security vulnerability being exploited
+      - 8-9: Critical path with no tests + high complexity + frequent changes
+      - 6-7: Known bugs or data integrity risks
+      - 4-5: Developer productivity degradation
+      - 2-3: Code quality improvement (nice to have)
+      - 0-1: Cosmetic or style improvements
+
+      **Effort Score (0-10, inverted - lower effort = higher score):**
+      - 10: <1 hour (version bump, config change)
+      - 8-9: 1-4 hours (small refactor, add tests)
+      - 6-7: 4-8 hours (moderate refactor, dependency migration)
+      - 4-5: 1-2 days (significant refactor, new test suite)
+      - 2-3: 3-5 days (major restructuring)
+      - 0-1: >1 week (architectural change)
+
+      **Business Impact Score (0-10):**
+      - 10: Revenue-impacting (production stability, customer-facing bugs)
+      - 8-9: Security or compliance (regulatory risk)
+      - 6-7: Developer productivity (velocity improvement for the whole team)
+      - 4-5: Operational efficiency (monitoring, deployment, debugging)
+      - 2-3: Code quality (long-term maintainability)
+      - 0-1: Aesthetic (code style, formatting)
+
+      **Priority Score = (Risk * 0.4) + (Effort * 0.3) + (Business Impact * 0.3)**
+
+      **REMEDIATION CATEGORIES**
+
+      Organize all items into these categories:
+
+      **Category 1: Security - Fix Immediately (Sprint 0)**
+      - Critical CVEs with known exploits
+      - Hardcoded secrets in source code
+      - Authentication/authorization bypass risks
+      - SQL injection or RCE vulnerabilities
+      These do not come from the tech debt budget - they are P0 security issues.
+
+      **Category 2: Quick Wins (Sprint 1)**
+      Items that deliver high value for minimal effort (<4 hours each):
+      - Dependency version bumps (patch releases with CVE fixes)
+      - Dead code removal (reduce attack surface and cognitive load)
+      - Missing test additions for critical paths
+      - Documentation updates for inaccurate information
+      Target: Complete all quick wins in the first sprint.
+
+      **Category 3: Targeted Refactoring (Sprints 2-4)**
+      Focused refactoring of the highest-risk modules:
+      - Decompose god classes/modules into focused components
+      - Reduce cyclomatic complexity of top hotspot functions
+      - Add test coverage to high-churn, untested code
+      - Extract common patterns to reduce duplication
+      Each item should be a self-contained PR with clear scope.
+
+      **Category 4: Structural Improvements (Sprints 5-8)**
+      Larger architectural improvements:
+      - Resolve circular dependencies
+      - Improve module boundaries and encapsulation
+      - Migrate deprecated dependencies
+      - Implement missing API contract validation
+      - Add integration test infrastructure
+
+      **Category 5: Strategic Initiatives (Quarter 2)**
+      Major improvements that require planning and potentially feature flags:
+      - Architecture migrations (if needed)
+      - Major dependency upgrades with breaking changes
+      - Testing strategy overhaul
+      - Documentation system implementation
+
+      **SPRINT PLANNING**
+
+      Given {input.tech_debt_budget} hours per sprint:
+
+      For each of the next 8 sprints, provide:
+      - Sprint number and theme (e.g., "Sprint 1: Security & Quick Wins")
+      - Specific items to address with estimated hours
+      - Total hours (must not exceed budget)
+      - Expected metrics improvement (coverage %, complexity reduction, CVE closure)
+      - Definition of done for each item
+      - Dependencies between items (what must be done first)
+
+      **BUSINESS CASE**
+
+      Build the ROI argument for tech debt investment:
+
+      1. **Cost of Inaction**: What happens if we do nothing?
+         - Estimated incident probability per quarter
+         - Developer productivity tax (% of time spent fighting debt)
+         - Onboarding time impact (how much longer for new developers)
+         - Security exposure risk in dollar terms
+
+      2. **Return on Investment**: What does fixing deliver?
+         - Developer velocity improvement estimate (% faster delivery)
+         - Incident rate reduction estimate
+         - Security risk reduction
+         - Onboarding time improvement
+         - Reduced maintenance burden in hours/sprint
+
+      3. **Payback Period**: When does the investment pay for itself?
+         - Calculate breakeven sprint based on velocity improvement vs hours invested
+
+      **MONITORING AND TRACKING**
+
+      Define ongoing health metrics to track:
+      - Metrics to measure weekly (coverage %, dependency freshness, build time)
+      - Metrics to measure monthly (complexity trends, code churn patterns)
+      - Metrics to measure quarterly (architecture debt score, maintainability index)
+      - Alert thresholds for each metric (when does a metric need attention)
+      - Dashboard recommendations (tools and visualization)
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "prioritized_backlog" - All items scored and ranked with complete metadata
+      2. "sprint_plans" - 8-sprint detailed plan with hours and expected improvements
+      3. "business_case" - ROI analysis with cost of inaction and return estimates
+      4. "quick_win_playbook" - Detailed instructions for Sprint 1 items
+      5. "monitoring_plan" - Metrics, thresholds, cadence, and tools
+      6. "executive_summary" - 1-page summary for engineering leadership
+      7. "risk_acceptance_register" - Items deliberately deferred with justification
+      8. "success_criteria" - How to know the program is working (leading indicators)
+    model: sonnet
+    max_turns: 10

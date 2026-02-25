@@ -70,6 +70,29 @@ NEW_TEMPLATE_FILES = [
     "voice_agent_pipeline",
     "freelancer_proposal",
     "product_design_spec",
+    # Wave 4 - 22 new templates
+    "ai_brand_sentinel",
+    "rfp_response_engine",
+    "codebase_health_scanner",
+    "knowledge_base_auditor",
+    "crisis_communication_commander",
+    "outage_postmortem_generator",
+    "compliance_audit_readiness",
+    "insurance_claims_adjuster",
+    "tax_return_preprocessor",
+    "carbon_footprint_reporter",
+    "patent_landscape_analyzer",
+    "permit_application_processor",
+    "vendor_renewal_negotiator",
+    "competitive_teardown",
+    "qbr_autopilot",
+    "board_meeting_prep",
+    "saas_usage_optimizer",
+    "influencer_campaign_matcher",
+    "construction_bid_analyzer",
+    "hotel_revenue_optimizer",
+    "student_learning_path_builder",
+    "data_privacy_scanner",
 ]
 
 
@@ -335,6 +358,63 @@ def main():
         },
     ]
     new_collections.extend(wave3_collections)
+
+    wave4_collections = [
+        {
+            "id": "compliance-fortress",
+            "name": "Compliance Fortress",
+            "description": "SOC 2/HIPAA/GDPR audit readiness, data privacy scanning, carbon reporting, and patent landscape analysis",
+            "icon": "shield",
+            "template_slugs": [
+                "gizmax/compliance-audit-readiness",
+                "gizmax/data-privacy-scanner",
+                "gizmax/carbon-footprint-reporter",
+                "gizmax/patent-landscape-analyzer",
+            ],
+            "downloads": random.randint(80, 200),
+        },
+        {
+            "id": "crisis-ops",
+            "name": "Crisis & Incident Ops",
+            "description": "PR crisis management, outage postmortems, knowledge base auditing, and codebase health scanning",
+            "icon": "alert-triangle",
+            "template_slugs": [
+                "gizmax/crisis-communication-commander",
+                "gizmax/outage-postmortem-generator",
+                "gizmax/knowledge-base-auditor",
+                "gizmax/codebase-health-scanner",
+            ],
+            "downloads": random.randint(80, 200),
+        },
+        {
+            "id": "executive-intelligence",
+            "name": "Executive Intelligence",
+            "description": "Board meeting packages, QBR automation, SaaS optimization, and competitive product teardowns",
+            "icon": "bar-chart",
+            "template_slugs": [
+                "gizmax/board-meeting-prep",
+                "gizmax/qbr-autopilot",
+                "gizmax/saas-usage-optimizer",
+                "gizmax/competitive-teardown",
+            ],
+            "downloads": random.randint(80, 200),
+        },
+        {
+            "id": "industry-verticals",
+            "name": "Industry Verticals",
+            "description": "Construction bids, hotel revenue, insurance claims, tax preprocessing, and permit applications",
+            "icon": "layers",
+            "template_slugs": [
+                "gizmax/construction-bid-analyzer",
+                "gizmax/hotel-revenue-optimizer",
+                "gizmax/insurance-claims-adjuster",
+                "gizmax/tax-return-preprocessor",
+                "gizmax/permit-application-processor",
+            ],
+            "downloads": random.randint(80, 200),
+        },
+    ]
+    new_collections.extend(wave4_collections)
 
     for col in new_collections:
         if col["id"] not in existing_collection_ids:

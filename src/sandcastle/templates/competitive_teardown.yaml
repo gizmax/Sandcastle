@@ -1,0 +1,757 @@
+# name: Competitive Teardown
+# description: Comprehensive competitor product teardown - feature-by-feature analysis, UX evaluation, pricing deconstruction, positioning critique, and strategic vulnerability assessment
+# tags: [Competitive, Strategy, Product, UX, Pricing]
+# category: marketing
+
+name: competitive-teardown
+description: Comprehensive competitor product teardown - feature-by-feature analysis, UX evaluation, pricing deconstruction, positioning critique, and strategic vulnerability assessment
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["competitor_product", "your_product"]
+  properties:
+    competitor_product:
+      type: string
+      description: "The competitor product to tear down - URL to product page or product name (e.g. 'https://competitor.com' or 'Notion')"
+    your_product:
+      type: string
+      description: "Your product name and brief description for comparison context (e.g. 'Acme Notes - collaborative documentation tool for engineering teams')"
+    analysis_depth:
+      type: string
+      description: "Depth of analysis: quick (key findings only), standard (full analysis), comprehensive (exhaustive teardown with scoring)"
+      default: "comprehensive"
+    focus_areas:
+      type: string
+      description: "Comma-separated areas to focus on: features, ux, pricing, positioning, technical, marketing, support"
+      default: "features, ux, pricing, positioning"
+
+steps:
+  - id: product-discovery
+    prompt: |
+      Conduct a comprehensive product discovery of the competitor product. Your goal
+      is to build a complete picture of what the product is, who it serves, how it
+      works, and how it is positioned in the market before diving into specific analyses.
+
+      Competitor product: {input.competitor_product}
+      Your product (for comparison): {input.your_product}
+      Analysis depth: {input.analysis_depth}
+      Focus areas: {input.focus_areas}
+
+      Research and document the following:
+
+      **1. Product Overview**
+      - Official product name and parent company
+      - Company founding date, headquarters, and employee count
+      - Product launch date and current version/release
+      - Funding history and investors (if private) or market cap (if public)
+      - Revenue estimates or reported revenue (ARR, MRR if available)
+      - Customer count and notable customer logos
+      - Team size dedicated to this product
+      - Recent press coverage and industry analyst mentions
+
+      **2. Product Category and Market Position**
+      - Primary product category and sub-categories
+      - Gartner Magic Quadrant or Forrester Wave position (if covered)
+      - G2, Capterra, TrustRadius ratings and review count
+      - Average customer rating across platforms
+      - Market share estimates within the category
+      - Year-over-year growth indicators
+      - Key awards or recognitions received
+
+      **3. Target Customer Profile**
+      - Stated target audience (from their website and marketing)
+      - Actual customer profile (based on reviews, case studies, job postings)
+      - Company size segments served (SMB, mid-market, enterprise)
+      - Industry verticals with strongest traction
+      - Key buyer personas (who buys this product within the organization?)
+      - Key user personas (who actually uses it day-to-day?)
+      - Geographic concentration (US-centric, global, specific regions)
+
+      **4. Product Architecture and Technical Stack**
+      - Deployment model (cloud SaaS, self-hosted, hybrid)
+      - Platform availability (web, desktop, mobile - iOS/Android)
+      - Browser and OS compatibility
+      - API availability and documentation quality
+      - Integration ecosystem (number and quality of integrations)
+      - Technology stack indicators (from job postings, tech blog, BuiltWith)
+      - Infrastructure providers (AWS, GCP, Azure - indicates scale and approach)
+      - Security certifications (SOC 2, ISO 27001, FedRAMP, HIPAA)
+      - Data residency options (EU, specific countries)
+
+      **5. Messaging and Positioning Analysis**
+      Capture their current positioning:
+      - Homepage headline and tagline (exact text)
+      - Value proposition statement (main promise)
+      - Key differentiators (what they claim is unique)
+      - Positioning territory (category leader? innovative challenger? affordable alternative?)
+      - Brand voice and personality (professional, playful, technical, enterprise)
+      - Primary call-to-action (free trial, demo request, sign up, contact sales)
+      - SEO focus keywords (what are they ranking for?)
+      - Social media presence and engagement level per platform
+      - Content marketing themes (blog topics, webinar subjects, whitepaper themes)
+
+      **6. Go-to-Market Strategy**
+      - Sales model (product-led growth, sales-led, hybrid)
+      - Free tier or freemium offering (what is included?)
+      - Trial availability and duration
+      - Self-serve signup flow (can you buy without talking to sales?)
+      - Sales team structure (SDRs, AEs, SEs visible from LinkedIn)
+      - Channel partner program (resellers, MSPs, consultants)
+      - Marketplace presence (AWS Marketplace, Salesforce AppExchange, etc.)
+      - Customer community (forum, Slack, Discord, user groups)
+      - Educational content and certification programs
+
+      **7. Recent Changes and Trajectory**
+      - Major feature launches in the past 6 months
+      - Pricing changes in the past 12 months
+      - Leadership changes or key hires
+      - Acquisition activity (acquirer or acquiree)
+      - Partnership announcements
+      - Market expansion moves (new verticals, new geographies)
+      - Product pivot or strategy shift indicators
+      - Public roadmap items or announced upcoming features
+
+      Produce a comprehensive product intelligence dossier that will serve
+      as the foundation for all subsequent teardown analyses.
+    model: sonnet
+    max_turns: 10
+
+  - id: feature-extraction
+    depends_on: [product-discovery]
+    prompt: |
+      Perform an exhaustive feature-by-feature extraction and comparison
+      between the competitor product and your product.
+
+      Product discovery: {steps.product-discovery.output}
+      Competitor product: {input.competitor_product}
+      Your product: {input.your_product}
+      Analysis depth: {input.analysis_depth}
+
+      **1. Feature Inventory**
+      Create a complete inventory of competitor features organized by category.
+      For each feature:
+      - Feature name and category
+      - Feature description (what it does)
+      - Feature maturity: Beta / New / Established / Legacy
+      - Availability by plan/tier (free, pro, enterprise, add-on)
+      - Quality assessment: Best-in-class / Good / Adequate / Weak / Broken
+      - Evidence source (documentation, demo, reviews, screenshots)
+
+      Organize features into these standard categories (adapt to product type):
+      a) Core functionality (the primary job the product does)
+      b) Data management (import, export, storage, backup)
+      c) Collaboration features (sharing, permissions, real-time, comments)
+      d) Customization and configuration (settings, preferences, theming)
+      e) Automation and workflow (rules, triggers, scheduled actions)
+      f) Integration capabilities (native integrations, API, webhooks, Zapier)
+      g) Reporting and analytics (dashboards, reports, data visualization)
+      h) Administration (user management, roles, SSO, audit logs)
+      i) Security features (encryption, 2FA, compliance, access controls)
+      j) Mobile experience (native app features, offline capabilities)
+      k) AI and intelligent features (ML-powered, smart suggestions, automation)
+      l) Developer experience (API quality, SDKs, CLI tools, documentation)
+
+      **2. Feature Comparison Matrix**
+      Create a detailed comparison matrix:
+      - Rows: Every feature identified (aim for 80-150 features)
+      - Column 1: Competitor has it? (Yes / No / Partial / Announced)
+      - Column 2: Your product has it? (Yes / No / Partial / Planned)
+      - Column 3: Who does it better? (Competitor / You / Tie / N/A)
+      - Column 4: Importance to users (Critical / Important / Nice-to-have / Niche)
+      - Column 5: Notes on implementation differences
+
+      **3. Feature Gap Analysis**
+      Identify three categories of gaps:
+
+      Competitor advantages (features they have that you lack):
+      - List each feature
+      - Impact on customer decision (deal-breaker, significant factor, minor consideration)
+      - Estimated effort to build (small, medium, large, very large)
+      - Strategic importance (must-have to compete vs. nice-to-have)
+      - Workaround available in your product? If so, describe it.
+
+      Your advantages (features you have that they lack):
+      - List each feature
+      - Impact on customer decision
+      - How defensible is this advantage (easy to copy vs. deep moat)
+      - Is this advantage being communicated effectively in your marketing?
+
+      Parity features (both have, quality differs):
+      - List each feature
+      - Quality comparison with specific examples
+      - Who is improving faster in this area?
+
+      **4. Feature Innovation Assessment**
+      Evaluate the competitor's innovation trajectory:
+      - Features launched in the past 12 months (velocity and quality)
+      - Visible roadmap commitments
+      - Patent filings related to product features
+      - Research papers or blog posts indicating future direction
+      - Hiring patterns that signal upcoming feature development
+        (e.g., hiring ML engineers suggests AI features coming)
+      - Beta or labs features currently available
+      - Feature deprecation patterns (what are they retiring?)
+
+      **5. Feature-to-Need Mapping**
+      Map features to real customer needs using evidence from:
+      - Customer review analysis (which features are most praised/criticized?)
+      - Support forum topics (which features generate the most questions?)
+      - Feature request boards (what are customers asking for?)
+      - Competitor's own customer stories (which features do they highlight?)
+      - Industry analyst evaluations (which capabilities are required for the category?)
+
+      **6. Feature Quality Deep Dive (Top 10 Features)**
+      For the 10 most important features, do a deep comparative analysis:
+      - Detailed functionality comparison (step by step how each product handles it)
+      - Performance characteristics (speed, reliability, scale)
+      - Ease of setup and configuration
+      - Flexibility and customization options
+      - Edge case handling
+      - Documentation and help content quality
+      - Recent improvements and investment level
+
+      Produce a feature comparison report with the complete matrix, gap analysis,
+      and prioritized list of competitive gaps to address.
+    model: sonnet
+    max_turns: 10
+
+  - id: ux-evaluation
+    depends_on: [product-discovery]
+    prompt: |
+      Conduct a rigorous UX evaluation of the competitor product using established
+      usability frameworks and heuristic evaluation methods.
+
+      Product discovery: {steps.product-discovery.output}
+      Competitor product: {input.competitor_product}
+      Your product: {input.your_product}
+      Focus areas: {input.focus_areas}
+
+      **1. Nielsen's 10 Usability Heuristics Evaluation**
+      Score the competitor product (1-10) on each of Nielsen's heuristics, with
+      specific examples and evidence:
+
+      H1 - Visibility of system status:
+      - Does the product keep users informed about what is going on?
+      - Examples: loading indicators, progress bars, save confirmations, sync status
+      - Score and evidence
+
+      H2 - Match between system and real world:
+      - Does the product use concepts and language users understand?
+      - Examples: terminology choices, metaphors, icon meanings, workflow patterns
+      - Score and evidence
+
+      H3 - User control and freedom:
+      - Can users easily undo, redo, and escape from states?
+      - Examples: undo/redo support, cancel buttons, back navigation, draft saving
+      - Score and evidence
+
+      H4 - Consistency and standards:
+      - Does the product follow platform conventions and its own patterns?
+      - Examples: consistent button styles, predictable navigation, standard shortcuts
+      - Score and evidence
+
+      H5 - Error prevention:
+      - Does the product prevent errors before they occur?
+      - Examples: confirmation dialogs, input validation, destructive action guards
+      - Score and evidence
+
+      H6 - Recognition rather than recall:
+      - Does the product minimize memory load with visible information?
+      - Examples: recent items, search suggestions, contextual help, breadcrumbs
+      - Score and evidence
+
+      H7 - Flexibility and efficiency of use:
+      - Does the product accommodate both novice and expert users?
+      - Examples: keyboard shortcuts, power user features, customizable workflows
+      - Score and evidence
+
+      H8 - Aesthetic and minimalist design:
+      - Is the interface clean and focused on essentials?
+      - Examples: information density, visual hierarchy, whitespace, typography
+      - Score and evidence
+
+      H9 - Help users recognize, diagnose, and recover from errors:
+      - Are error messages helpful and actionable?
+      - Examples: error message quality, suggested fixes, troubleshooting guidance
+      - Score and evidence
+
+      H10 - Help and documentation:
+      - Is help available, searchable, and contextual?
+      - Examples: help center quality, in-app tooltips, onboarding guides, chatbot
+      - Score and evidence
+
+      **2. Cognitive Walkthrough**
+      Walk through the 5 most important user tasks and evaluate each step:
+
+      For each task:
+      - Task name and goal (what the user is trying to accomplish)
+      - Step-by-step walkthrough:
+        * What the user sees at each step
+        * What the user needs to do
+        * Is the correct action obvious?
+        * Does the user get appropriate feedback?
+        * Can the user recover from mistakes?
+        * How many clicks/steps does it take?
+      - Time to complete (estimated)
+      - Frustration points identified
+      - Comparison to how the same task works in {input.your_product}
+
+      **3. First-Time User Experience (FTUE) Analysis**
+      Evaluate the complete onboarding experience:
+      - Signup flow friction (form fields, verification, payment requirement)
+      - Time from signup to first value (aha moment)
+      - Onboarding walkthrough quality (guided tour, tooltips, sample data)
+      - Empty state design (what does the product look like with no data?)
+      - Getting started documentation and tutorials
+      - Progressive disclosure (are advanced features hidden until needed?)
+      - Activation metrics (what does the product consider "activated"?)
+      - Drop-off risk points in the onboarding funnel
+
+      **4. Information Architecture Analysis**
+      Evaluate the product's structural organization:
+      - Navigation structure (top-nav, sidebar, tabs, breadcrumbs)
+      - Information hierarchy (how content is organized and nested)
+      - Search functionality quality (speed, relevance, filters, results display)
+      - Content density and scanning ease
+      - Page layout patterns and consistency
+      - Mobile navigation adaptation
+      - URL structure and deep-linking support
+
+      **5. Visual Design Assessment**
+      Evaluate the visual design quality:
+      - Color palette and brand expression
+      - Typography (font choices, hierarchy, readability)
+      - Iconography quality and consistency
+      - Spacing and alignment system
+      - Component design quality (buttons, forms, cards, tables)
+      - Dark mode availability and quality
+      - Illustration and imagery style
+      - Animation and micro-interaction quality
+      - Accessibility (contrast ratios, font sizes, screen reader support)
+      - Responsive design quality across breakpoints
+
+      **6. Performance and Reliability UX**
+      Evaluate the perceived performance:
+      - Page load speed (initial and subsequent)
+      - Interaction responsiveness (button clicks, form submissions)
+      - Search speed and result quality
+      - Large dataset handling (does the UI scale with data volume?)
+      - Offline capability (if applicable)
+      - Error frequency and recovery
+      - Cross-browser consistency
+
+      **7. UX Strengths and Weaknesses Summary**
+      - Top 5 UX strengths (things the competitor does exceptionally well)
+      - Top 5 UX weaknesses (things the competitor does poorly)
+      - UX innovations worth studying or borrowing
+      - UX anti-patterns to avoid
+      - Composite UX score (average across all heuristics)
+      - Comparison summary vs. {input.your_product} UX
+
+      Produce a detailed UX evaluation report with scores, evidence screenshots
+      descriptions, and specific recommendations for how {input.your_product}
+      can capitalize on competitor UX weaknesses.
+    model: sonnet
+    max_turns: 10
+
+  - id: pricing-analysis
+    depends_on: [product-discovery]
+    prompt: |
+      Deconstruct and analyze the competitor's pricing model to understand their
+      monetization strategy, identify vulnerabilities, and inform counter-positioning.
+
+      Product discovery: {steps.product-discovery.output}
+      Competitor product: {input.competitor_product}
+      Your product: {input.your_product}
+      Focus areas: {input.focus_areas}
+
+      **1. Pricing Model Deconstruction**
+      Identify and analyze every element of their pricing:
+
+      Pricing metric (what do they charge for?):
+      - Primary metric: per-seat, per-user, per-unit, per-API-call, per-GB, flat fee
+      - Secondary metrics: add-ons, overages, premium features
+      - Billing frequency options: monthly, annual, multi-year
+      - Annual vs. monthly pricing delta (discount for annual commitment)
+      - Enterprise "contact us" pricing (what triggers the sales conversation?)
+
+      Tier structure:
+      - Free tier: What is included? What are the limitations?
+        Limits on users, features, storage, API calls, support level
+      - Tier 1 (starter/basic): Price point, included features, limitations
+      - Tier 2 (professional/pro): Price point, additional features, positioning
+      - Tier 3 (business/team): Price point, additional features, positioning
+      - Tier 4 (enterprise): Custom pricing, additional features, key differentiators
+      - Add-ons: What can be purchased separately? Price per add-on
+      - Hidden costs: Implementation fees, training, support upgrades, data migration
+
+      **2. Pricing Model Type Analysis**
+      Classify and evaluate their pricing model:
+
+      Per-seat pricing analysis:
+      - Price per seat at each tier
+      - Volume discount breakpoints (10, 50, 100, 500, 1000+ seats)
+      - Does per-seat pricing include all features or are some features seat-type dependent?
+      - Admin vs. regular user pricing (do admins cost extra?)
+      - Viewer/read-only pricing (free viewers or paid?)
+      - External user/guest pricing model
+
+      Usage-based pricing analysis (if applicable):
+      - Base included usage per tier
+      - Overage pricing per unit
+      - Pricing tiers and volume discounts for usage
+      - Cost predictability (can customers predict their bill?)
+      - Usage tracking transparency (can customers see real-time usage?)
+      - Billing shock risk (is it easy to accidentally overspend?)
+
+      Hybrid pricing analysis:
+      - How the fixed component (platform fee or per-seat) combines with variable
+      - Which metric drives the majority of revenue
+      - Customer perception of fairness
+      - Complexity of the pricing calculation
+
+      **3. Value Metric Analysis**
+      Evaluate whether they charge for the right thing:
+      - What is their value metric (the unit of value they charge for)?
+      - Does the value metric align with customer-perceived value?
+      - Does the value metric scale with customer success?
+      - Pain points in the pricing model (where do customers feel overcharged?)
+      - Common customer complaints about pricing (from reviews, forums, Reddit)
+      - Value metric comparison: How does your value metric compare?
+
+      **4. Competitive Price Positioning**
+      Map the competitor's pricing relative to the market:
+      - Price-to-feature ratio compared to alternatives
+      - Price-to-value perception compared to alternatives
+      - Market positioning: premium, mid-market, budget, freemium
+      - How does their pricing compare to {input.your_product}?
+      - Price sensitivity analysis: at what price point do customers switch?
+      - Customer segments that are overserved (paying for features they do not use)
+      - Customer segments that are underserved (need more but cannot afford the next tier)
+
+      **5. Revenue Model Reverse-Engineering**
+      Estimate their revenue composition:
+      - Estimated customer distribution across tiers (based on review counts, public data)
+      - Estimated average contract value (ACV) by segment
+      - Estimated revenue split: subscription vs. usage vs. services
+      - Estimated gross margin based on pricing and delivery model
+      - Revenue concentration risk (heavy enterprise vs. distributed SMB)
+      - Net revenue retention indicators (expansion, contraction, churn signals)
+      - Pricing power assessment (can they raise prices without churn?)
+
+      **6. Pricing Vulnerability Analysis**
+      Identify weaknesses in their pricing:
+      - Price points that create sticker shock for target customers
+      - Tier boundaries that force customers to over-purchase
+      - Feature gates that frustrate users (commonly-needed features locked in premium tiers)
+      - Pricing complexity that confuses buyers
+      - Lack of flexible payment options
+      - Poor alignment between value delivered and price charged
+      - Segments they are pricing out of the market
+      - Pricing model rigidity (inability to accommodate diverse customer needs)
+
+      **7. Pricing Counter-Strategy for {input.your_product}**
+      Based on the analysis, recommend:
+      - Pricing model adjustments to exploit competitor pricing weaknesses
+      - Tier structure optimization to capture underserved segments
+      - Specific price points that undercut the competitor at key decision thresholds
+      - Value metric differentiation opportunities
+      - Bundling or unbundling strategies to create favorable comparisons
+      - Free tier strategy to capture top-of-funnel from the competitor
+      - Migration incentive pricing (discounts for switching from the competitor)
+      - Messaging to highlight pricing advantages without starting a price war
+
+      Produce a pricing teardown report with specific price points, model
+      comparisons, and actionable pricing strategy recommendations.
+    model: sonnet
+    max_turns: 10
+
+  - id: vulnerability-mapping
+    depends_on: [feature-extraction, ux-evaluation, pricing-analysis]
+    prompt: |
+      Synthesize all previous analyses into a comprehensive vulnerability map
+      of the competitor product. Identify every exploitable weakness across
+      product, UX, pricing, and market positioning.
+
+      Feature analysis: {steps.feature-extraction.output}
+      UX evaluation: {steps.ux-evaluation.output}
+      Pricing analysis: {steps.pricing-analysis.output}
+      Product discovery: {steps.product-discovery.output}
+      Competitor product: {input.competitor_product}
+      Your product: {input.your_product}
+
+      **1. SWOT Analysis**
+      Comprehensive SWOT for the competitor:
+
+      Strengths (internal advantages):
+      - List 8-12 specific strengths with supporting evidence
+      - Rate each: Mild / Significant / Dominant
+      - Assess defensibility of each strength (easy to replicate vs. deep moat)
+      - Which strengths directly threaten {input.your_product}?
+
+      Weaknesses (internal disadvantages):
+      - List 8-12 specific weaknesses with supporting evidence from the analyses
+      - Rate each: Mild / Significant / Critical
+      - Assess exploitability of each weakness (can {input.your_product} capitalize?)
+      - Which weaknesses represent the best attack vectors?
+
+      Opportunities (external factors favoring the competitor):
+      - Market trends that benefit them
+      - Technology shifts they are well-positioned for
+      - Regulatory changes that help them
+      - Partnership and ecosystem opportunities
+      - Adjacent market expansion opportunities
+
+      Threats (external factors threatening the competitor):
+      - Market shifts that disadvantage them
+      - Technology disruptions they are not prepared for
+      - Regulatory risks specific to their model
+      - New entrants and emerging competitors
+      - Customer expectation changes that misalign with their product
+
+      **2. Vulnerability Scoring Matrix**
+      Create a scored matrix of competitor vulnerabilities:
+
+      For each identified vulnerability:
+      - Vulnerability name and category (product, UX, pricing, positioning, technical, support)
+      - Description and evidence
+      - Severity (1-10): How significant is this weakness to customers?
+      - Exploitability (1-10): How easily can {input.your_product} exploit this?
+      - Customer awareness (1-10): Do customers already perceive this weakness?
+      - Remediation difficulty (1-10): How hard would it be for the competitor to fix?
+      - Time to fix (estimate): If the competitor addresses this, how long would it take?
+      - Composite vulnerability score: weighted combination
+
+      Rank all vulnerabilities by composite score. The top vulnerabilities are
+      where {input.your_product} should concentrate competitive energy.
+
+      **3. Attack Surface Analysis**
+      Group vulnerabilities into attack surfaces:
+
+      Customer acquisition attack surface:
+      - Where can you win deals the competitor is also competing for?
+      - Which segments are most dissatisfied with the competitor?
+      - What messaging resonates with prospects evaluating the competitor?
+      - Which evaluation criteria favor {input.your_product}?
+
+      Customer retention attack surface:
+      - Where can you win customers away from the installed base?
+      - What triggers customers to evaluate alternatives?
+      - What are common pain points for existing customers?
+      - What switching costs keep customers locked in despite dissatisfaction?
+
+      Market positioning attack surface:
+      - Where is their positioning weak or inconsistent?
+      - Which narrative can {input.your_product} own that the competitor cannot credibly claim?
+      - Where are category perception gaps (what the market assumes vs. reality)?
+      - Which analyst opinions or market reports challenge their positioning?
+
+      Product innovation attack surface:
+      - Technology areas where they are falling behind
+      - Features customers request that the competitor is slow to build
+      - Platform or ecosystem gaps
+      - AI and automation capabilities where they underinvest
+
+      **4. Positioning Map**
+      Create multi-dimensional positioning maps:
+      - Map 1: Price vs. Feature richness (plot competitor, your product, and 3-5 others)
+      - Map 2: Ease of use vs. Power/flexibility
+      - Map 3: SMB focus vs. Enterprise focus
+      - Map 4: Innovation speed vs. Reliability/stability
+      For each map, identify the optimal quadrant position for {input.your_product}
+      that maximizes distance from the competitor's stronghold.
+
+      **5. Churn Driver Analysis**
+      Identify why customers leave the competitor (from reviews, forums, social media):
+      - Top 10 reasons customers cite for leaving or considering alternatives
+      - Frequency of each reason (common vs. rare)
+      - Which of these reasons {input.your_product} directly addresses
+      - Migration path friction for each churn scenario
+      - Win-back campaign opportunities targeting specific churn drivers
+
+      **6. Sustainability Assessment**
+      Evaluate whether competitor weaknesses are temporary or structural:
+      - Weaknesses caused by resource constraints (could be fixed with investment)
+      - Weaknesses caused by architectural decisions (hard to fix without rebuild)
+      - Weaknesses caused by strategic choices (trade-offs they made intentionally)
+      - Weaknesses caused by organizational culture (deeply embedded, slow to change)
+      - Weaknesses caused by market position (incumbent inertia, innovation dilemma)
+
+      Produce a vulnerability map prioritizing the most actionable competitive
+      weaknesses for {input.your_product} to exploit.
+    model: sonnet
+    max_turns: 10
+
+  - id: attack-strategy
+    depends_on: [vulnerability-mapping]
+    prompt: |
+      Develop a complete go-to-market attack strategy against the competitor,
+      translating vulnerability analysis into executable competitive plays.
+
+      Vulnerability mapping: {steps.vulnerability-mapping.output}
+      Feature analysis: {steps.feature-extraction.output}
+      UX evaluation: {steps.ux-evaluation.output}
+      Pricing analysis: {steps.pricing-analysis.output}
+      Product discovery: {steps.product-discovery.output}
+      Competitor product: {input.competitor_product}
+      Your product: {input.your_product}
+
+      **1. Competitive Narrative**
+      Craft the strategic narrative that frames the competition:
+
+      Category narrative:
+      - How should the market think about this product category?
+      - What is the "old way" (represented by the competitor) vs. the "new way"
+        (represented by {input.your_product})?
+      - What market shift makes {input.your_product}'s approach the right one for now?
+
+      Product narrative:
+      - The one-sentence elevator pitch against this specific competitor
+      - The 30-second competitive differentiation statement
+      - The 3-minute detailed competitive positioning story
+      - Key proof points that validate each claim
+
+      Contrast messaging:
+      - 5 "Unlike [competitor], we..." statements with evidence
+      - 5 "While [competitor] focuses on X, we prioritize Y..." statements
+      - Handle-with-care statements (things that are true but could backfire if
+        stated too aggressively)
+
+      **2. Competitive Battle Cards**
+      Create sales-ready battle cards:
+
+      Quick reference card:
+      - Competitor overview (50 words)
+      - Why they win deals (top 3 reasons)
+      - Why they lose deals (top 3 reasons)
+      - Our key differentiators (top 3)
+      - Landmines to plant (questions for prospects to ask the competitor that expose weaknesses)
+      - Landmines to defuse (questions the competitor will prompt about {input.your_product})
+
+      Objection handling card:
+      For each common objection ("But [competitor] has X..."):
+      - Acknowledge the objection
+      - Reframe the conversation
+      - Counter with evidence
+      - Redirect to strength
+      - Example response script
+
+      Demo strategy card:
+      - Which features to demo first to establish advantage
+      - Which features to avoid showing (if weaker than competitor)
+      - Competitor feature traps to watch for in bake-offs
+      - How to structure a head-to-head comparison demo
+
+      **3. Segment-Specific Attack Plans**
+      For each target customer segment:
+
+      SMB / Startup segment:
+      - Why they should choose {input.your_product} over {input.competitor_product}
+      - Key buying criteria for this segment
+      - Price sensitivity and affordability positioning
+      - Self-serve vs. assisted sales approach
+      - Specific messaging and channels
+
+      Mid-Market segment:
+      - Why they should choose {input.your_product} over {input.competitor_product}
+      - Key buying criteria (integration, scalability, support)
+      - Procurement process and decision-maker mapping
+      - ROI justification framework
+      - Specific messaging and channels
+
+      Enterprise segment:
+      - Why they should choose {input.your_product} over {input.competitor_product}
+      - Key buying criteria (security, compliance, customization, support)
+      - Enterprise sales cycle strategies
+      - Executive sponsor messaging
+      - Specific messaging and channels
+
+      **4. Win-Back Campaign Design**
+      Design campaigns targeting the competitor's installed base:
+
+      Trigger-based campaigns:
+      - Competitor price increase announcement: Messaging and offer
+      - Competitor outage or service failure: Messaging and timing
+      - Competitor product deprecation: Migration offer
+      - Customer contract renewal approaching: Pre-emptive outreach
+      - Customer posting negative reviews: Targeted outreach
+
+      Content-driven campaigns:
+      - Comparison content (blog posts, landing pages, ad copy)
+      - Migration guides and resources
+      - Customer testimonials from switchers
+      - ROI calculators showing savings from switching
+      - Free trial or POC offers targeted at competitor users
+
+      Channel strategy:
+      - SEO: Target "[competitor] alternative" and "[competitor] vs" keywords
+      - SEM: Competitor name bidding strategy (conquesting ads)
+      - Social: Community engagement in competitor discussion forums
+      - Events: Sponsoring events where competitor customers gather
+      - Partnerships: Integrator and consultant relationships
+      - Analyst: Briefing analysts on competitive positioning
+
+      **5. Product Roadmap Implications**
+      Based on the competitive analysis, prioritize product investments:
+
+      Must-build (competitive table stakes):
+      - Features you must have to compete in this category
+      - Timeline and investment estimate
+      - Risk if not built
+
+      Should-build (competitive differentiators):
+      - Features that would create or widen competitive advantage
+      - Timeline and investment estimate
+      - Expected competitive impact
+
+      Could-build (nice to have):
+      - Features that would be beneficial but not critical
+      - Lower priority, build if resources allow
+
+      Should NOT build (competitive traps):
+      - Features the competitor has that are not worth replicating
+      - Why they are traps (expensive to build, low customer value, not aligned with strategy)
+      - Alternative approaches to address the underlying need
+
+      **6. Competitive Monitoring Plan**
+      Set up ongoing intelligence gathering:
+      - Metrics to track monthly (win/loss rates, competitive mentions, market share)
+      - Sources to monitor (product changelog, blog, social, job postings, patent filings)
+      - Quarterly competitive review cadence
+      - Triggers for updating the battle cards and strategy
+      - Competitive intelligence sharing process within the organization
+      - Customer advisory board feedback loops on competitive positioning
+
+      **7. 90-Day Competitive Action Plan**
+      Week 1-2: Internal alignment
+      - Share competitive intelligence with sales, marketing, product teams
+      - Train sales team on battle cards and objection handling
+      - Brief marketing team on competitive messaging framework
+
+      Week 3-4: Quick wins
+      - Launch comparison landing page
+      - Update website messaging with competitive positioning
+      - Create "[competitor] alternative" SEO content
+      - Set up competitive monitoring dashboards
+
+      Week 5-8: Campaign execution
+      - Launch win-back campaigns
+      - Begin competitor keyword conquesting
+      - Publish competitive content series
+      - Enable sales with updated collateral
+
+      Week 9-12: Measure and iterate
+      - Review win/loss data from competitive deals
+      - A/B test competitive messaging
+      - Refine battle cards based on field feedback
+      - Update pricing or packaging if needed
+      - Plan next quarter's competitive initiatives
+
+      This attack strategy should be immediately actionable by sales, marketing,
+      and product teams. Write it as a field manual for winning against this
+      specific competitor, not a theoretical framework.
+    model: sonnet
+    max_turns: 10

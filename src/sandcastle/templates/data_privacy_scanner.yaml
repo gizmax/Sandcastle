@@ -1,0 +1,527 @@
+# name: Data Privacy Scanner
+# description: Scan codebases and data flows to discover PII/PHI, classify sensitivity levels, map data lineage, detect compliance violations, and generate Data Protection Impact Assessments
+# tags: [Privacy, GDPR, CCPA, HIPAA, Compliance, Security]
+# category: engineering
+
+name: data-privacy-scanner
+description: Scan codebases and data flows to discover PII/PHI, classify sensitivity levels, map data lineage, detect compliance violations, and generate Data Protection Impact Assessments
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["scan_scope", "organization_name"]
+  properties:
+    scan_scope:
+      type: string
+      description: "Scope of the scan: codebase, database, api, or full_stack"
+    organization_name:
+      type: string
+      description: "Organization name for the assessment"
+    regulations:
+      type: string
+      description: "Comma-separated regulations to check against"
+      default: "GDPR, CCPA, HIPAA"
+    data_categories:
+      type: string
+      description: "Comma-separated data categories to focus on (e.g. 'customer, employee, financial')"
+    risk_tolerance:
+      type: string
+      description: "Risk tolerance level: low, medium, or high"
+      default: "medium"
+
+steps:
+  - id: data-discovery
+    prompt: |
+      Perform comprehensive data discovery across the specified scope to
+      identify all personal and sensitive data elements.
+
+      Scan scope: {input.scan_scope}
+      Organization: {input.organization_name}
+      Data categories: {input.data_categories}
+      Risk tolerance: {input.risk_tolerance}
+
+      Execute a systematic data discovery process:
+
+      **1. PII Detection Patterns**
+      Scan for these personal data categories with regex patterns and
+      contextual analysis:
+
+      Direct identifiers (high sensitivity):
+      - Social Security Numbers (XXX-XX-XXXX, with and without dashes)
+      - Passport numbers (country-specific formats)
+      - Driver's license numbers
+      - National ID numbers
+      - Tax identification numbers (EIN, ITIN, TIN)
+      - Biometric data references (fingerprint, facial recognition, iris)
+
+      Contact information (medium-high sensitivity):
+      - Email addresses (standard and obfuscated patterns)
+      - Phone numbers (international formats, with/without country codes)
+      - Physical addresses (street, city, state, zip parsing)
+      - IP addresses (IPv4 and IPv6)
+      - Device identifiers (IMEI, MAC addresses, IDFA, GAID)
+
+      Financial data (high sensitivity):
+      - Credit card numbers (Luhn validation, PAN formats by issuer)
+      - Bank account numbers (IBAN, routing numbers)
+      - Financial transaction records
+      - Income and salary data
+      - Insurance policy numbers
+
+      Health data (PHI - highest sensitivity):
+      - Medical record numbers
+      - Health conditions and diagnoses
+      - Prescription and medication data
+      - Lab results and test values
+      - Insurance claim numbers
+      - Provider NPI numbers
+
+      Demographic data (medium sensitivity):
+      - Date of birth (multiple formats)
+      - Age and age ranges
+      - Gender and sex identifiers
+      - Race and ethnicity data
+      - Religious affiliation
+      - Sexual orientation
+      - Disability status
+
+      Authentication data (critical sensitivity):
+      - Passwords (plaintext detection - critical alert)
+      - API keys and tokens
+      - OAuth secrets
+      - Session identifiers
+      - Security questions and answers
+
+      **2. Discovery by Scan Scope**
+
+      For codebase scanning:
+      - Source code files: variable names, string literals, comments
+      - Configuration files: .env, config.yaml, settings.py
+      - Database schema definitions: column names, types, constraints
+      - API endpoint definitions: request/response schemas
+      - Test fixtures and seed data (often contains real PII)
+      - Log statements that may capture PII
+      - Error messages that may expose data
+
+      For database scanning:
+      - Table and column name analysis (semantic matching)
+      - Sample data inspection (first 100 rows per table)
+      - View and stored procedure analysis
+      - Index patterns revealing query patterns on PII
+      - Backup and export file locations
+
+      For API scanning:
+      - Request/response payload analysis
+      - Header and cookie inspection
+      - Query parameter patterns
+      - GraphQL schema introspection
+      - API documentation review
+      - Webhook payload definitions
+
+      **3. Discovery Output**
+      For each data element found:
+      - Location (file:line, table:column, endpoint:field)
+      - Data type classification
+      - Sample value (redacted/masked)
+      - Detection confidence (high/medium/low)
+      - Encryption status (at rest, in transit, none)
+      - Access control observations
+
+      Return structured inventory of all discovered data elements.
+    model: haiku
+    max_turns: 10
+
+  - id: classification
+    depends_on: [data-discovery]
+    prompt: |
+      Classify all discovered data elements by sensitivity level and
+      regulatory category.
+
+      Discovered data: {steps.data-discovery.output}
+      Regulations: {input.regulations}
+      Organization: {input.organization_name}
+
+      **1. Sensitivity Classification Framework**
+
+      Apply a 4-tier classification:
+
+      RESTRICTED (Tier 1 - highest):
+      - Data requiring specific regulatory protection
+      - PHI under HIPAA, financial data under PCI-DSS
+      - Biometric data, genetic data
+      - Authentication credentials
+      - Children's data (COPPA)
+      - Special category data under GDPR Article 9
+      Classification criteria: unauthorized access causes severe harm,
+      regulatory penalties, or legal liability
+
+      CONFIDENTIAL (Tier 2):
+      - PII that can identify individuals
+      - Employee records, customer profiles
+      - Business-sensitive data linked to individuals
+      - Communication records
+      Classification criteria: unauthorized access causes significant
+      harm to individuals or reputational damage
+
+      INTERNAL (Tier 3):
+      - Aggregated or pseudonymized data
+      - Internal analytics with demographic segments
+      - De-identified datasets (assess re-identification risk)
+      - Business operational data with personal elements
+      Classification criteria: limited harm if exposed, but not
+      intended for public access
+
+      PUBLIC (Tier 4 - lowest):
+      - Published information
+      - Consent-verified public profiles
+      - Anonymized statistical data (verified k-anonymity >= 5)
+      Classification criteria: no harm from exposure
+
+      **2. Regulatory Mapping**
+
+      For each discovered data element, map to applicable regulations:
+
+      GDPR (if applicable):
+      - Personal data (Article 4(1)): any information relating to identified
+        or identifiable natural person
+      - Special categories (Article 9): racial/ethnic origin, political opinions,
+        religious beliefs, trade union membership, genetic, biometric, health,
+        sex life, sexual orientation
+      - Lawful basis required: consent, contract, legal obligation, vital interests,
+        public task, legitimate interests
+      - Data subject rights applicable: access, rectification, erasure, portability,
+        restriction, objection
+
+      CCPA/CPRA (if applicable):
+      - Personal information categories per Section 1798.140
+      - Sensitive personal information requiring opt-out
+      - Sale/sharing classification
+      - Consumer rights: know, delete, opt-out, correct, limit
+
+      HIPAA (if applicable):
+      - 18 PHI identifiers under Safe Harbor de-identification
+      - Minimum necessary standard assessment
+      - Business associate agreement requirements
+      - Breach notification thresholds
+
+      **3. Classification Output**
+      For each data element:
+      - Sensitivity tier (Restricted/Confidential/Internal/Public)
+      - Applicable regulations (GDPR, CCPA, HIPAA, PCI-DSS, etc.)
+      - Specific regulatory articles/sections
+      - Required protections per regulation
+      - Current protection status (compliant/gap/violation)
+
+      Produce classification summary with counts per tier and regulation.
+    model: sonnet
+    max_turns: 10
+
+  - id: lineage-mapping
+    depends_on: [data-discovery]
+    prompt: |
+      Map data lineage - trace how personal data flows through the system
+      from collection to processing to storage to sharing/deletion.
+
+      Discovered data: {steps.data-discovery.output}
+      Scan scope: {input.scan_scope}
+      Organization: {input.organization_name}
+
+      **1. Data Flow Mapping**
+
+      For each significant data category, trace the complete lifecycle:
+
+      Collection point:
+      - How is data collected? (web form, API, import, manual entry)
+      - What consent mechanism exists at collection?
+      - Is the collection purpose documented?
+      - Is the minimum data principle followed (only necessary data)?
+      - Are users informed about collection (privacy notice)?
+
+      Processing activities:
+      - What transformations are applied to the data?
+      - Which services/microservices process the data?
+      - Are there automated decision-making processes?
+      - Is profiling performed on the data?
+      - What is the legal basis for each processing activity?
+
+      Storage locations:
+      - Primary database(s) and tables
+      - Cache layers (Redis, Memcached)
+      - Search indexes (Elasticsearch)
+      - File storage (S3, local filesystem)
+      - Backup systems and retention
+      - Log files containing data
+      - Analytics systems receiving data
+
+      Sharing and transfers:
+      - Third-party services receiving data (analytics, CRM, marketing)
+      - Cross-border transfers (data leaving EU, leaving US)
+      - Sub-processor chain mapping
+      - API endpoints exposing data externally
+      - Reporting and export functions
+      - Data sharing agreements in place
+
+      Retention and deletion:
+      - Defined retention periods per data category
+      - Automated deletion mechanisms
+      - Manual deletion procedures
+      - Backup retention creating "zombie data"
+      - Right to erasure implementation completeness
+
+      **2. Data Flow Diagram**
+      Produce a text-based data flow diagram showing:
+      - Collection points (entry)
+      - Processing nodes (transformation)
+      - Storage locations (persistence)
+      - Sharing endpoints (exit)
+      - Deletion mechanisms (end of life)
+      - Encryption boundaries (where data is protected in transit/at rest)
+
+      **3. Cross-Border Transfer Analysis**
+      If applicable, identify all data transfers that cross jurisdictional
+      boundaries and assess:
+      - Adequacy decisions (EU to approved countries)
+      - Standard contractual clauses requirements
+      - Binding corporate rules applicability
+      - Schrems II implications for US transfers
+      - Data localization requirements by jurisdiction
+
+      Return complete lineage map with risk annotations at each stage.
+    model: sonnet
+    max_turns: 10
+
+  - id: violation-detection
+    depends_on: [data-discovery]
+    prompt: |
+      Detect specific compliance violations based on discovered data and
+      applicable regulations.
+
+      Discovered data: {steps.data-discovery.output}
+      Regulations: {input.regulations}
+      Risk tolerance: {input.risk_tolerance}
+
+      **1. GDPR Violation Detection**
+
+      Check for these common violations:
+      - Article 5: Data processed without clear purpose limitation
+      - Article 5: Excessive data collection (data minimization failure)
+      - Article 6: Processing without valid lawful basis documented
+      - Article 7: Consent not freely given, specific, informed, unambiguous
+      - Article 9: Special category data processed without Article 9(2) exemption
+      - Article 13/14: Missing privacy notice at point of collection
+      - Article 17: No erasure mechanism for right to be forgotten
+      - Article 20: No data portability mechanism
+      - Article 25: Privacy not built in by design and by default
+      - Article 28: Sub-processors without proper agreements
+      - Article 30: Missing Records of Processing Activities (ROPA)
+      - Article 32: Inadequate security measures for data sensitivity level
+      - Article 33: No breach notification procedure
+      - Article 35: High-risk processing without DPIA
+      - Article 44-49: International transfers without legal mechanism
+
+      **2. CCPA/CPRA Violation Detection**
+      - Missing "Do Not Sell/Share" mechanism
+      - Inadequate consumer request handling process
+      - Sensitive personal information without opt-in consent
+      - Privacy policy not updated within 12 months
+      - Missing service provider contract requirements
+      - Discrimination against consumers exercising rights
+
+      **3. HIPAA Violation Detection**
+      - PHI transmitted without encryption
+      - Access controls insufficient for PHI
+      - No audit trail for PHI access
+      - Missing Business Associate Agreements
+      - Minimum necessary principle not enforced
+      - PHI in logs, error messages, or debug output
+      - Breach notification procedure gaps
+
+      **4. Technical Security Violations**
+      - Plaintext passwords or secrets in code
+      - PII in URL parameters (logged by web servers)
+      - Sensitive data in client-side storage (localStorage, cookies)
+      - Missing encryption at rest for Restricted/Confidential data
+      - Overly permissive access controls
+      - PII in application logs without masking
+      - Sensitive data in test environments from production copies
+
+      **5. Violation Severity Scoring**
+      For each violation:
+      - Severity: Critical (active breach risk), High (regulatory penalty risk),
+        Medium (audit finding), Low (best practice gap)
+      - Likelihood of detection in audit: High/Medium/Low
+      - Potential penalty range if enforced
+      - Number of data subjects affected (estimated)
+      - Time to remediate: immediate/days/weeks/months
+
+      Return all violations ranked by severity with evidence references.
+    model: haiku
+    max_turns: 10
+
+  - id: dpia-generation
+    depends_on: [classification, lineage-mapping, violation-detection]
+    prompt: |
+      Generate a comprehensive Data Protection Impact Assessment (DPIA)
+      following GDPR Article 35 methodology.
+
+      Classification: {steps.classification.output}
+      Data lineage: {steps.lineage-mapping.output}
+      Violations: {steps.violation-detection.output}
+      Organization: {input.organization_name}
+      Regulations: {input.regulations}
+
+      **1. DPIA Scope and Context**
+      - Processing activities under assessment
+      - Data controller and processor identification
+      - DPO consultation record
+      - Assessment date and review schedule
+      - Legal basis for assessment (mandatory vs voluntary)
+
+      **2. Processing Description**
+      - Nature of processing (collection, storage, analysis, sharing)
+      - Scope (data types, volume, geographic reach, data subjects)
+      - Context (relationship with data subjects, expectations)
+      - Purpose (primary and secondary uses)
+      - Technology used in processing
+
+      **3. Necessity and Proportionality Assessment**
+      - Is the processing necessary for the stated purpose?
+      - Could the purpose be achieved with less data?
+      - Is the data retention period proportionate?
+      - Are there less intrusive alternatives?
+      - How is data quality ensured?
+      - Legitimate interest balancing test (if applicable)
+
+      **4. Risk Assessment Matrix**
+      For each identified risk:
+      - Risk description
+      - Source of risk (internal process, external threat, technology)
+      - Impact on data subjects (physical, material, moral harm)
+      - Likelihood (remote, possible, probable, near certain)
+      - Severity (negligible, limited, significant, maximum)
+      - Risk level (Likelihood x Severity matrix)
+      - Current mitigations in place
+      - Residual risk after mitigations
+
+      Risk categories to assess:
+      - Unauthorized access or disclosure
+      - Data loss or destruction
+      - Inaccurate data leading to wrong decisions
+      - Excessive data collection (function creep)
+      - Re-identification of pseudonymized data
+      - Automated decision-making causing harm
+      - Cross-border transfer risks
+      - Vendor/sub-processor incidents
+
+      **5. Mitigation Measures**
+      For each risk above acceptable threshold:
+      - Proposed technical measure
+      - Proposed organizational measure
+      - Implementation timeline
+      - Responsible party
+      - Effectiveness indicator
+      - Cost estimate
+
+      **6. Data Subject Rights Implementation**
+      Assessment of mechanisms for:
+      - Right of access (response time, process)
+      - Right to rectification
+      - Right to erasure (technical completeness)
+      - Right to data portability (format, mechanism)
+      - Right to restriction of processing
+      - Right to object
+      - Rights related to automated decision-making
+
+      **7. DPIA Conclusion**
+      - Overall risk rating: Acceptable / Acceptable with mitigations / Unacceptable
+      - Mandatory actions before processing can proceed
+      - Supervisory authority consultation requirement (if high residual risk)
+      - Review schedule and trigger events for re-assessment
+
+      Format as a formal DPIA document suitable for regulatory submission.
+    model: sonnet
+    max_turns: 10
+
+  - id: remediation-plan
+    depends_on: [dpia-generation]
+    prompt: |
+      Produce a prioritized remediation plan addressing all identified
+      violations and DPIA findings.
+
+      DPIA: {steps.dpia-generation.output}
+      Violations: {steps.violation-detection.output}
+      Classification: {steps.classification.output}
+      Organization: {input.organization_name}
+      Risk tolerance: {input.risk_tolerance}
+
+      **1. Critical Remediation (Week 1-2)**
+      Actions that must happen immediately:
+      - Plaintext credentials or secrets exposed
+      - Active data breach conditions
+      - PHI/PII accessible without authentication
+      - Unencrypted sensitive data in transit
+      For each:
+      - Specific code/config change required
+      - Example remediation (before/after code snippet)
+      - Verification test to confirm fix
+      - Incident assessment (does this require breach notification?)
+
+      **2. High Priority Remediation (Month 1)**
+      - Consent mechanism gaps
+      - Missing privacy notices
+      - Access control deficiencies
+      - Encryption at rest for Restricted data
+      - Audit logging gaps for sensitive data access
+      - Sub-processor agreement updates
+      For each:
+      - Implementation specification
+      - Technology/tool recommendation
+      - Effort estimate (person-hours)
+      - Dependencies and prerequisites
+
+      **3. Medium Priority Remediation (Quarter 1)**
+      - Data retention automation
+      - Right to erasure implementation
+      - Data portability mechanism
+      - ROPA documentation
+      - Privacy by design integration into SDLC
+      - Employee training program
+      For each:
+      - Project scope and milestones
+      - Resource requirements
+      - Budget estimate
+      - Success criteria
+
+      **4. Ongoing Compliance Program**
+      - Automated scanning integration (CI/CD pipeline)
+      - Regular DPIA review schedule
+      - Vendor assessment process
+      - Incident response procedure updates
+      - Privacy champion network across teams
+      - Regulatory change monitoring
+
+      **5. Compliance Dashboard Specification**
+      Design a monitoring dashboard tracking:
+      - Data inventory completeness (% of systems scanned)
+      - Violation count by severity (trend over time)
+      - DSAR response times vs SLA
+      - Consent rate and opt-out trends
+      - Training completion rates
+      - Vendor compliance status
+      - Breach simulation results
+
+      **6. DPO Reporting Package**
+      Compile executive summary for the Data Protection Officer:
+      - Current compliance posture score (0-100)
+      - Top 5 risks requiring board attention
+      - Regulatory penalty exposure estimate
+      - Remediation progress vs plan
+      - Budget request for remediation program
+      - Comparison to industry peers (where available)
+
+      Format as actionable project plan with clear owners, deadlines,
+      and success metrics.
+    model: sonnet
+    max_turns: 10

@@ -1,0 +1,615 @@
+# name: SaaS Usage Optimizer
+# description: Audit SaaS subscriptions across the organization, analyze usage vs licensed seats, identify redundant tools, calculate waste, and produce consolidation roadmap with savings projections
+# tags: [SaaS, Cost Optimization, IT Management, Procurement, Audit]
+# category: general_ai
+
+name: saas-usage-optimizer
+description: Audit SaaS subscriptions across the organization, analyze usage vs licensed seats, identify redundant tools, calculate waste, and produce consolidation roadmap with savings projections
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["organization_name", "employee_count"]
+  properties:
+    organization_name:
+      type: string
+      description: "Name of the organization being audited"
+    saas_inventory:
+      type: string
+      description: "Comma-separated list of known SaaS tools in use"
+    employee_count:
+      type: number
+      description: "Total number of employees in the organization"
+    annual_saas_budget:
+      type: string
+      description: "Annual SaaS budget in USD (e.g., 500000)"
+    optimization_goal:
+      type: string
+      description: "Primary optimization goal"
+      default: "reduce_waste"
+
+steps:
+  - id: inventory-audit
+    prompt: |
+      You are a SaaS management analyst conducting a comprehensive inventory audit for
+      {input.organization_name} with {input.employee_count} employees. Known SaaS tools:
+      {input.saas_inventory}. Annual SaaS budget: {input.annual_saas_budget}. Optimization goal:
+      {input.optimization_goal}.
+
+      Perform a thorough SaaS inventory audit by building a complete catalog of the organization's
+      software subscriptions. Use the provided inventory as a starting point and expand to include
+      likely tools based on organization size, industry patterns, and common shadow IT categories.
+
+      1. Complete SaaS Inventory Catalog:
+         For each tool in {input.saas_inventory} and any additional likely tools, document:
+         - Tool name and vendor
+         - Category: primary function (e.g., Project Management, CRM, Communication, Design,
+           Analytics, Security, HR, Finance, DevOps, Customer Support, Marketing Automation,
+           File Storage, Video Conferencing, Password Management, Email Marketing, etc.)
+         - Subcategory: specific use case within the category
+         - Plan/tier: estimated subscription level (Free, Starter, Professional, Enterprise)
+         - Pricing model: per-seat, per-usage, flat-rate, tiered, hybrid
+         - Estimated per-seat monthly cost: based on typical pricing for the plan tier
+         - Licensed seats: estimated number of seats purchased
+         - Contract type: monthly, annual, multi-year
+         - Contract renewal date: estimated based on typical cycles
+         - Billing owner: which department manages the subscription
+         - Integration status: connected to other tools via API/SSO/SCIM or standalone
+         - SSO/SCIM enrollment: whether the tool is managed through identity provider
+         - Data classification: what type of data flows through this tool (PII, financial,
+           intellectual property, public, internal)
+
+      2. Shadow IT Discovery:
+         - Based on {input.employee_count} employees, estimate likely shadow IT tools
+           not captured in the official inventory
+         - Common shadow IT categories: personal productivity tools, design tools,
+           AI assistants, file sharing, project management, communication, note-taking
+         - For each estimated shadow IT tool: name, estimated users, monthly cost per user,
+           total estimated annual spend, risk level (data security, compliance, redundancy)
+         - Estimate total shadow IT spend as a percentage of official SaaS budget
+         - Identify departments most likely to have shadow IT (engineering, marketing, sales,
+           design teams typically have highest shadow IT usage)
+
+      3. Spend Analysis:
+         - Total cataloged SaaS spend: sum all known subscriptions annualized
+         - Spend by category: which categories consume the most budget?
+         - Spend by department: which departments have the highest SaaS bills?
+         - Per-employee SaaS spend: total annual spend / {input.employee_count}
+         - Spend trend estimate: based on contract renewal dates, is total spend growing?
+         - Comparison to benchmarks: how does per-employee SaaS spend compare to industry
+           averages for an organization of this size? (Industry benchmark: typically $2,000-$6,000
+           per employee annually depending on industry and company stage)
+         - Top 10 most expensive subscriptions ranked by annual cost
+         - Long-tail analysis: how many tools account for 80% of spend? How many account
+           for the remaining 20%?
+
+      4. Contract and Compliance Snapshot:
+         - Upcoming renewals: tools renewing in the next 90 days (urgent action window)
+         - Auto-renewal traps: tools set to auto-renew that should be reviewed first
+         - Contract terms to renegotiate: tools where better terms might be available
+           (especially those where usage has declined significantly below licensed capacity)
+         - Compliance flags: tools storing sensitive data without SSO, SCIM, or SOC2 compliance
+         - Vendor risk: any tools from vendors showing signs of instability (layoffs, pivots,
+           acquisition rumors, declining product quality)
+         - License agreement issues: any terms that are problematic (unlimited data access,
+           broad IP claims, unfavorable termination clauses)
+
+      5. Data Quality Assessment:
+         - Completeness score: what percentage of the SaaS landscape is captured?
+         - Confidence levels: for each tool, rate data confidence (high/medium/low)
+         - Gaps identified: what information is missing and how to obtain it
+         - Recommended data collection actions: which departments to survey, which finance
+           records to audit, which SSO logs to analyze
+
+      Produce a structured inventory report with clear categorization, consistent formatting,
+      and realistic cost estimates based on publicly available pricing for each tool.
+    model: haiku
+    max_turns: 10
+
+  - id: usage-analysis
+    depends_on: [inventory-audit]
+    prompt: |
+      You are a SaaS utilization analyst performing deep usage analysis for
+      {input.organization_name} with {input.employee_count} employees. Optimization goal:
+      {input.optimization_goal}.
+
+      Inventory audit:
+      {steps.inventory-audit.output}
+
+      Analyze usage patterns across all cataloged SaaS tools:
+
+      1. License Utilization Analysis:
+         For each tool in the inventory, assess:
+         - Licensed seats vs. estimated active users (30-day active)
+         - Utilization rate: active users / licensed seats x 100
+         - Utilization category:
+           - Over-provisioned (>30% unused): immediate savings opportunity
+           - Moderately over-provisioned (15-30% unused): optimization opportunity
+           - Right-sized (within 15%): no immediate action needed
+           - Under-provisioned (<100% utilization with waitlist): consider expanding
+         - Inactive user analysis: users who have not logged in during the past 30, 60, 90 days
+         - User type breakdown: heavy users (daily), regular users (weekly), light users
+           (monthly), dormant users (less than monthly)
+         - Estimated wasted spend: (unused seats) x (per-seat cost) x 12 months
+         - Quick win assessment: can seats be easily reduced at next renewal?
+
+      2. Feature Utilization Deep Dive:
+         For major tools (top spend and top user count), analyze:
+         - Which plan features are actually being used vs. available
+         - Are users on a higher tier than needed? Could a downgrade maintain functionality?
+         - Feature usage pattern: are users primarily using basic features even on premium plans?
+         - Power features: which advanced features justify the premium tier? How many users
+           actually use them?
+         - API usage: if API access is part of the plan, is it being used? By whom?
+         - Integration utilization: are purchased integrations being actively used?
+         - Admin feature usage: is the admin console being properly leveraged for governance?
+         - Storage and data consumption: how much of allocated storage is being used?
+
+      3. Usage Pattern Analysis:
+         - Peak usage times: when are tools most heavily used (time of day, day of week)?
+         - Seasonal patterns: any tools with cyclical usage (quarterly reporting tools,
+           annual planning tools, seasonal marketing tools)?
+         - Department-level usage: which departments are the heaviest users of each tool?
+         - Role-based usage: are certain roles over-tooled or under-tooled?
+         - New hire onboarding: how quickly do new employees adopt each tool?
+         - Departing employee offboarding: are licenses promptly reclaimed when employees leave?
+         - Cross-tool workflows: which tools are used together frequently (indicating integration
+           importance or potential consolidation)?
+
+      4. Engagement Quality Assessment:
+         - Beyond login frequency, assess the depth of engagement:
+           - Are users creating content or just consuming?
+           - Are users using collaborative features or solo features?
+           - Are users completing workflows end-to-end or abandoning midway?
+         - User satisfaction proxy: support ticket frequency per tool, complaint patterns,
+           workaround prevalence (users building manual processes to avoid tool limitations)
+         - Training and adoption support: which tools have formal training vs. organic adoption?
+           Is there a correlation between training investment and utilization?
+         - Self-service vs. admin-dependent: are users able to self-manage or do they rely
+           heavily on admins for configuration and troubleshooting?
+
+      5. Waste Quantification:
+         - Total identified waste: sum of all over-provisioned seats across all tools
+         - Waste by category: which tool categories have the most waste?
+         - Waste by department: which departments have the most unused licenses?
+         - Tier-level waste: tools where a plan downgrade would save money without losing
+           needed functionality
+         - Duplicate capability waste: spend on tools that provide redundant functionality
+           (quantified in next step - overlap detection)
+         - Abandonment waste: tools that were purchased but never properly rolled out
+         - Estimated total recoverable spend: conservative, moderate, and aggressive scenarios
+         - Percentage of annual budget that is waste: total waste / {input.annual_saas_budget}
+
+      6. Usage Trends and Forecasts:
+         - Growing tools: which tools show increasing adoption (may need more seats)?
+         - Declining tools: which tools show decreasing usage (candidates for elimination)?
+         - Plateau tools: which tools have stable usage (optimize for current level)?
+         - New tool requests: common tools employees are requesting that are not yet provisioned
+         - Forecast: projected seat needs for the next 4 quarters based on hiring plan
+           and adoption trends
+
+      Provide specific utilization percentages and dollar amounts for every tool.
+      Rank all tools by waste potential (highest waste opportunity first).
+    model: sonnet
+    max_turns: 10
+
+  - id: overlap-detection
+    depends_on: [usage-analysis]
+    prompt: |
+      You are a SaaS rationalization specialist performing overlap and redundancy detection
+      for {input.organization_name} with {input.employee_count} employees.
+
+      Inventory audit:
+      {steps.inventory-audit.output}
+
+      Usage analysis:
+      {steps.usage-analysis.output}
+
+      Identify all functional overlaps, redundancies, and consolidation opportunities:
+
+      1. Feature Overlap Matrix:
+         - Build a comprehensive feature overlap matrix for the entire SaaS portfolio
+         - Group tools by primary category (Project Management, Communication, CRM, etc.)
+         - Within each category, list all tools and map their overlapping capabilities
+         - Rate overlap level: None, Low (minor feature overlap), Medium (significant shared
+           features), High (near-complete functional duplication), Complete (identical purpose)
+         - For each overlap pair: which tool is stronger overall, which has better adoption,
+           which has better integration with the rest of the stack
+
+      2. Category-by-Category Redundancy Analysis:
+
+         a) Communication and Collaboration:
+            - Chat/messaging tools: list all tools, feature comparison, user overlap
+            - Video conferencing: list all tools, feature comparison, usage frequency
+            - Email and calendar: any redundancy in email clients or calendar tools
+            - Recommendations: which tools to consolidate, which to keep, migration complexity
+
+         b) Project and Task Management:
+            - All project management, task tracking, and workflow tools
+            - Feature comparison: task management, timeline/Gantt, resource management,
+              reporting, integrations
+            - Team-level adoption: which teams use which tools and why
+            - Recommendations: consolidation path with least disruption
+
+         c) Document and File Management:
+            - Cloud storage, document creation, knowledge base, wiki tools
+            - Storage overlap: are files duplicated across multiple platforms?
+            - Collaboration features: real-time editing, commenting, sharing, permissions
+            - Recommendations: primary platform selection and migration plan
+
+         d) CRM and Sales Tools:
+            - Core CRM, sales engagement, prospecting, pipeline management tools
+            - Data duplication: is customer data maintained in multiple systems?
+            - Workflow overlap: which sales processes span multiple tools unnecessarily?
+            - Recommendations: CRM consolidation or integration strategy
+
+         e) Marketing Tools:
+            - Email marketing, social media, content, analytics, automation tools
+            - Campaign management overlap: can one tool replace multiple?
+            - Data and audience management: are audiences maintained in multiple places?
+            - Recommendations: marketing stack rationalization
+
+         f) Analytics and BI:
+            - Business intelligence, dashboarding, data visualization, reporting tools
+            - Data source overlap: are the same data sources being queried by multiple tools?
+            - User base overlap: are the same people using multiple analytics tools?
+            - Recommendations: analytics platform consolidation
+
+         g) Development and DevOps:
+            - Code repository, CI/CD, monitoring, incident management, documentation tools
+            - Toolchain coherence: is the dev toolchain integrated or fragmented?
+            - Recommendations: platform consolidation opportunities
+
+         h) HR and People:
+            - HRIS, recruiting, performance management, learning, engagement tools
+            - Employee data duplication: is employee data maintained in multiple systems?
+            - Recommendations: HR platform consolidation
+
+      3. Cross-Category Overlaps:
+         - Tools that span multiple categories and overlap with specialized tools in each
+           (e.g., a CRM with built-in project management overlapping with dedicated PM tool)
+         - Platform play assessment: are any tools expanding into adjacent categories,
+           potentially replacing specialized point solutions?
+         - Suite vs. best-of-breed analysis: where does a suite approach save money/complexity
+           vs. where best-of-breed is justified?
+
+      4. Integration Dependency Mapping:
+         - For each overlap pair, map integration dependencies: which other tools depend on
+           each candidate for consolidation?
+         - API and data flow mapping: if we remove tool A, what breaks?
+         - SSO and identity management: which tools are managed centrally vs. standalone?
+         - Data migration complexity: how hard is it to move data from one tool to another?
+
+      5. User Impact Assessment:
+         - For each consolidation candidate: how many users would be affected?
+         - Power user analysis: identify users who would lose functionality in consolidation
+         - Workflow disruption score: rate 1-5 how much each consolidation would disrupt
+           daily work
+         - Training requirements: estimated training hours to transition users
+         - Resistance forecast: which consolidations will face strongest pushback and from whom?
+
+      6. Consolidation Opportunity Ranking:
+         - Rank all identified consolidation opportunities by:
+           - Annual savings potential (highest first)
+           - Implementation complexity (easiest first)
+           - User disruption (lowest first)
+           - Risk level (lowest first)
+         - Calculate a composite "Opportunity Score" for each
+         - Classify each opportunity: Quick Win (high savings, low complexity), Strategic
+           (high savings, high complexity), Easy Win (moderate savings, low complexity),
+           or Not Worth It (low savings, high complexity)
+
+      Be specific about which tools overlap with which, the dollar amounts at stake, and the
+      practical realities of consolidation for each pair.
+    model: sonnet
+    max_turns: 10
+
+  - id: cost-benchmarking
+    depends_on: [usage-analysis]
+    prompt: |
+      You are a SaaS procurement specialist performing cost benchmarking analysis for
+      {input.organization_name} with {input.employee_count} employees. Annual SaaS budget:
+      {input.annual_saas_budget}.
+
+      Inventory audit:
+      {steps.inventory-audit.output}
+
+      Usage analysis:
+      {steps.usage-analysis.output}
+
+      Conduct comprehensive cost benchmarking and pricing optimization analysis:
+
+      1. Per-Seat Cost Benchmarking:
+         For each tool in the inventory:
+         - Current estimated per-seat monthly cost
+         - Market benchmark: typical pricing for similar organizations (by size and tier)
+         - Variance: are we paying above or below market rate?
+         - Discount potential: estimated discount achievable through negotiation
+         - Volume pricing tiers: are we close to a pricing breakpoint where adding/removing
+           seats changes the per-seat rate?
+         - Annual vs. monthly comparison: savings from annual commitment (typically 15-20%)
+         - Multi-year discount potential: savings from 2-3 year commitment vs. annual
+
+      2. Category Spend Benchmarking:
+         - For each SaaS category (Communication, PM, CRM, etc.):
+           - Total spend in this category for {input.organization_name}
+           - Industry benchmark: typical spend for this category at {input.employee_count}
+             employees
+           - Per-employee spend in this category vs. benchmark
+           - Overspend or underspend assessment
+           - Peer comparison: how do similar organizations allocate across categories?
+         - Overall portfolio balance: is spend proportionally distributed or skewed?
+         - SaaS spend as percentage of revenue (if available): benchmark comparison
+
+      3. Alternative Tool Pricing Analysis:
+         For the top 10 most expensive tools:
+         - List 2-3 alternative tools in the same category
+         - Compare pricing: per-seat cost, total annual cost for current seat count
+         - Feature parity assessment: what would be gained or lost by switching?
+         - Migration cost estimate: one-time costs of switching (data migration, training,
+           integration rebuild, productivity loss during transition)
+         - Break-even analysis: how long until the savings from switching exceed migration costs?
+         - Net present value: total 3-year cost comparison including migration
+
+      4. Pricing Optimization Strategies:
+         - Negotiation leverage points: tools where we have strong negotiating position
+           (competitive alternatives, declining usage, upcoming renewal, large seat count)
+         - Bundle opportunities: vendors offering multiple products where bundling saves money
+         - Rightsizing recommendations: specific tools where plan downgrade is recommended
+           with justification
+         - Prepayment discounts: tools where paying annually or multi-year yields significant savings
+         - Usage-based vs. seat-based: tools where a usage-based pricing model would be cheaper
+           given actual usage patterns
+         - Nonprofit/education/startup discounts: if applicable, programs that could reduce costs
+         - Startup credits and partnerships: tools offering credit programs
+
+      5. Contract Term Optimization:
+         - Renewal timing coordination: can we align renewal dates to strengthen negotiation position?
+         - Multi-tool vendor negotiation: vendors where we use multiple products and can
+           negotiate enterprise agreements
+         - Payment term optimization: early payment discounts vs. cash flow considerations
+         - Auto-renewal review: tools set to auto-renew that should be manually reviewed
+         - Cancellation timing: tools that can be cancelled with minimal penalty before renewal
+         - Renegotiation windows: when to initiate renegotiation for best outcomes
+
+      6. Total Cost of Ownership Analysis:
+         - Beyond subscription fees, estimate total cost for major tools:
+           - Administration time: hours spent managing, configuring, troubleshooting
+           - Training costs: formal training, onboarding, documentation maintenance
+           - Integration maintenance: developer time maintaining integrations
+           - Support escalation costs: internal IT time handling tool-related issues
+           - Compliance costs: audit, security review, data governance for each tool
+         - TCO per tool: subscription cost + hidden costs = true annual cost
+         - TCO ranking: which tools are more expensive than they appear?
+
+      7. Savings Summary:
+         - Negotiation savings: estimated annual savings from renegotiating existing contracts
+         - Rightsizing savings: estimated savings from plan downgrades and seat reductions
+         - Alternative tool savings: estimated savings from tool switches (net of migration costs)
+         - Total addressable savings: sum of all categories
+         - Confidence-weighted savings: apply probability-of-achievement to each category
+         - Timeline to realize savings: when each savings category can be captured
+
+      Provide specific dollar amounts for every recommendation. Use publicly available
+      pricing data as the basis for all benchmarking comparisons.
+    model: haiku
+    max_turns: 10
+
+  - id: consolidation-planning
+    depends_on: [usage-analysis, overlap-detection, cost-benchmarking]
+    prompt: |
+      You are a SaaS portfolio strategist developing the consolidation plan for
+      {input.organization_name} with {input.employee_count} employees. Annual SaaS budget:
+      {input.annual_saas_budget}. Optimization goal: {input.optimization_goal}.
+
+      Usage analysis:
+      {steps.usage-analysis.output}
+
+      Overlap detection:
+      {steps.overlap-detection.output}
+
+      Cost benchmarking:
+      {steps.cost-benchmarking.output}
+
+      Develop a comprehensive, executable consolidation plan:
+
+      1. Consolidation Priority Matrix:
+         - Rank all consolidation opportunities using a weighted scoring model:
+           - Annual savings potential (30% weight)
+           - Implementation ease (25% weight)
+           - User disruption risk (20% weight)
+           - Security/compliance improvement (15% weight)
+           - Strategic alignment (10% weight)
+         - For each opportunity: composite score, rank, recommended wave (1, 2, or 3)
+         - Total savings potential if all recommended consolidations are executed
+         - Minimum viable consolidation: the smallest set of changes that captures 80% of savings
+
+      2. Wave 1 - Quick Wins (execute within 30 days):
+         For each quick-win consolidation:
+         - What: specific tool(s) to eliminate or downgrade
+         - Why: clear justification with usage data and cost data
+         - How: step-by-step execution plan
+           - License audit and cleanup (remove inactive users)
+           - Plan downgrade execution (negotiate with vendor)
+           - Tool elimination (migrate users, data, and workflows)
+         - Who: responsible owner for each action
+         - When: specific timeline with milestones
+         - Risk mitigation: what could go wrong and how to handle it
+         - Expected savings: monthly and annual figures
+         - Success criteria: how to verify the consolidation was successful
+         - Rollback plan: what to do if the consolidation causes problems
+
+      3. Wave 2 - Strategic Consolidations (execute within 90 days):
+         For each strategic consolidation:
+         - What: tool consolidation pair (tool to keep, tool to retire)
+         - Business case: detailed cost-benefit analysis including migration costs
+         - Migration plan:
+           - Data migration: what data needs to move, format, volume, method
+           - User migration: communication plan, training plan, phased rollout
+           - Integration migration: which integrations need to be rebuilt or reconfigured
+           - Workflow migration: business processes that need to be redesigned
+         - Timeline: detailed week-by-week project plan
+         - Resource requirements: IT staff time, vendor professional services, user training hours
+         - Change management plan: how to handle resistance, who the champions are, communication cadence
+         - Risk register: specific risks, likelihood, impact, mitigation for each consolidation
+         - Expected savings: net of migration costs, with payback period calculation
+
+      4. Wave 3 - Transformational Changes (execute within 6 months):
+         For each transformational change:
+         - What: major platform consolidation or replacement
+         - Strategic rationale: why this matters beyond cost savings
+         - Vendor evaluation framework: criteria for selecting the winning platform
+         - Proof of concept plan: how to validate the replacement before committing
+         - Full migration plan: phases, milestones, checkpoints, go/no-go criteria
+         - Organizational change management: stakeholder alignment, executive sponsorship,
+           user advisory council
+         - Budget requirements: total investment needed (may require upfront spend before savings)
+         - 3-year TCO comparison: current state vs. consolidated state
+         - Strategic benefits: beyond cost - security, governance, user experience, integration
+
+      5. Consolidation Risk Assessment:
+         - Overall portfolio risk: what is the aggregate risk of executing the full plan?
+         - Dependency mapping: which consolidations depend on others?
+         - Critical path: which consolidations must succeed for the overall plan to work?
+         - Failure scenarios: what happens if a major consolidation fails?
+         - Vendor relationship risks: how will consolidation affect vendor relationships?
+         - Employee experience risks: cumulative change fatigue from multiple tool changes
+         - Data loss risks: where is data at risk during migration?
+         - Business continuity: at no point should consolidation interrupt business operations
+
+      6. Governance Framework:
+         - SaaS procurement policy recommendations: approval workflows, budget thresholds,
+           security review requirements
+         - Ongoing monitoring plan: how to track tool usage and prevent future sprawl
+         - New tool request process: how employees should request new SaaS tools
+         - Annual review cadence: scheduled optimization reviews to maintain discipline
+         - Shadow IT prevention: strategies to reduce unauthorized tool adoption
+         - Vendor management best practices: contract terms, SLA requirements, exit clauses
+         - Role definition: who owns SaaS management going forward (IT, finance, ops)?
+
+      Ensure every consolidation recommendation is specific, actionable, and supported by
+      data from the analysis. Acknowledge trade-offs honestly - consolidation always involves
+      some disruption, and the plan should show how to minimize it.
+    model: sonnet
+    max_turns: 10
+
+  - id: savings-roadmap
+    depends_on: [consolidation-planning]
+    prompt: |
+      You are a VP of IT/Finance presenting the final SaaS optimization savings roadmap for
+      {input.organization_name} with {input.employee_count} employees. Annual SaaS budget:
+      {input.annual_saas_budget}. Optimization goal: {input.optimization_goal}.
+
+      Usage analysis:
+      {steps.usage-analysis.output}
+
+      Overlap detection:
+      {steps.overlap-detection.output}
+
+      Cost benchmarking:
+      {steps.cost-benchmarking.output}
+
+      Consolidation plan:
+      {steps.consolidation-planning.output}
+
+      Produce the final executive savings roadmap and implementation brief:
+
+      1. EXECUTIVE SUMMARY (1 page):
+         - Current state: total SaaS spend, number of tools, per-employee cost, waste percentage
+         - Key finding: the single most important insight from the audit
+         - Total addressable savings: conservative, moderate, and aggressive scenarios
+         - Recommended approach: which scenario to pursue and why
+         - Investment required: upfront costs for consolidation and migration
+         - Net savings: total savings minus investment costs, with payback timeline
+         - Expected outcome: what the optimized portfolio looks like (fewer tools, lower cost,
+           better governance, improved security)
+
+      2. SAVINGS WATERFALL (detailed breakdown):
+         - Starting point: current annual SaaS spend
+         - Category 1 - License rightsizing: remove unused seats = $X savings
+         - Category 2 - Plan downgrades: move to appropriate tiers = $X savings
+         - Category 3 - Tool consolidation: eliminate redundant tools = $X savings
+         - Category 4 - Contract renegotiation: better pricing terms = $X savings
+         - Category 5 - Shadow IT elimination: bring rogue tools under management = $X savings
+         - Minus: Migration and transition costs = -$X
+         - Minus: Training and change management costs = -$X
+         - Net annual savings: total after all costs
+         - Savings as percentage of current spend
+         - Per-employee savings
+
+      3. IMPLEMENTATION TIMELINE:
+         - Month 1: Quick wins execution (license cleanup, plan downgrades)
+           - Specific actions, owners, expected savings capture
+         - Month 2-3: Strategic consolidations (Wave 2)
+           - Migration projects, training programs, vendor negotiations
+         - Month 4-6: Transformational changes (Wave 3)
+           - Platform consolidations, vendor evaluations, POCs
+         - Month 7-12: Optimization and governance
+           - Ongoing monitoring, contract renegotiations, policy enforcement
+         - Monthly savings capture curve: cumulative savings realized over 12 months
+         - Break-even point: when total savings exceed total investment
+         - Key milestones and decision gates at each phase
+
+      4. SAVINGS PROJECTIONS WITH CONFIDENCE INTERVALS:
+         - Conservative scenario (90% confidence):
+           - Only quick wins and license rightsizing
+           - Annual savings: $X
+           - Implementation risk: Low
+           - Timeline: 30 days to full realization
+         - Moderate scenario (70% confidence):
+           - Quick wins + strategic consolidations + renegotiations
+           - Annual savings: $X
+           - Implementation risk: Medium
+           - Timeline: 90 days to full realization
+         - Aggressive scenario (50% confidence):
+           - Full consolidation plan + transformational changes
+           - Annual savings: $X
+           - Implementation risk: High
+           - Timeline: 6 months to full realization
+         - For each scenario: assumptions, dependencies, and what must go right
+
+      5. OPTIMIZED PORTFOLIO VISION:
+         - Target state tool inventory: the recommended SaaS stack after optimization
+         - For each remaining tool: category, purpose, seats needed, annual cost, status
+           (keep as-is, renegotiate, downgrade, new selection)
+         - Category coverage map: every SaaS category, the winning tool, and the rationale
+         - Integration architecture: how the optimized tools connect and share data
+         - Per-employee cost target: from current $X to target $X
+         - Total annual cost target: from current $X to target $X
+         - Tool count reduction: from current X tools to target X tools
+
+      6. RISK MITIGATION PLAN:
+         - Top 10 risks to the optimization plan, ranked by severity
+         - For each risk: description, likelihood, impact, mitigation action, fallback plan
+         - Change management risks: how to maintain employee productivity during transitions
+         - Vendor relationship risks: how to manage vendor reactions to consolidation/cancellation
+         - Data migration risks: how to ensure zero data loss during migrations
+         - Business continuity assurance: guarantee that no critical process is interrupted
+         - Escalation procedures: who to contact when issues arise
+
+      7. GOVERNANCE AND SUSTAINABILITY:
+         - SaaS management policy: recommended policies for ongoing optimization
+         - Procurement workflow: approval process for new SaaS purchases
+         - Quarterly review process: template for ongoing SaaS portfolio reviews
+         - Usage monitoring dashboard: metrics to track continuously
+         - Budget allocation model: how to allocate SaaS budget by department
+         - Vendor management framework: standards for vendor evaluation, onboarding, offboarding
+         - Success metrics: KPIs to measure the optimization program's ongoing impact
+
+      8. APPENDICES:
+         - Complete tool-by-tool analysis with all data points
+         - Full overlap matrix
+         - Detailed cost benchmarking tables
+         - Migration plan details for each consolidation
+         - Contract renewal calendar
+         - Vendor contact information and contract summaries
+         - Training material templates
+         - Communication templates for stakeholders
+
+      The roadmap should be presentation-ready for executive leadership and the CFO.
+      Lead with business impact, not technical detail. Every recommendation should have
+      a clear dollar amount attached to it.
+    model: sonnet
+    max_turns: 10

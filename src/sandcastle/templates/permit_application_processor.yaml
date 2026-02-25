@@ -1,0 +1,635 @@
+# name: Permit Application Processor
+# description: Automate government permit applications - extract requirements from local codes, pre-fill forms, check completeness, flag non-compliance, and track approval across jurisdictions
+# tags: [Permits, Compliance, Government, Regulatory, Forms]
+# category: general_ai
+
+name: permit-application-processor
+description: Automate government permit applications - extract requirements from local codes, pre-fill forms, check completeness, flag non-compliance, and track approval across jurisdictions
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["project_type", "jurisdiction", "project_description"]
+  properties:
+    project_type:
+      type: string
+      description: "Type of permit required: construction, business, environmental, zoning, event"
+    jurisdiction:
+      type: string
+      description: "City, county, and state/country where the permit will be filed (e.g. 'Austin, TX', 'London Borough of Camden, UK')"
+    project_description:
+      type: string
+      description: "Detailed description of the project requiring permits (scope, size, location, intended use)"
+    applicant_info:
+      type: string
+      description: "Applicant details: name, organization, address, contact info, professional licenses held"
+    timeline_requirement:
+      type: string
+      description: "Desired project timeline and any hard deadlines (e.g. 'construction start by March 2026, occupancy by December 2026')"
+
+steps:
+  - id: code-research
+    prompt: |
+      Research all applicable municipal codes, building codes, zoning ordinances, and
+      regulatory requirements for this permit application. Your goal is to build a
+      complete regulatory picture so nothing is missed during the application process.
+
+      Project type: {input.project_type}
+      Jurisdiction: {input.jurisdiction}
+      Project description: {input.project_description}
+      Applicant info: {input.applicant_info}
+      Timeline: {input.timeline_requirement}
+
+      Conduct the following comprehensive regulatory research:
+
+      **1. Jurisdictional Authority Identification**
+      Determine every government body that has permitting authority over this project:
+      - Municipal/city permitting department (building permits, occupancy permits)
+      - County-level authorities (if outside city limits or county has overlay jurisdiction)
+      - State-level agencies (environmental, professional licensing, health department)
+      - Federal agencies if applicable (EPA, Army Corps of Engineers for wetlands, FAA for
+        height restrictions near airports, FCC for telecommunications)
+      - Special district authorities (fire districts, water districts, school districts
+        if impact fees apply)
+      - Homeowners association or architectural review boards (if applicable)
+      - Historic preservation commissions (if in a historic district)
+
+      For each authority:
+      - Official name and department
+      - Physical address and website URL
+      - Phone number and email for permit inquiries
+      - Office hours and appointment requirements
+      - Typical response times for applications
+      - Online portal availability for electronic submissions
+
+      **2. Applicable Code Research**
+      Identify and research all relevant codes and regulations:
+
+      For CONSTRUCTION permits:
+      - International Building Code (IBC) edition adopted by {input.jurisdiction}
+      - International Residential Code (IRC) if applicable
+      - International Fire Code (IFC) and local fire code amendments
+      - International Plumbing Code (IPC) or Uniform Plumbing Code (UPC)
+      - International Mechanical Code (IMC)
+      - National Electrical Code (NEC/NFPA 70) edition in effect
+      - International Energy Conservation Code (IECC) or local energy code
+      - Americans with Disabilities Act (ADA) requirements (if commercial)
+      - Local building code amendments and supplements
+      - Structural engineering requirements (seismic zone, wind zone, snow load zone)
+
+      For BUSINESS permits:
+      - Business license requirements and categories
+      - Zoning verification for intended business use
+      - Health department permits (food service, body art, childcare, etc.)
+      - Liquor license requirements if applicable
+      - Signage permits and sign code regulations
+      - Fire occupancy permits and maximum occupancy calculations
+      - Certificate of occupancy requirements
+      - Home occupation permits if home-based
+
+      For ENVIRONMENTAL permits:
+      - Clean Water Act Section 404 permits (wetland fill)
+      - NPDES stormwater permits (construction and industrial)
+      - Air quality permits (stationary source, Title V)
+      - Environmental impact assessment (EIA) or NEPA requirements
+      - Endangered species consultation requirements
+      - Tree preservation ordinances and tree removal permits
+      - Erosion and sediment control plans
+      - Hazardous materials handling and storage permits
+
+      For ZONING permits:
+      - Current zoning classification of the property
+      - Permitted uses vs. conditional uses in that zone
+      - Dimensional requirements (setbacks, height limits, FAR, lot coverage)
+      - Parking requirements (minimum spaces, dimensions, ADA accessibility)
+      - Variance requirements if the project does not conform
+      - Special use permit or conditional use permit process
+      - Planned unit development (PUD) overlay requirements
+      - Design review or architectural review requirements
+
+      For EVENT permits:
+      - Special event permit categories and thresholds (attendance, duration)
+      - Temporary structure permits (tents, stages, bleachers)
+      - Temporary food service permits
+      - Noise variance permits
+      - Street closure and traffic management plans
+      - Security and crowd control requirements
+      - Insurance and liability requirements
+      - Alcohol service permits for events
+
+      **3. Code Analysis for This Specific Project**
+      Based on the project description, identify:
+      - Exactly which code sections apply (cite specific section numbers)
+      - Requirements that are straightforward to meet
+      - Requirements that may be challenging or require special attention
+      - Requirements that appear impossible to meet (triggering variance needs)
+      - Conflicts between different code requirements
+      - Recent code changes that affect this project type
+      - Local interpretations or enforcement patterns that differ from the written code
+
+      **4. Precedent Research**
+      Search for similar projects approved in the same jurisdiction:
+      - Recent permit approvals for similar project types
+      - Common conditions of approval attached to similar projects
+      - Known denial reasons for similar applications
+      - Typical review timelines for this project type
+      - Public hearing requirements and neighborhood notification rules
+
+      **5. Fee Schedule Research**
+      Compile all applicable fees:
+      - Permit application fees (base fee, per-square-foot fees, plan review fees)
+      - Impact fees (traffic, water, sewer, parks, schools)
+      - Inspection fees
+      - Certificate of occupancy fees
+      - Utility connection fees
+      - Professional review fees (structural, fire, stormwater)
+      - Refund policies for withdrawn applications
+      - Fee waiver or reduction programs available
+      - Payment methods accepted and installment options
+
+      Produce a comprehensive regulatory research report organized by permitting
+      authority, with specific code citations and fee amounts for every requirement.
+    model: sonnet
+    max_turns: 10
+
+  - id: requirement-extraction
+    depends_on: [code-research]
+    prompt: |
+      Extract and organize all permit requirements into a structured checklist
+      that can be used to prepare a complete application package.
+
+      Code research results: {steps.code-research.output}
+      Project type: {input.project_type}
+      Jurisdiction: {input.jurisdiction}
+      Project description: {input.project_description}
+
+      Create the following structured requirement extractions:
+
+      **1. Document Requirements Checklist**
+      List every document that must be submitted with the application:
+      - Document name (exact name the jurisdiction expects)
+      - Document description and purpose
+      - Format requirements (paper size, scale, digital format, number of copies)
+      - Professional certification requirements (which documents must be stamped
+        by a licensed architect, engineer, or surveyor)
+      - Template availability (does the jurisdiction provide a template or form?)
+      - Template URL if available online
+      - Preparation complexity: Simple (applicant can prepare), Moderate (may need
+        professional help), Complex (requires licensed professional)
+
+      Typical documents by category:
+      a) Application forms and cover sheets
+      b) Site plans and surveys (boundary survey, topographic survey, ALTA survey)
+      c) Architectural drawings (floor plans, elevations, sections, details)
+      d) Structural engineering calculations and drawings
+      e) MEP (mechanical, electrical, plumbing) drawings
+      f) Civil engineering plans (grading, drainage, utilities)
+      g) Landscape plans
+      h) Environmental reports and studies
+      i) Traffic impact studies
+      j) Geotechnical reports (soil testing)
+      k) Energy compliance documents (Title 24, IECC calculations)
+      l) Accessibility compliance plans (ADA, Fair Housing)
+      m) Legal documents (property deed, title report, easements, CC&Rs)
+      n) Financial documents (proof of insurance, bonds, financial responsibility)
+      o) Neighborhood notification evidence (mailing receipts, sign posting photos)
+      p) Professional license copies for all design professionals
+
+      **2. Permit Sequencing Map**
+      Many permits must be obtained in a specific order. Map the dependencies:
+      - Which permits must be obtained before others can be applied for
+      - Which permits can be applied for simultaneously
+      - Which approvals are prerequisites for other departments
+      - Which permits require prior approvals from other jurisdictions
+      - Critical path analysis showing the fastest possible sequence
+      - Typical elapsed time for each permit in the sequence
+
+      **3. Inspection Requirements**
+      List all inspections required during and after the project:
+      - Inspection type and timing (at what construction stage)
+      - What the inspector will check
+      - Common pass/fail items
+      - Re-inspection fees if failed
+      - Scheduling requirements (advance notice needed)
+      - Final inspection requirements for certificate of occupancy
+
+      **4. Condition Compliance Matrix**
+      Based on precedent research, list likely conditions of approval:
+      - Standard conditions attached to all permits of this type
+      - Special conditions likely for this specific project
+      - How to demonstrate compliance with each condition
+      - Timeline for condition compliance (before construction, during, after)
+
+      **5. Requirement Gap Analysis**
+      Based on the project description and applicant info:
+      - Requirements that the project already satisfies
+      - Requirements where information is missing (needs to be gathered)
+      - Requirements where the project may not comply (needs variance or redesign)
+      - Professional services needed that the applicant may not have engaged yet
+        (architect, structural engineer, civil engineer, surveyor, geotechnical engineer)
+
+      Format the entire extraction as a machine-readable checklist with status
+      fields (complete, incomplete, not applicable, needs professional, needs variance).
+    model: haiku
+    max_turns: 10
+
+  - id: form-preparation
+    depends_on: [requirement-extraction]
+    prompt: |
+      Prepare pre-filled permit application forms and supporting narrative documents
+      based on the extracted requirements and project information.
+
+      Requirement checklist: {steps.requirement-extraction.output}
+      Code research: {steps.code-research.output}
+      Project type: {input.project_type}
+      Jurisdiction: {input.jurisdiction}
+      Project description: {input.project_description}
+      Applicant info: {input.applicant_info}
+      Timeline: {input.timeline_requirement}
+
+      Prepare the following application materials:
+
+      **1. Primary Application Form Pre-fill**
+      For each required application form identified in the requirements:
+      - Form name and form number (if known)
+      - Pre-fill every field possible based on available project and applicant information
+      - For each field, provide:
+        * Field label (as it appears on the form)
+        * Pre-filled value (based on provided information)
+        * Confidence level (certain, likely correct, needs verification, cannot determine)
+        * Notes on correct formatting or acceptable values for that field
+      - Flag fields that require information not yet provided
+      - Flag fields where the correct answer depends on design decisions not yet finalized
+
+      **2. Project Narrative**
+      Draft a comprehensive project narrative suitable for the permit application:
+      - Project overview (scope, purpose, location, timeline)
+      - Detailed scope of work organized by trade or discipline
+      - Construction methodology or operational plan
+      - Compliance narrative explaining how the project meets each major code requirement
+      - Environmental impact narrative if required
+      - Traffic and parking impact narrative if required
+      - Neighborhood compatibility narrative if required (addressing potential concerns)
+      - Project phasing plan if the work occurs in stages
+
+      **3. Cover Letter**
+      Draft a professional cover letter for the permit submission:
+      - Addressed to the correct department and official (from code research)
+      - Clear identification of what is being applied for
+      - Summary of enclosed documents cross-referenced to the requirements checklist
+      - Request for expedited review if timeline requires it
+      - Contact information for questions during review
+      - Professional and courteous tone appropriate for government correspondence
+
+      **4. Supporting Calculations and Narratives**
+      Prepare preliminary versions of required technical narratives:
+      - Parking calculation worksheet (required spaces based on use type and square footage)
+      - Lot coverage and floor area ratio calculations
+      - Setback compliance analysis
+      - Height calculation methodology
+      - Occupancy load calculation (if commercial - based on IBC Table 1004.5)
+      - Plumbing fixture count calculation (based on occupancy and IPC/UPC requirements)
+      - Exit and egress width calculations (based on occupancy load)
+      - Accessible route and accessible feature summary
+      - Energy code compliance path identification (prescriptive vs. performance)
+      - Fire protection system requirements analysis
+
+      **5. Variance or Exception Requests**
+      If the project requires variances or exceptions:
+      - Draft the variance application narrative
+      - Document the hardship justification (practical difficulty or unnecessary hardship)
+      - Explain why the variance will not be detrimental to public health, safety, or welfare
+      - Demonstrate that the variance is the minimum necessary
+      - Cite precedent variance approvals for similar situations
+      - Prepare responses to likely objections
+
+      **6. Fee Calculation Worksheet**
+      Prepare a detailed fee calculation:
+      - List each fee by authority and permit type
+      - Show the calculation method and variables used
+      - Subtotal by permitting authority
+      - Grand total for all permits and fees
+      - Payment timing (which fees are due at application vs. at issuance)
+      - Identify any fee reduction programs the applicant may qualify for
+
+      **7. Submission Logistics**
+      Prepare a submission plan:
+      - Submission method for each authority (online portal, in-person, mail)
+      - Required number of copies (paper) or file format requirements (digital)
+      - Appointment requirements and available scheduling windows
+      - Documents that must be submitted as originals vs. copies
+      - Pre-submission meeting options (some jurisdictions offer pre-application conferences)
+
+      Format all materials as ready-to-submit documents. Use placeholder brackets
+      [NEEDS: description] for any information that could not be determined from
+      the provided inputs.
+    model: sonnet
+    max_turns: 10
+
+  - id: compliance-check
+    depends_on: [requirement-extraction]
+    prompt: |
+      Perform a thorough compliance check of the project against all identified
+      regulatory requirements. Identify every potential non-compliance issue before
+      submission to prevent costly rejections and resubmittals.
+
+      Requirement checklist: {steps.requirement-extraction.output}
+      Code research: {steps.code-research.output}
+      Project type: {input.project_type}
+      Jurisdiction: {input.jurisdiction}
+      Project description: {input.project_description}
+      Timeline: {input.timeline_requirement}
+
+      Conduct the following compliance analysis:
+
+      **1. Zoning Compliance Analysis**
+      Check the project against all dimensional and use requirements:
+      - Permitted use verification: Is the proposed use allowed in the zoning district?
+        If conditional use, what are the additional requirements?
+      - Setback compliance: Does the project meet front, side, and rear setback requirements?
+        Calculate based on project dimensions and lot boundaries.
+      - Height compliance: Does the project meet height limitations? Account for measurement
+        methodology (grade to midpoint of roof, grade to peak, etc.)
+      - Floor area ratio (FAR): Calculate the proposed FAR and compare to the maximum allowed.
+      - Lot coverage: Calculate impervious surface coverage and compare to maximum allowed.
+      - Parking: Calculate required parking spaces by use type and compare to proposed.
+        Check for shared parking reductions, transit proximity reductions, or bike parking
+        substitutions that may be available.
+      - Landscaping: Check minimum landscape requirements (perimeter buffers, interior
+        parking lot landscaping, tree canopy coverage).
+      - Signage: Check proposed signage against the sign code (size, height, illumination,
+        number allowed).
+      - Density: For residential projects, check units per acre against zoning maximum.
+
+      For each item: COMPLIANT / NON-COMPLIANT / CANNOT DETERMINE / NOT APPLICABLE
+      If non-compliant, specify the deviation and required action (redesign, variance, exception).
+
+      **2. Building Code Compliance Review**
+      Check the project against applicable building codes:
+      - Construction type determination (Type I through Type V per IBC Chapter 6)
+      - Occupancy classification (IBC Chapter 3) and mixed-use provisions if applicable
+      - Allowable area and height per construction type and occupancy (IBC Chapter 5)
+      - Fire-resistance rating requirements for structural elements
+      - Means of egress compliance (exit access, exits, exit discharge)
+      - Accessibility requirements (new construction vs. alterations thresholds)
+      - Structural design requirements (seismic design category, wind speed, snow load)
+      - Fire protection system requirements (sprinklers, alarms, standpipes)
+      - Plumbing, mechanical, and electrical code compliance indicators
+
+      **3. Environmental Compliance Check**
+      - Stormwater management requirements and proposed compliance method
+      - Erosion and sediment control plan requirements
+      - Wetland and waterway setback compliance
+      - Tree preservation compliance (protected trees on site?)
+      - Air quality permit triggers (dust, emissions)
+      - Noise ordinance compliance (construction hours, operational noise levels)
+      - Hazardous materials disclosure requirements
+      - Environmental site assessment requirements (Phase I, Phase II ESA)
+
+      **4. Common Rejection Reasons Analysis**
+      Based on research of permit rejections in {input.jurisdiction}, flag these
+      common issues:
+      - Incomplete applications (missing forms, missing signatures, missing fees)
+      - Insufficient plan detail (dimensions not shown, scale incorrect, missing details)
+      - Professional seal and signature missing on required documents
+      - Incorrect or outdated forms used
+      - Property ownership not verified
+      - Outstanding code violations on the property
+      - Tax delinquency on the property
+      - Expired predecessor permits
+      - Neighborhood notification not properly completed
+      - Environmental clearance not obtained before building permit application
+
+      For each common rejection reason, assess whether this application is at risk.
+
+      **5. Timeline Feasibility Analysis**
+      Compare the desired timeline against realistic processing times:
+      - Permit application review period (typical and maximum for this jurisdiction)
+      - Plan check revision cycles (how many rounds of comments are typical?)
+      - Public hearing scheduling (if required, how far out are hearings scheduled?)
+      - Appeal periods after approval
+      - Permit issuance processing time after approval
+      - Building permit validity period and extension options
+      - Construction inspection scheduling availability
+
+      If the desired timeline is not feasible:
+      - Identify the bottleneck(s)
+      - Recommend expediting options (phased permitting, deferred submittals,
+        pre-application meetings, expedited review fees)
+      - Propose a realistic revised timeline
+
+      **6. Risk-Ranked Non-Compliance Summary**
+      Produce a risk-ranked list of all compliance issues:
+      - Critical (will definitely cause rejection): Must resolve before submission
+      - Major (likely to cause rejection): Should resolve or prepare variance request
+      - Minor (may cause plan check comments): Can potentially address during review
+      - Informational (best practice): Recommended but not strictly required
+
+      For each issue, provide:
+      - Code section citation
+      - The requirement
+      - The project's current status
+      - Recommended resolution
+      - Estimated cost and time to resolve
+      - Impact on project timeline if not resolved before submission
+
+      This compliance report should give the applicant a clear go/no-go decision
+      on whether the application is ready for submission.
+    model: haiku
+    max_turns: 10
+
+  - id: submission-package
+    depends_on: [form-preparation, compliance-check]
+    prompt: |
+      Assemble the final permit submission package incorporating the compliance
+      check findings and prepared forms. Produce a complete, submission-ready
+      package with quality assurance verification.
+
+      Prepared forms and documents: {steps.form-preparation.output}
+      Compliance check results: {steps.compliance-check.output}
+      Requirements checklist: {steps.requirement-extraction.output}
+      Project type: {input.project_type}
+      Jurisdiction: {input.jurisdiction}
+      Project description: {input.project_description}
+      Applicant info: {input.applicant_info}
+
+      **1. Compliance Issue Resolution**
+      For each compliance issue identified in the compliance check:
+      - Issues resolved through form corrections or narrative updates
+      - Issues requiring applicant action before submission (list specific actions)
+      - Issues requiring professional services (architect, engineer, surveyor)
+      - Issues requiring variance applications (included as supplemental submittals)
+      - Issues that can be deferred to plan check comments (acceptable risk)
+
+      **2. Final Document Package Assembly**
+      Organize the complete submission package in the order required by the jurisdiction:
+      - Cover sheet with table of contents
+      - Signed application forms (list which forms need wet signatures vs. electronic)
+      - Cover letter
+      - Project narrative
+      - Site plans and drawings (specify which sheets are included)
+      - Engineering calculations and reports
+      - Supporting studies and assessments
+      - Legal documents and certifications
+      - Financial documents and fee payments
+      - Supplemental applications (variance, conditional use, environmental, etc.)
+
+      For each document:
+      - Status: Ready / Needs Applicant Input / Needs Professional / Not Applicable
+      - If not ready, specific action items and deadlines to meet submission target
+
+      **3. Quality Assurance Checklist**
+      Perform a final QA check on the package:
+      - All required forms are included and complete
+      - All required signatures are identified and flagged for signing
+      - All professional seals and stamps are identified and flagged
+      - All calculations are internally consistent
+      - All plan dimensions match across drawings
+      - Code citations in narratives match current code editions
+      - Fee calculations are verified against current fee schedule
+      - Contact information is correct and consistent across all documents
+      - All cross-references between documents are accurate
+      - No placeholder text or brackets remain in final documents
+        (or all remaining placeholders are documented as action items)
+
+      **4. Submission Strategy**
+      Recommend the optimal submission approach:
+      - Submit all permits simultaneously vs. sequential submission
+      - Pre-application conference recommendation (yes/no and why)
+      - Expedited review options and cost-benefit analysis
+      - Electronic vs. physical submission preference and requirements
+      - Recommended submission day and time (avoid month-end backlogs,
+        know when new review cycles start)
+      - Backup plan if initial submission is rejected for completeness
+
+      **5. Post-Submission Action Plan**
+      Prepare for what happens after submission:
+      - Expected acknowledgment timeline
+      - Plan review assignment process
+      - How to check application status (online portal, phone, email)
+      - Typical plan check comment response format
+      - How to schedule a meeting with the plan reviewer if needed
+      - Deadline for responding to plan check comments
+      - What constitutes a complete response to reviewer comments
+
+      **6. Appeal and Escalation Procedures**
+      In case the application is denied or conditions are unacceptable:
+      - Formal appeal process and deadlines
+      - Appeal fees and hearing procedures
+      - Political escalation channels (council member, planning commission)
+      - Mediation options
+      - Legal challenge considerations and standing requirements
+
+      Produce the final submission package as a structured deliverable with
+      clear action items for the applicant and a timeline to submission.
+    model: sonnet
+    max_turns: 10
+
+  - id: tracking-setup
+    depends_on: [submission-package]
+    prompt: |
+      Set up a comprehensive permit tracking and monitoring system to manage
+      the application through approval and into the construction/operational phase.
+
+      Submission package: {steps.submission-package.output}
+      Compliance results: {steps.compliance-check.output}
+      Requirements: {steps.requirement-extraction.output}
+      Project type: {input.project_type}
+      Jurisdiction: {input.jurisdiction}
+      Timeline: {input.timeline_requirement}
+
+      Create the following tracking infrastructure:
+
+      **1. Master Permit Tracker**
+      For each permit in the application:
+      - Permit type and issuing authority
+      - Application number (to be filled upon submission)
+      - Submission date
+      - Current status (Preparing / Submitted / In Review / Comments Received /
+        Resubmitted / Approved / Issued / Denied / Appealed)
+      - Assigned reviewer name and contact (to be filled)
+      - Expected review completion date
+      - Actual completion date
+      - Conditions of approval (to be filled)
+      - Permit expiration date and renewal requirements
+      - Fee status (paid / pending / additional fees due)
+
+      **2. Milestone Timeline**
+      Create a detailed timeline with milestones:
+      - Application preparation milestones (documents due, professional deliverables due)
+      - Submission milestones (each permit submission date)
+      - Review milestones (expected comment dates, response deadlines)
+      - Approval milestones (expected approval dates)
+      - Permit issuance milestones (expected issuance dates)
+      - Construction start authorization (when can work legally begin)
+      - Inspection milestones (required inspections and when they occur)
+      - Certificate of occupancy / final approval milestone
+      - For each milestone: target date, actual date, status, responsible party
+
+      **3. Notification and Reminder System**
+      Define automated reminders and alerts:
+      - 30-day, 14-day, and 7-day reminders before permit expiration
+      - 7-day and 3-day reminders before comment response deadlines
+      - Renewal notice reminders (90, 60, 30 days before renewal deadline)
+      - Insurance renewal reminders tied to permit requirements
+      - Inspection scheduling reminders (schedule 48+ hours in advance)
+      - Fee payment reminders
+      - Professional license renewal reminders for team members
+
+      **4. Document Version Control**
+      Set up version tracking for all submitted documents:
+      - Initial submission version tracking
+      - Revision versions responding to plan check comments
+      - Change tracking between versions (what changed and why)
+      - Final approved version identification
+      - As-built documentation tracking (post-construction)
+
+      **5. Communication Log Template**
+      Create a structured log for all permit-related communications:
+      - Date and time
+      - Communication method (phone, email, in-person, portal message)
+      - Parties involved
+      - Subject and summary
+      - Action items resulting from communication
+      - Follow-up deadline
+      - Attachments or reference documents
+
+      **6. Inspection Tracking**
+      For each required inspection:
+      - Inspection type and code section
+      - Required timing (at what construction stage)
+      - Prerequisites (what must be complete before requesting inspection)
+      - Inspector name and contact (to be filled)
+      - Scheduling method and advance notice required
+      - Result: Pass / Fail / Partial
+      - If failed: deficiency list, correction deadline, re-inspection scheduling
+      - Cost of re-inspection if applicable
+
+      **7. Condition Compliance Tracking**
+      For each condition of approval:
+      - Condition description and source document
+      - Compliance deadline
+      - Evidence required to demonstrate compliance
+      - Responsible party
+      - Status (Not Started / In Progress / Completed / Verified)
+      - Verification method (who confirms compliance)
+
+      **8. Budget Tracking**
+      Track all permit-related costs:
+      - Application fees paid
+      - Plan review fees paid
+      - Impact fees paid
+      - Professional service fees (architect, engineer, surveyor, attorney)
+      - Revision and resubmittal costs
+      - Inspection fees
+      - Miscellaneous fees (notarization, recording, copies)
+      - Running total vs. original budget estimate
+      - Remaining budget and projected overage/underage
+
+      Produce all tracking templates in a structured format ready for implementation
+      in a project management tool or spreadsheet. Include formulas and logic for
+      automatic status calculations and deadline alerting.
+    model: haiku
+    max_turns: 10
