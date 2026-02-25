@@ -45,13 +45,17 @@ export default function Workflows() {
   const navigate = useNavigate();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [runModal, setRunModal] = useState<WorkflowInfo | null>(null);
   const [dagWorkflow, setDagWorkflow] = useState<WorkflowInfo | null>(null);
 
   const fetchWorkflows = useCallback(async () => {
     try {
+      setError(null);
       const res = await api.get<WorkflowInfo[]>("/workflows");
       if (res.data) setWorkflows(res.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -83,6 +87,23 @@ export default function Workflows() {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchWorkflows(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

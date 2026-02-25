@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { EventStreamProvider } from "@/components/providers/EventStreamProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
@@ -60,6 +61,7 @@ export default function App() {
 
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
+      <ErrorBoundary>
       <EventStreamProvider>
         <Suspense
           fallback={
@@ -97,6 +99,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </EventStreamProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }
