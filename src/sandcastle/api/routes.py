@@ -494,6 +494,7 @@ async def list_templates() -> ApiResponse:
                 "step_count": t.step_count,
                 "input_schema": t.input_schema,
                 "category": t.category,
+                "source": t.source,
             }
             for t in templates
         ]
@@ -523,6 +524,7 @@ async def get_template(template_name: str) -> ApiResponse:
             "content": content,
             "input_schema": info.input_schema,
             "category": info.category,
+            "source": info.source,
         }
     )
 
@@ -627,6 +629,170 @@ async def hub_playground(request: Request) -> ApiResponse:
         "note": "This is a demo preview - install the workflow for actual execution.",
     }
     return ApiResponse(data=result)
+
+
+@router.post("/hub/install/{slug:path}")
+async def install_hub_template(slug: str) -> ApiResponse:
+    """Install a community workflow from the hub registry.
+
+    Downloads the YAML from GitHub and saves it to the community
+    templates directory. Returns the installed template metadata.
+    """
+    # Validate slug format (author/name)
+    if "/" not in slug or len(slug.split("/")) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SLUG",
+                    message="Slug must be in format 'author/name'",
+                )
+            ).model_dump(),
+        )
+
+    # Fetch registry to find the template
+    registry_url = (
+        "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(registry_url)
+            resp.raise_for_status()
+            registry = resp.json()
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="REGISTRY_UNAVAILABLE",
+                    message="Could not fetch community hub registry",
+                )
+            ).model_dump(),
+        )
+
+    # Find template by slug
+    template_meta = None
+    for t in registry.get("templates", []):
+        if t.get("slug") == slug:
+            template_meta = t
+            break
+
+    if template_meta is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Template '{slug}' not found in community hub",
+                )
+            ).model_dump(),
+        )
+
+    download_url = template_meta.get("download_url")
+    if not download_url:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NO_DOWNLOAD_URL",
+                    message=f"No download URL for '{slug}'",
+                )
+            ).model_dump(),
+        )
+
+    # Download the YAML content
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            yaml_resp = await client.get(download_url)
+            yaml_resp.raise_for_status()
+            yaml_content = yaml_resp.text
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="DOWNLOAD_FAILED",
+                    message=f"Failed to download template: {exc}",
+                )
+            ).model_dump(),
+        )
+
+    # Save to community templates directory
+    community_dir = Path(__file__).parent.parent / "templates" / "community"
+    community_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = slug.split("/")[-1] + ".yaml"
+    target_path = community_dir / filename
+
+    # Check if already installed
+    already_existed = target_path.exists()
+    target_path.write_text(yaml_content, encoding="utf-8")
+
+    logger.info("Installed community template '%s' to %s", slug, target_path)
+
+    return ApiResponse(
+        data={
+            "installed": True,
+            "slug": slug,
+            "name": template_meta.get("name", ""),
+            "filename": filename,
+            "path": str(target_path),
+            "updated": already_existed,
+        }
+    )
+
+
+@router.delete("/hub/install/{slug:path}")
+async def uninstall_hub_template(slug: str) -> ApiResponse:
+    """Uninstall a community workflow."""
+    if "/" not in slug or len(slug.split("/")) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SLUG",
+                    message="Slug must be in format 'author/name'",
+                )
+            ).model_dump(),
+        )
+
+    community_dir = Path(__file__).parent.parent / "templates" / "community"
+    filename = slug.split("/")[-1] + ".yaml"
+    target_path = community_dir / filename
+
+    if not target_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Template '{slug}' is not installed",
+                )
+            ).model_dump(),
+        )
+
+    target_path.unlink()
+    return ApiResponse(data={"uninstalled": True, "slug": slug})
+
+
+@router.get("/hub/installed")
+async def list_installed_hub_templates() -> ApiResponse:
+    """List all community templates installed locally."""
+    community_dir = Path(__file__).parent.parent / "templates" / "community"
+    if not community_dir.exists():
+        return ApiResponse(data=[])
+
+    installed = []
+    for yaml_file in sorted(community_dir.glob("*.yaml")):
+        installed.append(
+            {
+                "filename": yaml_file.name,
+                "name": yaml_file.stem.replace("_", " ").replace("-", " ").title(),
+                "size_bytes": yaml_file.stat().st_size,
+            }
+        )
+
+    return ApiResponse(data=installed)
 
 
 @router.get("/workflows/{name}/export")
