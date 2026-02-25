@@ -927,6 +927,319 @@ def _print_eval_results(result: Any, *, verbose: bool = False) -> None:
     print()
 
 
+def _cmd_templates(args: argparse.Namespace) -> None:
+    """List available workflow templates."""
+    import httpx
+
+    base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+    try:
+        resp = httpx.get(f"{base}/api/templates", timeout=10)
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    body = resp.json()
+    items = body.get("data", [])
+
+    # Filter by category if requested
+    category = getattr(args, "category", None)
+    if category:
+        items = [t for t in items if t.get("category", "").lower() == category.lower()]
+
+    if getattr(args, "json", False):
+        print(json.dumps(items, indent=2))
+        return
+
+    if not items:
+        print("No templates found.")
+        return
+
+    headers = ["NAME", "CATEGORY", "STEPS", "DESCRIPTION"]
+    rows: list[list[str]] = []
+    for t in items:
+        rows.append([
+            t.get("name", ""),
+            t.get("category", ""),
+            str(t.get("step_count", "")),
+            t.get("description", ""),
+        ])
+    print(_table(headers, rows))
+
+
+def _cmd_replay(args: argparse.Namespace) -> None:
+    """Replay a workflow run from a specific step."""
+    import httpx
+
+    base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+    api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
+    headers_dict: dict[str, str] = {}
+    if api_key:
+        headers_dict["Authorization"] = f"Bearer {api_key}"
+
+    from_step = getattr(args, "from_step", None)
+    if not from_step:
+        print("Error: --from-step is required", file=sys.stderr)
+        sys.exit(1)
+
+    payload = {"from_step": from_step}
+
+    try:
+        resp = httpx.post(
+            f"{base}/api/runs/{args.run_id}/replay",
+            json=payload,
+            headers=headers_dict,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    body = resp.json()
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+        return
+
+    new_id = data.get("new_run_id", "?")
+    status = data.get("status", "queued")
+    print(f"Replay started: {new_id} [{_status_color(status)}]")
+    print(f"  Parent: {data.get('parent_run_id', '?')}")
+    print(f"  From step: {data.get('replay_from_step', '?')}")
+
+
+def _cmd_fork(args: argparse.Namespace) -> None:
+    """Fork a run with optional overrides."""
+    import httpx
+
+    base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+    api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
+    headers_dict: dict[str, str] = {}
+    if api_key:
+        headers_dict["Authorization"] = f"Bearer {api_key}"
+
+    from_step = getattr(args, "from_step", None)
+    if not from_step:
+        print("Error: --from-step is required", file=sys.stderr)
+        sys.exit(1)
+
+    # Build changes dict from --change args
+    changes: dict[str, Any] = {}
+    change_args = getattr(args, "change", None)
+    if change_args:
+        for pair in change_args:
+            if "=" not in pair:
+                print(f"Error: invalid change format '{pair}' - expected KEY=VALUE", file=sys.stderr)
+                sys.exit(1)
+            key, _, value = pair.partition("=")
+            try:
+                changes[key] = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                changes[key] = value
+
+    payload: dict[str, Any] = {"from_step": from_step}
+    if changes:
+        payload["changes"] = changes
+
+    try:
+        resp = httpx.post(
+            f"{base}/api/runs/{args.run_id}/fork",
+            json=payload,
+            headers=headers_dict,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    body = resp.json()
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+        return
+
+    new_id = data.get("new_run_id", "?")
+    status = data.get("status", "queued")
+    print(f"Fork started: {new_id} [{_status_color(status)}]")
+    print(f"  Parent: {data.get('parent_run_id', '?')}")
+    print(f"  From step: {data.get('fork_from_step', '?')}")
+    if data.get("changes"):
+        print(f"  Changes: {json.dumps(data['changes'])}")
+
+
+def _cmd_approve(args: argparse.Namespace) -> None:
+    """Approve a paused approval step."""
+    import httpx
+
+    base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+    api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
+    headers_dict: dict[str, str] = {}
+    if api_key:
+        headers_dict["Authorization"] = f"Bearer {api_key}"
+
+    # The CLI accepts a run_id, but the API uses approval_id.
+    # First, find the pending approval for this run.
+    approval_id = _find_pending_approval(base, headers_dict, args.run_id)
+    if not approval_id:
+        print(f"Error: no pending approval found for run {args.run_id}", file=sys.stderr)
+        sys.exit(1)
+
+    payload: dict[str, Any] = {}
+    data_arg = getattr(args, "data", None)
+    if data_arg:
+        try:
+            payload["edited_data"] = json.loads(data_arg)
+        except json.JSONDecodeError as exc:
+            print(f"Error: invalid JSON for --data: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    try:
+        resp = httpx.post(
+            f"{base}/api/approvals/{approval_id}/approve",
+            json=payload if payload else None,
+            headers=headers_dict,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    body = resp.json()
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+        return
+
+    print(f"Approved run {data.get('run_id', args.run_id)}")
+
+
+def _cmd_reject(args: argparse.Namespace) -> None:
+    """Reject a paused approval step."""
+    import httpx
+
+    base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+    api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
+    headers_dict: dict[str, str] = {}
+    if api_key:
+        headers_dict["Authorization"] = f"Bearer {api_key}"
+
+    # Find the pending approval for this run
+    approval_id = _find_pending_approval(base, headers_dict, args.run_id)
+    if not approval_id:
+        print(f"Error: no pending approval found for run {args.run_id}", file=sys.stderr)
+        sys.exit(1)
+
+    payload: dict[str, Any] = {}
+    reason = getattr(args, "reason", None)
+    if reason:
+        payload["comment"] = reason
+
+    try:
+        resp = httpx.post(
+            f"{base}/api/approvals/{approval_id}/reject",
+            json=payload if payload else None,
+            headers=headers_dict,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    body = resp.json()
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+        return
+
+    print(f"Rejected run {data.get('run_id', args.run_id)}")
+    if reason:
+        print(f"  Reason: {reason}")
+
+
+def _cmd_runs(args: argparse.Namespace) -> None:
+    """List recent workflow runs."""
+    import httpx
+
+    base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+    api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
+    headers_dict: dict[str, str] = {}
+    if api_key:
+        headers_dict["Authorization"] = f"Bearer {api_key}"
+
+    params: dict[str, Any] = {"limit": getattr(args, "limit", 20)}
+    status_filter = getattr(args, "status", None)
+    if status_filter:
+        params["status"] = status_filter
+
+    try:
+        resp = httpx.get(
+            f"{base}/api/runs",
+            params=params,
+            headers=headers_dict,
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    body = resp.json()
+    items = body.get("data", [])
+
+    if getattr(args, "json", False):
+        print(json.dumps(body, indent=2))
+        return
+
+    if not items:
+        print("No runs found.")
+        return
+
+    headers = ["RUN ID", "WORKFLOW", "STATUS", "COST ($)", "STARTED"]
+    rows: list[list[str]] = []
+    for r in items:
+        if isinstance(r, dict):
+            rows.append([
+                r.get("run_id", "")[:12],
+                r.get("workflow_name", ""),
+                _status_color(r.get("status", "")),
+                f"{r.get('total_cost_usd', 0):.4f}",
+                _fmt_time(r.get("started_at")),
+            ])
+    print(_table(headers, rows))
+
+
+def _find_pending_approval(
+    base: str, headers: dict[str, str], run_id: str
+) -> str | None:
+    """Find the pending approval_id for a given run_id by querying the API."""
+    import httpx
+
+    try:
+        resp = httpx.get(
+            f"{base}/api/approvals",
+            params={"status": "pending"},
+            headers=headers,
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return None
+
+    body = resp.json()
+    for item in body.get("data", []):
+        if isinstance(item, dict) and item.get("run_id") == run_id:
+            return item.get("id")
+    return None
+
+
 def _spinner_print(msg: str) -> None:
     """Print a message with a spinner-like prefix."""
     sys.stdout.write(f"  ... {msg}")
@@ -1067,6 +1380,10 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="sandcastle",
         description="Sandcastle - workflow orchestrator CLI",
     )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="Output raw JSON instead of formatted tables",
+    )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # --- init ---
@@ -1181,6 +1498,50 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("--output", "-o", metavar="FILE", help="Write YAML to file instead of stdout")
     p_gen.add_argument("--refine", action="store_true", help="Enter refinement loop after generation")
 
+    # --- templates ---
+    p_templates = subparsers.add_parser("templates", help="List workflow templates")
+    p_templates.add_argument("--category", "-c", default=None,
+                             help="Filter by category")
+    _add_connection_args(p_templates)
+
+    # --- replay ---
+    p_replay = subparsers.add_parser("replay", help="Replay a workflow run from a step")
+    p_replay.add_argument("run_id", help="Run ID to replay")
+    p_replay.add_argument("--from-step", required=True, dest="from_step",
+                          help="Step ID to replay from")
+    _add_connection_args(p_replay)
+
+    # --- fork ---
+    p_fork = subparsers.add_parser("fork", help="Fork a run with modifications")
+    p_fork.add_argument("run_id", help="Run ID to fork")
+    p_fork.add_argument("--from-step", required=True, dest="from_step",
+                        help="Step ID to fork from")
+    p_fork.add_argument("--change", action="append", metavar="KEY=VALUE",
+                        help="Step override key=value (repeatable)")
+    _add_connection_args(p_fork)
+
+    # --- approve ---
+    p_approve = subparsers.add_parser("approve", help="Approve a paused approval step")
+    p_approve.add_argument("run_id", help="Run ID with pending approval")
+    p_approve.add_argument("--data", default=None,
+                           help="JSON data to pass with approval")
+    _add_connection_args(p_approve)
+
+    # --- reject ---
+    p_reject = subparsers.add_parser("reject", help="Reject a paused approval step")
+    p_reject.add_argument("run_id", help="Run ID with pending approval")
+    p_reject.add_argument("--reason", default=None,
+                          help="Rejection reason")
+    _add_connection_args(p_reject)
+
+    # --- runs ---
+    p_runs = subparsers.add_parser("runs", help="List recent workflow runs")
+    p_runs.add_argument("--status", "-s", default=None,
+                        help="Filter by status (queued, running, completed, failed)")
+    p_runs.add_argument("--limit", "-n", type=int, default=20,
+                        help="Max number of results (default: 20)")
+    _add_connection_args(p_runs)
+
     return parser
 
 
@@ -1212,6 +1573,12 @@ def main() -> None:
         "doctor": _cmd_doctor,
         "generate": _cmd_generate,
         "eval": _cmd_eval,
+        "templates": _cmd_templates,
+        "replay": _cmd_replay,
+        "fork": _cmd_fork,
+        "approve": _cmd_approve,
+        "reject": _cmd_reject,
+        "runs": _cmd_runs,
     }
 
     handler = dispatch.get(args.command)
