@@ -19,7 +19,7 @@ class TestToolRegistry:
     """Tests for the TOOL_REGISTRY dict and helper functions."""
 
     def test_registry_not_empty(self):
-        assert len(TOOL_REGISTRY) >= 12
+        assert len(TOOL_REGISTRY) >= 50
 
     def test_known_tools_matches_registry(self):
         assert KNOWN_TOOLS == frozenset(TOOL_REGISTRY.keys())
@@ -46,8 +46,17 @@ class TestToolRegistry:
                 assert func.parameters.get("type") == "object"
 
     def test_expected_tools_present(self):
-        expected = {"slack", "jira", "github", "gmail", "notion", "hubspot",
-                    "salesforce", "zendesk", "teams", "gdrive", "postgresql", "webhook"}
+        expected = {
+            "slack", "jira", "github", "gmail", "notion", "hubspot",
+            "salesforce", "zendesk", "teams", "gdrive", "postgresql", "webhook",
+            "openai", "anthropic", "discord", "google-sheets", "airtable",
+            "linear", "aws-s3", "redis", "supabase", "pinecone", "resend",
+            "vercel", "cloudflare-workers", "firecrawl", "tavily", "elevenlabs",
+            "zapier", "shopify", "quickbooks", "calendly", "whatsapp", "figma",
+            "datadog", "plaid", "docusign", "pagerduty", "mcp-bridge",
+            "human-input", "filesystem", "shell", "python-runtime",
+            "code-interpreter",
+        }
         assert expected.issubset(KNOWN_TOOLS)
 
 
@@ -75,7 +84,7 @@ class TestListTools:
 
     def test_list_all(self):
         tools = list_tools()
-        assert len(tools) >= 12
+        assert len(tools) >= 50
         # Sorted by name
         names = [t.name for t in tools]
         assert names == sorted(names)
