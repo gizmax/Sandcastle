@@ -28,7 +28,7 @@ import {
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
-import { GenerateChatModal } from "@/components/workflows/GenerateChatModal";
+import { GenerateChatPanel } from "@/components/workflows/GenerateChatPanel";
 import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
 
@@ -1025,23 +1025,41 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         <Wand2 className="h-4 w-4" />
       </button>
 
-      {/* Canvas */}
-      <div className="flex-1 pt-8 lg:pt-0">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          onNodeClick={(_, node) => setSelectedStepId(node.id)}
-          onPaneClick={() => setSelectedStepId(null)}
-          fitView
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background gap={16} size={1} color="var(--color-border)" />
-          <Controls showInteractive={false} className="!bg-surface !border-border !shadow-sm" />
-        </ReactFlow>
+      {/* Canvas + AI Chat Panel wrapper */}
+      <div className="flex flex-1 min-w-0">
+        {/* Canvas */}
+        <div className={cn(
+          "flex-1 min-w-0 pt-8 lg:pt-0 transition-all duration-300",
+          generateModalOpen ? "lg:w-[60%]" : "w-full"
+        )}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            onNodeClick={(_, node) => setSelectedStepId(node.id)}
+            onPaneClick={() => setSelectedStepId(null)}
+            fitView
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={16} size={1} color="var(--color-border)" />
+            <Controls showInteractive={false} className="!bg-surface !border-border !shadow-sm" />
+          </ReactFlow>
+        </div>
+
+        {/* AI Chat Panel - slides in from the right */}
+        {generateModalOpen && (
+          <div className="w-[40%] min-w-[380px] max-w-[500px] shrink-0">
+            <GenerateChatPanel
+              open={generateModalOpen}
+              onClose={() => { setGenerateModalOpen(false); setEditWithAiYaml(undefined); }}
+              onSelect={handleGenerateSelect}
+              existingYaml={editWithAiYaml}
+            />
+          </div>
+        )}
       </div>
 
       {/* Right config panel - sidebar on desktop, overlay on mobile */}
@@ -1102,14 +1120,6 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         open={templateBrowserOpen}
         onClose={() => setTemplateBrowserOpen(false)}
         onSelect={handleTemplateSelect}
-      />
-
-      {/* AI Generate / Edit Modal */}
-      <GenerateChatModal
-        open={generateModalOpen}
-        onClose={() => { setGenerateModalOpen(false); setEditWithAiYaml(undefined); }}
-        onSelect={handleGenerateSelect}
-        existingYaml={editWithAiYaml}
       />
 
       {/* Confirm replace dialog */}
