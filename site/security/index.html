@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security - Sandcastle</title>
+  <meta name="description" content="Sandcastle security architecture: sandbox isolation, authentication, policy engine, credential management, telemetry anonymization, and compliance posture.">
+  <meta name="author" content="Tomas Pflanzer @gizmax">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Security - Sandcastle">
+  <meta property="og:description" content="Defense-in-depth security for AI agent workflows. Sandbox isolation, HMAC auth, PII redaction, SSRF prevention, and more.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta property="og:url" content="https://gizmax.cz/sandcastle/security">
+  <meta property="og:type" content="website">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Security - Sandcastle">
+  <meta name="twitter:description" content="Defense-in-depth security for AI agent workflows. Sandbox isolation, HMAC auth, PII redaction, SSRF prevention, and more.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-hover: #1a1a1a;
+      --border: #262626;
+      --border-light: #333;
+      --text: #f5f5f5;
+      --text-muted: #a3a3a3;
+      --text-dim: #737373;
+      --accent: #f59e0b;
+      --accent-hover: #fbbf24;
+      --accent-dim: rgba(245, 158, 11, 0.15);
+      --green: #22c55e;
+      --green-dim: rgba(34, 197, 94, 0.12);
+      --red: #ef4444;
+      --red-dim: rgba(239, 68, 68, 0.12);
+      --blue: #3b82f6;
+      --blue-dim: rgba(59, 130, 246, 0.12);
+      --code-bg: #0d0d0d;
+      --radius: 8px;
+      --radius-sm: 4px;
+      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+    }
+
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }
+    a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: var(--accent-hover); }
+    code, pre, .mono { font-family: var(--font-mono); }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Fade-in */
+    .fade-in { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+
+    /* Nav */
+    nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .nav-brand { font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a { font-size: 14px; font-weight: 500; color: var(--text-muted); }
+    .nav-links a:hover { color: var(--text); }
+
+    /* Hero */
+    .hero { padding: 140px 0 80px; text-align: center; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; font-size: 13px; font-weight: 500; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 100px; margin-bottom: 32px; }
+    .hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
+    .hero h1 .accent { color: var(--accent); }
+    .hero p { font-size: clamp(16px, 2vw, 19px); color: var(--text-muted); max-width: 680px; margin: 0 auto 32px; line-height: 1.7; }
+
+    /* Sections */
+    section { padding: 80px 0; border-top: 1px solid var(--border); }
+    .section-label { display: inline-block; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 12px; }
+    .section-title { font-size: clamp(24px, 3.5vw, 36px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; line-height: 1.2; }
+    .section-subtitle { font-size: 16px; color: var(--text-muted); max-width: 640px; line-height: 1.6; margin-bottom: 48px; }
+
+    /* Layer grid */
+    .layer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+
+    /* Layer card */
+    .layer-card { padding: 28px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; }
+    .layer-card:hover { border-color: var(--border-light); transform: translateY(-2px); }
+    .layer-card-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+    .layer-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+    .layer-icon.green { background: var(--green-dim); }
+    .layer-icon.amber { background: var(--accent-dim); }
+    .layer-icon.blue { background: var(--blue-dim); }
+    .layer-icon.red { background: var(--red-dim); }
+    .layer-card h3 { font-size: 16px; font-weight: 600; }
+    .layer-card p { font-size: 14px; color: var(--text-muted); line-height: 1.65; margin-bottom: 16px; }
+    .layer-card .detail-list { list-style: none; padding: 0; }
+    .layer-card .detail-list li { font-size: 13px; color: var(--text-muted); padding: 5px 0; display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+    .layer-card .detail-list li::before { content: '\2713'; color: var(--green); font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+    .layer-card code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); }
+
+    /* Architecture diagram */
+    .arch-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; margin-bottom: 48px; overflow-x: auto; }
+    .arch-layers { display: flex; flex-direction: column; gap: 2px; max-width: 800px; margin: 0 auto; }
+    .arch-layer { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-radius: var(--radius-sm); }
+    .arch-layer-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; width: 130px; flex-shrink: 0; font-family: var(--font-mono); }
+    .arch-layer-content { font-size: 13px; color: var(--text-muted); flex: 1; }
+    .arch-layer-content span { display: inline-block; padding: 3px 10px; background: rgba(255,255,255,0.06); border-radius: var(--radius-sm); margin: 2px 4px 2px 0; font-size: 12px; font-family: var(--font-mono); }
+    .arch-layer:nth-child(1) { background: rgba(34, 197, 94, 0.06); }
+    .arch-layer:nth-child(1) .arch-layer-label { color: var(--green); }
+    .arch-layer:nth-child(2) { background: rgba(59, 130, 246, 0.06); }
+    .arch-layer:nth-child(2) .arch-layer-label { color: var(--blue); }
+    .arch-layer:nth-child(3) { background: var(--accent-dim); }
+    .arch-layer:nth-child(3) .arch-layer-label { color: var(--accent); }
+    .arch-layer:nth-child(4) { background: rgba(239, 68, 68, 0.06); }
+    .arch-layer:nth-child(4) .arch-layer-label { color: var(--red); }
+    .arch-layer:nth-child(5) { background: rgba(168, 85, 247, 0.06); }
+    .arch-layer:nth-child(5) .arch-layer-label { color: #a855f7; }
+
+    /* Compliance grid */
+    .compliance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+    .compliance-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); text-align: center; transition: border-color 0.2s; }
+    .compliance-card:hover { border-color: var(--border-light); }
+    .compliance-card .icon { font-size: 28px; margin-bottom: 12px; }
+    .compliance-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .compliance-card p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+    .compliance-card .status { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 100px; margin-top: 10px; }
+    .compliance-card .status.active { background: var(--green-dim); color: var(--green); }
+    .compliance-card .status.planned { background: var(--accent-dim); color: var(--accent); }
+
+    /* Credential table */
+    .cred-table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+    .cred-table th { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    .cred-table td { font-size: 13px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+    .cred-table tr:hover td { background: var(--surface-hover); }
+    .cred-table code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); }
+
+    /* Improvements section */
+    .improve-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .improve-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); border-left: 3px solid var(--accent); }
+    .improve-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .improve-card p { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+    .improve-card .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 100px; margin-top: 10px; display: inline-block; }
+    .improve-card .priority.high { background: var(--red-dim); color: var(--red); }
+    .improve-card .priority.medium { background: var(--accent-dim); color: var(--accent); }
+    .improve-card .priority.low { background: var(--blue-dim); color: var(--blue); }
+
+    /* Stats bar */
+    .stats-bar { display: flex; flex-wrap: wrap; gap: 32px; justify-content: center; margin-bottom: 48px; }
+    .stat-item { text-align: center; }
+    .stat-num { font-size: clamp(28px, 4vw, 40px); font-weight: 700; font-family: var(--font-mono); color: var(--accent); }
+    .stat-label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+    /* Footer */
+    footer { border-top: 1px solid var(--border); padding: 48px 0; }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
+    .footer-left { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+    .footer-left a { color: var(--text-muted); }
+    .footer-left a:hover { color: var(--accent); }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a { font-size: 14px; color: var(--text-muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--accent); }
+
+    /* CTA */
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 14px 28px; font-size: 15px; font-weight: 600; font-family: var(--font-sans); border-radius: var(--radius); transition: all 0.2s; cursor: pointer; border: none; }
+    .btn-primary { background: var(--accent); color: #0a0a0a; }
+    .btn-primary:hover { background: var(--accent-hover); color: #0a0a0a; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3); }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--surface-hover); border-color: var(--border-light); transform: translateY(-1px); }
+
+    .bottom-cta-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 48px 32px; text-align: center; overflow: hidden; }
+    .bottom-cta-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); }
+    .bottom-cta-card h3 { font-size: clamp(22px, 3vw, 30px); font-weight: 700; margin-bottom: 12px; }
+    .bottom-cta-card p { font-size: 16px; color: var(--text-muted); max-width: 540px; margin: 0 auto 28px; }
+    .bottom-cta-card .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .layer-grid { grid-template-columns: 1fr; }
+      .arch-layer { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .arch-layer-label { width: auto; }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 110px 0 60px; }
+      section { padding: 60px 0; }
+      .nav-links span { display: none; }
+      .stats-bar { gap: 20px; }
+      .compliance-grid { grid-template-columns: 1fr 1fr; }
+      .improve-grid { grid-template-columns: 1fr; }
+      .bottom-cta-card { padding: 32px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container nav-inner">
+      <a href="/sandcastle" class="nav-brand">Sandcastle</a>
+      <div class="nav-links">
+        <a href="#architecture"><span>Architecture</span></a>
+        <a href="#features"><span>Features</span></a>
+        <a href="#compliance"><span>Compliance</span></a>
+        <a href="/sandcastle" class="btn-secondary" style="padding:8px 16px;font-size:13px;">Back to Home</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero" id="hero">
+    <div class="container">
+      <div class="hero-badge">Security Whitepaper</div>
+      <h1>Defense in depth<br><span class="accent">for AI agent workflows.</span></h1>
+      <p>Sandcastle applies layered security controls at every stage - from API authentication and sandbox isolation to PII redaction and credential management. Your workflows run in ephemeral sandboxes with zero trust by default.</p>
+
+      <div class="stats-bar">
+        <div class="stat-item">
+          <div class="stat-num">5</div>
+          <div class="stat-label">Security Layers</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">4</div>
+          <div class="stat-label">Sandbox Backends</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">30+</div>
+          <div class="stat-label">Credential Patterns</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">1060</div>
+          <div class="stat-label">Passing Tests</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Architecture Overview -->
+  <section id="architecture">
+    <div class="container fade-in">
+      <div class="section-label">Architecture</div>
+      <h2 class="section-title">Layered security model</h2>
+      <p class="section-subtitle">Every request passes through multiple independent security layers. A failure in one layer is caught by the next.</p>
+
+      <div class="arch-diagram">
+        <div class="arch-layers">
+          <div class="arch-layer">
+            <div class="arch-layer-label">Perimeter</div>
+            <div class="arch-layer-content">
+              <span>CORS Policy</span>
+              <span>Rate Limiting</span>
+              <span>SSRF Prevention</span>
+              <span>Input Validation</span>
+            </div>
+          </div>
+          <div class="arch-layer">
+            <div class="arch-layer-label">Auth</div>
+            <div class="arch-layer-content">
+              <span>HMAC-SHA256 Keys</span>
+              <span>Tenant Isolation</span>
+              <span>Admin Scoping</span>
+              <span>Bearer / Header / Query</span>
+            </div>
+          </div>
+          <div class="arch-layer">
+            <div class="arch-layer-label">Policy</div>
+            <div class="arch-layer-content">
+              <span>PII Redaction</span>
+              <span>Secret Blocking</span>
+              <span>Cost Limits</span>
+              <span>Approval Gates</span>
+            </div>
+          </div>
+          <div class="arch-layer">
+            <div class="arch-layer-label">Execution</div>
+            <div class="arch-layer-content">
+              <span>Ephemeral Sandboxes</span>
+              <span>Circuit Breaker</span>
+              <span>Timeout Enforcement</span>
+              <span>Resource Limits</span>
+            </div>
+          </div>
+          <div class="arch-layer">
+            <div class="arch-layer-label">Audit</div>
+            <div class="arch-layer-content">
+              <span>Policy Violations</span>
+              <span>Approval Trail</span>
+              <span>Run History</span>
+              <span>Key Usage Tracking</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Security Features -->
+  <section id="features">
+    <div class="container fade-in">
+      <div class="section-label">Security Features</div>
+      <h2 class="section-title">What's built in</h2>
+      <p class="section-subtitle">Every feature listed below ships with Sandcastle out of the box. No plugins, no paid tiers, no configuration required for the defaults.</p>
+
+      <div class="layer-grid">
+
+        <!-- Sandbox Isolation -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon green">&#x1f512;</div>
+            <h3>Sandbox Isolation</h3>
+          </div>
+          <p>AI agent code runs in ephemeral sandboxes that are destroyed after each execution. No shared state, no persistent access to host resources.</p>
+          <ul class="detail-list">
+            <li><strong>E2B</strong> - Cloud-hosted microVMs with SOC 2 Type II certification</li>
+            <li><strong>Docker</strong> - Local containers with 512 MB memory limit, non-root user (UID 1000), bridge networking, auto-remove on exit</li>
+            <li><strong>Cloudflare Workers</strong> - Edge V8 isolates with per-request timeout</li>
+            <li><strong>Local</strong> - Subprocess mode for development only (no isolation)</li>
+            <li>Runner file validation - blocks path traversal (<code>..</code>) and absolute paths before execution</li>
+          </ul>
+        </div>
+
+        <!-- Authentication -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon blue">&#x1f511;</div>
+            <h3>Authentication</h3>
+          </div>
+          <p>API key authentication with HMAC-SHA256 hashing. Keys are never stored in plaintext - only their peppered hash is persisted.</p>
+          <ul class="detail-list">
+            <li>HMAC-SHA256 with configurable server-side pepper (<code>API_KEY_PEPPER</code>)</li>
+            <li>Keys accepted via <code>X-API-Key</code> header, <code>Authorization: Bearer</code>, or query param (SSE)</li>
+            <li><code>sc_</code> prefix with 32-byte URL-safe random token</li>
+            <li>First 8 characters stored as <code>key_prefix</code> for UI identification</li>
+            <li><code>last_used_at</code> timestamp updated on every authenticated request</li>
+            <li>Soft deletion via <code>is_active</code> flag - preserves audit trail</li>
+          </ul>
+        </div>
+
+        <!-- Multi-Tenant Isolation -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon blue">&#x1f465;</div>
+            <h3>Multi-Tenant Isolation</h3>
+          </div>
+          <p>Each API key is scoped to a tenant. Tenant-scoped queries filter all data access to prevent cross-tenant leaks.</p>
+          <ul class="detail-list">
+            <li><code>tenant_id</code> set from API key on every request via middleware</li>
+            <li>Admin keys (no tenant_id) can access all data</li>
+            <li>Tenant keys only see their own runs, workflows, schedules</li>
+            <li>Per-key cost limits (<code>max_cost_per_run_usd</code>)</li>
+          </ul>
+        </div>
+
+        <!-- Policy Engine -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon amber">&#x1f6e1;</div>
+            <h3>Policy Engine</h3>
+          </div>
+          <p>Declarative policy rules that evaluate step outputs in real-time. Automatically redact PII, block secrets, and trigger approvals.</p>
+          <ul class="detail-list">
+            <li><strong>PII patterns</strong> - email, phone, SSN, credit card regex detection</li>
+            <li><strong>30+ credential patterns</strong> - Slack, GitHub, AWS, Stripe, OpenAI, and more</li>
+            <li><strong>Actions</strong> - redact, block, inject_approval, alert, log</li>
+            <li><strong>Severity levels</strong> - critical, high, medium, low</li>
+            <li>Safe expression evaluation via <code>simpleeval</code> (no Python eval/exec)</li>
+            <li>Auto-generated credential policies when tools are used</li>
+            <li>Redacted output stored separately - originals preserved for LLM context</li>
+          </ul>
+        </div>
+
+        <!-- SSRF Prevention -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon red">&#x1f6ab;</div>
+            <h3>SSRF Prevention</h3>
+          </div>
+          <p>All webhook callback URLs are validated against private network ranges before any HTTP request is made.</p>
+          <ul class="detail-list">
+            <li>Blocks loopback (<code>127.0.0.0/8</code>, <code>::1</code>)</li>
+            <li>Blocks private networks (<code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>)</li>
+            <li>Blocks link-local (<code>169.254.0.0/16</code>) and IPv6 ULA (<code>fc00::/7</code>)</li>
+            <li>DNS resolution performed before IP check (prevents DNS rebinding via TOCTOU)</li>
+            <li>Scheme validation - only <code>http://</code> and <code>https://</code></li>
+          </ul>
+        </div>
+
+        <!-- Path Traversal -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon red">&#x1f4c1;</div>
+            <h3>Path Traversal Protection</h3>
+          </div>
+          <p>All file operations are sandboxed within base directories. Resolved paths are validated to prevent escape.</p>
+          <ul class="detail-list">
+            <li><code>Path.resolve()</code> + <code>is_relative_to()</code> check on all storage operations</li>
+            <li>Raises <code>ValueError</code> on traversal attempts (<code>../../etc/passwd</code>)</li>
+            <li>Dashboard SPA fallback rejects paths containing <code>..</code></li>
+            <li>Runner file validation blocks <code>..</code> and absolute paths</li>
+          </ul>
+        </div>
+
+        <!-- Rate Limiting -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon amber">&#x23f1;</div>
+            <h3>Rate Limiting</h3>
+          </div>
+          <p>Sliding window counter per tenant or IP. Prevents abuse of expensive sandbox execution endpoints.</p>
+          <ul class="detail-list">
+            <li>Default: 10 requests per 60 seconds on execution endpoints</li>
+            <li>Keyed by <code>tenant:{id}</code> when authenticated, <code>ip:{addr}</code> when anonymous</li>
+            <li>HTTP 429 response with <code>Retry-After</code>, <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> headers</li>
+            <li>Stale window entries pruned on each check</li>
+          </ul>
+        </div>
+
+        <!-- Credential Management -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon green">&#x1f50f;</div>
+            <h3>Credential Management</h3>
+          </div>
+          <p>Tool credentials are resolved from environment variables or database-stored named connections. Never logged, never exposed in outputs.</p>
+          <ul class="detail-list">
+            <li><code>TOOL_*</code> prefix convention for environment variables</li>
+            <li>Named connections (<code>postgresql:analytics</code>) stored in DB with unique constraint</li>
+            <li>Credential masking for UI display - shows first 4 + last 4 chars only</li>
+            <li>Credentials injected into sandbox env at runtime, not stored in workflow YAML</li>
+            <li>Export API (<code>/workflows/{name}/export</code>) sanitizes credentials from YAML</li>
+          </ul>
+        </div>
+
+        <!-- Telemetry Anonymization -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon blue">&#x1f4ca;</div>
+            <h3>Telemetry Anonymization</h3>
+          </div>
+          <p>Opt-in error reporting via Sentry with aggressive anonymization. Disabled by default. No user data, no secrets, no hostnames.</p>
+          <ul class="detail-list">
+            <li>Opt-in only: <code>TELEMETRY_ENABLED=true</code> + <code>SENTRY_DSN</code></li>
+            <li><code>send_default_pii=False</code>, <code>server_name=None</code>, zero tracing</li>
+            <li>Before-send hook strips: API keys, tokens, secrets, file paths, request data, user data, stack frame variables</li>
+            <li>40+ sensitive env var names blocklisted from reporting</li>
+            <li>Local fallback: failed sends saved to <code>data/error_reports/</code></li>
+          </ul>
+        </div>
+
+        <!-- Webhook Signing -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon green">&#x270d;</div>
+            <h3>Webhook Signing</h3>
+          </div>
+          <p>Outgoing webhooks are signed with HMAC-SHA256. Recipients can verify authenticity using the signature header.</p>
+          <ul class="detail-list">
+            <li>HMAC-SHA256 signature over JSON payload</li>
+            <li>Header: <code>X-Sandcastle-Signature</code></li>
+            <li>Timing-safe comparison via <code>hmac.compare_digest()</code></li>
+            <li>10-second timeout on webhook delivery</li>
+          </ul>
+        </div>
+
+        <!-- Circuit Breaker -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon amber">&#x26a1;</div>
+            <h3>Circuit Breaker</h3>
+          </div>
+          <p>Three-state circuit breaker protects against cascading backend failures. Automatically recovers when the backend stabilizes.</p>
+          <ul class="detail-list">
+            <li><strong>CLOSED</strong> - normal operation, requests pass through</li>
+            <li><strong>OPEN</strong> - after 5 consecutive failures, reject immediately</li>
+            <li><strong>HALF_OPEN</strong> - after 30s cooldown, allow one test request</li>
+            <li>Success in HALF_OPEN resets to CLOSED</li>
+            <li>Metrics tracking: total queries, failures, failovers, CB rejections</li>
+          </ul>
+        </div>
+
+        <!-- Audit Trail -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon blue">&#x1f4dd;</div>
+            <h3>Audit Trail</h3>
+          </div>
+          <p>Every policy violation, approval decision, and API key usage is recorded in the database with timestamps and context.</p>
+          <ul class="detail-list">
+            <li><strong>PolicyViolation</strong> - run_id, step_id, policy_id, severity, trigger_details, action_taken</li>
+            <li><strong>ApprovalRequest</strong> - status, reviewer_id, reviewer_comment, request/response data</li>
+            <li><strong>ApiKey</strong> - created_at, last_used_at, key_prefix, tenant_id</li>
+            <li><strong>RunStep</strong> - policy_violations_count, policy_actions, attempt counter</li>
+            <li><strong>Run</strong> - full timeline (created, started, completed), tenant_id, idempotency_key</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Credential Patterns -->
+  <section>
+    <div class="container fade-in">
+      <div class="section-label">Credential Detection</div>
+      <h2 class="section-title">Automatic secret redaction</h2>
+      <p class="section-subtitle">The policy engine automatically detects and redacts credentials from 30+ services in step outputs. Patterns are applied before data reaches storage or webhooks.</p>
+
+      <table class="cred-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Services</th>
+            <th>Pattern Examples</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Communication</td>
+            <td>Slack, Discord, Twilio, SendGrid, Resend, WhatsApp, Intercom</td>
+            <td><code>xoxb-</code> <code>xoxp-</code> <code>SG.</code></td>
+          </tr>
+          <tr>
+            <td>AI Providers</td>
+            <td>OpenAI, Anthropic, ElevenLabs, Tavily</td>
+            <td><code>sk-</code> <code>sk-ant-</code></td>
+          </tr>
+          <tr>
+            <td>Cloud & DevOps</td>
+            <td>AWS, Vercel, Datadog, PagerDuty, Cloudflare</td>
+            <td><code>AKIA</code> <code>Bearer</code></td>
+          </tr>
+          <tr>
+            <td>Version Control</td>
+            <td>GitHub, Jira, Linear</td>
+            <td><code>ghp_</code> <code>gho_</code></td>
+          </tr>
+          <tr>
+            <td>Data & Storage</td>
+            <td>Supabase, Pinecone, Airtable, Snowflake, Redis</td>
+            <td><code>eyJ</code> (JWT) UUID patterns</td>
+          </tr>
+          <tr>
+            <td>Payments & ERP</td>
+            <td>Stripe, Shopify, Plaid, QuickBooks, DocuSign</td>
+            <td><code>sk_live_</code> <code>sk_test_</code></td>
+          </tr>
+          <tr>
+            <td>CRM</td>
+            <td>HubSpot, Salesforce, Zendesk</td>
+            <td><code>pat-</code> Bearer tokens</td>
+          </tr>
+          <tr>
+            <td>PII</td>
+            <td>Email, Phone, SSN, Credit Card</td>
+            <td>Regex patterns for common PII formats</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Compliance -->
+  <section id="compliance">
+    <div class="container fade-in">
+      <div class="section-label">Compliance</div>
+      <h2 class="section-title">Compliance posture</h2>
+      <p class="section-subtitle">Sandcastle's security controls align with industry compliance frameworks. E2B's cloud sandbox backend holds SOC 2 Type II certification.</p>
+
+      <div class="compliance-grid">
+        <div class="compliance-card">
+          <div class="icon">&#x1f6e1;</div>
+          <h4>SOC 2 Type II</h4>
+          <p>E2B cloud sandbox infrastructure is SOC 2 Type II certified</p>
+          <div class="status active">E2B Backend</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f512;</div>
+          <h4>Data Isolation</h4>
+          <p>Multi-tenant scoping on every API query. Ephemeral sandboxes with zero shared state</p>
+          <div class="status active">Active</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f4dd;</div>
+          <h4>Audit Logging</h4>
+          <p>Policy violations, approval decisions, and key usage tracked in database</p>
+          <div class="status active">Active</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f50f;</div>
+          <h4>Secret Management</h4>
+          <p>Credentials in env vars or encrypted DB. Never logged, masked for display</p>
+          <div class="status active">Active</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f6ab;</div>
+          <h4>PII Protection</h4>
+          <p>Automatic redaction of email, phone, SSN, credit card patterns in outputs</p>
+          <div class="status active">Active</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f4ca;</div>
+          <h4>Telemetry Privacy</h4>
+          <p>Opt-in only. Aggressive anonymization strips all secrets and user data</p>
+          <div class="status active">Active</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f310;</div>
+          <h4>GDPR Ready</h4>
+          <p>No PII in telemetry. Tenant data isolation. PII redaction in policy engine</p>
+          <div class="status active">Active</div>
+        </div>
+        <div class="compliance-card">
+          <div class="icon">&#x1f527;</div>
+          <h4>Encryption at Rest</h4>
+          <p>Database credential encryption and S3 server-side encryption</p>
+          <div class="status planned">Planned</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Improvement Recommendations -->
+  <section>
+    <div class="container fade-in">
+      <div class="section-label">Roadmap</div>
+      <h2 class="section-title">Security improvements</h2>
+      <p class="section-subtitle">Areas identified for hardening. These are enhancements, not vulnerabilities - existing controls mitigate these risks today.</p>
+
+      <div class="improve-grid">
+        <div class="improve-card">
+          <h4>Credential Encryption at Rest</h4>
+          <p>Named connection credentials are stored as plaintext JSON in the database. Encrypt with AES-256-GCM using a server-managed key envelope.</p>
+          <div class="priority high">High Priority</div>
+        </div>
+        <div class="improve-card">
+          <h4>API Key Rotation</h4>
+          <p>No built-in key rotation mechanism. Add automated rotation with grace period for old keys and notification on rotation.</p>
+          <div class="priority high">High Priority</div>
+        </div>
+        <div class="improve-card">
+          <h4>IP Allowlisting</h4>
+          <p>API access is currently unrestricted by source IP. Add per-key CIDR allowlists for enterprise deployments.</p>
+          <div class="priority medium">Medium Priority</div>
+        </div>
+        <div class="improve-card">
+          <h4>CSP Headers</h4>
+          <p>Dashboard does not set Content-Security-Policy headers. Add strict CSP to prevent XSS and data exfiltration.</p>
+          <div class="priority medium">Medium Priority</div>
+        </div>
+        <div class="improve-card">
+          <h4>Distributed Rate Limiting</h4>
+          <p>Rate limiter is in-memory only - resets on restart and doesn't scale across replicas. Add Redis-backed sliding window.</p>
+          <div class="priority medium">Medium Priority</div>
+        </div>
+        <div class="improve-card">
+          <h4>Docker Seccomp Profiles</h4>
+          <p>Docker sandbox runs non-root but without seccomp/AppArmor profiles. Add custom seccomp profile to restrict system calls.</p>
+          <div class="priority low">Low Priority</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section>
+    <div class="container fade-in">
+      <div class="bottom-cta-card">
+        <h3>Questions about security?</h3>
+        <p>If you're evaluating Sandcastle for your organization and need more details about our security posture, reach out or open a discussion on GitHub.</p>
+        <div class="btn-row">
+          <a href="https://github.com/gizmax/Sandcastle/discussions" class="btn btn-primary">GitHub Discussions</a>
+          <a href="/sandcastle" class="btn btn-secondary">Back to Home</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div class="footer-left">
+        Sandcastle &middot; Built by <a href="https://github.com/gizmax">Tomas Pflanzer</a>
+      </div>
+      <div class="footer-links">
+        <a href="/sandcastle">Home</a>
+        <a href="/sandcastle/hub">Community Hub</a>
+        <a href="https://github.com/gizmax/Sandcastle">GitHub</a>
+        <a href="https://pypi.org/project/sandcastle-ai/">PyPI</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var targets = document.querySelectorAll('.fade-in');
+      if (!('IntersectionObserver' in window)) {
+        targets.forEach(function (el) { el.classList.add('visible'); });
+        return;
+      }
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.15 });
+      targets.forEach(function (el) { observer.observe(el); });
+    });
+  </script>
+
+</body>
+</html>
