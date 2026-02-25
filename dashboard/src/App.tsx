@@ -68,6 +68,9 @@ export default function App() {
           }
         >
           <Routes>
+            {/* Onboarding lives outside Layout (full-screen, no sidebar) */}
+            <Route path="/onboarding" element={<Onboarding />} />
+
             <Route element={<Layout />}>
               <Route path="/" element={<Overview />} />
               <Route path="/runs" element={<Runs />} />
@@ -87,7 +90,6 @@ export default function App() {
               <Route path="/dead-letter" element={<DeadLetterPage />} />
               <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/onboarding" element={<Onboarding />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

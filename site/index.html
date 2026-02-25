@@ -31,6 +31,11 @@
     gtag('config', 'G-ZN1K4G2TCZ');
   </script>
 
+  <!-- C1: IBM Plex Sans + Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
     *, *::before, *::after {
       margin: 0;
@@ -51,8 +56,10 @@
       --accent-hover: #fbbf24;
       --accent-dim: rgba(245, 158, 11, 0.15);
       --code-bg: #0d0d0d;
-      --radius: 12px;
-      --radius-sm: 8px;
+      --radius: 8px;
+      --radius-sm: 4px;
+      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
     }
 
     html {
@@ -62,7 +69,7 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
@@ -77,6 +84,10 @@
 
     a:hover {
       color: var(--accent-hover);
+    }
+
+    code, pre, .mono {
+      font-family: var(--font-mono);
     }
 
     .container {
@@ -169,8 +180,41 @@
 
     /* ---- HERO ---- */
     .hero {
-      padding: 160px 0 100px;
+      padding: 140px 0 60px;
       text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Dot grid background */
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(245, 158, 11, 0.12) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+      mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, black 20%, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 40%, black 20%, transparent 70%);
+    }
+
+    /* Radial amber glow behind terminal */
+    .hero::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -40%);
+      width: 700px;
+      height: 500px;
+      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.10) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .hero > .container {
+      position: relative;
+      z-index: 1;
     }
 
     .hero-badge {
@@ -188,9 +232,9 @@
     }
 
     .hero h1 {
-      font-size: clamp(36px, 6vw, 64px);
-      font-weight: 800;
-      line-height: 1.1;
+      font-size: clamp(40px, 7vw, 72px);
+      font-weight: 700;
+      line-height: 1.08;
       letter-spacing: -0.03em;
       margin-bottom: 20px;
     }
@@ -213,6 +257,7 @@
       justify-content: center;
       gap: 16px;
       flex-wrap: wrap;
+      margin-bottom: 56px;
     }
 
     .btn {
@@ -222,7 +267,8 @@
       padding: 14px 28px;
       font-size: 15px;
       font-weight: 600;
-      border-radius: var(--radius-sm);
+      font-family: var(--font-sans);
+      border-radius: var(--radius);
       transition: all 0.2s;
       cursor: pointer;
       border: none;
@@ -257,131 +303,145 @@
       transform: translateY(-1px);
     }
 
-    /* ---- QUICK START ---- */
-    .quickstart {
-      padding: 0 0 100px;
-      text-align: center;
-    }
-
-    .quickstart-box {
-      max-width: 640px;
+    /* ---- TERMINAL (hero) ---- */
+    .terminal {
+      max-width: 600px;
       margin: 0 auto;
-      background: var(--code-bg);
+      background: #141414;
       border: 1px solid var(--border);
       border-radius: var(--radius);
       overflow: hidden;
+      text-align: left;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 60px rgba(245, 158, 11, 0.06);
     }
 
-    .quickstart-header {
+    .terminal-chrome {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 8px;
       padding: 14px 20px;
-      background: var(--surface);
+      background: #1a1a1a;
       border-bottom: 1px solid var(--border);
     }
 
-    .quickstart-header .dots {
-      display: flex;
-      gap: 6px;
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
     }
 
-    .quickstart-header .label {
+    .terminal-dot--close { background: #ef4444; }
+    .terminal-dot--min { background: #f59e0b; }
+    .terminal-dot--max { background: #22c55e; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-family: var(--font-mono);
       font-size: 13px;
-      color: var(--text-muted);
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+      color: var(--text-dim);
     }
 
-    .quickstart-body {
-      padding: 20px 24px;
-      text-align: left;
-    }
-
-    .quickstart-body code {
-      display: block;
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+    .terminal-body {
+      padding: 24px;
+      font-family: var(--font-mono);
       font-size: 14px;
-      line-height: 2;
+      line-height: 1.9;
+      min-height: 180px;
+    }
+
+    .terminal-line {
+      white-space: pre;
       color: var(--text-muted);
     }
 
-    .quickstart-body code .cmd {
-      color: var(--text);
-    }
-
-    .quickstart-body code .comment {
-      color: #525252;
-      font-style: italic;
-    }
-
-    .quickstart-body code .prompt {
+    .terminal-line .prompt {
       color: var(--accent);
       user-select: none;
     }
 
-    .quickstart-footer {
-      max-width: 640px;
-      margin: 0 auto;
+    .terminal-line .cmd {
+      color: var(--text);
     }
 
-    .quickstart-steps {
+    .terminal-line .output {
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+
+    .terminal-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: var(--accent);
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .terminal-steps {
+      max-width: 600px;
+      margin: 24px auto 0;
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-top: 28px;
+      gap: 12px;
     }
 
-    .quickstart-step {
-      padding: 20px 16px;
+    .terminal-step {
+      padding: 16px 14px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       text-align: left;
     }
 
-    .quickstart-step-num {
+    .terminal-step-num {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
-      font-size: 12px;
+      width: 22px;
+      height: 22px;
+      font-size: 11px;
       font-weight: 700;
       color: var(--accent);
       background: var(--accent-dim);
-      border-radius: 6px;
-      margin-bottom: 10px;
+      border-radius: 4px;
+      margin-bottom: 8px;
     }
 
-    .quickstart-step-title {
-      font-size: 14px;
+    .terminal-step-title {
+      font-size: 13px;
       font-weight: 600;
       color: var(--text);
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
-    .quickstart-step-desc {
+    .terminal-step-desc {
       font-size: 12px;
       color: var(--text-dim);
-      line-height: 1.5;
+      line-height: 1.4;
     }
 
-    .quickstart-divider {
+    .source-alt {
+      max-width: 600px;
+      margin: 16px auto 0;
       display: flex;
       align-items: center;
-      gap: 16px;
-      margin-top: 24px;
+      gap: 12px;
     }
 
-    .quickstart-divider::before,
-    .quickstart-divider::after {
+    .source-alt::before,
+    .source-alt::after {
       content: '';
       flex: 1;
       height: 1px;
       background: var(--border);
     }
 
-    .quickstart-divider span {
+    .source-alt span {
       font-size: 12px;
       font-weight: 600;
       text-transform: uppercase;
@@ -389,58 +449,69 @@
       color: var(--text-dim);
     }
 
-    .quickstart-alt {
-      margin-top: 16px;
-      padding: 14px 20px;
+    .source-alt-cmd {
+      max-width: 600px;
+      margin: 12px auto 0;
+      padding: 12px 16px;
       background: var(--code-bg);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       text-align: left;
     }
 
-    .quickstart-alt code {
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+    .source-alt-cmd code {
+      font-family: var(--font-mono);
       font-size: 13px;
       color: var(--text-muted);
       word-break: break-all;
     }
 
-    .quickstart-alt code .prompt {
+    .source-alt-cmd code .prompt {
       color: var(--accent);
       user-select: none;
     }
 
-    .mode-pills {
+    /* ---- SOCIAL PROOF (C4) ---- */
+    .social-proof {
+      padding: 64px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+      margin-bottom: 32px;
+    }
+
+    .stat-item {
+      text-align: center;
+    }
+
+    .stat-number {
+      font-family: var(--font-mono);
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
+
+    .badges-row {
       display: flex;
       justify-content: center;
       gap: 12px;
-      margin-top: 24px;
       flex-wrap: wrap;
     }
 
-    .mode-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      font-size: 13px;
-      color: var(--text-muted);
-      background: var(--surface);
-      border-radius: 100px;
-      border: 1px solid var(--border);
-    }
-
-    .mode-pill .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-    }
-
-    @media (max-width: 600px) {
-      .quickstart-steps {
-        grid-template-columns: 1fr;
-      }
+    .badges-row img {
+      height: 24px;
     }
 
     /* ---- SECTIONS ---- */
@@ -493,7 +564,6 @@
       color: var(--text);
     }
 
-    /* Without / With comparison */
     .contrast-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -528,13 +598,8 @@
       margin-bottom: 16px;
     }
 
-    .contrast-box--without .contrast-label {
-      color: #ef4444;
-    }
-
-    .contrast-box--with .contrast-label {
-      color: #22c55e;
-    }
+    .contrast-box--without .contrast-label { color: #ef4444; }
+    .contrast-box--with .contrast-label { color: #22c55e; }
 
     .contrast-list {
       list-style: none;
@@ -565,7 +630,6 @@
       color: var(--text);
     }
 
-    /* Capability cards */
     .pain-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -589,7 +653,7 @@
     .pain-card-icon {
       width: 40px;
       height: 40px;
-      border-radius: 10px;
+      border-radius: 8px;
       background: var(--accent-dim);
       display: flex;
       align-items: center;
@@ -613,20 +677,70 @@
       font-style: italic;
     }
 
-    /* ---- FEATURES ---- */
+    /* ---- FEATURES TABS (C3) ---- */
     .features {
       border-top: 1px solid var(--border);
     }
 
-    .features-grid {
+    /* CSS-only tabs via hidden radio inputs */
+    .tabs-input { display: none; }
+
+    .tabs-nav {
+      display: flex;
+      gap: 0;
+      margin-top: 40px;
+      border-bottom: 2px solid var(--border);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .tabs-nav label {
+      padding: 14px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      cursor: pointer;
+      white-space: nowrap;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .tabs-nav label:hover {
+      color: var(--text-muted);
+    }
+
+    .tabs-panel {
+      display: none;
+      padding-top: 32px;
+    }
+
+    .tabs-panel .tab-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 16px;
-      margin-top: 48px;
+    }
+
+    /* Active states for each tab */
+    #tab-core:checked ~ .tabs-nav label[for="tab-core"],
+    #tab-intel:checked ~ .tabs-nav label[for="tab-intel"],
+    #tab-safety:checked ~ .tabs-nav label[for="tab-safety"],
+    #tab-integrations:checked ~ .tabs-nav label[for="tab-integrations"],
+    #tab-dx:checked ~ .tabs-nav label[for="tab-dx"] {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    #tab-core:checked ~ .tabs-panels #panel-core,
+    #tab-intel:checked ~ .tabs-panels #panel-intel,
+    #tab-safety:checked ~ .tabs-panels #panel-safety,
+    #tab-integrations:checked ~ .tabs-panels #panel-integrations,
+    #tab-dx:checked ~ .tabs-panels #panel-dx {
+      display: block;
     }
 
     .feature-card {
-      padding: 28px 24px;
+      padding: 24px 20px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -639,8 +753,8 @@
     }
 
     .feature-icon {
-      font-size: 28px;
-      margin-bottom: 16px;
+      font-size: 24px;
+      margin-bottom: 14px;
       display: block;
     }
 
@@ -656,7 +770,123 @@
       line-height: 1.5;
     }
 
-    /* ---- YAML CODE ---- */
+    /* Providers and Backends inside features */
+    .compat-section {
+      margin-top: 72px;
+      display: flex;
+      flex-direction: column;
+      gap: 48px;
+    }
+
+    .compat-group-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .compat-group-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--accent-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .compat-group-label {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .compat-group-sub {
+      font-size: 13px;
+      color: var(--text-dim);
+      font-weight: 400;
+      margin-left: 4px;
+    }
+
+    .compat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .compat-card {
+      position: relative;
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      overflow: hidden;
+    }
+
+    .compat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      opacity: 0.7;
+      transition: opacity 0.25s;
+    }
+
+    .compat-card:hover {
+      transform: translateY(-3px);
+      border-color: var(--border-light);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .compat-card:hover::before { opacity: 1; }
+
+    .compat-card-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 14px;
+    }
+
+    .compat-card-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .compat-card-models {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .card-claude::before { background: linear-gradient(90deg, #cc7832, #e89a4f); }
+    .card-claude .compat-card-icon { background: rgba(204, 120, 50, 0.15); color: #cc7832; }
+    .card-openai::before { background: linear-gradient(90deg, #10a37f, #34d399); }
+    .card-openai .compat-card-icon { background: rgba(16, 163, 127, 0.15); color: #10a37f; }
+    .card-minimax::before { background: linear-gradient(90deg, #6366f1, #818cf8); }
+    .card-minimax .compat-card-icon { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+    .card-gemini::before { background: linear-gradient(90deg, #4285f4, #60a5fa); }
+    .card-gemini .compat-card-icon { background: rgba(66, 133, 244, 0.15); color: #4285f4; }
+    .card-e2b::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .card-e2b .compat-card-icon { background: rgba(245, 158, 11, 0.15); color: var(--accent); }
+    .card-docker::before { background: linear-gradient(90deg, #1d63ed, #3b82f6); }
+    .card-docker .compat-card-icon { background: rgba(29, 99, 237, 0.15); color: #1d63ed; }
+    .card-local::before { background: linear-gradient(90deg, #22c55e, #4ade80); }
+    .card-local .compat-card-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+    .card-cf::before { background: linear-gradient(90deg, #f97316, #fb923c); }
+    .card-cf .compat-card-icon { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+
+    /* ---- YAML / CODE BLOCKS (C5) ---- */
     .yaml-section {
       border-top: 1px solid var(--border);
     }
@@ -674,6 +904,19 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       overflow: hidden;
+      position: relative;
+    }
+
+    /* Amber glow top border on code blocks */
+    .yaml-block::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      z-index: 1;
     }
 
     .yaml-header {
@@ -685,7 +928,7 @@
       border-bottom: 1px solid var(--border);
       font-size: 13px;
       color: var(--text-muted);
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+      font-family: var(--font-mono);
     }
 
     .yaml-dot {
@@ -699,16 +942,55 @@
     .yaml-dot--yellow { background: #f59e0b; }
     .yaml-dot--green { background: #22c55e; }
 
+    /* Copy button */
+    .copy-btn {
+      position: absolute;
+      top: 52px;
+      right: 12px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      z-index: 2;
+    }
+
+    .copy-btn:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
     pre {
       padding: 20px;
+      padding-left: 52px;
       overflow-x: auto;
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+      font-family: var(--font-mono);
       font-size: 13px;
       line-height: 1.7;
       color: var(--text-muted);
+      counter-reset: line;
+      position: relative;
     }
 
-    /* YAML syntax colors */
+    /* CSS line numbers */
+    pre .ln {
+      counter-increment: line;
+    }
+
+    pre .ln::before {
+      content: counter(line);
+      position: absolute;
+      left: 16px;
+      width: 24px;
+      text-align: right;
+      color: #333;
+      font-size: 12px;
+    }
+
     .y-key { color: #7dd3fc; }
     .y-str { color: #86efac; }
     .y-num { color: #fbbf24; }
@@ -813,7 +1095,7 @@
       padding: 20px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      border-radius: var(--radius);
       transition: border-color 0.2s;
     }
 
@@ -824,6 +1106,7 @@
     .template-count {
       font-size: 28px;
       font-weight: 800;
+      font-family: var(--font-mono);
       color: var(--accent);
       line-height: 1;
     }
@@ -859,7 +1142,7 @@
       padding: 18px 20px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      border-radius: var(--radius);
       transition: border-color 0.2s;
     }
 
@@ -880,6 +1163,156 @@
     .stack-item .stack-role {
       font-size: 12px;
       color: var(--text-dim);
+    }
+
+    /* ---- BOTTOM CTA (C6) ---- */
+    .bottom-cta {
+      border-top: 1px solid var(--border);
+      padding: 100px 0;
+      text-align: center;
+    }
+
+    .bottom-cta-card {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 48px 40px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bottom-cta-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+
+    .bottom-cta-card h3 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .bottom-cta-card p {
+      font-size: 16px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
+    .bottom-cta-install {
+      display: inline-block;
+      padding: 12px 24px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 15px;
+      color: var(--text);
+      margin-bottom: 24px;
+    }
+
+    .bottom-cta-install .prompt {
+      color: var(--accent);
+      user-select: none;
+    }
+
+    .bottom-cta-actions {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* ---- SUPPORT ---- */
+    .support-section {
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .support-box {
+      max-width: 640px;
+      margin: 48px auto 0;
+      padding: 48px 40px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .support-box::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), #f59e0b88, var(--accent));
+    }
+
+    .support-icon {
+      font-size: 48px;
+      margin-bottom: 20px;
+      display: block;
+    }
+
+    .support-box h3 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .support-box p {
+      font-size: 16px;
+      color: var(--text-muted);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .support-box p:last-of-type {
+      margin-bottom: 32px;
+    }
+
+    .support-box .btn-coffee {
+      background: #ffdd00;
+      color: #0a0a0a;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 16px 32px;
+    }
+
+    .support-box .btn-coffee:hover {
+      background: #ffe84d;
+      color: #0a0a0a;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 24px rgba(255, 221, 0, 0.25);
+    }
+
+    .support-pills {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 28px;
+      flex-wrap: wrap;
+    }
+
+    .support-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 100px;
+      border: 1px solid var(--border);
     }
 
     /* ---- MORE PROJECTS ---- */
@@ -983,228 +1416,60 @@
       color: var(--accent);
     }
 
-    /* ---- SUPPORT ---- */
-    .support-section {
-      border-top: 1px solid var(--border);
-      text-align: center;
-    }
-
-    .support-box {
-      max-width: 640px;
-      margin: 48px auto 0;
-      padding: 48px 40px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .support-box::before {
-      content: '';
-      position: absolute;
-      top: 0;
+    /* ---- MOBILE STICKY CTA (C6) ---- */
+    .mobile-cta {
+      display: none;
+      position: fixed;
+      bottom: 0;
       left: 0;
       right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accent), #f59e0b88, var(--accent));
+      z-index: 99;
+      padding: 12px 16px;
+      background: rgba(10, 10, 10, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
     }
 
-    .support-icon {
-      font-size: 48px;
-      margin-bottom: 20px;
-      display: block;
+    .mobile-cta.visible {
+      transform: translateY(0);
     }
 
-    .support-box h3 {
-      font-size: 24px;
-      font-weight: 700;
-      margin-bottom: 16px;
+    .mobile-cta .btn {
+      width: 100%;
+      justify-content: center;
     }
 
-    .support-box p {
-      font-size: 16px;
-      color: var(--text-muted);
-      line-height: 1.7;
-      margin-bottom: 12px;
-    }
-
-    .support-box p:last-of-type {
-      margin-bottom: 32px;
-    }
-
-    .support-box .btn-coffee {
-      background: #ffdd00;
-      color: #0a0a0a;
-      font-weight: 700;
-      font-size: 16px;
-      padding: 16px 32px;
-    }
-
-    .support-box .btn-coffee:hover {
-      background: #ffe84d;
-      color: #0a0a0a;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 24px rgba(255, 221, 0, 0.25);
-    }
-
-    .support-pills {
+    .mode-pills {
       display: flex;
       justify-content: center;
       gap: 12px;
-      margin-top: 28px;
       flex-wrap: wrap;
     }
 
-    .support-pill {
+    .mode-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
       padding: 6px 14px;
       font-size: 13px;
-      color: var(--text-dim);
-      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-muted);
+      background: var(--surface);
       border-radius: 100px;
       border: 1px solid var(--border);
     }
 
-    /* ---- COMPAT SECTION ---- */
-    .compat-section {
-      margin-top: 72px;
-      display: flex;
-      flex-direction: column;
-      gap: 48px;
+    .mode-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
     }
-
-    .compat-group {
-      position: relative;
-    }
-
-    .compat-group-header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-
-    .compat-group-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      background: var(--accent-dim);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-    }
-
-    .compat-group-label {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text);
-    }
-
-    .compat-group-sub {
-      font-size: 13px;
-      color: var(--text-dim);
-      font-weight: 400;
-      margin-left: 4px;
-    }
-
-    .compat-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-    }
-
-    .compat-card {
-      position: relative;
-      padding: 20px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
-      overflow: hidden;
-    }
-
-    .compat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      opacity: 0.7;
-      transition: opacity 0.25s;
-    }
-
-    .compat-card:hover {
-      transform: translateY(-3px);
-      border-color: var(--border-light);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    }
-
-    .compat-card:hover::before {
-      opacity: 1;
-    }
-
-    .compat-card-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      font-weight: 800;
-      margin-bottom: 14px;
-    }
-
-    .compat-card-name {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-
-    .compat-card-models {
-      font-size: 13px;
-      color: var(--text-muted);
-      line-height: 1.4;
-    }
-
-    /* Provider card colors */
-    .card-claude::before { background: linear-gradient(90deg, #cc7832, #e89a4f); }
-    .card-claude .compat-card-icon { background: rgba(204, 120, 50, 0.15); color: #cc7832; }
-
-    .card-openai::before { background: linear-gradient(90deg, #10a37f, #34d399); }
-    .card-openai .compat-card-icon { background: rgba(16, 163, 127, 0.15); color: #10a37f; }
-
-    .card-minimax::before { background: linear-gradient(90deg, #6366f1, #818cf8); }
-    .card-minimax .compat-card-icon { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
-
-    .card-gemini::before { background: linear-gradient(90deg, #4285f4, #60a5fa); }
-    .card-gemini .compat-card-icon { background: rgba(66, 133, 244, 0.15); color: #4285f4; }
-
-    /* Backend card colors */
-    .card-e2b::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-    .card-e2b .compat-card-icon { background: rgba(245, 158, 11, 0.15); color: var(--accent); }
-
-    .card-docker::before { background: linear-gradient(90deg, #1d63ed, #3b82f6); }
-    .card-docker .compat-card-icon { background: rgba(29, 99, 237, 0.15); color: #1d63ed; }
-
-    .card-local::before { background: linear-gradient(90deg, #22c55e, #4ade80); }
-    .card-local .compat-card-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-
-    .card-cf::before { background: linear-gradient(90deg, #f97316, #fb923c); }
-    .card-cf .compat-card-icon { background: rgba(249, 115, 22, 0.15); color: #f97316; }
 
     /* ---- RESPONSIVE ---- */
     @media (max-width: 900px) {
-      .features-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-
       .contrast-row,
       .yaml-wrapper {
         grid-template-columns: 1fr;
@@ -1219,25 +1484,24 @@
         grid-template-columns: 1fr 1fr;
       }
 
-      .pain-grid {
-        grid-template-columns: 1fr 1fr;
+      .compat-grid {
+        grid-template-columns: repeat(2, 1fr);
       }
 
-      .compat-grid {
+      .tabs-panel .tab-grid {
         grid-template-columns: repeat(2, 1fr);
       }
     }
 
     @media (max-width: 600px) {
       .hero {
-        padding: 120px 0 64px;
+        padding: 120px 0 48px;
       }
 
       section {
         padding: 64px 0;
       }
 
-      .features-grid,
       .compat-grid {
         grid-template-columns: 1fr;
       }
@@ -1279,6 +1543,39 @@
       .projects-grid {
         grid-template-columns: 1fr;
       }
+
+      .terminal-steps {
+        grid-template-columns: 1fr;
+      }
+
+      .tabs-panel .tab-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tabs-nav {
+        gap: 0;
+      }
+
+      .tabs-nav label {
+        padding: 12px 14px;
+        font-size: 13px;
+      }
+
+      .stats-row {
+        gap: 32px;
+      }
+
+      .stat-item {
+        min-width: 120px;
+      }
+
+      .mobile-cta {
+        display: block;
+      }
+
+      .bottom-cta-actions .btn {
+        width: auto;
+      }
     }
   </style>
 </head>
@@ -1307,8 +1604,8 @@
     </div>
   </nav>
 
-  <!-- Hero -->
-  <header class="hero">
+  <!-- Hero (C2) -->
+  <header class="hero" id="hero">
     <div class="container">
       <div class="hero-badge">
         v0.13.0 - A2A + AG-UI Protocols + Full CLI
@@ -1318,9 +1615,7 @@
         <span class="accent">your AI agents.</span>
       </h1>
       <p>
-        Sandcastle runs your agent workflows so you don't have to. Pluggable sandbox backends (E2B, Docker, Cloudflare),
-        multi-provider model routing (Claude, OpenAI, Gemini), budget guardrails, approvals, policy enforcement - all out of the box.
-        Just <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle init</code> + <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-size:0.9em;">sandcastle serve</code> and you're live.
+        Sandcastle runs your agent workflows so you don't have to. Pluggable sandbox backends, multi-provider model routing, budget guardrails, approvals, policy enforcement - all out of the box.
       </p>
       <div class="hero-ctas">
         <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="btn btn-primary">
@@ -1331,59 +1626,72 @@
           Try Live Demo
         </a>
       </div>
-    </div>
-  </header>
 
-  <!-- Quick Start -->
-  <section class="quickstart">
-    <div class="container fade-in">
-      <div class="quickstart-box">
-        <div class="quickstart-header">
-          <div class="dots">
-            <span class="yaml-dot yaml-dot--red"></span>
-            <span class="yaml-dot yaml-dot--yellow"></span>
-            <span class="yaml-dot yaml-dot--green"></span>
-          </div>
-          <span class="label">Terminal</span>
+      <!-- Animated Terminal -->
+      <div class="terminal">
+        <div class="terminal-chrome">
+          <span class="terminal-dot terminal-dot--close"></span>
+          <span class="terminal-dot terminal-dot--min"></span>
+          <span class="terminal-dot terminal-dot--max"></span>
+          <span class="terminal-title">Terminal</span>
+          <span style="width:36px"></span>
         </div>
-        <div class="quickstart-body">
-          <code>
-<span class="prompt">$</span> <span class="cmd">pip install sandcastle-ai</span>
-<span class="prompt">$</span> <span class="cmd">sandcastle init</span>
-<span class="prompt">$</span> <span class="cmd">sandcastle serve</span>
-          </code>
+        <div class="terminal-body" id="terminal-body">
+          <span class="terminal-cursor" id="terminal-cursor"></span>
         </div>
       </div>
 
-      <div class="quickstart-footer">
-        <div class="quickstart-steps">
-          <div class="quickstart-step">
-            <div class="quickstart-step-num">1</div>
-            <div class="quickstart-step-title">Install</div>
-            <div class="quickstart-step-desc">One pip install. No database, no Redis, no S3 - everything runs locally.</div>
-          </div>
-          <div class="quickstart-step">
-            <div class="quickstart-step-num">2</div>
-            <div class="quickstart-step-title">Configure</div>
-            <div class="quickstart-step-desc">Interactive wizard asks for API keys, picks a sandbox backend, writes <code>.env</code>.</div>
-          </div>
-          <div class="quickstart-step">
-            <div class="quickstart-step-num">3</div>
-            <div class="quickstart-step-title">Run</div>
-            <div class="quickstart-step-desc">API + dashboard on one port. 28 workflow templates included. Ready to go.</div>
-          </div>
+      <div class="terminal-steps">
+        <div class="terminal-step">
+          <div class="terminal-step-num">1</div>
+          <div class="terminal-step-title">Install</div>
+          <div class="terminal-step-desc">One pip install. No database, no Redis - everything local.</div>
         </div>
+        <div class="terminal-step">
+          <div class="terminal-step-num">2</div>
+          <div class="terminal-step-title">Configure</div>
+          <div class="terminal-step-desc">Interactive wizard picks sandbox backend, writes .env.</div>
+        </div>
+        <div class="terminal-step">
+          <div class="terminal-step-num">3</div>
+          <div class="terminal-step-title">Run</div>
+          <div class="terminal-step-desc">API + dashboard on one port. 28 templates included.</div>
+        </div>
+      </div>
 
-        <div class="mode-pills">
-          <span class="mode-pill"><span class="dot"></span> Zero infrastructure</span>
-          <span class="mode-pill"><span class="dot"></span> Auto-detects local vs production</span>
-          <span class="mode-pill"><span class="dot"></span> Scale when ready</span>
-        </div>
+      <div class="source-alt"><span>or from source</span></div>
+      <div class="source-alt-cmd">
+        <code><span class="prompt">$ </span>git clone https://github.com/gizmax/Sandcastle.git && cd Sandcastle && uv sync && uv run sandcastle serve</code>
+      </div>
+    </div>
+  </header>
 
-        <div class="quickstart-divider"><span>or from source</span></div>
-        <div class="quickstart-alt">
-          <code><span class="prompt">$</span> git clone https://github.com/gizmax/Sandcastle.git && cd Sandcastle && uv sync && uv run sandcastle serve</code>
+  <!-- Social Proof (C4) -->
+  <section class="social-proof">
+    <div class="container fade-in">
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="stat-number">731</div>
+          <div class="stat-label">Tests Passing</div>
         </div>
+        <div class="stat-item">
+          <div class="stat-number">28</div>
+          <div class="stat-label">Templates</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">15</div>
+          <div class="stat-label">Step Types</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">4</div>
+          <div class="stat-label">Backends</div>
+        </div>
+      </div>
+      <div class="badges-row">
+        <img src="https://img.shields.io/github/stars/gizmax/Sandcastle?style=flat-square&color=f59e0b&labelColor=171717" alt="GitHub Stars">
+        <img src="https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=f59e0b&labelColor=171717" alt="PyPI Version">
+        <img src="https://img.shields.io/pypi/pyversions/sandcastle-ai?style=flat-square&color=f59e0b&labelColor=171717" alt="Python Versions">
+        <img src="https://img.shields.io/github/license/gizmax/Sandcastle?style=flat-square&color=f59e0b&labelColor=171717" alt="License">
       </div>
     </div>
   </section>
@@ -1401,7 +1709,6 @@
         </p>
       </div>
 
-      <!-- Without / With -->
       <div class="contrast-row">
         <div class="contrast-box contrast-box--without">
           <div class="contrast-label"><span>&#10005;</span> Without Sandcastle</div>
@@ -1425,7 +1732,6 @@
         </div>
       </div>
 
-      <!-- Capability cards -->
       <div class="pain-grid">
         <div class="pain-card">
           <div class="pain-card-icon">🔗</div>
@@ -1471,141 +1777,181 @@
     </div>
   </section>
 
-  <!-- Features -->
+  <!-- Features (C3 - Tabbed) -->
   <section class="features">
     <div class="container fade-in">
       <span class="section-label">Capabilities</span>
       <h2 class="section-title">Everything you need for production agents</h2>
       <p class="section-subtitle">From sandbox execution to production-grade orchestration - everything you need in one package.</p>
-      <div class="features-grid">
-        <div class="feature-card">
-          <span class="feature-icon">🔀</span>
-          <h3>DAG Workflow Engine</h3>
-          <p>Define multi-step pipelines in YAML. Dependencies, parallel branches, data passing between steps.</p>
+
+      <!-- CSS-only tabs: hidden radio inputs -->
+      <input type="radio" name="features-tab" id="tab-core" class="tabs-input" checked>
+      <input type="radio" name="features-tab" id="tab-intel" class="tabs-input">
+      <input type="radio" name="features-tab" id="tab-safety" class="tabs-input">
+      <input type="radio" name="features-tab" id="tab-integrations" class="tabs-input">
+      <input type="radio" name="features-tab" id="tab-dx" class="tabs-input">
+
+      <div class="tabs-nav">
+        <label for="tab-core">Core Engine</label>
+        <label for="tab-intel">Intelligence</label>
+        <label for="tab-safety">Safety</label>
+        <label for="tab-integrations">Integrations</label>
+        <label for="tab-dx">Developer Experience</label>
+      </div>
+
+      <div class="tabs-panels">
+        <!-- Core Engine -->
+        <div class="tabs-panel" id="panel-core">
+          <div class="tab-grid">
+            <div class="feature-card">
+              <span class="feature-icon">🔀</span>
+              <h3>DAG Workflow Engine</h3>
+              <p>Define multi-step pipelines in YAML. Dependencies, parallel branches, data passing between steps.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">⚡</span>
+              <h3>Parallel Execution</h3>
+              <p>Steps at the same DAG layer run concurrently. Fan out over lists with configurable concurrency.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🏖️</span>
+              <h3>Sandshore Runtime</h3>
+              <p>Purpose-built agent runtime with circuit breaker, pool management, health caching, and production-grade optimization.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📦</span>
+              <h3>Pluggable Sandboxes</h3>
+              <p>Four backends: E2B cloud microVMs, Docker containers, Cloudflare Workers edge, or local subprocess. Switch with one env var.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🧩</span>
+              <h3>15 Step Types</h3>
+              <p><code>llm</code>, <code>http</code>, <code>code</code>, <code>condition</code>, <code>classify</code>, <code>loop</code>, <code>race</code>, <code>sensor</code>, <code>gate</code>, <code>transform</code>, <code>notify</code>, <code>delegate</code>. Mix AI with $0 deterministic steps.</p>
+            </div>
+          </div>
         </div>
-        <div class="feature-card">
-          <span class="feature-icon">⚡</span>
-          <h3>Parallel Execution</h3>
-          <p>Steps at the same DAG layer run concurrently. Fan out over lists with configurable concurrency.</p>
+
+        <!-- Intelligence -->
+        <div class="tabs-panel" id="panel-intel">
+          <div class="tab-grid">
+            <div class="feature-card">
+              <span class="feature-icon">🌐</span>
+              <h3>Multi-Provider Routing</h3>
+              <p>Claude, OpenAI, Gemini, Minimax, OpenRouter - all from one config. Use short names like <code>sonnet</code>, <code>opus</code>, <code>openai/gpt-4o</code>.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🔄</span>
+              <h3>Model Failover</h3>
+              <p>Automatic fallback when a provider returns 429 or 5xx. Per-key cooldown tracking, ordered failover chains across providers.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">✨</span>
+              <h3>AI Workflow Generator</h3>
+              <p>Describe what you need in plain English. <code>sandcastle generate</code> creates a complete workflow YAML with steps, dependencies, and model selection.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🧠</span>
+              <h3>Agent Memory</h3>
+              <p>Persistent context across runs via Mem0. Semantic search auto-injects relevant memories into prompts.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🎯</span>
+              <h3>Cost-Latency Optimizer</h3>
+              <p>SLO-based model routing. Define quality, cost, and latency constraints - let the optimizer pick the model.</p>
+            </div>
+          </div>
         </div>
-        <div class="feature-card">
-          <span class="feature-icon">⏪</span>
-          <h3>Time Machine</h3>
-          <p>Replay from any step or fork with changes. Checkpoints restore prior outputs so you only pay for what re-runs.</p>
+
+        <!-- Safety -->
+        <div class="tabs-panel" id="panel-safety">
+          <div class="tab-grid">
+            <div class="feature-card">
+              <span class="feature-icon">🛡️</span>
+              <h3>Policy Engine</h3>
+              <p>Declarative rules for PII redaction, secret blocking, cost guards. Applied per step or globally.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">💰</span>
+              <h3>Budget Guardrails</h3>
+              <p>Cost tracking per step and per run. Set hard budgets and get alerts before they blow up your invoice.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">👤</span>
+              <h3>HITL Approvals</h3>
+              <p>Pause workflows for human review. Approve, reject, or edit the data before the next step runs. Multi-strategy gates.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">⚡</span>
+              <h3>Circuit Breaker</h3>
+              <p>Automatic failure detection with CLOSED/OPEN/HALF_OPEN states. Prevents cascading failures across your pipeline.</p>
+            </div>
+          </div>
         </div>
-        <div class="feature-card">
-          <span class="feature-icon">👤</span>
-          <h3>Approval Gates</h3>
-          <p>Pause workflows for human review. Approve, reject, or edit the data before the next step runs.</p>
+
+        <!-- Integrations -->
+        <div class="tabs-panel" id="panel-integrations">
+          <div class="tab-grid">
+            <div class="feature-card">
+              <span class="feature-icon">🔧</span>
+              <h3>20+ Tool Connectors</h3>
+              <p>Slack, Jira, GitHub, HubSpot, Salesforce, Zendesk, Notion, Teams, Gmail, Google Drive, PostgreSQL, webhooks, and more. Add <code>tools: [slack]</code> to any step.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🤝</span>
+              <h3>A2A Protocol</h3>
+              <p>Google's Agent-to-Agent protocol. Agent card discovery at <code>/.well-known/agent.json</code>, JSON-RPC 2.0 task management.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📺</span>
+              <h3>AG-UI Streaming</h3>
+              <p>CopilotKit's Agent-User Interaction protocol. Real-time SSE streaming of agent state, tool calls, and text deltas to any frontend.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🔌</span>
+              <h3>MCP Server</h3>
+              <p>Built-in Model Context Protocol server. Run workflows, check status, and manage schedules from Claude Desktop, Cursor, or Windsurf.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📡</span>
+              <h3>Webhooks + SSE</h3>
+              <p>Real-time event streaming via SSE. Webhook dispatcher for external integrations. Live updates, no polling.</p>
+            </div>
+          </div>
         </div>
-        <div class="feature-card">
-          <span class="feature-icon">🧪</span>
-          <h3>AutoPilot</h3>
-          <p>A/B test models and prompts per step. Automatic quality evaluation and best-variant deployment.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🛡️</span>
-          <h3>Policy Engine</h3>
-          <p>Declarative rules for PII redaction, secret blocking, cost guards. Applied per step or globally.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🎯</span>
-          <h3>Cost-Latency Optimizer</h3>
-          <p>SLO-based model routing. Define quality, cost, and latency constraints - let the optimizer pick the model.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🚀</span>
-          <h3>Zero-Config Local Mode</h3>
-          <p><code>sandcastle init</code> + <code>sandcastle serve</code>. Auto-detects local vs production - SQLite or PostgreSQL, in-process or Redis.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📋</span>
-          <h3>24 Built-in Templates</h3>
-          <p>Marketing, sales, support, HR, legal, product, and operations templates ready to use. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📂</span>
-          <h3>Directory Input</h3>
-          <p>Point a workflow at a folder. The agent reads files, processes them, and passes results downstream. Built-in server-side file browser.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📊</span>
-          <h3>CSV Export</h3>
-          <p>Export step output to CSV - per run or appended to one file. Works with any output shape. Configure per step in YAML or the visual builder.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📡</span>
-          <h3>Real-time Updates</h3>
-          <p>Live SSE event stream. See runs complete, steps execute, and errors appear instantly. No page refresh needed.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🔌</span>
-          <h3>MCP Server</h3>
-          <p>Built-in Model Context Protocol server. Run workflows, check status, and manage schedules from Claude Desktop, Cursor, or Windsurf.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🔄</span>
-          <h3>Model Failover</h3>
-          <p>Automatic fallback when a provider returns 429 or 5xx. Per-key cooldown tracking, ordered failover chains across providers.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🩺</span>
-          <h3>Doctor CLI</h3>
-          <p><code>sandcastle doctor</code> validates your setup - config, API keys, sandbox backends, dependencies, and network. No running server needed.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🧠</span>
-          <h3>Agent Memory</h3>
-          <p>Persistent context across runs via Mem0. A daily standup bot remembers yesterday. Semantic search auto-injects relevant memories into prompts.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🔧</span>
-          <h3>Tool Connectors</h3>
-          <p>12 built-in integrations: Slack, Jira, GitHub, HubSpot, Salesforce, Zendesk, Notion, Teams, Gmail, Google Drive, PostgreSQL, and webhooks. Add <code>tools: [slack]</code> to any step.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🔗</span>
-          <h3>Integrations Hub</h3>
-          <p>Visual dashboard page for managing tool credentials. Card grid grouped by category, search and filter, slide-over config panel with status indicators.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">✨</span>
-          <h3>AI Workflow Generator</h3>
-          <p>Describe what you need in plain English. <code>sandcastle generate</code> creates a complete workflow YAML with steps, dependencies, and model selection.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🌐</span>
-          <h3>Multi-Provider Routing</h3>
-          <p>Claude, OpenAI, Gemini, Minimax, OpenRouter - all from one config. Use short names like <code>sonnet</code>, <code>opus</code>, <code>openai/gpt-4o</code> in your workflows.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🧩</span>
-          <h3>Hybrid Step Types</h3>
-          <p>15 step types: <code>llm</code>, <code>http</code>, <code>code</code>, <code>condition</code>, <code>classify</code>, <code>loop</code>, <code>race</code>, <code>sensor</code>, <code>gate</code>, <code>transform</code>, <code>notify</code>, <code>delegate</code>. Mix AI with $0 deterministic steps.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📦</span>
-          <h3>Pluggable Sandboxes</h3>
-          <p>Four backends: E2B cloud microVMs, Docker containers, Cloudflare Workers edge, or local subprocess. Switch with one env var.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🤝</span>
-          <h3>A2A Protocol</h3>
-          <p>Google's Agent-to-Agent protocol built in. Agent card discovery at <code>/.well-known/agent.json</code>, JSON-RPC 2.0 task management. Your agents talk to other agents.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📺</span>
-          <h3>AG-UI Streaming</h3>
-          <p>CopilotKit's Agent-User Interaction protocol. Real-time SSE streaming of agent state, tool calls, and text deltas to any frontend. Drop-in React integration.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">⌨️</span>
-          <h3>Full CLI Suite</h3>
-          <p>Complete CLI: <code>templates</code>, <code>runs</code>, <code>replay</code>, <code>fork</code>, <code>approve</code>, <code>reject</code>. Global <code>--json</code> flag for scripting. Pipe-friendly output.</p>
+
+        <!-- Developer Experience -->
+        <div class="tabs-panel" id="panel-dx">
+          <div class="tab-grid">
+            <div class="feature-card">
+              <span class="feature-icon">⌨️</span>
+              <h3>Full CLI Suite</h3>
+              <p><code>templates</code>, <code>runs</code>, <code>replay</code>, <code>fork</code>, <code>approve</code>, <code>reject</code>, <code>generate</code>, <code>doctor</code>. Global <code>--json</code> flag for scripting.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📊</span>
+              <h3>Real-time Dashboard</h3>
+              <p>Runs, costs, schedules, dead letters, approvals, experiments, policy violations - all in one place. Visual workflow builder included.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📋</span>
+              <h3>28 Templates</h3>
+              <p>Marketing, sales, support, HR, legal, product, and operations templates. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🧪</span>
+              <h3>Evaluation Framework</h3>
+              <p>A/B test models and prompts per step. Automatic quality evaluation and best-variant deployment with AutoPilot.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🚀</span>
+              <h3>REST API + Docs</h3>
+              <p>Full OpenAPI spec. Interactive docs at <code>/api/docs</code>. Zero-config local mode - <code>sandcastle init</code> + <code>sandcastle serve</code>.</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Providers & Backends -->
+      <!-- Providers and Backends -->
       <div class="compat-section">
         <div class="compat-group">
           <div class="compat-group-header">
@@ -1667,7 +2013,7 @@
     </div>
   </section>
 
-  <!-- YAML Example -->
+  <!-- YAML Example (C5 - with line numbers, copy btn, amber glow) -->
   <section class="yaml-section">
     <div class="container fade-in">
       <span class="section-label">Define</span>
@@ -1681,31 +2027,32 @@
             <span class="yaml-dot yaml-dot--green"></span>
             lead-enrichment.yaml <span style="color:var(--accent);font-size:11px;margin-left:8px;">hybrid</span>
           </div>
-          <pre><code><span class="y-key">name:</span> <span class="y-str">"Lead Enrichment"</span>
-<span class="y-key">default_model:</span> <span class="y-str">sonnet</span>
-
-<span class="y-key">steps:</span>
-  - <span class="y-key">id:</span> <span class="y-str">"fetch"</span>
-    <span class="y-key">type:</span> <span class="y-str">http</span>              <span class="y-comment"># $0 - no LLM needed</span>
-    <span class="y-key">http_config:</span>
-      <span class="y-key">url:</span> <span class="y-str">"https://api.example.com/company/{input.id}"</span>
-      <span class="y-key">method:</span> <span class="y-str">GET</span>
-
-  - <span class="y-key">id:</span> <span class="y-str">"enrich"</span>
-    <span class="y-key">type:</span> <span class="y-str">llm</span>               <span class="y-comment"># single API call, no sandbox</span>
-    <span class="y-key">depends_on:</span> [<span class="y-str">"fetch"</span>]
-    <span class="y-key">prompt:</span> <span class="y-str">"Research: {steps.fetch.output}"</span>
-
-  - <span class="y-key">id:</span> <span class="y-str">"route"</span>
-    <span class="y-key">type:</span> <span class="y-str">classify</span>          <span class="y-comment"># LLM-based routing</span>
-    <span class="y-key">depends_on:</span> [<span class="y-str">"enrich"</span>]
-    <span class="y-key">classify_config:</span>
-      <span class="y-key">categories:</span> [<span class="y-str">hot</span>, <span class="y-str">warm</span>, <span class="y-str">cold</span>]
-      <span class="y-key">input:</span> <span class="y-str">"{steps.enrich.output}"</span>
-      <span class="y-key">branches:</span>
-        <span class="y-key">hot:</span> [<span class="y-str">priority-outreach</span>]
-        <span class="y-key">warm:</span> [<span class="y-str">nurture-sequence</span>]
-        <span class="y-key">cold:</span> [<span class="y-str">archive</span>]</code></pre>
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          <pre><code><span class="ln"><span class="y-key">name:</span> <span class="y-str">"Lead Enrichment"</span></span>
+<span class="ln"><span class="y-key">default_model:</span> <span class="y-str">sonnet</span></span>
+<span class="ln"></span>
+<span class="ln"><span class="y-key">steps:</span></span>
+<span class="ln">  - <span class="y-key">id:</span> <span class="y-str">"fetch"</span></span>
+<span class="ln">    <span class="y-key">type:</span> <span class="y-str">http</span>              <span class="y-comment"># $0 - no LLM needed</span></span>
+<span class="ln">    <span class="y-key">http_config:</span></span>
+<span class="ln">      <span class="y-key">url:</span> <span class="y-str">"https://api.example.com/company/{input.id}"</span></span>
+<span class="ln">      <span class="y-key">method:</span> <span class="y-str">GET</span></span>
+<span class="ln"></span>
+<span class="ln">  - <span class="y-key">id:</span> <span class="y-str">"enrich"</span></span>
+<span class="ln">    <span class="y-key">type:</span> <span class="y-str">llm</span>               <span class="y-comment"># single API call, no sandbox</span></span>
+<span class="ln">    <span class="y-key">depends_on:</span> [<span class="y-str">"fetch"</span>]</span>
+<span class="ln">    <span class="y-key">prompt:</span> <span class="y-str">"Research: {steps.fetch.output}"</span></span>
+<span class="ln"></span>
+<span class="ln">  - <span class="y-key">id:</span> <span class="y-str">"route"</span></span>
+<span class="ln">    <span class="y-key">type:</span> <span class="y-str">classify</span>          <span class="y-comment"># LLM-based routing</span></span>
+<span class="ln">    <span class="y-key">depends_on:</span> [<span class="y-str">"enrich"</span>]</span>
+<span class="ln">    <span class="y-key">classify_config:</span></span>
+<span class="ln">      <span class="y-key">categories:</span> [<span class="y-str">hot</span>, <span class="y-str">warm</span>, <span class="y-str">cold</span>]</span>
+<span class="ln">      <span class="y-key">input:</span> <span class="y-str">"{steps.enrich.output}"</span></span>
+<span class="ln">      <span class="y-key">branches:</span></span>
+<span class="ln">        <span class="y-key">hot:</span> [<span class="y-str">priority-outreach</span>]</span>
+<span class="ln">        <span class="y-key">warm:</span> [<span class="y-str">nurture-sequence</span>]</span>
+<span class="ln">        <span class="y-key">cold:</span> [<span class="y-str">archive</span>]</span></code></pre>
         </div>
         <div class="yaml-info">
           <h3>Mix agent + lightweight steps. One file.</h3>
@@ -1755,7 +2102,7 @@
     </div>
   </section>
 
-  <!-- MCP Integration -->
+  <!-- MCP Integration (C5 - with line numbers, copy btn, amber glow) -->
   <section class="yaml-section">
     <div class="container fade-in">
       <span class="section-label">Integrate</span>
@@ -1769,14 +2116,15 @@
             <span class="yaml-dot yaml-dot--green"></span>
             claude_desktop_config.json
           </div>
-          <pre><code>{
-  <span class="y-key">"mcpServers"</span>: {
-    <span class="y-key">"sandcastle"</span>: {
-      <span class="y-key">"command"</span>: <span class="y-str">"sandcastle"</span>,
-      <span class="y-key">"args"</span>: [<span class="y-str">"mcp"</span>]
-    }
-  }
-}</code></pre>
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          <pre><code><span class="ln">{</span>
+<span class="ln">  <span class="y-key">"mcpServers"</span>: {</span>
+<span class="ln">    <span class="y-key">"sandcastle"</span>: {</span>
+<span class="ln">      <span class="y-key">"command"</span>: <span class="y-str">"sandcastle"</span>,</span>
+<span class="ln">      <span class="y-key">"args"</span>: [<span class="y-str">"mcp"</span>]</span>
+<span class="ln">    }</span>
+<span class="ln">  }</span>
+<span class="ln">}</span></code></pre>
         </div>
         <div class="yaml-info">
           <h3>8 tools. 3 resources. Zero config.</h3>
@@ -1850,6 +2198,28 @@
           <span class="template-count">3</span>
           <span class="template-name">Operations</span>
           <span class="template-examples">Technical Debt Auditor, Incident Postmortem Generator, Market Entry Analyzer</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom CTA (C6) -->
+  <section class="bottom-cta">
+    <div class="container fade-in">
+      <div class="bottom-cta-card">
+        <h3>Ready to ship agent workflows?</h3>
+        <p>Install Sandcastle in under 30 seconds. No infrastructure, no setup - just works.</p>
+        <div class="bottom-cta-install">
+          <span class="prompt">$ </span>pip install sandcastle-ai
+        </div>
+        <div class="bottom-cta-actions">
+          <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            Get Started
+          </a>
+          <a href="https://gizmax.github.io/Sandcastle/" target="_blank" rel="noopener" class="btn btn-secondary">
+            Live Demo
+          </a>
         </div>
       </div>
     </div>
@@ -1998,8 +2368,15 @@
     </div>
   </footer>
 
-  <!-- Fade-in Observer -->
+  <!-- Mobile sticky CTA (C6) -->
+  <div class="mobile-cta" id="mobile-cta">
+    <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="btn btn-primary">
+      Get Started
+    </a>
+  </div>
+
   <script>
+    // Fade-in observer
     document.addEventListener('DOMContentLoaded', function () {
       var targets = document.querySelectorAll('.fade-in');
       if (!('IntersectionObserver' in window)) {
@@ -2016,6 +2393,120 @@
       }, { threshold: 0.15 });
       targets.forEach(function (el) { observer.observe(el); });
     });
+
+    // Mobile sticky CTA - show after scrolling past hero (C6)
+    (function () {
+      var mobileCta = document.getElementById('mobile-cta');
+      var hero = document.getElementById('hero');
+      if (!mobileCta || !hero) return;
+      var shown = false;
+      function checkScroll() {
+        var heroBottom = hero.getBoundingClientRect().bottom;
+        if (heroBottom < 0 && !shown) {
+          mobileCta.classList.add('visible');
+          shown = true;
+        } else if (heroBottom >= 0 && shown) {
+          mobileCta.classList.remove('visible');
+          shown = false;
+        }
+      }
+      window.addEventListener('scroll', checkScroll, { passive: true });
+    })();
+
+    // Copy button for code blocks (C5)
+    function copyCode(btn) {
+      var block = btn.closest('.yaml-block');
+      var code = block.querySelector('pre code');
+      var text = code.textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+      }).catch(function () {
+        btn.textContent = 'Failed';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    // Terminal typing animation (C2)
+    (function () {
+      var body = document.getElementById('terminal-body');
+      var cursor = document.getElementById('terminal-cursor');
+      if (!body || !cursor) return;
+
+      var commands = [
+        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.13.0' },
+        { cmd: 'sandcastle init', output: 'Created .env with E2B backend' },
+        { cmd: 'sandcastle serve', output: 'Dashboard ready at http://localhost:8080' }
+      ];
+
+      var cmdIdx = 0;
+      var charIdx = 0;
+      var phase = 'typing'; // typing | output | pause
+      var currentLine = null;
+
+      function createLine() {
+        currentLine = document.createElement('div');
+        currentLine.className = 'terminal-line';
+        currentLine.innerHTML = '<span class="prompt">$ </span><span class="cmd"></span>';
+        body.insertBefore(currentLine, cursor);
+        return currentLine;
+      }
+
+      function createOutputLine(text) {
+        var line = document.createElement('div');
+        line.className = 'terminal-line';
+        line.innerHTML = '<span class="output">' + text + '</span>';
+        body.insertBefore(line, cursor);
+      }
+
+      function tick() {
+        if (cmdIdx >= commands.length) {
+          // Done - restart after pause
+          cursor.style.display = 'inline-block';
+          setTimeout(function () {
+            // Clear and restart
+            while (body.firstChild !== cursor) {
+              body.removeChild(body.firstChild);
+            }
+            cmdIdx = 0;
+            charIdx = 0;
+            phase = 'typing';
+            createLine();
+            setTimeout(tick, 400);
+          }, 3000);
+          return;
+        }
+
+        var entry = commands[cmdIdx];
+
+        if (phase === 'typing') {
+          if (charIdx === 0 && !currentLine) {
+            createLine();
+          }
+          if (charIdx < entry.cmd.length) {
+            var cmdSpan = currentLine.querySelector('.cmd');
+            cmdSpan.textContent += entry.cmd[charIdx];
+            charIdx++;
+            setTimeout(tick, 45 + Math.random() * 25);
+          } else {
+            phase = 'output';
+            setTimeout(tick, 400);
+          }
+        } else if (phase === 'output') {
+          createOutputLine(entry.output);
+          phase = 'pause';
+          setTimeout(tick, 600);
+        } else if (phase === 'pause') {
+          cmdIdx++;
+          charIdx = 0;
+          phase = 'typing';
+          currentLine = null;
+          setTimeout(tick, 200);
+        }
+      }
+
+      setTimeout(tick, 800);
+    })();
   </script>
 
 </body>

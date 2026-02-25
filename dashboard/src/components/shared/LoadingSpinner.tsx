@@ -16,9 +16,13 @@ export function LoadingSpinner({ className, size = "md" }: LoadingSpinnerProps) 
     <div
       className={cn(
         "animate-spin rounded-full border-muted-foreground/30 border-t-accent",
+        "shadow-[0_0_8px_rgba(245,158,11,0.2)]",
         sizes[size],
         className
       )}
+      style={{
+        animation: "spin 0.8s linear infinite, pulse-glow 2s ease-in-out infinite",
+      }}
     />
   );
 }

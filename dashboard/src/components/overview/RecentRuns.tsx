@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, formatCost } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 interface RunItem {
@@ -40,9 +40,14 @@ export function RecentRuns({ runs }: RecentRunsProps) {
                 {run.workflow_name}
               </p>
               <p className="text-xs text-muted">
+                <span className="font-data text-muted-foreground">{run.run_id.slice(0, 8)}</span>
+                {" - "}
                 {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
               </p>
             </div>
+            <span className="font-data text-xs text-muted-foreground">
+              {formatCost(run.total_cost_usd)}
+            </span>
             <RunStatusBadge status={run.status} />
           </button>
         ))}
