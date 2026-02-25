@@ -1,0 +1,177 @@
+# name: M&A Due Diligence
+# description: Comprehensive due diligence analysis for mergers and acquisitions with parallel risk and terms extraction
+# tags: [Legal, M&A, Due-Diligence, Finance]
+# category: hr_legal
+
+name: ma-due-diligence
+description: Comprehensive due diligence analysis for mergers and acquisitions with parallel risk and terms extraction
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["target_company"]
+  properties:
+    target_company:
+      type: string
+      description: "Name of the target company being evaluated for the transaction"
+    deal_type:
+      type: string
+      description: "Type of transaction (e.g. acquisition, merger, asset purchase, joint venture)"
+      default: "acquisition"
+    focus_areas:
+      type: string
+      description: "Comma-separated focus areas for the due diligence review"
+      default: "financials,contracts,ip,compliance"
+
+steps:
+  - id: document-ingestion
+    prompt: |
+      You are a senior M&A analyst preparing for a due diligence review of {input.target_company}.
+      The transaction type is: {input.deal_type}.
+
+      Begin by creating a comprehensive document inventory and ingestion plan.
+      For each focus area ({input.focus_areas}), identify:
+      1. The critical documents that must be reviewed (e.g. financial statements, material contracts,
+         IP filings, regulatory licenses, corporate governance records)
+      2. The expected document categories and their priority ranking (critical, important, supplementary)
+      3. Any red flags to watch for during initial document triage
+      4. Standard data room organization structure for this type of deal
+      5. Missing document checklist - what should be requested from the target if not provided
+
+      Output a structured document inventory with categories, priorities, and status tracking fields.
+      This will serve as the foundation for all subsequent analysis steps.
+    model: sonnet
+    max_turns: 10
+
+  - id: contract-classification
+    depends_on: [document-ingestion]
+    prompt: |
+      Based on the document inventory for {input.target_company}, perform a detailed
+      classification of all material contracts and legal agreements.
+
+      Document inventory: {steps.document-ingestion.output}
+
+      Classify each contract into the following categories:
+      1. Revenue contracts (customer agreements, licensing, subscriptions, distribution)
+      2. Cost contracts (vendor agreements, leases, service contracts, supply agreements)
+      3. Employment contracts (executive agreements, non-competes, equity plans, severance)
+      4. IP-related agreements (licenses, assignments, joint development, technology transfer)
+      5. Financial instruments (loan agreements, credit facilities, guarantees, hedging)
+      6. Regulatory and compliance documents (permits, licenses, consent decrees)
+
+      For each contract, note:
+      - Materiality threshold and deal relevance
+      - Whether it contains change-of-control provisions that could be triggered by the {input.deal_type}
+      - Assignment and consent requirements
+      - Estimated financial impact on the transaction
+    model: opus
+    max_turns: 10
+
+  - id: key-terms-extraction
+    depends_on: [contract-classification]
+    prompt: |
+      Extract and analyze key terms from all classified material contracts for {input.target_company}.
+
+      Contract classification: {steps.contract-classification.output}
+
+      For each material contract, extract:
+      1. Financial terms: total contract value, payment schedules, pricing mechanisms,
+         escalation clauses, volume commitments, and minimum guarantees
+      2. Duration and renewal: effective dates, expiration, auto-renewal provisions,
+         notice periods for termination, and early termination penalties
+      3. Performance obligations: deliverables, SLAs, KPIs, milestones, and cure periods
+      4. Protective provisions: limitation of liability, indemnification caps,
+         representations and warranties, and insurance requirements
+      5. Change-of-control: assignment restrictions, consent requirements, acceleration
+         triggers, and anti-assignment clauses that could block the {input.deal_type}
+      6. IP rights: ownership, licensing scope, exclusivity, sublicensing rights
+
+      Compile a term sheet summary for each top-20 contract by materiality.
+    model: opus
+    max_turns: 10
+
+  - id: risk-identification
+    depends_on: [contract-classification]
+    prompt: |
+      Conduct a comprehensive risk identification analysis for the {input.deal_type}
+      of {input.target_company} across all focus areas: {input.focus_areas}.
+
+      Contract classification: {steps.contract-classification.output}
+
+      Identify and categorize risks across these dimensions:
+      1. Legal risks: pending or threatened litigation, regulatory investigations,
+         consent decree violations, contractual disputes, and IP infringement claims
+      2. Financial risks: revenue concentration, off-balance-sheet liabilities,
+         contingent obligations, tax exposure, and working capital shortfalls
+      3. Operational risks: key person dependencies, single-source suppliers,
+         technology debt, integration complexity, and customer churn risk
+      4. Compliance risks: regulatory non-compliance, data privacy violations,
+         environmental liabilities, sanctions exposure, and anti-corruption issues
+      5. Strategic risks: market position deterioration, competitive threats,
+         technology obsolescence, and customer relationship instability
+
+      For each risk, assign:
+      - Severity (Critical / High / Medium / Low)
+      - Probability (Likely / Possible / Unlikely)
+      - Estimated financial exposure range
+      - Recommended mitigation strategy or deal term protection
+    model: opus
+    max_turns: 10
+
+  - id: cross-reference-check
+    depends_on: [key-terms-extraction, risk-identification]
+    prompt: |
+      Perform a cross-reference validation between the extracted key terms and
+      identified risks for the {input.target_company} {input.deal_type}.
+
+      Key terms: {steps.key-terms-extraction.output}
+      Risk identification: {steps.risk-identification.output}
+
+      Cross-reference and validate:
+      1. Consistency check: Do the financial terms in contracts align with reported
+         financials? Are there discrepancies between stated obligations and actual terms?
+      2. Risk-term correlation: Map each identified risk back to specific contract clauses
+         or terms that create, mitigate, or exacerbate that risk
+      3. Gap analysis: Identify any risks that lack contractual protections, or contracts
+         that create risks not yet identified in the risk assessment
+      4. Change-of-control cascade: Trace how triggering one change-of-control clause
+         could cascade through related agreements
+      5. Indemnification coverage: Verify that identified risks are covered by existing
+         indemnification, insurance, or warranty provisions
+      6. Regulatory alignment: Confirm that contractual commitments comply with applicable
+         regulations in all relevant jurisdictions
+
+      Flag any inconsistencies, gaps, or areas requiring deeper investigation.
+    model: sonnet
+    max_turns: 10
+
+  - id: due-diligence-report
+    depends_on: [cross-reference-check]
+    prompt: |
+      Compile the final due diligence report for the {input.deal_type} of {input.target_company}.
+
+      Cross-reference analysis: {steps.cross-reference-check.output}
+      Key terms: {steps.key-terms-extraction.output}
+      Risk identification: {steps.risk-identification.output}
+
+      Structure the report as follows:
+      1. Executive Summary: Deal overview, overall risk assessment (Go / Conditional Go / No-Go),
+         and top 5 findings requiring immediate attention
+      2. Transaction Overview: Deal structure, parties, timeline, and key assumptions
+      3. Financial Due Diligence: Revenue quality, cost structure, working capital,
+         and financial projections assessment
+      4. Legal Due Diligence: Contract portfolio health, litigation exposure,
+         IP position, and regulatory compliance status
+      5. Risk Register: Complete risk inventory with severity, probability,
+         financial exposure, and mitigation recommendations
+      6. Deal Term Recommendations: Suggested representations and warranties,
+         indemnification provisions, escrow requirements, and closing conditions
+      7. Integration Considerations: Key dependencies, consent requirements,
+         timeline risks, and recommended post-closing priorities
+      8. Appendices: Detailed contract summaries, risk matrices, and document checklists
+
+      The report should be suitable for presentation to the board and deal committee.
+    model: opus
+    max_turns: 10

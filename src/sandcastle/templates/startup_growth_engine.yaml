@@ -1,0 +1,363 @@
+# name: Startup Growth Engine
+# description: Comprehensive growth audit with parallel strategy tracks for content, SEO, and conversion optimization
+# tags: [Growth, Startup, SEO, Marketing, Analytics]
+# category: marketing
+
+name: startup-growth-engine
+description: Comprehensive growth audit with parallel strategy tracks for content, SEO, and conversion optimization
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["startup_name", "product_url"]
+  properties:
+    startup_name:
+      type: string
+      description: "Name of the startup"
+    product_url:
+      type: string
+      description: "URL of the product or landing page to analyze"
+    growth_stage:
+      type: string
+      description: "Current growth stage (early, growth, scale)"
+      default: "early"
+    monthly_budget:
+      type: number
+      description: "Monthly marketing budget in USD"
+      default: 5000
+
+steps:
+  - id: growth-audit
+    prompt: |
+      Conduct a comprehensive growth audit for {input.startup_name} at {input.product_url}.
+      The startup is currently in the {input.growth_stage} stage with a monthly marketing
+      budget of ${input.monthly_budget}.
+
+      Perform a thorough analysis across these dimensions:
+
+      1. Current Digital Presence:
+         - Website/product analysis: messaging clarity, value proposition, UX first impressions
+         - SEO baseline: estimated domain authority, indexed pages, current organic visibility
+         - Social media presence: active platforms, follower counts, posting frequency, engagement
+         - Content footprint: existing blog posts, resources, documentation quality
+         - Tech stack assessment: page speed, mobile experience, analytics setup
+
+      2. Acquisition Channels Assessment:
+         - Organic search: current keyword rankings, content gaps, technical SEO issues
+         - Social media: platform fit for audience, content-market fit, viral potential
+         - Paid channels: estimated CAC by channel for the industry, budget allocation efficiency
+         - Community and partnerships: existing relationships, co-marketing opportunities
+         - Product-led growth: referral mechanisms, viral loops, network effects
+
+      3. Competitive Landscape:
+         - Top 3-5 direct competitors and their growth strategies
+         - Channel analysis: where competitors invest most (content, paid, community, etc.)
+         - Messaging comparison: positioning gaps and differentiation opportunities
+         - Backlink and content gap analysis vs. competitors
+
+      4. Growth Readiness Score (1-100):
+         - Product-market fit signals (qualitative assessment)
+         - Analytics and tracking maturity
+         - Team and resource readiness for growth initiatives
+         - Technical infrastructure readiness (page speed, scalability, conversion tracking)
+
+      5. Key Constraints and Bottlenecks:
+         - Budget constraints at ${input.monthly_budget}/month
+         - Stage-specific challenges for {input.growth_stage} startups
+         - Resource and skill gaps to address
+         - Timeline expectations vs. realistic outcomes
+
+      Produce a detailed audit report with scores, findings, and prioritized opportunity areas.
+    model: sonnet
+    max_turns: 10
+
+  - id: content-strategy
+    depends_on: [growth-audit]
+    prompt: |
+      Design a comprehensive content strategy for {input.startup_name} based on the
+      growth audit findings.
+
+      Growth audit: {steps.growth-audit.output}
+      Budget: ${input.monthly_budget}/month
+      Growth stage: {input.growth_stage}
+
+      Content Strategy:
+
+      1. Content Pillars (3-5 themes):
+         - For each pillar, define:
+           - Theme and topic cluster
+           - Target audience segment
+           - Buyer journey stage (awareness, consideration, decision)
+           - Content types (blog posts, guides, case studies, tools, templates)
+           - Expected traffic and lead generation potential
+           - Competitive difficulty assessment
+
+      2. Editorial Calendar (12-week plan):
+         - Week-by-week content production schedule
+         - Mix of quick-win content (news, commentary, listicles) and
+           long-form assets (ultimate guides, research reports, tools)
+         - Content velocity: realistic output given budget and resources
+         - Repurposing plan: how each piece becomes 3-5 derivative pieces
+
+      3. Content Distribution Plan:
+         - Owned channels: blog, email, documentation
+         - Earned channels: guest posts, PR, podcast appearances, community contributions
+         - Shared channels: social media scheduling and cross-promotion
+         - Paid amplification: which pieces deserve budget and where
+
+      4. Content-Led Growth Tactics:
+         - Lead magnets: downloadable resources, templates, calculators, checklists
+         - Interactive content: quizzes, assessments, configurators
+         - User-generated content: reviews, testimonials, community stories
+         - Content partnerships: co-created content with complementary companies
+
+      5. Measurement Framework:
+         - KPIs by content type (traffic, leads, MQLs, engagement)
+         - Attribution model recommendation for {input.growth_stage} stage
+         - Monthly reporting template
+         - Content performance threshold (when to double down vs. pivot)
+
+      Budget allocation: recommend how much of ${input.monthly_budget} should go to content.
+    model: sonnet
+    max_turns: 10
+
+  - id: seo-optimization
+    depends_on: [growth-audit]
+    prompt: |
+      Create a detailed SEO optimization plan for {input.startup_name} at {input.product_url}.
+
+      Growth audit: {steps.growth-audit.output}
+      Growth stage: {input.growth_stage}
+      Target keywords: based on product and competitor analysis from audit
+
+      SEO Optimization Plan:
+
+      1. Technical SEO Priorities:
+         - Critical issues to fix immediately (crawl errors, broken links, redirects)
+         - Page speed optimization recommendations (Core Web Vitals targets)
+         - Mobile experience improvements
+         - Schema markup implementation plan (Organization, Product, FAQ, HowTo)
+         - XML sitemap and robots.txt optimization
+         - Internal linking architecture improvements
+
+      2. Keyword Strategy:
+         - Primary keyword targets (10-15 keywords) with search volume estimates
+         - Quick win keywords (currently ranking 5-20, can move to top 3)
+         - Strategic keywords (high value, 3-6 month timeline)
+         - Long-tail keyword clusters for each content pillar
+         - Featured snippet opportunities
+         - SERP feature targeting (People Also Ask, Knowledge Panel, Local Pack)
+
+      3. On-Page Optimization:
+         - Title tag and meta description templates for key page types
+         - Header structure (H1-H4) guidelines
+         - Content optimization checklist for each new piece
+         - Image optimization protocol (alt text, compression, WebP format)
+         - URL structure recommendations
+
+      4. Off-Page and Link Building:
+         - Link building tactics appropriate for {input.growth_stage} stage and budget
+         - Digital PR opportunities (data studies, surveys, expert commentary)
+         - HARO/Connectively response strategy
+         - Guest posting targets (relevant, high-DA publications)
+         - Broken link building opportunities in the niche
+         - Resource page link building targets
+         - Estimated timeline: links needed per month to move target keywords
+
+      5. Local SEO (if applicable):
+         - Google Business Profile optimization
+         - Local citation building plan
+         - Review generation strategy
+
+      6. 90-Day SEO Roadmap:
+         - Week-by-week priorities and milestones
+         - Quick wins (first 30 days) vs. foundation building (60-90 days)
+         - Tool recommendations for tracking and execution
+         - Budget allocation from ${input.monthly_budget}
+    model: haiku
+    max_turns: 10
+
+  - id: conversion-analysis
+    depends_on: [growth-audit]
+    prompt: |
+      Perform a conversion rate optimization (CRO) analysis for {input.startup_name}
+      at {input.product_url}.
+
+      Growth audit: {steps.growth-audit.output}
+      Growth stage: {input.growth_stage}
+
+      CRO Analysis:
+
+      1. Funnel Mapping:
+         - Map the current user journey from first visit to conversion
+         - Identify all conversion points (signup, demo, trial, purchase)
+         - Estimate current conversion rates at each funnel stage
+         - Benchmark against industry averages for {input.growth_stage} startups
+         - Calculate estimated drop-off rates between stages
+
+      2. Landing Page Analysis:
+         - Above-the-fold effectiveness: headline clarity, value proposition, CTA visibility
+         - Trust signals: social proof, testimonials, logos, security badges
+         - Objection handling: pricing transparency, FAQ, guarantee/refund policy
+         - CTA optimization: placement, copy, design, urgency elements
+         - Page load speed impact on conversion
+         - Mobile conversion experience vs. desktop
+
+      3. User Experience Friction Points:
+         - Registration/signup flow complexity (number of fields, steps, friction)
+         - Onboarding experience assessment
+         - Pricing page clarity and tier differentiation
+         - Navigation and information architecture
+         - Error handling and recovery flows
+         - Social login and SSO availability
+
+      4. A/B Testing Roadmap:
+         - Priority tests ranked by expected impact and ease of implementation
+         - For each test:
+           - Hypothesis (what we believe and why)
+           - Variable to test (headline, CTA, layout, pricing, social proof)
+           - Expected lift percentage
+           - Required sample size and test duration
+           - Success metrics (primary and secondary)
+         - Testing velocity: how many tests per month given traffic levels
+
+      5. Quick Win Optimizations:
+         - Changes that can be implemented in under a week
+         - Expected conversion lift from each change
+         - No-code tools and methods for rapid testing
+         - Copy and messaging improvements with before/after examples
+
+      6. Analytics and Tracking Setup:
+         - Recommended event tracking for conversion funnel
+         - Heatmap and session recording tool recommendations
+         - Goal and event configuration for key conversions
+         - Dashboard template for weekly CRO monitoring
+    model: haiku
+    max_turns: 10
+
+  - id: experiment-design
+    depends_on: [content-strategy, seo-optimization, conversion-analysis]
+    prompt: |
+      Design a structured growth experiment program for {input.startup_name} that
+      synthesizes insights from all three strategy tracks.
+
+      Content strategy: {steps.content-strategy.output}
+      SEO plan: {steps.seo-optimization.output}
+      CRO analysis: {steps.conversion-analysis.output}
+      Budget: ${input.monthly_budget}/month
+
+      Growth Experiment Program:
+
+      1. Experiment Framework:
+         - ICE scoring methodology (Impact, Confidence, Ease - each 1-10)
+         - Experiment documentation template
+         - Statistical significance requirements
+         - Learning capture and sharing process
+         - Weekly experiment review cadence
+
+      2. Priority Experiments (Top 10):
+         For each experiment, define:
+         - Experiment name and category (acquisition, activation, retention, revenue, referral)
+         - Hypothesis: "We believe [change] will cause [effect] because [reason]"
+         - ICE score and ranking rationale
+         - Implementation plan (steps, tools, timeline)
+         - Success metric and target improvement
+         - Budget required from ${input.monthly_budget} allocation
+         - Expected timeline to statistical significance
+         - Learning objectives regardless of outcome
+
+      3. Channel Experiments:
+         - Content experiments: topic angles, formats, distribution channels
+         - SEO experiments: content types, link building approaches, technical changes
+         - Conversion experiments: landing page variants, pricing models, onboarding flows
+         - Paid experiments: channel tests, audience targeting, creative angles
+         - Partnership experiments: co-marketing, integrations, affiliate programs
+
+      4. Experiment Calendar:
+         - 12-week experiment schedule
+         - Maximum 3 concurrent experiments to maintain focus
+         - Review and iteration cycles built in
+         - Resource allocation per experiment
+         - Kill criteria: when to stop an underperforming experiment
+
+      5. Measurement and Learning:
+         - North star metric for {input.startup_name} at {input.growth_stage} stage
+         - Leading indicators to watch during experiments
+         - Experiment results database template
+         - Monthly growth review agenda and format
+    model: sonnet
+    max_turns: 10
+
+  - id: growth-playbook
+    depends_on: [experiment-design]
+    prompt: |
+      Compile the definitive growth playbook for {input.startup_name} - a comprehensive,
+      actionable plan that the team can execute starting this week.
+
+      Experiment design: {steps.experiment-design.output}
+      Content strategy: {steps.content-strategy.output}
+      SEO plan: {steps.seo-optimization.output}
+      CRO analysis: {steps.conversion-analysis.output}
+      Growth audit: {steps.growth-audit.output}
+
+      Growth Playbook Structure:
+
+      1. Executive Summary:
+         - Current state assessment (growth readiness score from audit)
+         - Top 3 growth opportunities identified
+         - Expected outcomes: traffic, leads, and conversion targets for 3/6/12 months
+         - Total investment: ${input.monthly_budget}/month allocation breakdown
+         - Key risks and mitigation strategies
+
+      2. 30-60-90 Day Action Plan:
+         - Days 1-30 (Foundation):
+           - Technical fixes and quick wins to implement immediately
+           - Analytics and tracking setup
+           - First content pieces to publish
+           - First experiments to launch
+           - Team roles and responsibilities
+         - Days 31-60 (Acceleration):
+           - Content velocity ramp-up
+           - SEO link building activation
+           - A/B testing program launch
+           - Channel expansion based on early data
+         - Days 61-90 (Optimization):
+           - Review first experiment results and double down on winners
+           - Scale winning channels
+           - Introduce new experiment batch
+           - Refine conversion funnel based on data
+
+      3. Resource Allocation:
+         - Budget split by channel and initiative
+         - Time investment by activity (content creation, SEO, CRO, analytics)
+         - Tool stack recommendations with costs
+         - Outsourcing vs. in-house decision framework
+         - Hiring priorities if growth targets are met
+
+      4. Metrics Dashboard:
+         - Weekly tracking metrics (traffic, signups, activation, revenue)
+         - Monthly reporting template
+         - Quarterly business review format
+         - Growth rate benchmarks for {input.growth_stage} companies
+         - Leading and lagging indicator definitions
+
+      5. Contingency Plans:
+         - If organic growth is slower than expected: paid amplification playbook
+         - If budget increases: scaling plan and priority order
+         - If budget decreases: essential activities to maintain
+         - Seasonal adjustments and timing considerations
+         - Pivot triggers: when to fundamentally change approach
+
+      6. Appendices:
+         - Complete keyword research database
+         - Content calendar with all planned pieces
+         - Experiment backlog with ICE scores
+         - Competitor tracking dashboard setup
+         - Recommended reading and growth resources
+
+      The playbook should be actionable, specific to {input.startup_name}'s situation,
+      and suitable for sharing with founders, investors, and the growth team.
+    model: sonnet
+    max_turns: 10

@@ -1,0 +1,328 @@
+# name: Churn Prediction Pipeline
+# description: Analyze customer usage patterns, score churn risk, identify root causes, generate retention offers, and orchestrate outreach campaigns
+# tags: [Churn, Customer-Success, Retention, Analytics]
+# category: sales_crm
+
+name: churn-prediction-pipeline
+description: Analyze customer usage patterns, score churn risk, identify root causes, generate retention offers, and orchestrate outreach campaigns
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [hubspot, slack]
+
+input_schema:
+  required: ["customer_segment"]
+  properties:
+    customer_segment:
+      type: string
+      description: "Customer segment to analyze (e.g. 'Enterprise', 'Mid-Market', 'SMB', 'Starter', or 'All')"
+    lookback_period:
+      type: string
+      description: "How far back to analyze usage and behavioral data (default: '90 days')"
+      default: "90 days"
+    risk_threshold:
+      type: number
+      description: "Minimum churn risk score (0-100) to trigger retention actions (default: 70)"
+      default: 70
+
+steps:
+  - id: usage-analytics
+    prompt: |
+      Collect and analyze product usage metrics for the target customer segment.
+
+      Segment: {input.customer_segment}
+      Lookback period: {input.lookback_period}
+
+      Use the HubSpot tool to pull customer account data:
+        node /home/user/tools/hubspot.mjs get_accounts '{input.customer_segment}' 100
+
+      For each customer account, compile the following usage analytics:
+
+      1. **Login Activity:**
+         - Daily/weekly active users vs total licensed seats
+         - Login frequency trend (current month vs previous 3 months)
+         - Last login date for each user on the account
+         - Percentage of seats that have never been activated
+
+      2. **Feature Adoption:**
+         - Core features used vs available (adoption breadth)
+         - Depth of usage for key features (basic vs advanced usage)
+         - New feature adoption rate for recently launched capabilities
+         - Features used at signup that are no longer being used
+
+      3. **Volume Metrics:**
+         - API calls, documents created, workflows run (whatever applies)
+         - Storage or resource consumption vs plan limits
+         - Trend in volume metrics (growing, flat, declining)
+
+      4. **Engagement Quality:**
+         - Time spent in product per session
+         - Actions per session (are users doing meaningful work)
+         - Integration usage (connected third-party tools)
+         - Mobile vs desktop usage patterns
+
+      Calculate a Usage Health Score (0-100) for each account based on these metrics.
+      Flag accounts with dramatic usage drops (>30% decline in any major metric).
+      Return structured JSON with per-account usage analytics and overall segment summary.
+    model: haiku
+    max_turns: 8
+
+  - id: behavioral-patterns
+    depends_on: [usage-analytics]
+    prompt: |
+      Identify behavioral patterns that historically correlate with customer churn.
+
+      Usage analytics: {steps.usage-analytics.output}
+      Segment: {input.customer_segment}
+      Lookback period: {input.lookback_period}
+
+      Analyze the usage data to detect the following behavioral churn patterns:
+
+      **Pattern 1 - The Slow Fade:**
+      - Gradual, consistent decline in usage over 4+ weeks
+      - No single dramatic drop, but a clear downward trend
+      - Often accompanied by fewer users logging in each week
+      - Risk: High (this pattern has the highest historical churn rate)
+
+      **Pattern 2 - The Feature Abandonment:**
+      - Customer stops using 2+ core features they previously relied on
+      - May indicate they found an alternative tool for those workflows
+      - Check if abandoned features overlap with competitor capabilities
+      - Risk: High (indicates active evaluation of alternatives)
+
+      **Pattern 3 - The Support Spiral:**
+      - Increasing support ticket volume with decreasing satisfaction scores
+      - Repeated tickets about the same issue (unresolved pain point)
+      - Escalation requests or executive complaints
+      - Risk: Medium-High (frustration building toward a switch decision)
+
+      **Pattern 4 - The Ghost Account:**
+      - Near-zero usage but contract is still active
+      - Last meaningful login was 30+ days ago
+      - No response to product emails or outreach
+      - Risk: Very High (customer has mentally churned already)
+
+      **Pattern 5 - The Champion Exit:**
+      - Primary power user or admin has left the company or changed roles
+      - New admin has not been onboarded or trained
+      - Usage from the champion's team drops after their departure
+      - Risk: High (loss of internal advocacy)
+
+      For each account, identify which patterns (if any) are present, provide the
+      supporting evidence, and assign a pattern confidence score (0-100).
+      Return JSON with per-account pattern detection results and a pattern frequency summary.
+    model: sonnet
+    max_turns: 10
+
+  - id: churn-risk-scoring
+    depends_on: [behavioral-patterns]
+    prompt: |
+      Calculate a comprehensive churn risk score for each customer account.
+
+      Behavioral patterns: {steps.behavioral-patterns.output}
+      Usage analytics: {steps.usage-analytics.output}
+      Risk threshold: {input.risk_threshold}
+
+      Build a multi-factor churn risk model with these weighted components:
+
+      **Usage Decline Score (0-30 points):**
+      - Weight: 30% of total score
+      - Based on login frequency drop, feature adoption decline, volume trends
+      - Accounts with >50% usage drop in lookback period get maximum points
+      - Adjust for seasonality if obvious patterns exist
+
+      **Behavioral Pattern Score (0-25 points):**
+      - Weight: 25% of total score
+      - Each detected churn pattern adds points based on its risk level
+      - Multiple concurrent patterns compound the score (multiplicative, not additive)
+      - Pattern confidence moderates the contribution
+
+      **Support Health Score (0-20 points):**
+      - Weight: 20% of total score
+      - Ticket volume relative to account size
+      - Resolution time and satisfaction trends
+      - Escalation frequency
+      - Unresolved critical issues
+
+      **Engagement Recency Score (0-15 points):**
+      - Weight: 15% of total score
+      - Days since last CSM interaction
+      - Response rate to emails and outreach
+      - Attendance at training, webinars, community events
+      - QBR participation
+
+      **Contract Context Score (0-10 points):**
+      - Weight: 10% of total score
+      - Proximity to renewal date
+      - Contract length and history of renewals
+      - Previous downgrades or pricing disputes
+      - Competitor mentions in any communication
+
+      For each account, calculate:
+      - Composite Churn Risk Score (0-100)
+      - Risk Tier: Critical (80+), High (60-79), Moderate (40-59), Low (0-39)
+      - Top 3 contributing risk factors with their point contributions
+      - Confidence level of the prediction (High/Medium/Low)
+      - Estimated probability of churn in next 90 days
+
+      Flag all accounts scoring above {input.risk_threshold} for immediate action.
+      Provide a segment-level summary: total accounts at risk, ARR at risk, risk distribution.
+      Return structured JSON with scored_accounts, segment_summary, and methodology_notes.
+    model: sonnet
+    max_turns: 10
+
+  - id: root-cause-analysis
+    depends_on: [churn-risk-scoring]
+    prompt: |
+      Perform deep root cause analysis for every account above the risk threshold.
+
+      Churn risk scores: {steps.churn-risk-scoring.output}
+      Behavioral patterns: {steps.behavioral-patterns.output}
+      Usage analytics: {steps.usage-analytics.output}
+      Risk threshold: {input.risk_threshold}
+
+      For each account with a churn risk score >= {input.risk_threshold}, investigate:
+
+      **1. Primary Root Cause:**
+      Determine the single most important reason this customer is likely to churn.
+      Categorize into one of these root cause buckets:
+      - Product-Market Fit Gap: Product does not fully solve their core use case
+      - Value Realization Failure: Customer cannot achieve ROI they expected
+      - Competitive Displacement: A competitor is actively winning them over
+      - Relationship Breakdown: Poor support experience or CSM neglect
+      - Internal Change: Budget cuts, team restructuring, or priority shift at the customer
+      - Pricing Misalignment: Customer feels they are overpaying for the value received
+
+      **2. Evidence Chain:**
+      - List 3-5 specific data points that support this root cause diagnosis
+      - Reference actual usage metrics, support tickets, or behavioral patterns
+      - Note any contradicting evidence that weakens the diagnosis
+      - Assign confidence level to the root cause determination
+
+      **3. Contributing Factors:**
+      - Secondary issues that amplify the primary root cause
+      - Environmental factors (market conditions, industry trends)
+      - Internal factors at the customer organization
+
+      **4. Churn Timeline Estimate:**
+      - When is this customer most likely to churn (next renewal, mid-contract, immediate)
+      - What trigger event would accelerate the decision
+      - Is there still a window of intervention, and how long is it
+
+      **5. Save Difficulty Rating (1-10):**
+      - 1-3: Relatively easy to save with standard retention plays
+      - 4-6: Requires significant effort and possibly concessions
+      - 7-9: Very difficult, may require executive intervention and major changes
+      - 10: Likely unsaveable, focus on graceful exit and learning
+
+      Return structured JSON with per-account root cause analysis, evidence chains,
+      timeline estimates, and save difficulty ratings.
+    model: sonnet
+    max_turns: 10
+
+  - id: retention-offers
+    depends_on: [root-cause-analysis]
+    prompt: |
+      Design tailored retention offers and save plays for each at-risk account.
+
+      Root cause analysis: {steps.root-cause-analysis.output}
+      Churn risk scores: {steps.churn-risk-scoring.output}
+      Segment: {input.customer_segment}
+
+      For each at-risk account, create a retention package matched to their root cause:
+
+      **For Product-Market Fit Gap:**
+      - Custom feature roadmap preview addressing their specific gaps
+      - Beta access to upcoming capabilities relevant to their use case
+      - Professional services engagement to build custom workflows
+      - Partner integration recommendation if a third-party tool fills the gap
+
+      **For Value Realization Failure:**
+      - Complimentary success planning workshop with measurable KPI targets
+      - Dedicated implementation specialist for 30 days
+      - ROI analysis using their actual data to demonstrate achieved value
+      - Training sessions for underutilized features that would increase ROI
+
+      **For Competitive Displacement:**
+      - Competitive migration prevention package (price match + switching cost analysis)
+      - Executive alignment meeting to reinforce strategic partnership
+      - Exclusive early access to features that close the competitive gap
+      - Customer advisory board invitation (status and influence)
+
+      **For Relationship Breakdown:**
+      - CSM reassignment to a senior team member
+      - Escalated support tier upgrade (complimentary for 90 days)
+      - Personal outreach from VP Customer Success with action plan
+      - Service credit for documented poor experiences
+
+      **For each offer, include:**
+      - Estimated cost to the business (direct discounts, resource allocation, opportunity cost)
+      - Expected impact on retention probability (percentage point improvement)
+      - ROI calculation: cost of offer vs lifetime value preserved if customer stays
+      - Approval level required (CSM, Manager, VP, C-suite)
+      - Expiration or urgency framing for the offer
+
+      Rank offers by ROI (value preserved per dollar spent on retention).
+      Return structured JSON with per-account retention packages, cost estimates,
+      and expected outcomes.
+    model: sonnet
+    max_turns: 10
+
+  - id: outreach-orchestration
+    depends_on: [retention-offers]
+    prompt: |
+      Orchestrate the multi-channel retention outreach campaign for all at-risk accounts.
+
+      Retention offers: {steps.retention-offers.output}
+      Root cause analysis: {steps.root-cause-analysis.output}
+      Churn risk scores: {steps.churn-risk-scoring.output}
+
+      Execute the following outreach actions:
+
+      **1. Internal Team Alert via Slack:**
+      Use the Slack tool to post a churn risk briefing:
+        node /home/user/tools/slack.mjs post_message '#customer-success' '<message>'
+
+      Format the Slack message as:
+      *Churn Risk Alert - {input.customer_segment} Segment*
+      - Accounts analyzed: <count>
+      - Accounts above risk threshold ({input.risk_threshold}): <count>
+      - Total ARR at risk: $<amount>
+
+      For each Critical and High risk account:
+      > *<Account Name>* - Risk: <score>/100 | ARR: $<amount>
+      > Root cause: <primary_root_cause>
+      > Recommended action: <immediate_action>
+      > Assigned to: @<CSM_name>
+
+      **2. CRM Task Creation:**
+      Use the HubSpot tool to create follow-up tasks:
+        node /home/user/tools/hubspot.mjs create_task '<account>' '<description>' '<due_date>'
+
+      For each at-risk account, create:
+      - Urgent task for CSM: "Retention outreach - <account_name>" due within 48 hours
+      - Task description includes the retention offer details and talking points
+      - Follow-up task at 14 days to check retention play effectiveness
+
+      **3. Personalized Outreach Drafts:**
+      For each Critical-risk account, draft a personalized email from the CSM:
+      - Subject line that does NOT mention churn risk (value-focused framing)
+      - Opening that references a specific positive aspect of their usage
+      - Middle section addressing their likely pain point without being presumptuous
+      - Closing with a specific, low-commitment ask (15-min call, feature demo, etc.)
+      - Tone: helpful and proactive, not desperate
+
+      **4. Executive Briefing:**
+      For accounts with ARR > $50,000 at Critical risk, draft a brief for the VP/CRO:
+      - Account name, ARR, risk score, and save difficulty
+      - Recommended executive involvement (sponsor call, site visit, strategic review)
+      - Decision needed and timeline
+
+      Return a comprehensive campaign summary as JSON with:
+      slack_alert (posted/failed), tasks_created (count and details),
+      email_drafts (per account), executive_briefs (if applicable),
+      and a 30-day follow-up schedule.
+    model: haiku
+    max_turns: 10
+    tools: [hubspot, slack]

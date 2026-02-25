@@ -1,0 +1,256 @@
+# name: Dynamic Pricing
+# description: Optimize product pricing using competitor intelligence, demand elasticity, and margin analysis with A/B test design
+# tags: [Pricing, E-commerce, Analytics, Revenue]
+# category: general_ai
+
+name: dynamic-pricing
+description: Optimize product pricing using competitor intelligence, demand elasticity, and margin analysis with A/B test design
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [shopify]
+
+input_schema:
+  required: ["product_catalog", "competitor_urls"]
+  properties:
+    product_catalog:
+      type: string
+      description: "Product catalog description or SKU list to optimize pricing for (e.g. 'premium headphones line - 5 SKUs')"
+    competitor_urls:
+      type: string
+      description: "Comma-separated competitor store URLs or names to monitor (e.g. 'bestbuy.com, amazon.com/headphones')"
+    pricing_strategy:
+      type: string
+      description: "Pricing approach: 'value-based', 'competitive', 'premium', or 'penetration' (default: 'value-based')"
+      default: "value-based"
+    margin_floor:
+      type: number
+      description: "Minimum acceptable gross margin percentage (default: 20)"
+      default: 20
+
+steps:
+  - id: competitor-monitoring
+    prompt: |
+      Conduct a comprehensive competitor pricing analysis for the product catalog.
+
+      Product catalog: {input.product_catalog}
+      Competitor sources: {input.competitor_urls}
+
+      For each product in the catalog, gather competitor intelligence:
+
+      1. **Price mapping** - for each competitor, identify:
+         - Current selling price (regular and any active sale price)
+         - Price history pattern (do they run regular promotions? what discount depth?)
+         - Shipping costs and thresholds (free shipping at $X, flat rate, etc.)
+         - Bundle offers or multi-buy discounts that affect effective price
+      2. **Product positioning** - how competitors position equivalent products:
+         - Feature comparison (are they selling identical or similar products?)
+         - Rating and review scores (social proof advantage/disadvantage)
+         - Availability status (in stock, limited, backordered)
+         - Delivery speed promises
+      3. **Pricing patterns** - identify temporal patterns:
+         - Day-of-week pricing changes
+         - Seasonal pricing adjustments
+         - Response to competitor price changes (leader/follower dynamics)
+         - Flash sale or lightning deal frequency
+      4. **Market price range** - establish the competitive price corridor:
+         - Floor price (lowest competitor)
+         - Ceiling price (highest competitor)
+         - Median market price
+         - Price cluster analysis (where do most competitors cluster?)
+
+      Present a structured competitor pricing matrix for each product.
+    model: haiku
+    max_turns: 8
+
+  - id: demand-analysis
+    depends_on: [competitor-monitoring]
+    prompt: |
+      Analyze demand elasticity and willingness-to-pay for each product based on
+      market data and competitor intelligence.
+
+      Competitor pricing data: {steps.competitor-monitoring.output}
+      Product catalog: {input.product_catalog}
+      Pricing strategy: {input.pricing_strategy}
+
+      Perform the following demand-side analysis:
+
+      1. **Price elasticity estimation** - for each product, estimate how demand
+         volume changes with price adjustments. Consider:
+         - Category elasticity benchmarks (staples vs luxury vs discretionary)
+         - Cross-price elasticity (how does competitor pricing affect our demand?)
+         - Historical promotion response (if available from catalog data)
+         - Price sensitivity signals from review content and search behavior
+      2. **Willingness-to-pay segmentation** - identify customer segments:
+         - Price-sensitive (deal seekers, comparison shoppers)
+         - Value-oriented (quality/price balance)
+         - Premium (willing to pay more for brand, service, convenience)
+         - Estimate the size of each segment as a percentage of total addressable market
+      3. **Demand curve modeling** - for each product, construct a simplified
+         demand curve showing expected unit volume at 5 price points:
+         - 15% below current, 5% below, current, 5% above, 15% above
+      4. **Revenue optimization zones** - identify the price range that maximizes
+         total revenue (price x volume), not just margin. Note where the revenue
+         curve peaks and where it drops off sharply.
+
+      The output should clearly show the trade-off between volume and margin
+      at different price points for each product.
+    model: sonnet
+    max_turns: 10
+
+  - id: inventory-assessment
+    depends_on: [competitor-monitoring]
+    prompt: |
+      Assess current inventory position and its impact on pricing strategy.
+
+      Competitor data: {steps.competitor-monitoring.output}
+      Product catalog: {input.product_catalog}
+
+      Evaluate inventory-driven pricing factors:
+
+      1. **Stock level classification** - for each product, categorize inventory as:
+         - Overstock (>90 days of supply) - needs markdown acceleration
+         - Healthy (30-90 days) - standard pricing applies
+         - Lean (15-30 days) - consider price increase to manage demand
+         - Critical (<15 days) - raise price or limit availability
+      2. **Aging analysis** - identify products with aging inventory that risks
+         obsolescence (seasonal items, tech products with refresh cycles,
+         fashion with trend cycles). Calculate the markdown urgency.
+      3. **Replenishment timeline** - for each product, estimate:
+         - Lead time for next replenishment
+         - Supplier minimum order quantities
+         - Inbound shipment costs and their impact on landed cost
+      4. **Clearance candidates** - flag products that should be priced to clear
+         rather than optimized for margin. Recommend clearance price targets.
+      5. **New arrival premium** - identify recently launched products where
+         novelty premium pricing is appropriate before competitors match.
+
+      Output a pricing urgency matrix combining stock health and competitive
+      position for each product.
+    model: sonnet
+    max_turns: 8
+
+  - id: margin-optimization
+    depends_on: [demand-analysis, inventory-assessment]
+    prompt: |
+      Calculate optimal price points that maximize margin within constraints.
+
+      Demand analysis: {steps.demand-analysis.output}
+      Inventory assessment: {steps.inventory-assessment.output}
+      Pricing strategy: {input.pricing_strategy}
+      Margin floor: {input.margin_floor}%
+
+      For each product, determine the optimal price:
+
+      1. **Cost basis** - establish the all-in cost per unit:
+         - Product cost (COGS)
+         - Inbound freight and duties (estimated)
+         - Fulfillment and shipping cost
+         - Platform fees and payment processing
+         - Return rate cost allocation
+      2. **Price optimization** - using the {input.pricing_strategy} approach:
+         - **Value-based**: price at the willingness-to-pay ceiling for the target
+           segment, anchored by perceived value vs alternatives
+         - **Competitive**: price at or slightly below the median competitor, adjusted
+           for differentiation factors (brand, service, reviews)
+         - **Premium**: price 10-25% above median, justified by brand equity,
+           exclusive features, or superior service
+         - **Penetration**: price aggressively below competitors to gain market share,
+           but above the {input.margin_floor}% floor
+      3. **Constraint satisfaction** - verify each recommended price:
+         - Meets or exceeds {input.margin_floor}% gross margin
+         - Falls within the competitive corridor (not so high it kills demand,
+           not so low it triggers a price war)
+         - Aligns with inventory urgency (overstock = lower, lean = higher)
+      4. **Price recommendation table** - for each product:
+         - Current price, recommended price, price change ($, %)
+         - Expected gross margin at new price
+         - Estimated volume impact
+         - Projected revenue and profit change
+
+      Summarize total portfolio revenue and margin impact of all recommended changes.
+    model: sonnet
+    max_turns: 10
+
+  - id: ab-test-design
+    depends_on: [margin-optimization]
+    prompt: |
+      Design rigorous A/B tests to validate the pricing recommendations before
+      full rollout.
+
+      Price recommendations: {steps.margin-optimization.output}
+      Product catalog: {input.product_catalog}
+
+      For each significant price change (>3% movement), design an A/B test:
+
+      1. **Test structure**
+         - Control group: current price
+         - Treatment group(s): recommended price (and optionally a midpoint variant)
+         - Traffic split: recommend allocation (e.g. 80/20 or 70/15/15)
+         - Randomization unit: user-level or session-level, with justification
+      2. **Primary metrics**
+         - Conversion rate (add-to-cart and checkout completion)
+         - Revenue per visitor
+         - Gross margin per visitor
+         - Units sold per 1000 visitors
+      3. **Guardrail metrics** (must not degrade significantly)
+         - Cart abandonment rate
+         - Return rate
+         - Customer satisfaction (NPS or review score)
+         - Repeat purchase rate
+      4. **Sample size and duration**
+         - Calculate minimum sample size for 80% power, 5% significance level,
+           and a minimum detectable effect of 3% relative change
+         - Estimate test duration based on current traffic
+         - Recommend stopping rules for early winners/losers
+      5. **Segmentation plan**
+         - Pre-register subgroup analyses (new vs returning, mobile vs desktop,
+           geographic region) to detect heterogeneous treatment effects
+      6. **Risk mitigation**
+         - Maximum loss threshold before auto-stopping the test
+         - Fallback plan if price increase causes conversion collapse
+
+      Output a complete test protocol document ready for implementation.
+    model: sonnet
+    max_turns: 10
+
+  - id: pricing-update-plan
+    depends_on: [margin-optimization, ab-test-design]
+    prompt: |
+      Create a phased pricing update implementation plan.
+
+      Price recommendations: {steps.margin-optimization.output}
+      A/B test designs: {steps.ab-test-design.output}
+      Product catalog: {input.product_catalog}
+      Pricing strategy: {input.pricing_strategy}
+
+      Produce a complete implementation plan:
+
+      1. **Phase 1 - Quick Wins (Week 1)**
+         - Price changes with high confidence and low risk (small adjustments,
+           strong data support, or clearance items where delay costs money)
+         - No A/B test needed - implement directly
+         - Expected revenue impact
+      2. **Phase 2 - A/B Test Launch (Weeks 2-4)**
+         - Deploy the designed A/B tests for larger price changes
+         - Monitoring dashboard requirements
+         - Decision criteria and timeline for reading results
+      3. **Phase 3 - Full Rollout (Weeks 4-6)**
+         - Roll winning test variants to 100%
+         - Implement remaining price changes based on test learnings
+         - Adjust any prices where tests showed unexpected results
+      4. **Ongoing monitoring**
+         - Competitor price tracking frequency (daily/weekly)
+         - Automated repricing rules (e.g. match competitor within 24h if delta > 5%)
+         - Monthly price review cadence
+         - Seasonal adjustment calendar
+      5. **Communication plan**
+         - Internal stakeholder notification
+         - Customer-facing messaging (if significant changes)
+         - MAP/MSRP compliance checks (if applicable)
+
+      Include a Gantt-style timeline table showing each action, owner,
+      and deadline. Estimate total revenue and margin impact across all phases.
+    model: sonnet
+    max_turns: 10

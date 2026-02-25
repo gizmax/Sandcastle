@@ -1,0 +1,181 @@
+# name: Incident Command Center
+# description: Automated incident response - ingest alerts, analyze logs and metrics in parallel, find root cause, and generate remediation runbooks
+# tags: [DevOps, SRE, Incident-Response, Monitoring]
+# category: engineering
+
+name: incident-command-center
+description: Automated incident response - ingest alerts, analyze logs and metrics in parallel, find root cause, and generate remediation runbooks
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [webhook, slack]
+
+input_schema:
+  required: ["alert_source", "service_name"]
+  properties:
+    alert_source:
+      type: string
+      description: "Alert source integration (e.g. 'pagerduty', 'datadog', 'opsgenie')"
+    service_name:
+      type: string
+      description: "Name of the affected service (e.g. 'payments-api', 'auth-service')"
+    severity:
+      type: string
+      description: "Incident severity level (default: P2)"
+      default: "P2"
+
+steps:
+  - id: alert-ingestion
+    prompt: |
+      Ingest the incoming alert from {input.alert_source} for the service {input.service_name}.
+
+      Use the {input.alert_source} tool to fetch the latest alert details:
+        node /home/user/tools/{input.alert_source}.mjs get_alert '{input.service_name}'
+
+      Extract and structure the following information:
+      1. **Alert title and description** - the exact error condition that triggered
+      2. **Timestamp and duration** - when it started and how long it has been firing
+      3. **Affected endpoints** - which API routes or service components are impacted
+      4. **Current impact** - error rates, latency percentiles (p50, p95, p99)
+      5. **Related alerts** - any other alerts that fired within the same 15-minute window
+      6. **On-call responder** - who is currently on-call for this service
+      7. **Escalation status** - has this already been escalated or acknowledged
+
+      Classify the alert severity as {input.severity} and flag if it should be upgraded
+      based on blast radius. Return all data in structured JSON format.
+    model: haiku
+    max_turns: 5
+
+  - id: log-analysis
+    depends_on: [alert-ingestion]
+    prompt: |
+      Perform deep log analysis for the incident on {input.service_name}.
+
+      Alert context: {steps.alert-ingestion.output}
+
+      Use the Datadog tool to query recent logs:
+        node /home/user/tools/datadog.mjs query_logs 'service:{input.service_name} status:error' '15m'
+
+      Analyze the logs systematically:
+      1. **Error clustering** - group errors by type (5xx, timeout, connection refused,
+         OOM, panic/crash). Count occurrences per error class.
+      2. **Timeline reconstruction** - build a minute-by-minute timeline of when errors
+         started appearing and how they evolved. Identify the exact inflection point.
+      3. **Stack trace analysis** - extract unique stack traces and identify the
+         deepest common frame that points to the root module or function.
+      4. **Dependency errors** - look for upstream/downstream service failures,
+         database connection errors, cache misses, or queue backlogs.
+      5. **Deployment correlation** - check if any deployments occurred in the
+         30 minutes before the incident started.
+      6. **Request patterns** - identify if specific request paths, user segments,
+         or geographic regions are disproportionately affected.
+
+      Return structured findings with confidence levels (high/medium/low) for each signal.
+    model: sonnet
+    max_turns: 10
+
+  - id: metrics-analysis
+    depends_on: [alert-ingestion]
+    prompt: |
+      Perform infrastructure and application metrics analysis for {input.service_name}.
+
+      Alert context: {steps.alert-ingestion.output}
+
+      Use the Datadog tool to fetch metrics:
+        node /home/user/tools/datadog.mjs query_metrics '{input.service_name}' '30m'
+
+      Analyze the following metric dimensions:
+      1. **Resource saturation** - CPU utilization, memory usage, disk I/O, network
+         throughput. Flag any resource exceeding 80% utilization or showing rapid growth.
+      2. **Application metrics** - request rate (RPM), error rate (%), latency
+         distributions (p50/p95/p99), throughput, and active connections.
+      3. **Infrastructure metrics** - pod/container restarts, node health, load
+         balancer connection draining, health check failures.
+      4. **Dependency health** - database connection pool saturation, cache hit
+         ratios, message queue depth, external API response times.
+      5. **Anomaly detection** - compare current metrics against the same time
+         window from the previous 7 days. Flag any metric deviating by more
+         than 2 standard deviations.
+      6. **Capacity analysis** - is this a traffic-driven incident? Compare
+         current request volume against the service's known capacity limits.
+
+      Produce a metrics summary with RED (Request rate, Errors, Duration) and
+      USE (Utilization, Saturation, Errors) methodology scores.
+    model: sonnet
+    max_turns: 10
+
+  - id: root-cause-hypothesis
+    depends_on: [log-analysis, metrics-analysis]
+    prompt: |
+      Synthesize the log analysis and metrics analysis to form root cause hypotheses.
+
+      Log findings: {steps.log-analysis.output}
+      Metrics findings: {steps.metrics-analysis.output}
+      Original alert: {steps.alert-ingestion.output}
+
+      Apply structured root cause analysis:
+      1. **Correlation matrix** - cross-reference log error patterns with metric
+         anomalies. Identify signals that started within the same time window.
+      2. **Hypothesis generation** - propose the top 3 most likely root causes,
+         ranked by evidence strength. For each hypothesis, cite specific log
+         entries and metric data points that support or contradict it.
+      3. **Causal chain** - for the primary hypothesis, map the full causal chain
+         from trigger event to user-visible impact. Example: "memory leak in
+         connection pool -> pool exhaustion -> request queuing -> timeout errors".
+      4. **Contributing factors** - identify secondary factors that may have
+         amplified the incident (e.g., missing circuit breakers, no autoscaling,
+         retry storms, missing rate limits).
+      5. **Confidence assessment** - rate overall confidence in the primary
+         hypothesis (high/medium/low) and list what additional data would be
+         needed to increase confidence.
+
+      Return the analysis as structured JSON with hypotheses array, causal_chain,
+      contributing_factors, and confidence_level.
+    model: sonnet
+    max_turns: 10
+
+  - id: runbook-remediation
+    depends_on: [root-cause-hypothesis]
+    type: approval
+    prompt: |
+      Review the proposed remediation steps before execution.
+      Root cause analysis: {steps.root-cause-hypothesis.output}
+      Service: {input.service_name} | Severity: {input.severity}
+    approval_config:
+      message: "Review the proposed remediation runbook and approve execution. Verify the root cause hypothesis and confirm the remediation steps are safe to execute."
+      show_data: steps.root-cause-hypothesis.output
+      timeout_hours: 1
+      on_timeout: abort
+      allow_edit: true
+
+  - id: postmortem-generator
+    depends_on: [runbook-remediation]
+    prompt: |
+      Generate a comprehensive incident postmortem document for the {input.service_name} incident.
+
+      Root cause analysis: {steps.root-cause-hypothesis.output}
+      Log analysis: {steps.log-analysis.output}
+      Metrics analysis: {steps.metrics-analysis.output}
+      Alert details: {steps.alert-ingestion.output}
+
+      Structure the postmortem following the industry-standard format:
+      1. **Incident Summary** - one-paragraph executive summary: what happened,
+         duration, severity ({input.severity}), and user impact.
+      2. **Timeline** - minute-by-minute chronology from first alert to resolution,
+         including detection time, response time, and time-to-mitigation.
+      3. **Root Cause** - detailed technical explanation of what caused the incident,
+         the full causal chain, and contributing factors.
+      4. **Impact Assessment** - quantified impact: affected users, failed requests,
+         revenue impact estimate, SLA implications.
+      5. **What Went Well** - aspects of the response that worked effectively
+         (e.g., fast detection, good runbooks, effective communication).
+      6. **What Went Poorly** - gaps in detection, response, or communication.
+      7. **Action Items** - prioritized list of follow-up tasks with owners and
+         due dates. Categorize as: prevent recurrence, improve detection,
+         improve response, improve process.
+      8. **Lessons Learned** - key takeaways for the broader engineering org.
+
+      Format as a clean Markdown document ready for sharing in Confluence or Notion.
+    model: sonnet
+    max_turns: 10

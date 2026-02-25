@@ -1,0 +1,254 @@
+# name: Earnings Call Intelligence
+# description: Analyze earnings call transcripts for sentiment, key metrics, and investment insights
+# tags: [Finance, Investment, Analytics, Intelligence]
+# category: general_ai
+
+name: earnings-call-intelligence
+description: Analyze earnings call transcripts for sentiment, key metrics, and investment insights
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["company_ticker", "sector"]
+  properties:
+    company_ticker:
+      type: string
+      description: "Stock ticker symbol of the company (e.g. AAPL, MSFT, TSLA)"
+    sector:
+      type: string
+      description: "Industry sector (e.g. technology, healthcare, financials, consumer)"
+    benchmark_peers:
+      type: string
+      description: "Comma-separated ticker symbols of peer companies for comparison"
+
+steps:
+  - id: transcription
+    prompt: |
+      Process and structure the most recent earnings call transcript for {input.company_ticker}
+      in the {input.sector} sector.
+
+      Organize the transcript into clearly labeled sections:
+      1. Opening Remarks: CEO/CFO prepared statements, key highlights and narrative themes
+      2. Financial Results Summary: Revenue, EPS, margins, cash flow, and guidance figures
+         as presented by management
+      3. Business Segment Breakdown: Performance by division, geography, or product line
+      4. Forward Guidance: Next quarter and full-year outlook, any guidance revisions
+      5. Q&A Session: Each analyst question paired with management response, noting
+         which analysts asked and their firm affiliation
+      6. Management Tone Indicators: Note instances of hedging language, confidence
+         signals, deflections, or unusual phrasing compared to prior quarters
+
+      Extract exact numerical figures where stated (revenue, EPS, margins, growth rates).
+      Flag any corrections or clarifications made during the call.
+      Note any topics management conspicuously avoided or redirected.
+    model: haiku
+    max_turns: 10
+
+  - id: sentiment-analysis
+    depends_on: [transcription]
+    prompt: |
+      Perform a multi-layered sentiment analysis of the {input.company_ticker} earnings call.
+
+      Transcript: {steps.transcription.output}
+
+      Analyze sentiment across these dimensions:
+
+      1. Overall Management Sentiment:
+         - Confidence score (1-10) based on language patterns
+         - Compare tone to previous quarter (more/less optimistic)
+         - Identify specific phrases that signal bullish or bearish outlook
+         - Note any defensive or evasive language patterns
+
+      2. Topic-Level Sentiment:
+         - Revenue growth: positive/neutral/negative with supporting quotes
+         - Margin trajectory: positive/neutral/negative with supporting quotes
+         - Competitive positioning: confident/concerned/defensive
+         - Capital allocation: aggressive/balanced/conservative
+         - Macro environment: optimistic/cautious/pessimistic
+
+      3. Q&A Dynamics:
+         - Which questions made management uncomfortable (longer pauses, deflections)
+         - Which topics generated the most detailed, enthusiastic responses
+         - Analyst tone analysis - are analysts challenging or accepting guidance
+         - Unasked questions that market expected but were not raised
+
+      4. Language Pattern Analysis:
+         - Frequency of hedging words (may, might, potentially, approximately)
+         - Use of superlatives (best, strongest, unprecedented, record)
+         - Forward-looking statement density and conviction level
+         - Comparison of scripted remarks vs. spontaneous Q&A responses
+
+      Produce a sentiment scorecard with dimension, score, trend, and key evidence.
+    model: sonnet
+    max_turns: 10
+
+  - id: metric-extraction
+    depends_on: [transcription]
+    prompt: |
+      Extract and organize all quantitative metrics and KPIs mentioned during
+      the {input.company_ticker} earnings call.
+
+      Transcript: {steps.transcription.output}
+
+      Extract the following categories of metrics:
+
+      1. Income Statement Metrics:
+         - Revenue (total, by segment, by geography), YoY and QoQ growth rates
+         - Gross margin, operating margin, net margin
+         - EPS (GAAP and non-GAAP), beat/miss vs. consensus
+         - Operating expenses breakdown and trends
+
+      2. Balance Sheet and Cash Flow:
+         - Cash and equivalents, total debt, net debt
+         - Free cash flow and operating cash flow
+         - Capital expenditure (actual and planned)
+         - Share repurchase and dividend information
+
+      3. Operational KPIs:
+         - Customer/subscriber counts and growth rates
+         - Average revenue per user (ARPU) or similar metrics
+         - Retention rates, churn metrics, NRR
+         - Backlog, pipeline, or order book figures
+         - Headcount and efficiency metrics
+
+      4. Guidance and Outlook:
+         - Next quarter guidance (revenue, EPS, margins)
+         - Full-year guidance (any revisions from prior)
+         - Long-term targets or model updates
+         - Capital allocation plans (buybacks, M&A, CapEx)
+
+      5. Comparison to Consensus:
+         - Which metrics beat, met, or missed analyst expectations
+         - Magnitude of beats/misses
+         - Guidance vs. street expectations
+
+      Present all metrics in a structured table with metric name, reported value,
+      prior period value, YoY change, and vs. consensus.
+    model: haiku
+    max_turns: 10
+
+  - id: peer-comparison
+    depends_on: [sentiment-analysis, metric-extraction]
+    prompt: |
+      Compare {input.company_ticker}'s earnings results against sector peers
+      in the {input.sector} industry.
+
+      Peers for comparison: {input.benchmark_peers}
+
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Extracted metrics: {steps.metric-extraction.output}
+
+      Perform a comparative analysis across:
+
+      1. Financial Performance Ranking:
+         - Revenue growth rate vs. peers
+         - Margin profile comparison (gross, operating, net)
+         - EPS growth trajectory relative to peer group
+         - Cash flow generation efficiency
+
+      2. Operational Metrics Benchmarking:
+         - Customer growth and retention vs. industry averages
+         - Unit economics comparison (ARPU, LTV, CAC where applicable)
+         - Market share trends and competitive positioning
+         - R&D intensity and innovation pipeline
+
+      3. Management Execution:
+         - Guidance accuracy track record vs. peers
+         - Consistency of beat/miss pattern
+         - Quality of forward guidance (specificity, range width)
+         - Capital allocation effectiveness (ROIC, TSR)
+
+      4. Valuation Context:
+         - Current multiple vs. peer average (P/E, EV/EBITDA, P/S)
+         - Growth-adjusted valuation (PEG ratio)
+         - Premium or discount justified by results
+         - Historical valuation range vs. current positioning
+
+      Rank {input.company_ticker} against each peer on key dimensions.
+    model: sonnet
+    max_turns: 10
+
+  - id: investment-thesis
+    depends_on: [peer-comparison]
+    prompt: |
+      Synthesize all analysis into a structured investment thesis for {input.company_ticker}.
+
+      Peer comparison: {steps.peer-comparison.output}
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Metrics: {steps.metric-extraction.output}
+
+      Build the investment thesis covering:
+
+      1. Bull Case:
+         - Top 3-5 reasons to be optimistic
+         - Key catalysts that could drive upside (product launches, market expansion, margin improvement)
+         - Scenario analysis with upside price target range
+         - What would need to go right
+
+      2. Bear Case:
+         - Top 3-5 risk factors and concerns
+         - Key headwinds (competition, regulation, macro, execution)
+         - Scenario analysis with downside price target range
+         - What could go wrong
+
+      3. Base Case:
+         - Most likely outcome based on current trajectory
+         - Key assumptions and their probability
+         - Fair value estimate with supporting methodology
+         - Expected return over 12-month horizon
+
+      4. Key Debates:
+         - What the market is debating about this company
+         - Where consensus may be wrong (both directions)
+         - Information asymmetry opportunities
+         - Upcoming events that could resolve debates (product launches, regulatory decisions)
+
+      5. Actionable Recommendation:
+         - Buy / Hold / Sell with conviction level (high/medium/low)
+         - Suggested position sizing rationale
+         - Entry point and timing considerations
+         - Stop-loss and take-profit levels
+    model: sonnet
+    max_turns: 10
+
+  - id: portfolio-impact
+    depends_on: [investment-thesis]
+    prompt: |
+      Assess the portfolio-level implications of the {input.company_ticker} earnings results
+      and investment thesis.
+
+      Investment thesis: {steps.investment-thesis.output}
+      Peer comparison: {steps.peer-comparison.output}
+      Sector: {input.sector}
+
+      Evaluate portfolio impact:
+
+      1. Sector Read-Through:
+         - What do {input.company_ticker}'s results signal for the broader {input.sector} sector
+         - Which peers ({input.benchmark_peers}) are likely to report similar trends
+         - Sector-wide tailwinds or headwinds identified from the call
+         - Supply chain or demand signals that affect the value chain
+
+      2. Portfolio Positioning Recommendations:
+         - Should sector allocation increase, decrease, or remain unchanged
+         - Relative positioning within sector (overweight/underweight specific names)
+         - Pairs trade opportunities (long {input.company_ticker} / short peer or vice versa)
+         - Hedging considerations for identified risks
+
+      3. Risk Management:
+         - Correlation analysis - how does this position interact with existing holdings
+         - Concentration risk assessment
+         - Event risk calendar (next earnings, ex-dividend, index rebalance)
+         - Options strategies for risk management or income generation
+
+      4. Action Items:
+         - Immediate actions to take before next trading session
+         - Research priorities for deeper analysis
+         - Upcoming catalysts to monitor with dates
+         - Alerts and triggers to set for position management
+
+      Produce a concise one-page portfolio action memo suitable for investment committee review.
+    model: sonnet
+    max_turns: 10

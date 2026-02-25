@@ -1,0 +1,245 @@
+# name: SOC Triage Pipeline
+# description: Security Operations Center alert triage - deduplicate, enrich with threat intel, map to MITRE ATT&CK, and recommend containment
+# tags: [Security, SOC, Threat-Intel, SIEM]
+# category: engineering
+
+name: soc-triage-pipeline
+description: Security Operations Center alert triage - deduplicate, enrich with threat intel, map to MITRE ATT&CK, and recommend containment
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack, jira]
+
+input_schema:
+  required: ["siem_source", "alert_id"]
+  properties:
+    siem_source:
+      type: string
+      description: "SIEM platform source (e.g. 'splunk', 'sentinel', 'elastic', 'crowdstrike')"
+    alert_id:
+      type: string
+      description: "Alert ID from the SIEM to triage (e.g. 'ALERT-2024-00847')"
+    auto_contain:
+      type: string
+      description: "Whether to auto-execute containment actions (default: 'false')"
+      default: "false"
+
+steps:
+  - id: alert-intake
+    prompt: |
+      Ingest and parse the security alert {input.alert_id} from {input.siem_source}.
+
+      Extract and normalize the following alert fields:
+      1. **Alert metadata** - alert ID, rule name that triggered, severity as
+         reported by the SIEM, timestamp (UTC), and detection source (endpoint,
+         network, identity, cloud, email).
+      2. **Observables** - extract all indicators of compromise (IOCs):
+         IP addresses (source and destination), domain names, file hashes
+         (MD5, SHA256), email addresses, URLs, process names, registry keys,
+         and user accounts involved.
+      3. **Event context** - raw event data, log source, device/host name,
+         operating system, geographic location of source IP, and the specific
+         action detected (e.g., failed login, file download, lateral movement).
+      4. **Alert history** - has this exact rule fired before for this host
+         or user in the past 30 days? How many times?
+      5. **Asset context** - what is the affected asset? Is it a server,
+         workstation, or cloud instance? What is its criticality tier
+         (crown jewel, business critical, standard, dev/test)?
+      6. **User context** - is the associated user account a privileged
+         account (admin, service account)? What is their normal behavior
+         baseline (login times, typical source IPs)?
+
+      Return all data in a structured JSON format with an initial triage
+      priority (P1-P4) based on observable severity and asset criticality.
+    model: haiku
+    max_turns: 5
+
+  - id: dedup-correlation
+    depends_on: [alert-intake]
+    prompt: |
+      Perform alert deduplication and correlation analysis for {input.alert_id}.
+
+      Alert data: {steps.alert-intake.output}
+
+      Execute the following correlation logic:
+      1. **Exact deduplication** - check if this is a duplicate of an existing
+         alert by matching on: same source IP + same rule + same destination
+         within a 1-hour window. If duplicate, link to the existing case.
+      2. **Near-match correlation** - find related alerts that share at least
+         2 observables (e.g., same source IP but different rule, same hash
+         on different hosts). These may indicate a broader campaign.
+      3. **Kill chain correlation** - map the alert to a potential attack
+         sequence. Look for preceding reconnaissance alerts (port scans,
+         DNS enumeration), concurrent lateral movement (RDP, SMB, WMI),
+         or subsequent data exfiltration (large outbound transfers, DNS
+         tunneling, cloud storage uploads).
+      4. **Campaign detection** - do the correlated alerts suggest a
+         coordinated attack? Check for: multiple hosts affected, time
+         clustering, common C2 infrastructure, or shared TTPs.
+      5. **False positive scoring** - calculate a false positive probability
+         (0-100%) based on: known benign sources, alert tuning history,
+         user behavior baseline, and asset context.
+
+      Return the deduplication result (new/duplicate/correlated), the list
+      of related alert IDs, kill chain position, campaign assessment,
+      and false positive score. Adjust the triage priority if correlation
+      reveals a broader threat.
+    model: sonnet
+    max_turns: 10
+
+  - id: threat-enrichment
+    depends_on: [dedup-correlation]
+    prompt: |
+      Enrich all observables from alert {input.alert_id} with threat intelligence.
+
+      Alert data: {steps.alert-intake.output}
+      Correlation results: {steps.dedup-correlation.output}
+
+      For each IOC extracted, perform multi-source enrichment:
+      1. **IP addresses** - query reputation databases (AbuseIPDB, VirusTotal,
+         GreyNoise). Check: is it a known malicious IP, a Tor exit node,
+         a VPN/proxy, a cloud provider IP, or a residential IP? Check
+         geolocation and ASN ownership. Flag IPs seen in active threat
+         campaigns within the last 90 days.
+      2. **Domain names** - check WHOIS registration (age, registrar, privacy
+         protection), DNS resolution history, domain reputation score,
+         and whether the domain appears on known blocklists. Check for
+         DGA (Domain Generation Algorithm) patterns.
+      3. **File hashes** - query VirusTotal for detection ratio, first/last
+         seen dates, file type, and associated malware family. Check if
+         the hash appears in any known APT campaign toolsets.
+      4. **Email addresses** - check for involvement in known phishing
+         campaigns, credential dumps, or social engineering attacks.
+      5. **URLs** - check URL reputation, redirect chains, hosting provider,
+         SSL certificate details, and screenshot analysis if available.
+      6. **Threat actor attribution** - based on the enriched IOCs and TTPs,
+         identify potential threat actor groups (APT or cybercrime) that
+         match the observed patterns. Cite specific threat intel reports.
+
+      Return an enrichment report with a threat score (0-100) for each
+      observable and an overall threat assessment (benign/suspicious/malicious).
+    model: opus
+    max_turns: 10
+
+  - id: mitre-mapping
+    depends_on: [dedup-correlation]
+    prompt: |
+      Map alert {input.alert_id} to the MITRE ATT&CK framework.
+
+      Alert data: {steps.alert-intake.output}
+      Correlation results: {steps.dedup-correlation.output}
+
+      Perform comprehensive ATT&CK mapping:
+      1. **Tactic identification** - determine which ATT&CK tactics are
+         represented by this alert and correlated alerts. Map to the kill
+         chain phases: Initial Access, Execution, Persistence, Privilege
+         Escalation, Defense Evasion, Credential Access, Discovery,
+         Lateral Movement, Collection, Exfiltration, Command and Control.
+      2. **Technique mapping** - for each identified tactic, map to specific
+         ATT&CK techniques and sub-techniques (e.g., T1566.001 - Spearphishing
+         Attachment, T1059.001 - PowerShell). Cite the specific observable
+         evidence that supports each mapping.
+      3. **Detection coverage assessment** - for the identified techniques,
+         evaluate current detection coverage. Are there additional detection
+         rules that should have fired? Identify blind spots where the
+         attacker may have used techniques that went undetected.
+      4. **Attack progression prediction** - based on the current position
+         in the kill chain, predict the most likely next techniques the
+         attacker would use. Reference ATT&CK Navigator data for common
+         technique sequences.
+      5. **Mitigation mapping** - for each identified technique, reference
+         the corresponding ATT&CK mitigations (M-codes) and evaluate
+         which mitigations are currently deployed vs. missing.
+
+      Return the ATT&CK mapping as structured data with tactic, technique ID,
+      technique name, evidence, confidence, and recommended mitigations.
+    model: sonnet
+    max_turns: 10
+
+  - id: severity-classification
+    depends_on: [threat-enrichment, mitre-mapping]
+    prompt: |
+      Perform final severity classification for alert {input.alert_id}.
+
+      Threat enrichment: {steps.threat-enrichment.output}
+      MITRE ATT&CK mapping: {steps.mitre-mapping.output}
+      Correlation results: {steps.dedup-correlation.output}
+      Original alert: {steps.alert-intake.output}
+
+      Calculate the final severity using a weighted scoring model:
+      1. **Threat intelligence score** (weight: 30%) - derived from IOC
+         enrichment. Known malicious indicators score highest.
+      2. **Asset criticality score** (weight: 25%) - crown jewel assets
+         and privileged accounts increase severity.
+      3. **Kill chain progression** (weight: 20%) - later-stage techniques
+         (lateral movement, exfiltration) score higher than early-stage
+         (reconnaissance, initial access).
+      4. **Correlation breadth** (weight: 15%) - multiple correlated alerts
+         across hosts or users increase severity.
+      5. **False positive probability** (weight: 10%) - inverse of the
+         false positive score from deduplication.
+
+      Produce the final classification:
+      - **Final severity**: P1 (Critical), P2 (High), P3 (Medium), P4 (Low)
+      - **Confidence level**: percentage confidence in the classification
+      - **Recommended SLA**: response time target based on severity
+      - **Escalation required**: yes/no and to whom (SOC L2, SOC L3, CISO, IR team)
+      - **Containment recommendation**: immediate containment actions if P1/P2
+
+      Return as structured JSON suitable for updating the SIEM case and
+      creating a Jira ticket for tracking.
+    model: sonnet
+    max_turns: 10
+
+  - id: containment-actions
+    depends_on: [severity-classification]
+    type: approval
+    prompt: |
+      Review proposed containment actions for alert {input.alert_id}.
+      Severity: {steps.severity-classification.output}
+      Auto-contain setting: {input.auto_contain}
+    approval_config:
+      message: "Review the proposed containment actions before execution. Verify that isolating the affected assets will not cause an unacceptable business disruption."
+      show_data: steps.severity-classification.output
+      timeout_hours: 2
+      on_timeout: abort
+      allow_edit: true
+
+  - id: analyst-brief
+    depends_on: [containment-actions]
+    prompt: |
+      Generate a comprehensive analyst brief for alert {input.alert_id}
+      and post it to Slack and Jira.
+
+      Full investigation data:
+      - Alert intake: {steps.alert-intake.output}
+      - Correlation: {steps.dedup-correlation.output}
+      - Threat enrichment: {steps.threat-enrichment.output}
+      - MITRE mapping: {steps.mitre-mapping.output}
+      - Severity classification: {steps.severity-classification.output}
+
+      Create the analyst brief with:
+      1. **Executive summary** - 3-sentence overview: what was detected,
+         how severe it is, and what action was taken.
+      2. **Investigation timeline** - chronological walkthrough of the
+         alert from detection through triage.
+      3. **IOC table** - formatted table of all indicators with type,
+         value, threat score, and recommended block/monitor action.
+      4. **ATT&CK matrix highlight** - visual representation of which
+         techniques were observed in this incident.
+      5. **Containment status** - what containment actions were approved
+         and their current execution status.
+      6. **Recommended follow-up** - additional investigation steps,
+         threat hunting queries to run, and detection rule tuning
+         recommendations.
+      7. **Jira ticket creation** - create a tracking ticket with all
+         relevant details and link to the SIEM case.
+
+      Post the brief to the security-ops Slack channel using the Slack tool:
+        node /home/user/tools/slack.mjs post_message '#security-ops' '<brief>'
+
+      Create a Jira ticket using the Jira tool:
+        node /home/user/tools/jira.mjs create_issue 'SEC' 'Alert Triage: {input.alert_id}' '<description>'
+    model: sonnet
+    max_turns: 10

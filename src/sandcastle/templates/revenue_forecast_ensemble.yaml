@@ -1,0 +1,294 @@
+# name: Revenue Forecast Ensemble
+# description: Generate revenue forecasts using statistical, ML, and LLM-based methods in parallel, then synthesize into an ensemble prediction with scenario analysis
+# tags: [Forecasting, Revenue, Analytics, Finance]
+# category: sales_crm
+
+name: revenue-forecast-ensemble
+description: Generate revenue forecasts using statistical, ML, and LLM-based methods in parallel, then synthesize into an ensemble prediction with scenario analysis
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["revenue_data"]
+  properties:
+    revenue_data:
+      type: string
+      description: "Description of revenue data source and format (e.g. 'Monthly ARR by segment from Jan 2023 to present, exported from Stripe')"
+    forecast_horizon:
+      type: string
+      description: "Time period to forecast (default: 'next quarter')"
+      default: "next quarter"
+    segments:
+      type: string
+      description: "Revenue segments to analyze separately (e.g. 'Enterprise, Mid-Market, SMB, Self-Serve')"
+
+steps:
+  - id: data-ingestion
+    prompt: |
+      Parse and prepare the revenue data for forecasting analysis.
+
+      Data source: {input.revenue_data}
+      Segments to analyze: {input.segments}
+      Forecast horizon: {input.forecast_horizon}
+
+      Perform the following data preparation steps:
+
+      1. **Data Parsing** - Interpret the revenue data description and structure it into
+         a clean time series format. If specific numbers are not provided, create a realistic
+         synthetic dataset based on the described source characteristics.
+
+      2. **Time Series Validation:**
+         - Check for missing periods and note any gaps
+         - Identify obvious outliers or data anomalies (one-time adjustments, refunds, etc.)
+         - Verify the data granularity (monthly, weekly, daily) matches the forecast horizon
+         - Note the total number of data points available
+
+      3. **Segment Breakdown:**
+         - Split data by the requested segments if provided
+         - Calculate each segment's contribution to total revenue
+         - Identify which segments are growing, stable, or declining
+
+      4. **Summary Statistics:**
+         - Total current MRR/ARR
+         - Month-over-month growth rate (last 3, 6, 12 months)
+         - Revenue CAGR
+         - Seasonality patterns (if observable)
+         - Net revenue retention rate (if expansion/contraction visible)
+         - Churn rate by segment
+
+      5. **Data Quality Score** (1-10) with specific issues noted.
+
+      Return the prepared dataset as structured JSON with time_series, segments,
+      summary_stats, data_quality, and any preprocessing_notes.
+    model: haiku
+    max_turns: 8
+
+  - id: statistical-forecast
+    depends_on: [data-ingestion]
+    prompt: |
+      Generate a revenue forecast using classical statistical time series methods.
+
+      Prepared data: {steps.data-ingestion.output}
+      Forecast horizon: {input.forecast_horizon}
+
+      Apply the following statistical forecasting approaches and compare their outputs:
+
+      **1. Linear Trend Extrapolation:**
+      - Fit a linear regression to the revenue time series
+      - Calculate R-squared and confidence interval
+      - Project forward for the forecast horizon
+      - Note: This is the simplest baseline, acknowledge its limitations
+
+      **2. Exponential Smoothing (Holt-Winters):**
+      - Apply double exponential smoothing for trend
+      - If seasonality is detected, use triple exponential smoothing
+      - Optimize alpha, beta, gamma parameters conceptually
+      - Generate point forecast with prediction intervals
+
+      **3. Moving Average with Trend Decomposition:**
+      - Decompose the series into trend, seasonal, and residual components
+      - Apply weighted moving average to the trend component
+      - Reconstruct the forecast by combining projected components
+      - Calculate the standard error of the forecast
+
+      **4. Growth Rate Analysis:**
+      - Compute trailing 3-month, 6-month, and 12-month growth rates
+      - Apply each growth rate to project revenue forward
+      - Weight recent growth rates more heavily
+      - Account for regression to the mean for high-growth scenarios
+
+      For each method, provide:
+      - Point forecast (best estimate) for each period in the horizon
+      - Confidence interval (80% and 95%)
+      - Method-specific assumptions and limitations
+      - Goodness of fit on historical data
+
+      If segments are available, run per-segment forecasts and a total-level forecast.
+      Return all forecasts as structured JSON with method, predictions, confidence_intervals,
+      and fit_metrics.
+    model: sonnet
+    max_turns: 10
+
+  - id: ml-forecast
+    depends_on: [data-ingestion]
+    prompt: |
+      Generate a revenue forecast using machine learning-inspired analytical approaches.
+
+      Prepared data: {steps.data-ingestion.output}
+      Forecast horizon: {input.forecast_horizon}
+
+      Apply the following ML-inspired forecasting methodologies:
+
+      **1. Feature-Based Regression:**
+      - Identify predictive features: month-of-year, quarter, days-in-month,
+        lagged revenue values (t-1, t-3, t-6, t-12), rolling averages, growth momentum
+      - Conceptualize a gradient-boosted regression model using these features
+      - Generate predictions by reasoning through feature importance and interactions
+      - Estimate feature importance ranking
+
+      **2. Cohort-Based Projection:**
+      - If segment data is available, model each cohort/segment independently
+      - Project new customer acquisition rate based on historical pattern
+      - Model expansion revenue based on observed net revenue retention
+      - Model contraction and churn based on historical rates
+      - Sum cohort-level projections for total forecast
+
+      **3. Analogous Company Benchmarking:**
+      - Based on the company's current size, growth rate, and industry
+      - Reference typical growth trajectories for similar-stage companies
+      - Apply benchmark growth rates as a cross-check on time series projections
+      - Flag if the company's growth deviates significantly from benchmarks
+
+      **4. Monte Carlo Simulation:**
+      - Define probability distributions for key growth drivers:
+        - New logo acquisition rate (based on historical variance)
+        - Net revenue retention (based on observed range)
+        - Average deal size (based on historical distribution)
+      - Run 1000 conceptual simulation paths
+      - Report P10, P25, P50, P75, P90 outcomes
+
+      For each approach, provide:
+      - Point forecast with confidence range
+      - Key assumptions and sensitivity to input changes
+      - Where this method adds signal beyond statistical approaches
+
+      Return structured JSON with all ML forecasts, feature importance, cohort projections,
+      benchmark comparisons, and simulation percentiles.
+    model: sonnet
+    max_turns: 10
+
+  - id: llm-forecast
+    depends_on: [data-ingestion]
+    prompt: |
+      Generate a revenue forecast using qualitative reasoning and contextual intelligence.
+
+      Prepared data: {steps.data-ingestion.output}
+      Forecast horizon: {input.forecast_horizon}
+      Segments: {input.segments}
+
+      This forecast layer adds human-like judgment that pure statistical and ML models miss:
+
+      **1. Market Context Analysis:**
+      - Current macroeconomic conditions affecting B2B/SaaS spending
+      - Industry-specific trends (expansion, consolidation, budget tightening)
+      - Competitive landscape shifts that could impact win rates
+      - Regulatory changes that could accelerate or slow sales cycles
+
+      **2. Leading Indicator Assessment:**
+      - Pipeline coverage ratio implied by current growth rate
+      - Sales capacity and hiring trends needed to sustain growth
+      - Product-market fit signals (NRR trend, deal size trend, sales cycle length)
+      - Marketing efficiency trends (is growth getting harder or easier to achieve)
+
+      **3. Qualitative Risk Factors:**
+      - Customer concentration risk (if top 10% of customers churn, impact on forecast)
+      - Pricing power sustainability
+      - Platform/channel dependency risks
+      - Team execution risk (key person dependencies, organizational changes)
+
+      **4. Narrative Forecast:**
+      - Bull case: What needs to go right, and the resulting revenue trajectory
+      - Base case: Most likely outcome given current momentum and known factors
+      - Bear case: What could go wrong, and the downside revenue scenario
+      - Black swan: Low-probability, high-impact scenario
+
+      For each scenario, provide a monthly or quarterly revenue projection for the
+      forecast horizon with a brief narrative explanation of the key drivers.
+
+      Return structured JSON with market_context, leading_indicators, risk_factors,
+      and scenario_forecasts (bull, base, bear, black_swan) with revenue numbers.
+    model: sonnet
+    max_turns: 10
+
+  - id: ensemble-synthesis
+    depends_on: [statistical-forecast, ml-forecast, llm-forecast]
+    prompt: |
+      Synthesize all three forecasting approaches into a unified ensemble prediction.
+
+      Statistical forecasts: {steps.statistical-forecast.output}
+      ML-based forecasts: {steps.ml-forecast.output}
+      LLM qualitative forecasts: {steps.llm-forecast.output}
+      Data summary: {steps.data-ingestion.output}
+
+      Perform a rigorous ensemble synthesis:
+
+      **1. Method Comparison Matrix:**
+      Create a table comparing all individual forecast methods:
+      | Method | Point Forecast | Lower Bound | Upper Bound | Confidence | Weight |
+      - Assign weights based on method reliability, data quality, and forecast horizon length
+      - Statistical methods get higher weight for short horizons with clean data
+      - ML methods get higher weight when feature richness is high
+      - LLM qualitative gets higher weight for longer horizons and uncertain environments
+
+      **2. Ensemble Forecast:**
+      - Calculate weighted average point forecast across all methods
+      - Determine ensemble confidence interval using bootstrap-style aggregation
+      - Flag any strong disagreement between methods (divergence > 15%) and explain why
+      - If methods disagree significantly, provide the range rather than a false-precision point estimate
+
+      **3. Accuracy Assessment:**
+      - Expected forecast error range based on data quality and horizon length
+      - Which input assumptions have the highest leverage on the forecast
+      - What new data would most improve forecast accuracy
+
+      **4. Segment-Level Rollup** (if segments were analyzed):
+      - Per-segment ensemble forecast with confidence intervals
+      - Which segments have highest forecast uncertainty and why
+      - Cross-segment correlation risks (e.g. macro downturn hitting all segments)
+
+      Return the final ensemble forecast as structured JSON with ensemble_forecast,
+      method_weights, confidence_intervals, disagreement_analysis, and accuracy_notes.
+    model: opus
+    max_turns: 10
+
+  - id: scenario-report
+    depends_on: [ensemble-synthesis]
+    prompt: |
+      Generate a comprehensive scenario report suitable for executive presentation.
+
+      Ensemble forecast: {steps.ensemble-synthesis.output}
+      Statistical analysis: {steps.statistical-forecast.output}
+      Qualitative analysis: {steps.llm-forecast.output}
+      Original data: {steps.data-ingestion.output}
+
+      Create a polished forecast report with the following sections:
+
+      **Executive Summary (3-4 sentences):**
+      - Headline forecast number for {input.forecast_horizon}
+      - Confidence level and key driver
+      - One sentence on biggest risk and biggest opportunity
+
+      **Forecast Overview:**
+      - Ensemble point forecast with confidence interval
+      - Visual-friendly table: Period | Forecast | Low | High | Growth Rate
+      - Comparison to prior period actuals
+
+      **Three Scenarios Deep Dive:**
+      For each scenario (Bull / Base / Bear):
+      - Revenue projection with growth rate
+      - Key assumptions that define this scenario
+      - Probability assessment (how likely is this scenario)
+      - 2-3 leading indicators to watch that would signal this scenario is playing out
+      - Recommended management actions for this scenario
+
+      **Risk Register:**
+      - Top 5 risks to the forecast, ranked by impact x probability
+      - Mitigation strategies for each risk
+      - Early warning signals
+
+      **Recommendations:**
+      - 3-5 specific actions to maximize revenue outcome
+      - Investment or resource allocation suggestions
+      - Metrics to track weekly to monitor forecast accuracy
+
+      **Methodology Note:**
+      - Brief explanation of the ensemble approach for stakeholder transparency
+      - Data quality caveats
+      - Suggested improvements for next forecast cycle
+
+      Format the report in clean, structured markdown suitable for conversion to slides.
+      Return as JSON with sections as keys for easy parsing.
+    model: sonnet
+    max_turns: 10

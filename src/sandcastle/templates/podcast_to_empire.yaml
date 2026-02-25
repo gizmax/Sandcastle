@@ -1,0 +1,342 @@
+# name: Podcast to Empire
+# description: Transform a single podcast episode into a full content empire with blog, social, newsletter, and SEO landing page
+# tags: [Content, Podcast, Repurpose, Marketing]
+# category: marketing
+
+name: podcast-to-empire
+description: Transform a single podcast episode into a full content empire with blog, social, newsletter, and SEO landing page
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["podcast_title", "episode_topic"]
+  properties:
+    podcast_title:
+      type: string
+      description: "Name of the podcast show"
+    episode_topic:
+      type: string
+      description: "Topic or title of the specific episode to repurpose"
+    target_keywords:
+      type: string
+      description: "Target SEO keywords for content optimization (comma-separated)"
+    brand_name:
+      type: string
+      description: "Brand or company name for attribution and CTAs"
+
+steps:
+  - id: transcription
+    prompt: |
+      Process the podcast episode from "{input.podcast_title}" about "{input.episode_topic}"
+      and create a structured, detailed transcript analysis.
+
+      Produce the following:
+
+      1. Episode Metadata:
+         - Show name: {input.podcast_title}
+         - Episode topic: {input.episode_topic}
+         - Estimated duration and format (interview, solo, panel)
+         - Key participants and their roles/expertise
+
+      2. Content Breakdown:
+         - Introduction and hook (first 2-3 minutes summary)
+         - Main segments with timestamps and topic headings
+         - Key discussion points and arguments made
+         - Stories, anecdotes, and examples shared
+         - Data points, statistics, or research cited
+         - Conclusions and action items discussed
+
+      3. Quotable Moments:
+         - Extract 10-15 of the most impactful, shareable quotes
+         - Note the speaker and context for each quote
+         - Rate each quote's shareability potential (high/medium/low)
+         - Categorize quotes by theme (inspirational, tactical, contrarian, data-driven)
+
+      4. Content Atoms:
+         - Identify 5-8 standalone content ideas that can be extracted
+         - Each atom should be a complete thought that works independently
+         - Tag each atom for best-fit platform (blog, social, newsletter, video clip)
+         - Note the depth available for each atom (quick tip vs. deep dive)
+
+      This analysis will serve as the foundation for all repurposed content.
+    model: sonnet
+    max_turns: 10
+
+  - id: show-notes
+    depends_on: [transcription]
+    prompt: |
+      Create comprehensive, SEO-optimized show notes for the "{input.podcast_title}"
+      episode about "{input.episode_topic}".
+
+      Transcript analysis: {steps.transcription.output}
+      Target keywords: {input.target_keywords}
+
+      Show notes structure:
+
+      1. Episode Header:
+         - Compelling episode title optimized for search (include target keywords)
+         - One-paragraph episode description (2-3 sentences, hooks the reader)
+         - Guest bio(s) with relevant credentials and links
+         - Episode duration and publication date placeholder
+
+      2. Key Takeaways Section:
+         - 5-7 bullet-point takeaways that capture the episode's value
+         - Each takeaway should be actionable and specific
+         - Use strong action verbs to start each bullet
+         - Naturally incorporate target keywords: {input.target_keywords}
+
+      3. Timestamps and Chapters:
+         - Detailed chapter markers with descriptive labels
+         - Allow listeners to jump to topics of interest
+         - Each timestamp entry should be a mini-hook
+
+      4. Resources Mentioned:
+         - Books, tools, websites, and resources discussed in the episode
+         - Proper links and attribution
+         - Affiliate link placeholders where appropriate
+
+      5. Subscribe and Share Section:
+         - Links to all podcast platforms (Apple, Spotify, Google, etc.)
+         - Social sharing prompts with suggested copy
+         - Review request with specific platform CTAs
+         - Newsletter signup prompt
+
+      Format in clean markdown suitable for a podcast hosting platform or blog.
+    model: haiku
+    max_turns: 8
+
+  - id: blog-post
+    depends_on: [transcription]
+    prompt: |
+      Transform the podcast episode content into a comprehensive, standalone blog post
+      that captures the value of the episode in written form.
+
+      Transcript analysis: {steps.transcription.output}
+      Podcast: {input.podcast_title}
+      Topic: {input.episode_topic}
+      Target keywords: {input.target_keywords}
+      Brand: {input.brand_name}
+
+      Blog post requirements:
+
+      1. Article Structure:
+         - SEO-optimized title (different from episode title for broader reach)
+         - Hook introduction that establishes the problem and promises value
+         - 5-7 main sections, each covering a key theme from the episode
+         - Use H2 and H3 headings with target keywords integrated naturally
+         - Conclusion with clear takeaways and CTA to listen to the full episode
+         - Target: 1500-2000 words
+
+      2. Content Transformation:
+         - Do NOT simply transcribe - restructure for reading vs. listening
+         - Add context and background that listeners got from tone/context
+         - Include direct quotes from the episode as pull quotes
+         - Expand on points that were briefly mentioned but deserve more depth
+         - Add section transitions that guide the reader's journey
+
+      3. SEO Optimization:
+         - Primary keyword in title, first paragraph, and 2+ H2 headings
+         - Secondary keywords from {input.target_keywords} distributed throughout
+         - Meta description draft (under 155 characters)
+         - Suggested URL slug
+         - Internal linking opportunities noted in brackets
+         - Image/graphic suggestions for each major section
+
+      4. Engagement and Conversion:
+         - Embedded podcast player CTA after introduction
+         - Mid-article CTA to subscribe to the podcast
+         - End-of-article CTA for newsletter signup
+         - Related episode suggestions if applicable
+         - Social share prompts at natural breakpoints
+
+      Output the complete blog post in markdown format.
+    model: sonnet
+    max_turns: 10
+
+  - id: social-clips
+    depends_on: [blog-post]
+    prompt: |
+      Create a social media content package optimized for short-form engagement
+      across LinkedIn, Twitter/X, and TikTok/Reels.
+
+      Blog post: {steps.blog-post.output}
+      Transcript analysis: {steps.transcription.output}
+      Brand: {input.brand_name}
+
+      Social Clips Package:
+
+      1. LinkedIn Posts (3 variations):
+         - Post A: Thought-leadership angle - take the most contrarian or surprising
+           insight from the episode and build a professional narrative around it.
+           Include a personal reflection angle. 800-1200 characters.
+         - Post B: Tactical value - extract the most actionable framework or process
+           discussed and present it as a step-by-step guide. 600-1000 characters.
+         - Post C: Story-driven - use the best anecdote from the episode as a
+           narrative hook, then deliver the lesson. 800-1200 characters.
+         - Each post should end with engagement question and 3-5 hashtags
+
+      2. Twitter/X Threads (2 threads):
+         - Thread A (5-7 tweets): Key lessons format - each tweet delivers one
+           standalone insight. Hook tweet must be exceptional.
+         - Thread B (4-5 tweets): Behind-the-scenes angle - what surprised us,
+           what we learned, what changed our thinking. More personal tone.
+         - All tweets under 280 characters, numbered
+
+      3. Short-Form Video Scripts (3 scripts):
+         - Script A (30 seconds): Quick tip or surprising fact from the episode
+         - Script B (60 seconds): Storytelling format - problem, insight, solution
+         - Script C (15 seconds): Hot take or bold claim for maximum shareability
+         - Each script includes: hook (first 3 seconds), body, CTA, text overlay suggestions
+
+      Output all content clearly labeled by platform and variation.
+    model: sonnet
+    max_turns: 8
+
+  - id: quote-cards
+    depends_on: [blog-post]
+    prompt: |
+      Design a series of visual quote cards and infographic concepts derived from
+      the podcast episode about "{input.episode_topic}".
+
+      Blog post: {steps.blog-post.output}
+      Transcript analysis: {steps.transcription.output}
+      Brand: {input.brand_name}
+
+      Quote Card Package:
+
+      1. Quote Cards (8-10 designs):
+         - Select the most impactful, shareable quotes from the episode
+         - For each quote card, specify:
+           - The exact quote text (keep under 25 words for readability)
+           - Speaker attribution
+           - Suggested background style (gradient, solid, photo overlay)
+           - Color palette recommendation (align with brand or topic mood)
+           - Font pairing suggestion (headline font + quote font)
+           - Dimensions: create for Instagram (1080x1080), Twitter (1200x675),
+             and LinkedIn (1200x627)
+
+      2. Infographic Concepts (2-3):
+         - Concept A: Key statistics or data points mentioned in the episode,
+           presented as a data visualization layout
+         - Concept B: Process or framework discussed, shown as a step-by-step
+           visual flowchart or diagram
+         - Concept C: Comparison or before/after concept if applicable
+         - For each infographic: title, sections, data points, color scheme, and layout description
+
+      3. Carousel Story Concept:
+         - 8-10 slide carousel telling the episode's key story
+         - Each slide: headline, supporting text (under 30 words), visual direction
+         - Consistent visual thread connecting all slides
+         - Final slide: CTA to listen to full episode
+
+      4. Production Notes:
+         - Recommended design tools and templates
+         - Brand consistency checklist
+         - File naming convention for organized asset management
+         - Publishing schedule for dripping out visual content over 1-2 weeks
+
+      Output detailed creative briefs for each visual asset.
+    model: haiku
+    max_turns: 8
+
+  - id: newsletter
+    depends_on: [blog-post]
+    prompt: |
+      Create a newsletter edition built around the podcast episode about
+      "{input.episode_topic}" from {input.podcast_title}.
+
+      Blog post: {steps.blog-post.output}
+      Transcript analysis: {steps.transcription.output}
+      Brand: {input.brand_name}
+
+      Newsletter Structure:
+
+      1. Subject Line Options (5 variations):
+         - Curiosity-driven: tease an unexpected insight
+         - Benefit-driven: promise specific value
+         - Number-driven: "X lessons from..." or "X things I learned..."
+         - Question-driven: pose a thought-provoking question
+         - Urgency/relevance-driven: tie to current trend or event
+         - Include preview text for each (the secondary line in inbox)
+
+      2. Newsletter Body:
+         - Personal opening: 2-3 sentences connecting the topic to current events
+           or a personal observation (warm, conversational tone)
+         - Episode spotlight: 1-paragraph hook about what makes this episode special
+         - Top 3 Insights: expanded summaries of the best takeaways, each with
+           a practical "try this" action item
+         - Favorite Quote: one standout quote with brief commentary on why it matters
+         - Listen Now CTA: button/link to the episode with platform options
+
+      3. Additional Sections:
+         - "Further Reading" - 2-3 related articles or resources
+         - "Question of the Week" - engagement prompt related to the episode topic
+         - "What's Coming Next" - teaser for the next episode or content piece
+         - Footer: social links, unsubscribe, and forward-to-a-friend prompt
+
+      4. Email Design Notes:
+         - Suggested header image concept
+         - Text-to-image ratio (aim for 80/20 text-heavy for deliverability)
+         - Mobile-first formatting (single column, large CTA buttons)
+         - Estimated read time: 3-4 minutes
+         - Recommended send time and day
+
+      Output the complete newsletter copy ready for email platform import.
+    model: sonnet
+    max_turns: 8
+
+  - id: seo-landing-page
+    depends_on: [social-clips, quote-cards, newsletter]
+    prompt: |
+      Create a comprehensive SEO-optimized landing page that serves as the permanent
+      home for this episode's content ecosystem.
+
+      Blog post: {steps.blog-post.output}
+      Social content: {steps.social-clips.output}
+      Visual assets: {steps.quote-cards.output}
+      Newsletter: {steps.newsletter.output}
+      Target keywords: {input.target_keywords}
+      Brand: {input.brand_name}
+
+      Landing Page Structure:
+
+      1. Above the Fold:
+         - SEO-optimized H1 title targeting primary keyword from {input.target_keywords}
+         - Compelling subtitle or value proposition (1 sentence)
+         - Embedded podcast player or play button CTA
+         - Episode duration, guest name, and publish date
+         - Social proof elements (download count placeholder, rating)
+
+      2. Content Sections:
+         - Episode summary (3-4 paragraphs, keyword-rich, readable)
+         - Key takeaways as styled bullet points or cards
+         - Featured quotes in styled callout boxes
+         - Chapter markers with jump-to links
+         - Guest bio section with photo placeholder and social links
+
+      3. Content Hub:
+         - Links to the full blog post
+         - Social media post previews with share buttons
+         - Newsletter signup form with value proposition
+         - Related episodes grid (placeholder for 3-4 episodes)
+
+      4. SEO Technical Elements:
+         - Title tag (under 60 characters with primary keyword)
+         - Meta description (under 155 characters)
+         - Schema markup suggestions (PodcastEpisode, Article, FAQ)
+         - Open Graph and Twitter Card meta tags
+         - Canonical URL structure recommendation
+         - Internal linking strategy to/from other content
+
+      5. Conversion Elements:
+         - Primary CTA: Subscribe to podcast (above fold + sticky)
+         - Secondary CTA: Join newsletter (mid-page + exit intent)
+         - Tertiary CTA: Share on social (floating sidebar)
+         - Comment section or discussion prompt
+
+      Output the complete landing page content with HTML structure suggestions
+      and all copy blocks ready for implementation.
+    model: sonnet
+    max_turns: 10

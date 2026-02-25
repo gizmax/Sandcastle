@@ -1,0 +1,246 @@
+# name: Voice of Market
+# description: Mine forums, reviews, and social channels to extract sentiment, unmet needs, and buyer personas
+# tags: [Market-Research, Sentiment, VoC, Personas]
+# category: marketing
+
+name: voice-of-market
+description: Mine forums, reviews, and social channels to extract sentiment, unmet needs, and buyer personas
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["product_category", "competitor_names"]
+  properties:
+    product_category:
+      type: string
+      description: "Product category to research (e.g. 'project management tools', 'email marketing platforms')"
+    competitor_names:
+      type: string
+      description: "Comma-separated list of competitor names to mine feedback for"
+    keywords:
+      type: string
+      description: "Additional search keywords to include in research (optional)"
+
+steps:
+  - id: forum-mining
+    prompt: |
+      Mine technical and professional forums for discussions about {input.product_category}.
+
+      Competitors to focus on: {input.competitor_names}
+      Additional keywords: {input.keywords}
+
+      Research forums including Reddit (relevant subreddits), Hacker News, Stack Overflow,
+      Quora, Product Hunt discussions, and any industry-specific forums.
+
+      For each relevant thread or discussion found, extract:
+      1. The core question or complaint being discussed
+      2. The user's role/context (developer, manager, founder, etc.)
+      3. Specific pain points mentioned with existing solutions
+      4. Alternative solutions users suggest or have switched to
+      5. Feature requests or wishlists mentioned
+      6. Emotional intensity - mild frustration vs. strong dissatisfaction
+      7. The number of upvotes or agreement signals on the thread
+
+      Categorize findings by theme: usability, pricing, features, reliability,
+      support, integration, performance, and security.
+
+      Aim to collect at least 20-30 distinct data points. Include verbatim quotes
+      where they capture the sentiment effectively.
+    model: sonnet
+    max_turns: 10
+
+  - id: review-mining
+    prompt: |
+      Mine product review platforms for structured feedback on {input.product_category} tools.
+
+      Competitors: {input.competitor_names}
+      Additional keywords: {input.keywords}
+
+      Research review platforms including G2, Capterra, TrustRadius, GetApp, Software Advice,
+      and the Chrome Web Store or app stores if applicable.
+
+      For each competitor, extract:
+      1. Overall rating and total review count
+      2. Top 5 most frequently praised features (with approximate mention frequency)
+      3. Top 5 most common complaints (with approximate mention frequency)
+      4. Rating trends - improving or declining over the past 12 months
+      5. Reviews from users who switched FROM that competitor - why did they leave
+      6. Reviews from users who switched TO that competitor - what attracted them
+      7. Enterprise vs SMB reviewer sentiment differences
+      8. Implementation and onboarding experience feedback
+      9. Customer support quality perception
+
+      Extract 5-8 representative quotes per competitor that capture the most common
+      themes. Flag any reviews that mention specific unmet needs or feature gaps
+      that no current solution addresses.
+
+      Structure output as a per-competitor review summary with cross-competitor
+      comparison themes.
+    model: sonnet
+    max_turns: 10
+
+  - id: social-listening
+    prompt: |
+      Analyze social media conversations and content about {input.product_category}.
+
+      Competitors: {input.competitor_names}
+      Keywords: {input.keywords}
+
+      Research social channels including Twitter/X, LinkedIn, YouTube comments,
+      industry newsletters, podcast mentions, and blog posts.
+
+      Focus on extracting:
+      1. **Influencer opinions** - What do industry thought leaders say about
+         the category? Are they endorsing specific solutions?
+      2. **Buyer conversations** - People publicly evaluating or switching tools.
+         What criteria do they use? What questions do they ask peers?
+      3. **Viral complaints** - Any competitor issues that gained public traction
+         (outages, price hikes, feature removals, data breaches)
+      4. **Success stories** - What positive outcomes do users share publicly?
+         What use cases generate the most enthusiasm?
+      5. **Community sentiment** - Which competitors have the most engaged and
+         positive communities? Which have toxic or frustrated communities?
+      6. **Content gaps** - What questions do people ask that have no good
+         answers? These indicate educational content opportunities.
+      7. **Hashtags and terms** - What language do buyers use naturally when
+         discussing this category? (Important for SEO and messaging)
+
+      Provide a social sentiment summary per competitor and per topic theme.
+    model: sonnet
+    max_turns: 10
+
+  - id: sentiment-analysis
+    depends_on: [forum-mining, review-mining, social-listening]
+    prompt: |
+      Synthesize all collected voice-of-market data into a comprehensive sentiment analysis.
+
+      Forum mining results: {steps.forum-mining.output}
+      Review mining results: {steps.review-mining.output}
+      Social listening results: {steps.social-listening.output}
+      Product category: {input.product_category}
+
+      Perform the following analysis:
+
+      1. **Overall category sentiment** - Is the market satisfied, dissatisfied, or mixed
+         with existing solutions? Provide a -1.0 to +1.0 sentiment score with justification.
+
+      2. **Sentiment by competitor** - Score each competitor's market sentiment and
+         identify their strongest and weakest perception areas.
+
+      3. **Sentiment by topic** - Score sentiment across: pricing, ease of use,
+         features, reliability, support, integrations, value for money, innovation.
+         Identify which topics generate the most negative vs positive sentiment.
+
+      4. **Sentiment by persona** - Do different buyer types (technical users, managers,
+         executives) have systematically different sentiment patterns?
+
+      5. **Cross-source validation** - Where do forum, review, and social data agree?
+         Where do they diverge? High-confidence findings are those validated across
+         multiple sources.
+
+      6. **Emotion mapping** - Beyond positive/negative, map the emotional landscape:
+         frustration, delight, anxiety, trust, confusion, excitement.
+
+      Provide a sentiment dashboard summary with clear numerical scores and trend arrows.
+    model: sonnet
+    max_turns: 10
+
+  - id: unmet-needs
+    depends_on: [sentiment-analysis]
+    prompt: |
+      Extract and prioritize unmet needs from the sentiment analysis.
+
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Product category: {input.product_category}
+
+      Identify and rank unmet needs using this framework:
+
+      1. **Frequency** (1-10) - How often is this need mentioned across all sources?
+      2. **Intensity** (1-10) - How strongly do people feel about this need?
+         (Mild inconvenience vs deal-breaker)
+      3. **Willingness to pay** (1-10) - Would solving this drive purchasing
+         decisions or just be a nice-to-have?
+      4. **Current alternatives** - What workarounds do people use today?
+         (Manual processes, multiple tools, custom scripts, nothing)
+      5. **Competitive coverage** - Does any competitor address this even partially?
+
+      Calculate an Opportunity Score = (Frequency + Intensity + WTP) / 3 * (10 - Competitive Coverage) / 10
+
+      Produce a ranked list of the top 15 unmet needs with scores, supporting
+      evidence quotes, and an estimate of the addressable audience size
+      (small niche, significant segment, or universal need).
+
+      Group needs into themes: core functionality, workflow efficiency, collaboration,
+      analytics/insights, integration, and cost/value.
+    model: sonnet
+    max_turns: 10
+
+  - id: persona-generation
+    depends_on: [unmet-needs, sentiment-analysis]
+    prompt: |
+      Generate data-driven buyer personas based on the voice-of-market research.
+
+      Unmet needs analysis: {steps.unmet-needs.output}
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Product category: {input.product_category}
+
+      Create 3-5 distinct buyer personas derived from patterns in the data.
+      For each persona:
+
+      1. **Name and title** - A representative fictional name and job title
+      2. **Demographics** - Company size, industry, team size, budget authority
+      3. **Goals** - What they are trying to achieve with {input.product_category}
+      4. **Pain points** - Their specific frustrations (mapped to unmet needs data)
+      5. **Current solution** - What they use today and why it falls short
+      6. **Decision criteria** - Top 5 factors when evaluating a new solution (ranked)
+      7. **Information sources** - Where they research and who influences them
+      8. **Objections** - Common reasons they hesitate or say no
+      9. **Trigger events** - What causes them to start looking for a new solution
+      10. **Preferred messaging** - Language and value props that resonate based on
+          the actual words and phrases found in the research data
+
+      Each persona must be grounded in real data points from the research.
+      Note which forums, reviews, or social posts support each persona trait.
+      Indicate the estimated market size each persona represents.
+    model: sonnet
+    max_turns: 10
+
+  - id: opportunity-scoring
+    depends_on: [persona-generation, unmet-needs]
+    prompt: |
+      Score and prioritize market opportunities by combining persona insights with unmet needs.
+
+      Personas: {steps.persona-generation.output}
+      Unmet needs: {steps.unmet-needs.output}
+      Product category: {input.product_category}
+
+      Create an opportunity matrix:
+
+      1. **Persona x Need mapping** - Which unmet needs matter most to which personas?
+         Score relevance 1-5 for each combination.
+
+      2. **Opportunity clusters** - Group related needs and personas into 3-5 opportunity
+         clusters that could each represent a product initiative or go-to-market motion.
+
+      3. **For each cluster, score:**
+         - Market size potential (1-10)
+         - Competitive whitespace (1-10)
+         - Technical feasibility (1-10)
+         - Go-to-market clarity (1-10) - how clear is the path to reach these buyers
+         - Strategic alignment (1-10) - fit with typical product roadmap priorities
+
+      4. **Recommended prioritization** - Rank clusters by composite score with clear
+         reasoning for the ranking.
+
+      5. **Quick wins** - Identify any opportunities that are low effort but high
+         signal value (could validate product-market fit fast).
+
+      6. **Messaging framework** - For the top 2 opportunity clusters, draft 3 headline-level
+         value propositions using language extracted from the voice-of-market data.
+
+      Produce a final executive summary: "Based on analysis of N data points across
+      forums, reviews, and social media, the top market opportunity is..."
+    model: sonnet
+    max_turns: 10

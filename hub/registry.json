@@ -1363,18 +1363,986 @@
       "remix_count": 3,
       "forked_from": null,
       "license": "MIT"
+    },
+    {
+      "slug": "gizmax/market-opportunity-scout",
+      "name": "Market Opportunity Scout",
+      "description": "Research market landscape, mine competitor gaps, size the TAM, and produce an actionable opportunity report",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Market-Research",
+        "TAM",
+        "Strategy",
+        "Competitive-Intel"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/market_opportunity_scout.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0172,
+      "avg_execution_time": "~16s",
+      "downloads": 135,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/competitive-intelligence-radar",
+      "name": "Competitive Intelligence Radar",
+      "description": "Monitor competitor activity, detect strategic changes, update battlecards, and distribute alerts",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Competitive-Intel",
+        "Monitoring",
+        "Strategy",
+        "Battlecards"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitive_intelligence_radar.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~13s",
+      "downloads": 125,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/voice-of-market",
+      "name": "Voice of Market",
+      "description": "Mine forums, reviews, and social channels to extract sentiment, unmet needs, and buyer personas",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Market-Research",
+        "Sentiment",
+        "VoC",
+        "Personas"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/voice_of_market.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.028,
+      "avg_execution_time": "~15s",
+      "downloads": 153,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/pricing-intelligence",
+      "name": "Pricing Intelligence",
+      "description": "Analyze competitor pricing, feature-value perception, and willingness to pay to optimize packaging and pricing strategy",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Pricing",
+        "Competitive-Intel",
+        "Strategy",
+        "Revenue"
+      ],
+      "models_used": [
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/pricing_intelligence.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.04,
+      "avg_execution_time": "~13s",
+      "downloads": 96,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/trend-radar",
+      "name": "Trend Radar",
+      "description": "Scan academic research, startup activity, social signals, and investment patterns to identify emerging trends and assess their strategic impact",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Trends",
+        "Research",
+        "Innovation",
+        "Strategy"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/trend_radar.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.01,
+      "avg_execution_time": "~14s",
+      "downloads": 30,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/win-loss-intelligence",
+      "name": "Win-Loss Intelligence",
+      "description": "Ingest CRM deal data, extract win/loss signals, identify patterns, and generate strategic recommendations with updated battlecards",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Win-Loss",
+        "CRM",
+        "Strategy"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "salesforce"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/win_loss_intelligence.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 91,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/market-entry-strategy",
+      "name": "Market Entry Strategy",
+      "description": "Comprehensive market entry analysis covering sizing, competitive landscape, regulatory environment, customer research, and go-to-market strategy",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Strategy",
+        "Market-Entry",
+        "TAM",
+        "Research"
+      ],
+      "models_used": [
+        "haiku",
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/market_entry_strategy.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0404,
+      "avg_execution_time": "~14s",
+      "downloads": 40,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/account-intelligence",
+      "name": "Account Intelligence Engine",
+      "description": "Profile target accounts, enrich with firmographic and technographic data in parallel, detect buying signals, and generate personalized outreach",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "ABM",
+        "Intelligence",
+        "CRM"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "hubspot",
+        "salesforce"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/account_intelligence.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0096,
+      "avg_execution_time": "~14s",
+      "downloads": 93,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/deal-velocity-optimizer",
+      "name": "Deal Velocity Optimizer",
+      "description": "Analyze pipeline health, score deal risks, recommend actions, and build competitive battle cards to accelerate deal closure",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Pipeline",
+        "CRM",
+        "Forecasting"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [
+        "salesforce"
+      ],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/deal_velocity_optimizer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.02,
+      "avg_execution_time": "~10s",
+      "downloads": 162,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/revenue-forecast-ensemble",
+      "name": "Revenue Forecast Ensemble",
+      "description": "Generate revenue forecasts using statistical, ML, and LLM-based methods in parallel, then synthesize into an ensemble prediction with scenario analysis",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Forecasting",
+        "Revenue",
+        "Analytics",
+        "Finance"
+      ],
+      "models_used": [
+        "haiku",
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/revenue_forecast_ensemble.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0364,
+      "avg_execution_time": "~14s",
+      "downloads": 62,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/churn-prediction-pipeline",
+      "name": "Churn Prediction Pipeline",
+      "description": "Analyze customer usage patterns, score churn risk, identify root causes, generate retention offers, and orchestrate outreach campaigns",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Churn",
+        "Customer-Success",
+        "Retention",
+        "Analytics"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "hubspot",
+        "slack"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/churn_prediction_pipeline.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~15s",
+      "downloads": 39,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/incident-command-center",
+      "name": "Incident Command Center",
+      "description": "Automated incident response - ingest alerts, analyze logs and metrics in parallel, find root cause, and generate remediation runbooks",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "DevOps",
+        "SRE",
+        "Incident-Response",
+        "Monitoring"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack",
+        "webhook"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/incident_command_center.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~15s",
+      "downloads": 36,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/deployment-risk-analyzer",
+      "name": "Deployment Risk Analyzer",
+      "description": "Analyze deployment risk by scanning diffs, dependencies, and performance impact before go/no-go decision",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "DevOps",
+        "CI-CD",
+        "Security",
+        "Risk"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "github"
+      ],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/deployment_risk_analyzer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0128,
+      "avg_execution_time": "~13s",
+      "downloads": 115,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/soc-triage-pipeline",
+      "name": "SOC Triage Pipeline",
+      "description": "Security Operations Center alert triage - deduplicate, enrich with threat intel, map to MITRE ATT&CK, and recommend containment",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Security",
+        "SOC",
+        "Threat-Intel",
+        "SIEM"
+      ],
+      "models_used": [
+        "haiku",
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [
+        "jira",
+        "slack"
+      ],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/soc_triage_pipeline.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0404,
+      "avg_execution_time": "~17s",
+      "downloads": 132,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/ai-red-team",
+      "name": "AI Red Team",
+      "description": "Automated adversarial testing of AI models - probe for prompt injection, jailbreaks, bias, and safety vulnerabilities",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "AI-Safety",
+        "Security",
+        "Testing",
+        "Red-Team"
+      ],
+      "models_used": [
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ai_red_team.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.056,
+      "avg_execution_time": "~15s",
+      "downloads": 95,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/ma-due-diligence",
+      "name": "M&A Due Diligence",
+      "description": "Comprehensive due diligence analysis for mergers and acquisitions with parallel risk and terms extraction",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Legal",
+        "M&A",
+        "Due-Diligence",
+        "Finance"
+      ],
+      "models_used": [
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ma_due_diligence.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.088,
+      "avg_execution_time": "~15s",
+      "downloads": 39,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/regulatory-change-analyzer",
+      "name": "Regulatory Change Analyzer",
+      "description": "Monitor regulatory changes, assess compliance gaps, and generate remediation plans",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Compliance",
+        "Regulatory",
+        "Legal",
+        "Risk"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "notion"
+      ],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/regulatory_change_analyzer.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0164,
+      "avg_execution_time": "~11s",
+      "downloads": 113,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/contract-lifecycle",
+      "name": "Contract Lifecycle Manager",
+      "description": "End-to-end contract lifecycle from drafting through approval to obligation tracking",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Legal",
+        "Contracts",
+        "Negotiation",
+        "CLM"
+      ],
+      "models_used": [
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/contract_lifecycle.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.052,
+      "avg_execution_time": "~12s",
+      "downloads": 103,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/earnings-call-intelligence",
+      "name": "Earnings Call Intelligence",
+      "description": "Analyze earnings call transcripts for sentiment, key metrics, and investment insights",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Finance",
+        "Investment",
+        "Analytics",
+        "Intelligence"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/earnings_call_intelligence.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~13s",
+      "downloads": 53,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/content-factory",
+      "name": "Content Factory",
+      "description": "Generate a complete multi-platform content package from a single brief with SEO-optimized article and social posts",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Content",
+        "SEO",
+        "Social-Media",
+        "Marketing"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack"
+      ],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/content_factory.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0172,
+      "avg_execution_time": "~14s",
+      "downloads": 96,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/podcast-to-empire",
+      "name": "Podcast to Empire",
+      "description": "Transform a single podcast episode into a full content empire with blog, social, newsletter, and SEO landing page",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Content",
+        "Podcast",
+        "Repurpose",
+        "Marketing"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/podcast_to_empire.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0208,
+      "avg_execution_time": "~14s",
+      "downloads": 146,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/startup-growth-engine",
+      "name": "Startup Growth Engine",
+      "description": "Comprehensive growth audit with parallel strategy tracks for content, SEO, and conversion optimization",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Growth",
+        "Startup",
+        "SEO",
+        "Marketing",
+        "Analytics"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/startup_growth_engine.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 81,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/supplier-risk-intelligence",
+      "name": "Supplier Risk Intelligence",
+      "description": "Assess supplier portfolio risks across financial, geopolitical, and ESG dimensions with alternative sourcing recommendations",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Supply-Chain",
+        "Risk",
+        "Procurement",
+        "ESG"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/supplier_risk_intelligence.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0244,
+      "avg_execution_time": "~15s",
+      "downloads": 47,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/demand-forecasting",
+      "name": "Demand Forecasting",
+      "description": "Multi-signal demand forecasting combining statistical models, market intelligence, and social trends for inventory planning",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Supply-Chain",
+        "Forecasting",
+        "Analytics",
+        "Inventory"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/demand_forecasting.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0168,
+      "avg_execution_time": "~14s",
+      "downloads": 107,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/dynamic-pricing",
+      "name": "Dynamic Pricing",
+      "description": "Optimize product pricing using competitor intelligence, demand elasticity, and margin analysis with A/B test design",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Pricing",
+        "E-commerce",
+        "Analytics",
+        "Revenue"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "shopify"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/dynamic_pricing.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~13s",
+      "downloads": 100,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/recruiting-pipeline",
+      "name": "Recruiting Pipeline",
+      "description": "End-to-end recruiting workflow from job description to offer preparation with candidate evaluation and interview coordination",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "HR",
+        "Recruiting",
+        "Hiring",
+        "Talent"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack"
+      ],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/recruiting_pipeline.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0244,
+      "avg_execution_time": "~14s",
+      "downloads": 68,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/org-health-pulse",
+      "name": "Org Health Pulse",
+      "description": "Analyze employee survey data to surface sentiment trends, flight risks, and targeted intervention recommendations",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "HR",
+        "Analytics",
+        "Culture",
+        "Engagement"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack"
+      ],
+      "step_count": 7,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/org_health_pulse.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0244,
+      "avg_execution_time": "~14s",
+      "downloads": 95,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/self-healing-pipeline",
+      "name": "Self-Healing Pipeline",
+      "description": "Monitor data pipelines for schema drift and anomalies, auto-fix common issues, and report on data quality recovery",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Data",
+        "ETL",
+        "DevOps",
+        "Automation"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "datadog",
+        "slack"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/self_healing_pipeline.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~15s",
+      "downloads": 172,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/nl-to-dashboard",
+      "name": "NL to Dashboard",
+      "description": "Transform natural language business questions into optimized SQL queries, visualizations, and narrative insights",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Analytics",
+        "SQL",
+        "Visualization",
+        "Data"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "postgres"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/nl_to_dashboard.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0204,
+      "avg_execution_time": "~13s",
+      "downloads": 105,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/model-evaluation-arena",
+      "name": "Model Evaluation Arena",
+      "description": "Systematically benchmark and compare multiple AI models across safety, accuracy, cost, and latency with statistical rigor",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "AI-Safety",
+        "Evaluation",
+        "Testing",
+        "Benchmarking"
+      ],
+      "models_used": [
+        "haiku",
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/model_evaluation_arena.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0452,
+      "avg_execution_time": "~15s",
+      "downloads": 138,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
     }
   ],
   "categories": [
     {
       "id": "sales_crm",
       "name": "Sales & CRM",
-      "count": 9
+      "count": 14
     },
     {
       "id": "marketing",
       "name": "Marketing",
-      "count": 7
+      "count": 16
     },
     {
       "id": "support",
@@ -1384,24 +2352,24 @@
     {
       "id": "engineering",
       "name": "Engineering",
-      "count": 8
+      "count": 15
     },
     {
       "id": "hr_legal",
       "name": "HR & Legal",
-      "count": 6
+      "count": 11
     },
     {
       "id": "general_ai",
       "name": "General AI",
-      "count": 6
+      "count": 10
     }
   ],
   "stats": {
-    "total_templates": 43,
+    "total_templates": 73,
     "total_authors": 9,
-    "total_downloads": 12989,
-    "last_updated": "2026-02-25T18:00:00Z"
+    "total_downloads": 15856,
+    "last_updated": "2026-02-25T20:00:00Z"
   },
   "collections": [
     {
@@ -1474,6 +2442,76 @@
         "gizmax/compliance-checker"
       ],
       "downloads": 421
+    },
+    {
+      "id": "market-intelligence",
+      "name": "Market Intelligence Suite",
+      "description": "Complete market research toolkit - opportunity scouting, competitive radar, voice of market analysis, and pricing intelligence",
+      "icon": "search",
+      "template_slugs": [
+        "gizmax/market-opportunity-scout",
+        "gizmax/competitive-intelligence-radar",
+        "gizmax/voice-of-market",
+        "gizmax/pricing-intelligence",
+        "gizmax/trend-radar",
+        "gizmax/market-entry-strategy"
+      ],
+      "downloads": 312
+    },
+    {
+      "id": "revops-autopilot",
+      "name": "RevOps Autopilot",
+      "description": "Revenue operations on autopilot - account intelligence, deal velocity, forecasting, and churn prevention",
+      "icon": "trending-up",
+      "template_slugs": [
+        "gizmax/account-intelligence",
+        "gizmax/deal-velocity-optimizer",
+        "gizmax/revenue-forecast-ensemble",
+        "gizmax/churn-prediction-pipeline",
+        "gizmax/win-loss-intelligence"
+      ],
+      "downloads": 267
+    },
+    {
+      "id": "security-operations",
+      "name": "Security Operations Center",
+      "description": "Automate incident response, deployment risk analysis, SOC triage, and AI safety testing",
+      "icon": "shield",
+      "template_slugs": [
+        "gizmax/incident-command-center",
+        "gizmax/deployment-risk-analyzer",
+        "gizmax/soc-triage-pipeline",
+        "gizmax/ai-red-team",
+        "gizmax/self-healing-pipeline"
+      ],
+      "downloads": 198
+    },
+    {
+      "id": "legal-compliance",
+      "name": "Legal & Compliance",
+      "description": "M&A due diligence, regulatory monitoring, contract lifecycle management, and compliance automation",
+      "icon": "briefcase",
+      "template_slugs": [
+        "gizmax/ma-due-diligence",
+        "gizmax/regulatory-change-analyzer",
+        "gizmax/contract-lifecycle",
+        "gizmax/earnings-call-intelligence"
+      ],
+      "downloads": 156
+    },
+    {
+      "id": "content-empire",
+      "name": "Content Empire",
+      "description": "Create once, publish everywhere - from podcast to blog to social media to landing pages",
+      "icon": "zap",
+      "template_slugs": [
+        "gizmax/content-factory",
+        "gizmax/podcast-to-empire",
+        "gizmax/startup-growth-engine",
+        "gizmax/blog-to-social",
+        "gizmax/seo-content"
+      ],
+      "downloads": 289
     }
   ]
 }
