@@ -5,17 +5,25 @@ continue to work.  All real logic lives in ``sandcastle.engine.sandshore``.
 """
 
 from sandcastle.engine.sandshore import (  # noqa: F401
+    CircuitBreaker,
+    RuntimeMetrics,
     SandshoreError,
     SandshoreResult,
     SandshoreRuntime,
     SSEEvent,
+    cleanup_pool,
     get_sandshore_runtime,
+    pool_stats,
 )
 
 __all__ = [
+    "CircuitBreaker",
+    "RuntimeMetrics",
     "SSEEvent",
     "SandshoreRuntime",
     "SandshoreResult",
     "SandshoreError",
+    "cleanup_pool",
     "get_sandshore_runtime",
+    "pool_stats",
 ]

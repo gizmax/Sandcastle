@@ -14,7 +14,11 @@ from sandcastle.engine.providers import (
     ProviderFailover,
     get_failover,
 )
-from sandcastle.engine.sandshore import SandshoreError, SandshoreRuntime
+from sandcastle.engine.sandshore import (
+    RuntimeMetrics,
+    SandshoreError,
+    SandshoreRuntime,
+)
 
 # ---------------------------------------------------------------------------
 # TestFailoverChains
@@ -209,6 +213,7 @@ class TestSandshoreFailoverIntegration:
 
         runtime = SandshoreRuntime.__new__(SandshoreRuntime)
         runtime._sandbox_backend_type = "mock"
+        runtime._metrics = RuntimeMetrics()
         runtime._stream_backend_once = mock_stream_once
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test", "OPENAI_API_KEY": "sk-oa"}):
@@ -230,6 +235,7 @@ class TestSandshoreFailoverIntegration:
 
         runtime = SandshoreRuntime.__new__(SandshoreRuntime)
         runtime._sandbox_backend_type = "mock"
+        runtime._metrics = RuntimeMetrics()
         runtime._stream_backend_once = mock_stream_once
 
         with pytest.raises(SandshoreError, match="invalid api key"):
@@ -246,6 +252,7 @@ class TestSandshoreFailoverIntegration:
 
         runtime = SandshoreRuntime.__new__(SandshoreRuntime)
         runtime._sandbox_backend_type = "mock"
+        runtime._metrics = RuntimeMetrics()
         runtime._stream_backend_once = mock_stream_once
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test", "OPENAI_API_KEY": "sk-oa"}):
