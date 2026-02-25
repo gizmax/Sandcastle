@@ -30,6 +30,10 @@ const CATEGORIES: Record<string, string> = {
   project_management: "Project Management",
   crm: "CRM & Sales",
   data: "Data & Storage",
+  erp: "ERP",
+  payments: "Payments",
+  ai: "AI",
+  devops: "DevOps",
   general: "General",
 };
 

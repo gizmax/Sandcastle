@@ -62,6 +62,7 @@ class SandboxBackend(Protocol):
         envs: dict[str, str],
         use_claude_runner: bool,
         timeout: float,
+        tool_files: dict[str, str] | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Execute *runner_file* inside the sandbox and stream events."""
         ...  # pragma: no cover
@@ -132,6 +133,7 @@ class E2BBackend:
         envs: dict[str, str],
         use_claude_runner: bool,
         timeout: float,
+        tool_files: dict[str, str] | None = None,
     ) -> AsyncIterator[SSEEvent]:
         _validate_runner_file(runner_file)
 
@@ -196,6 +198,20 @@ class E2BBackend:
                     timeout=self._npm_install_timeout,
                 )
                 _, npm_handle = await asyncio.gather(upload_coro, npm_coro)
+
+                # Upload tool connector files into /home/user/tools/
+                if tool_files:
+                    await sandbox.commands.run("mkdir -p /home/user/tools", timeout=5)
+                    tool_uploads = [
+                        sandbox.files.write(f"/home/user/tools/{fname}", content)
+                        for fname, content in tool_files.items()
+                    ]
+                    if tool_uploads:
+                        await asyncio.gather(*tool_uploads)
+                        logger.info(
+                            "Uploaded %d tool files to sandbox",
+                            len(tool_uploads),
+                        )
 
                 # Wait for npm to finish using event-based polling with a
                 # hard deadline instead of a naive sleep loop.
@@ -371,6 +387,7 @@ class DockerBackend:
         envs: dict[str, str],
         use_claude_runner: bool,
         timeout: float,
+        tool_files: dict[str, str] | None = None,
     ) -> AsyncIterator[SSEEvent]:
         _validate_runner_file(runner_file)
 
@@ -406,13 +423,19 @@ class DockerBackend:
 
             container = await docker.containers.create_or_run(config=config)
 
-            # Upload runner script via tar archive
+            # Upload runner script + tool connector files via tar archive
             tar_stream = io.BytesIO()
             with tarfile.open(fileobj=tar_stream, mode="w") as tar:
                 data = runner_code.encode()
                 info = tarfile.TarInfo(name=runner_file)
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
+                if tool_files:
+                    for fname, content in tool_files.items():
+                        fdata = content.encode()
+                        finfo = tarfile.TarInfo(name=f"tools/{fname}")
+                        finfo.size = len(fdata)
+                        tar.addfile(finfo, io.BytesIO(fdata))
             tar_stream.seek(0)
             await container.put_archive("/home/user", tar_stream.read())
 
@@ -481,14 +504,23 @@ class LocalBackend:
         envs: dict[str, str],
         use_claude_runner: bool,
         timeout: float,
+        tool_files: dict[str, str] | None = None,
     ) -> AsyncIterator[SSEEvent]:
         _validate_runner_file(runner_file)
 
         import os
+        import tempfile
 
         runner_path = _RUNNER_DIR / runner_file
         if not runner_path.exists():
             raise RuntimeError(f"Runner script not found: {runner_path}")
+
+        # Write tool connector files to a temp tools/ directory
+        tools_dir = None
+        if tool_files:
+            tools_dir = Path(tempfile.mkdtemp(prefix="sandcastle-tools-"))
+            for fname, content in tool_files.items():
+                (tools_dir / fname).write_text(content)
 
         # Merge host env with provided envs
         proc_env = {**os.environ, **envs}
@@ -499,7 +531,7 @@ class LocalBackend:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=proc_env,
-            cwd=str(_RUNNER_DIR),
+            cwd=str(tools_dir) if tools_dir else str(_RUNNER_DIR),
         )
 
         try:
@@ -620,6 +652,7 @@ class CloudflareBackend:
         envs: dict[str, str],
         use_claude_runner: bool,
         timeout: float,
+        tool_files: dict[str, str] | None = None,
     ) -> AsyncIterator[SSEEvent]:
         _validate_runner_file(runner_file)
 
@@ -634,11 +667,13 @@ class CloudflareBackend:
         if not runner_code:
             raise RuntimeError(f"Runner script not found: {runner_file}")
 
-        payload = {
+        payload: dict[str, Any] = {
             "runner_file": runner_file,
             "runner_content": runner_code,
             "envs": envs,
         }
+        if tool_files:
+            payload["tool_files"] = tool_files
 
         import httpx
 
