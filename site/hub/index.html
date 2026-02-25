@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Community Hub - Sandcastle</title>
-  <meta name="description" content="Browse, discover, and install AI workflows shared by the Sandcastle community. 43+ ready-to-use templates for sales, marketing, support, engineering, and more.">
+  <meta name="description" content="Browse, discover, and install 118 AI workflows shared by the Sandcastle community. Ready-to-use templates for sales, marketing, support, engineering, HR, and AI.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
   <meta property="og:title" content="Sandcastle Community Hub">
-  <meta property="og:description" content="Browse and install community AI workflows for Sandcastle. Sales, marketing, support, engineering templates ready to go.">
+  <meta property="og:description" content="118 community AI workflows for Sandcastle. Sales, marketing, support, engineering, HR, and AI templates - browse, install, remix.">
   <meta property="og:url" content="https://gizmax.cz/sandcastle/hub/">
   <meta property="og:type" content="website">
 
@@ -205,9 +205,15 @@
       transform: translate(-50%, -40%);
       width: 700px;
       height: 500px;
-      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.08) 0%, transparent 65%);
+      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.12) 0%, transparent 65%);
       pointer-events: none;
       z-index: 0;
+      animation: hero-pulse 4s ease-in-out infinite;
+    }
+
+    @keyframes hero-pulse {
+      0%, 100% { opacity: 0.6; transform: translate(-50%, -40%) scale(1); }
+      50% { opacity: 1; transform: translate(-50%, -40%) scale(1.08); }
     }
 
     .hero > .container {
@@ -216,15 +222,25 @@
     }
 
     .hero h1 {
-      font-size: clamp(32px, 6vw, 56px);
+      font-size: clamp(36px, 7vw, 64px);
       font-weight: 700;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-      margin-bottom: 16px;
+      line-height: 1.05;
+      letter-spacing: -0.035em;
+      margin-bottom: 20px;
     }
 
     .hero h1 .accent {
-      color: var(--accent);
+      background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 50%, #f59e0b 100%);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: gradient-shift 4s ease infinite;
+    }
+
+    @keyframes gradient-shift {
+      0%, 100% { background-position: 0% center; }
+      50% { background-position: 100% center; }
     }
 
     .hero p {
@@ -247,11 +263,12 @@
     }
 
     .stat-number {
-      font-size: 32px;
+      font-size: clamp(36px, 5vw, 48px);
       font-weight: 700;
       font-family: var(--font-mono);
       color: var(--accent);
       display: block;
+      text-shadow: 0 0 30px rgba(245, 158, 11, 0.3);
     }
 
     .stat-label {
@@ -357,9 +374,9 @@
     }
 
     .collection-card:hover {
-      border-color: var(--border-light);
-      transform: translateY(-2px);
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+      border-color: rgba(245, 158, 11, 0.25);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 0 16px rgba(245, 158, 11, 0.05);
     }
 
     .collection-card.active {
@@ -588,9 +605,9 @@
     }
 
     .card:hover {
-      transform: translateY(-3px);
-      border-color: var(--border-light);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      transform: translateY(-4px);
+      border-color: rgba(245, 158, 11, 0.3);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(245, 158, 11, 0.06);
     }
 
     .card:hover::before {
@@ -780,7 +797,8 @@
 
     .cta-card:hover {
       border-color: var(--accent);
-      transform: translateY(-3px);
+      transform: translateY(-4px);
+      box-shadow: 0 8px 32px rgba(245, 158, 11, 0.1);
     }
 
     .cta-card-icon {
@@ -1466,6 +1484,126 @@
       color: var(--accent);
     }
 
+    /* ---- BOLD ANIMATIONS ---- */
+    @keyframes card-enter {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card {
+      animation: card-enter 0.4s ease-out both;
+    }
+
+    .card:nth-child(1) { animation-delay: 0.02s; }
+    .card:nth-child(2) { animation-delay: 0.06s; }
+    .card:nth-child(3) { animation-delay: 0.10s; }
+    .card:nth-child(4) { animation-delay: 0.14s; }
+    .card:nth-child(5) { animation-delay: 0.18s; }
+    .card:nth-child(6) { animation-delay: 0.22s; }
+    .card:nth-child(7) { animation-delay: 0.26s; }
+    .card:nth-child(8) { animation-delay: 0.30s; }
+    .card:nth-child(9) { animation-delay: 0.34s; }
+
+    .card:hover .card-title {
+      color: var(--accent);
+    }
+
+    .card-title {
+      transition: color 0.2s;
+    }
+
+    .pill {
+      transition: all 0.2s, transform 0.15s;
+    }
+
+    .pill:active {
+      transform: scale(0.96);
+    }
+
+    .pill.active {
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+    }
+
+    @keyframes collection-enter {
+      from { opacity: 0; transform: translateX(12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .collection-card {
+      animation: collection-enter 0.35s ease-out both;
+    }
+
+    .collection-card:nth-child(1) { animation-delay: 0.02s; }
+    .collection-card:nth-child(2) { animation-delay: 0.07s; }
+    .collection-card:nth-child(3) { animation-delay: 0.12s; }
+    .collection-card:nth-child(4) { animation-delay: 0.17s; }
+    .collection-card:nth-child(5) { animation-delay: 0.22s; }
+    .collection-card:nth-child(6) { animation-delay: 0.27s; }
+
+    .collection-card:hover .collection-icon {
+      transform: scale(1.15);
+    }
+
+    .collection-icon {
+      transition: transform 0.2s;
+    }
+
+    .card-cost-badge {
+      animation: pulse-green 3s ease-in-out infinite;
+    }
+
+    @keyframes pulse-green {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .modal-overlay {
+      animation: fade-in 0.2s ease-out;
+    }
+
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .modal {
+      animation: modal-enter 0.25s ease-out;
+    }
+
+    @keyframes modal-enter {
+      from { opacity: 0; transform: translateY(20px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    #search-input {
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+    }
+
+    #search-input:focus {
+      transform: scale(1.005);
+    }
+
+    .card-source-badge.community {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-source-badge.community::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.2), transparent);
+      animation: badge-shimmer 3s ease-in-out infinite;
+    }
+
+    @keyframes badge-shimmer {
+      0% { left: -100%; }
+      50%, 100% { left: 100%; }
+    }
+
     /* ---- RESPONSIVE ---- */
     @media (max-width: 900px) {
       .grid {
@@ -1604,6 +1742,23 @@
       background: radial-gradient(ellipse, rgba(245, 158, 11, 0.1) 0%, transparent 65%);
     }
 
+    html.light .card:hover {
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 16px rgba(245, 158, 11, 0.08);
+    }
+
+    html.light .collection-card:hover {
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06), 0 0 12px rgba(245, 158, 11, 0.06);
+    }
+
+    html.light .stat-number {
+      text-shadow: none;
+    }
+
+    html.light .hero h1 .accent {
+      -webkit-text-fill-color: var(--accent);
+      animation: none;
+    }
+
     /* ---- THEME TOGGLE ---- */
     .theme-toggle {
       background: none;
@@ -1690,18 +1845,21 @@
     }
 
     .card-badge--featured {
-      background: #f59e0b;
+      background: linear-gradient(135deg, #f59e0b, #fbbf24);
       color: #000;
+      box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
     }
 
     .card-badge--trending {
-      background: #10B981;
+      background: linear-gradient(135deg, #10B981, #34D399);
       color: #fff;
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
     }
 
     .card-badge--new {
-      background: #3B82F6;
+      background: linear-gradient(135deg, #3B82F6, #60A5FA);
       color: #fff;
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
     }
 
     /* ---- BADGE FILTER BUTTONS ---- */
@@ -1969,8 +2127,8 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <h1>Community <span class="accent">Workflows</span></h1>
-      <p>Browse, discover, and install AI workflows shared by the community</p>
+      <h1>The <span class="accent">Workflow</span> Marketplace</h1>
+      <p>118 production-ready AI workflows. Browse, fork, remix. Ship faster with community-built automation.</p>
       <div class="stats-bar">
         <div class="stat">
           <span class="stat-number" id="stat-templates">0</span>
@@ -1993,7 +2151,7 @@
         <div class="search-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </div>
-        <input type="text" id="search-input" placeholder="Search workflows by name, tag, or description...">
+        <input type="text" id="search-input" placeholder="Search workflows... (press / to focus)">
       </div>
     </div>
   </section>
@@ -3329,6 +3487,14 @@
 
     // Theme toggle
     document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+    // Keyboard shortcut: "/" to focus search
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        document.getElementById('search-input').focus();
+      }
+    });
 
     // Modal close
     document.getElementById('modal-close').addEventListener('click', hideDetail);
