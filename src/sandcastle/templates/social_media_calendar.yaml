@@ -1,0 +1,1123 @@
+# name: Social Media Content Calendar
+# description: Plan, create, and schedule a complete social media content calendar with platform-specific content, hashtag strategies, and performance predictions
+# tags: [Social Media, Content Calendar, Marketing, Hashtags, Engagement]
+# category: marketing
+
+name: social-media-calendar
+description: Plan, create, and schedule a complete social media content calendar with platform-specific content, hashtag strategies, and performance predictions
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["brand_name", "platforms", "content_pillars", "posting_frequency"]
+  properties:
+    brand_name:
+      type: string
+      description: "Name of the brand or business"
+    platforms:
+      type: string
+      description: "Target platforms, comma-separated (e.g., Instagram, TikTok, LinkedIn, Twitter/X, Facebook, YouTube, Pinterest)"
+    content_pillars:
+      type: string
+      description: "Core content themes/pillars the brand focuses on (e.g., education, behind-the-scenes, product showcases, user stories)"
+    posting_frequency:
+      type: string
+      description: "Desired posting frequency per platform (e.g., 'daily on Instagram, 3x/week on LinkedIn')"
+    brand_voice:
+      type: string
+      description: "Brand voice and tone description"
+      default: "Professional yet approachable, informative with personality"
+    time_period:
+      type: string
+      description: "Calendar planning period"
+      default: "30 days"
+
+steps:
+  - id: audience-analysis
+    prompt: |
+      You are a social media strategist and audience research specialist with 15+ years of experience building brand presences for companies ranging from startups to Fortune 500. Conduct a comprehensive audience and platform analysis for {input.brand_name}.
+
+      Brand Information:
+      - Brand Name: {input.brand_name}
+      - Target Platforms: {input.platforms}
+      - Content Pillars: {input.content_pillars}
+      - Posting Frequency: {input.posting_frequency}
+      - Brand Voice: {input.brand_voice}
+      - Planning Period: {input.time_period}
+
+      ============================================================
+      SECTION 1: AUDIENCE PERSONA DEVELOPMENT
+      ============================================================
+
+      Develop 3-4 detailed audience personas based on the brand, content pillars, and platforms:
+
+      For each persona, define:
+
+      1.1 Demographics:
+          - Age range and generational cohort (Gen Z, Millennial, Gen X, Boomer)
+          - Gender distribution
+          - Geographic concentration (urban/suburban/rural, specific regions if relevant)
+          - Income level and spending power
+          - Education level
+          - Occupation and industry
+          - Household composition (single, couple, family, empty nest)
+
+      1.2 Psychographics:
+          - Core values and beliefs
+          - Lifestyle and daily routines
+          - Hobbies and interests beyond the brand's category
+          - Media consumption habits (podcasts, newsletters, YouTube channels they follow)
+          - Purchase decision-making style (impulse, research-heavy, peer-influenced)
+          - Brand loyalty patterns (brand-loyal vs. deal-seeker vs. quality-driven)
+          - Social causes they care about
+          - Aspirations and life goals
+
+      1.3 Social Media Behavior:
+          - Primary platform and time spent per day
+          - Content consumption patterns (scrolling vs. searching vs. engaging)
+          - Engagement behavior (lurker, liker, commenter, sharer, creator)
+          - Peak activity times by platform (hour-by-hour heat map)
+          - Content format preferences (short-form video, carousels, long-form text, stories)
+          - Hashtag usage and discovery behavior
+          - DM and community interaction patterns
+          - Influencer and creator follow patterns
+          - Shopping behavior on social platforms (social commerce adoption)
+
+      1.4 Pain Points and Content Needs:
+          - Top 5 frustrations in the brand's category
+          - Information gaps they actively seek to fill
+          - Content that makes them stop scrolling (scroll-stopping triggers)
+          - Content that motivates them to share (share triggers)
+          - Content that drives them to save for later (save triggers)
+          - Content that prompts them to comment (comment triggers)
+          - Questions they ask in comments and DMs
+          - Objections and skepticism patterns
+
+      ============================================================
+      SECTION 2: PLATFORM-BY-PLATFORM ANALYSIS
+      ============================================================
+
+      For each platform in {input.platforms}, provide a detailed analysis:
+
+      2.1 Platform Algorithm Deep Dive:
+          - Current algorithm ranking signals (2024-2025 updates)
+          - Content type prioritization hierarchy (what the algorithm favors)
+          - Engagement velocity requirements (how fast engagement must come)
+          - Reach vs. engagement tradeoffs
+          - Hashtag algorithm behavior (discovery vs. categorization vs. spam signals)
+          - Posting frequency sweet spots (diminishing returns thresholds)
+          - Cross-posting detection and penalties (if any)
+          - New feature bonuses (platforms reward early adopters of new features)
+          - Shadowban risk factors and avoidance strategies
+          - Link-in-bio vs. link-in-post algorithm impact
+
+      2.2 Competitive Landscape on Each Platform:
+          - Top 5 competitors or comparable brands on each platform
+          - Their follower counts, growth rates, and engagement rates
+          - Content themes and formats that perform best for them
+          - Posting frequency and timing patterns
+          - Gaps in their content strategy (opportunities for differentiation)
+          - Engagement quality assessment (real engagement vs. bot-like patterns)
+          - Their best-performing post types and why they work
+
+      2.3 Platform-Specific Audience Insights:
+          - Which personas are most active on which platform
+          - Content consumption context (commute, lunch break, evening wind-down, weekend)
+          - Device usage patterns (mobile vs. desktop, screen size implications)
+          - Audio-on vs. audio-off viewing percentages (critical for video strategy)
+          - Average content consumption session length
+          - Discovery behavior: search, explore page, hashtags, recommendations, shares
+
+      2.4 Optimal Posting Times:
+          - Day-by-day, hour-by-hour optimal posting windows for each platform
+          - Timezone considerations for the brand's primary audience
+          - Weekend vs. weekday performance differences
+          - Holiday and event-based timing opportunities
+          - Frequency caps: maximum posts per day before engagement drops
+
+      ============================================================
+      SECTION 3: CONTENT MIX STRATEGY
+      ============================================================
+
+      3.1 Content Ratio Frameworks:
+          Apply and customize these proven frameworks for {input.brand_name}:
+
+          THE 80/20 RULE:
+          - 80% value-driven content (educate, entertain, inspire)
+          - 20% promotional content (product, offers, CTAs)
+          - How to make promotional content feel value-driven
+          - Specific examples for each content pillar in both categories
+
+          THE 4-1-1 RULE:
+          - 4 pieces of curated/educational content
+          - 1 soft promotion (testimonial, case study, behind-the-scenes)
+          - 1 hard promotion (direct CTA, product launch, offer)
+          - Weekly content block schedule following this ratio
+
+          THE HERO-HUB-HYGIENE MODEL:
+          - Hero content (1-2x/month): Big campaigns, launches, collaborations
+          - Hub content (weekly): Series-based content, recurring themes
+          - Hygiene content (daily): Always-on, search-optimized, evergreen
+          - Content calendar allocation for each tier
+
+          THE 3E FRAMEWORK:
+          - Educate: tutorials, tips, how-tos, industry insights
+          - Entertain: humor, trends, relatable content, storytelling
+          - Engage: polls, questions, challenges, UGC prompts
+          - Recommended split percentage for {input.brand_name}
+
+      3.2 Content Format Strategy Per Platform:
+          For each platform, rank content formats by expected performance:
+
+          INSTAGRAM:
+          - Reels (15s, 30s, 60s, 90s - which length for which content?)
+          - Carousel posts (educational, storytelling, product showcase)
+          - Single image posts (when still effective)
+          - Stories (frequency, interactive stickers, link stickers)
+          - Live streams (topics, frequency, collaboration opportunities)
+          - Guides (curation strategy)
+          - Broadcast channels (community building)
+
+          TIKTOK:
+          - Short-form (15-30s): trending sounds, quick tips, hooks
+          - Medium-form (60s-3min): tutorials, storytelling, day-in-life
+          - Long-form (3-10min): deep dives, vlogs, educational series
+          - Duets and Stitches: engagement and trend-riding strategy
+          - LIVE: when and how to use it
+          - Series feature utilization
+
+          LINKEDIN:
+          - Text posts (optimal length, formatting, hook strategies)
+          - Document/carousel posts (slide decks, frameworks)
+          - Video posts (native upload performance vs. links)
+          - Articles (long-form thought leadership)
+          - Polls (engagement boosters, data collection)
+          - Newsletter feature
+          - Event and live audio features
+
+          TWITTER/X:
+          - Tweet length optimization (short punchy vs. longer threads)
+          - Thread strategy (educational threads, storytelling threads)
+          - Quote tweets and engagement strategy
+          - Spaces (audio conversations)
+          - Visual content (images, GIFs, video)
+          - Community feature utilization
+
+          FACEBOOK:
+          - Reels (cross-posting strategy from Instagram)
+          - Group content strategy (if applicable)
+          - Video content (native, live, premiere)
+          - Link posts optimization
+          - Event marketing
+
+          YOUTUBE:
+          - Shorts (15-60s, cross-platform repurposing)
+          - Standard videos (optimal length for the niche)
+          - Community posts (engagement between uploads)
+          - Live streams and premieres
+
+          PINTEREST:
+          - Standard pins (image specs, description optimization)
+          - Idea pins (multi-page visual content)
+          - Video pins (optimal length and format)
+          - Board strategy and organization
+
+      3.3 Content Pillar Breakdown:
+          For each content pillar listed in "{input.content_pillars}":
+          - Sub-topics and themes (minimum 10 specific topics per pillar)
+          - Best formats for this pillar (which format drives highest engagement?)
+          - Platform prioritization (where does this pillar perform best?)
+          - Frequency recommendation within the overall mix
+          - Series and recurring feature ideas (branded series that build anticipation)
+          - User-generated content opportunities within this pillar
+          - Call-to-action strategy specific to this pillar
+
+      ============================================================
+      SECTION 4: ENGAGEMENT STRATEGY
+      ============================================================
+
+      4.1 Community Management Framework:
+          - Response time targets by platform (DMs: 1 hour, comments: 4 hours)
+          - Tone and voice guidelines for responses (aligned with {input.brand_voice})
+          - Escalation protocol for negative comments or crisis situations
+          - Proactive engagement tactics (commenting on relevant accounts, industry conversations)
+          - Community building initiatives (branded hashtags, challenges, ambassador programs)
+
+      4.2 Engagement Boosting Tactics:
+          - First-hour engagement strategy (how to seed engagement immediately after posting)
+          - Comment prompt formulas that drive high response rates
+          - Poll and question strategies by platform
+          - Collaboration and cross-promotion opportunities
+          - Employee advocacy program outline
+          - Influencer and creator partnership framework
+          - UGC campaign ideas (contests, challenges, features)
+
+      4.3 Trend Monitoring and Response Framework:
+          - Tools and processes for trend identification
+          - Decision framework: which trends to join vs. skip
+          - Speed-to-trend targets (ideal response time for trending content)
+          - Brand safety guidelines for trend participation
+          - Template for rapid trend content creation
+
+      Deliver the complete audience and platform analysis as a reference document that will inform all content creation, scheduling, and optimization decisions.
+    model: sonnet
+    max_turns: 10
+
+  - id: content-planning
+    depends_on: [audience-analysis]
+    prompt: |
+      You are a senior content strategist who has planned and executed social media calendars for brands generating millions of impressions monthly. Using the audience analysis, create a detailed content plan for {input.brand_name} covering {input.time_period}.
+
+      Audience Analysis: {steps.audience-analysis.output}
+
+      Brand Context:
+      - Brand: {input.brand_name}
+      - Platforms: {input.platforms}
+      - Content Pillars: {input.content_pillars}
+      - Posting Frequency: {input.posting_frequency}
+      - Brand Voice: {input.brand_voice}
+      - Time Period: {input.time_period}
+
+      ============================================================
+      SECTION 1: CONTENT THEME CALENDAR
+      ============================================================
+
+      1.1 Monthly Theme Architecture:
+          - Overarching monthly theme that ties all content together
+          - Weekly sub-themes that create a narrative arc through the month
+          - How themes connect to business objectives (awareness, engagement, conversion, retention)
+          - Seasonal and cultural moments to incorporate (holidays, awareness days, industry events)
+          - Product/service launch windows and promotional tie-ins
+          - Theme flexibility: how to adapt if a theme underperforms
+
+      1.2 Weekly Content Rhythm:
+          Design a repeatable weekly content structure:
+
+          MONDAY: [Content type and purpose - e.g., "Motivation Monday" educational post]
+          TUESDAY: [Content type and purpose]
+          WEDNESDAY: [Content type and purpose]
+          THURSDAY: [Content type and purpose]
+          FRIDAY: [Content type and purpose]
+          SATURDAY: [Content type and purpose]
+          SUNDAY: [Content type and purpose]
+
+          For each day, specify:
+          - Content pillar rotation
+          - Primary platform and cross-posting strategy
+          - Content format (reel, carousel, text post, story, etc.)
+          - Engagement goal for that day's content (saves, shares, comments, clicks)
+          - Content production complexity (quick-create vs. planned-produce)
+
+      1.3 Content Series and Recurring Features:
+          Create 5-8 branded content series that build audience anticipation:
+
+          For each series:
+          - Series name and branded hashtag
+          - Frequency (weekly, bi-weekly, monthly)
+          - Format and platform
+          - Episode/installment structure
+          - Hook formula and thumbnail/cover design direction
+          - How it maps to content pillars and business objectives
+          - Examples of first 4 installments with specific topics
+
+      ============================================================
+      SECTION 2: DETAILED CONTENT BRIEFS
+      ============================================================
+
+      For each day in the {input.time_period} planning period, create a content brief:
+
+      2.1 Content Brief Template (apply to each post):
+          - Date and day of week
+          - Platform(s) for this piece
+          - Content pillar
+          - Content series (if applicable)
+          - Format (reel, carousel, single image, text, story, live, etc.)
+          - Working title / concept
+          - Hook (first line, first 3 seconds, or cover slide text)
+          - Key message and takeaway
+          - Call-to-action (specific and platform-appropriate)
+          - Hashtag group reference (from hashtag strategy)
+          - Cross-posting adaptation notes
+          - Visual direction (mood, style, reference)
+          - Production requirements (photo, video, graphic design, copywriting)
+          - Priority level (must-post vs. can-skip if resources are tight)
+
+      2.2 Content Batching Schedule:
+          - Group content by production type for efficient batching
+          - Photo shoot days: what to capture for upcoming content
+          - Video shoot days: batch multiple videos in one session
+          - Graphic design batching: templates and variations
+          - Copywriting batching: write all captions in dedicated sessions
+          - Recommended batch production schedule (e.g., every Monday produce the week's content)
+
+      2.3 Content Repurposing Matrix:
+          For each piece of content, map out repurposing opportunities:
+          - Original format -> Adapted formats (minimum 3 derivatives per original)
+          - Platform translation guide (e.g., LinkedIn article -> Twitter thread -> Instagram carousel -> TikTok script)
+          - Evergreen content recycling schedule (re-share top performers every 60-90 days)
+          - Content atomization: breaking one large piece into 5-10 micro-content pieces
+          - Blog/newsletter integration: social content that drives traffic to owned channels
+
+      ============================================================
+      SECTION 3: CAPTION AND COPY STRATEGY
+      ============================================================
+
+      3.1 Caption Architecture by Platform:
+          Define the copy structure for each platform:
+
+          INSTAGRAM:
+          - Hook (first line visible before "more"): 5-7 most impactful words
+          - Body: value delivery, storytelling, or information (150-300 words optimal)
+          - CTA: specific, actionable, platform-native (save, share, comment, link in bio)
+          - Hashtag placement: comment vs. caption, above or below line breaks
+          - Emoji strategy: frequency, types, accessibility considerations
+
+          TIKTOK:
+          - On-screen text hook (synced with first 1-3 seconds)
+          - Caption: short (150 chars max), keyword-rich, CTA-driven
+          - Sound/music selection rationale
+          - Hashtag integration in caption vs. description
+
+          LINKEDIN:
+          - Hook line (drives the "see more" click)
+          - Line-break formatting for scanability
+          - Professional storytelling structure (situation, action, result, lesson)
+          - CTA: engagement-focused (agree/disagree, share your experience)
+          - Hashtag placement and count (3-5 max)
+
+          TWITTER/X:
+          - Single tweet: punchy, quotable, conversation-starting
+          - Thread opener: hook that promises value and creates curiosity
+          - Thread structure: numbered points, one idea per tweet, visual breaks
+          - CTA: retweet, reply, follow, bookmark
+
+      3.2 Hook Formulas Library:
+          Provide 20+ proven hook formulas customized for {input.brand_name}:
+          - The Contrarian: "Everyone says [common belief]. Here's why they're wrong..."
+          - The List Promise: "7 [things] that [benefit] (number 4 changed everything)"
+          - The Story Opener: "Last [time period], I [did something unexpected]..."
+          - The Question: "[Thought-provoking question related to audience pain point]?"
+          - The Bold Claim: "[Surprising statistic or statement] - here's the proof..."
+          - The Before/After: "I went from [bad state] to [good state] in [time period]"
+          - The Secret: "The [industry] secret nobody talks about..."
+          - The Challenge: "Try this for 7 days and watch what happens..."
+          - The Myth Buster: "Stop believing [common myth]. The truth is..."
+          - The Time Saver: "This 2-minute [tip/hack] saves me [time/money] every week"
+          - [10+ more formulas tailored to the brand's content pillars]
+
+      3.3 CTA Strategy:
+          - Platform-specific CTA best practices
+          - Rotating CTA types to avoid audience fatigue
+          - Soft CTAs (engage) vs. hard CTAs (click, buy, sign up)
+          - CTA copy variations for A/B testing
+          - Link-in-bio optimization and landing page strategy
+
+      ============================================================
+      SECTION 4: PERFORMANCE PREDICTION MODEL
+      ============================================================
+
+      4.1 Baseline Metrics Estimation:
+          Based on the brand's industry, content quality, and platform:
+          - Expected follower growth rate per month (by platform)
+          - Expected average engagement rate per post (by platform and format)
+          - Expected reach per post (by platform and format)
+          - Expected impressions per post
+          - Expected click-through rate for link-based content
+          - Expected save rate for educational content
+          - Expected share rate for entertaining/emotional content
+
+      4.2 Content Performance Predictions:
+          For each content type in the calendar:
+          - Predicted engagement level (high/medium/low) with reasoning
+          - Which metric this content will drive most (reach, engagement, saves, shares, clicks)
+          - Risk level (experimental vs. proven format)
+          - Optimization levers if performance is below expectations
+
+      4.3 A/B Testing Plan:
+          - Tests to run in month 1 (minimum 4 tests):
+            * Caption length test (short vs. long)
+            * Posting time test (morning vs. evening)
+            * Format test (carousel vs. reel for same topic)
+            * CTA test (question vs. instruction)
+          - How to structure tests for statistical validity
+          - Sample size requirements and test duration
+          - Decision framework: when to declare a winner and implement
+
+      4.4 KPI Dashboard:
+          - Daily tracking metrics (engagement rate, reach, follower count)
+          - Weekly tracking metrics (best/worst performing content, growth rate, audience insights)
+          - Monthly tracking metrics (overall growth, content pillar performance, ROI)
+          - Quarterly tracking metrics (brand awareness lift, sentiment analysis, competitive position)
+          - Recommended tools for tracking and reporting
+
+      Deliver the complete content plan as an executable document with every post planned, briefs written, and performance expectations set.
+    model: sonnet
+    max_turns: 10
+
+  - id: content-creation
+    depends_on: [content-planning]
+    prompt: |
+      You are a prolific social media content creator and copywriter known for crafting viral, engaging content that drives measurable business results. Using the content plan, write the actual content for {input.brand_name}'s social media calendar.
+
+      Content Plan: {steps.content-planning.output}
+
+      Brand Context:
+      - Brand: {input.brand_name}
+      - Platforms: {input.platforms}
+      - Content Pillars: {input.content_pillars}
+      - Brand Voice: {input.brand_voice}
+      - Time Period: {input.time_period}
+
+      ============================================================
+      SECTION 1: WEEK 1 CONTENT (FULL PRODUCTION)
+      ============================================================
+
+      Write complete, ready-to-post content for every post in Week 1. For each post:
+
+      1.1 Complete Caption/Copy:
+          - Full caption text with formatting (line breaks, emojis where appropriate)
+          - Platform-specific adaptations for cross-posting
+          - Hashtag set (placed correctly for the platform)
+          - Alt text for images (accessibility)
+
+      1.2 Visual Direction Brief:
+          - Detailed visual concept description
+          - Color palette and mood references
+          - Text overlay content (for reels, carousels, stories)
+          - Thumbnail/cover design direction
+          - Photo/video shot list if applicable
+          - Canva/design tool template suggestions
+
+      1.3 Video Scripts (for Reels/TikToks/Shorts):
+          - Second-by-second script with:
+            * Spoken words or voiceover text
+            * On-screen text overlays (with timing)
+            * Visual actions and transitions
+            * Music/sound recommendations
+            * B-roll or footage requirements
+          - Hook (first 1-3 seconds) - this is critical for retention
+          - Body content delivery
+          - CTA at the end
+
+      1.4 Carousel Slide Content (for carousel posts):
+          - Slide-by-slide content with:
+            * Headline/title text per slide
+            * Body text per slide
+            * Visual direction per slide
+            * Flow and narrative progression
+          - Cover slide (must be scroll-stopping)
+          - Final CTA slide
+
+      ============================================================
+      SECTION 2: WEEKS 2-4 CONTENT (DETAILED BRIEFS + KEY POSTS)
+      ============================================================
+
+      2.1 For Weeks 2-4, provide:
+          - Detailed content briefs for every scheduled post
+          - Full caption copy for the 3 highest-priority posts each week
+          - Video scripts for all planned video content
+          - Carousel slide outlines for all planned carousel content
+          - Story sequence outlines for planned story content
+
+      2.2 Highlight the "Hero" Content Pieces:
+          For each week, identify the single most important post and provide:
+          - Full production-ready content
+          - A/B variant for testing (alternative hook, CTA, or visual direction)
+          - Promotion strategy (paid amplification budget if applicable)
+          - Expected performance and KPIs
+
+      ============================================================
+      SECTION 3: STORIES AND EPHEMERAL CONTENT
+      ============================================================
+
+      3.1 Daily Story Strategy:
+          - Story posting cadence (4-7 stories per day recommended)
+          - Content mix: behind-the-scenes (30%), engagement/polls (25%), content promotion (20%), curated/shared (15%), promotional (10%)
+          - Interactive element usage: polls, quizzes, questions, sliders, countdowns
+          - Story highlight categories and what to save
+
+      3.2 Story Sequences:
+          Design 4 story sequences (one per week):
+          - Sequence theme and purpose
+          - 5-8 slides per sequence with content for each
+          - Interactive elements placement
+          - CTA and exit link strategy
+
+      ============================================================
+      SECTION 4: ENGAGEMENT AND COMMUNITY CONTENT
+      ============================================================
+
+      4.1 Comment Response Templates:
+          - 10 response templates for common positive comments
+          - 5 response templates for questions
+          - 5 response templates for negative or critical comments
+          - Brand voice guidelines for spontaneous responses
+          - Emoji and tone guidelines per platform
+
+      4.2 Proactive Engagement Content:
+          - 10 conversation-starting comments for posting on relevant accounts
+          - Industry conversation contributions
+          - Trend response templates (fill-in-the-blank for rapid trend adoption)
+          - Collaboration pitch templates for creator partnerships
+
+      4.3 Community Prompts:
+          - 8 question prompts to post in stories or feeds to drive engagement
+          - 4 user-generated content prompts (challenges, share-your-story, photo contests)
+          - 4 poll topics with strategic purpose (market research disguised as engagement)
+
+      ============================================================
+      SECTION 5: CONTENT ADAPTATION GUIDES
+      ============================================================
+
+      5.1 Cross-Platform Adaptation:
+          For the top 5 content pieces from Week 1, show exactly how to adapt each one across all target platforms:
+          - Original platform version (full content)
+          - Adapted version for each other platform
+          - What changes: length, format, tone, CTA, hashtags, visual specs
+          - What stays the same: core message, key visuals, brand elements
+
+      5.2 Evergreen Content Library:
+          Identify and produce 10 evergreen content pieces:
+          - Content that can be reshared every 60-90 days with minor updates
+          - Seasonal content that can be refreshed annually
+          - FAQ content that addresses common audience questions
+          - "Greatest hits" reformatting strategy
+
+      Deliver all content as ready-to-use assets that can be directly scheduled in a social media management tool (Buffer, Hootsuite, Later, Sprout Social, etc.).
+    model: sonnet
+    max_turns: 10
+
+  - id: hashtag-strategy
+    depends_on: [audience-analysis]
+    prompt: |
+      You are a hashtag strategist and social media SEO expert who understands how hashtags function as discovery mechanisms, categorization tools, and community identifiers across all major platforms. Develop a comprehensive hashtag strategy for {input.brand_name}.
+
+      Audience Analysis: {steps.audience-analysis.output}
+
+      Brand Context:
+      - Brand: {input.brand_name}
+      - Platforms: {input.platforms}
+      - Content Pillars: {input.content_pillars}
+      - Brand Voice: {input.brand_voice}
+
+      ============================================================
+      SECTION 1: HASHTAG RESEARCH AND CATEGORIZATION
+      ============================================================
+
+      1.1 Hashtag Tier System:
+          Organize hashtags into tiers by reach and competition:
+
+          TIER 1 - MEGA HASHTAGS (1M+ posts):
+          - 10-15 hashtags with massive reach but high competition
+          - Use sparingly (1-2 per post) as visibility is unlikely for small accounts
+          - Value: categorization, not discovery
+          - Example categories: industry-wide, lifestyle, generic content type
+
+          TIER 2 - LARGE HASHTAGS (100K-1M posts):
+          - 15-20 hashtags with strong reach and moderate competition
+          - Sweet spot for medium-sized accounts seeking growth
+          - Mix into every post (3-5 per post)
+          - Example categories: niche-specific, product category, audience interest
+
+          TIER 3 - MEDIUM HASHTAGS (10K-100K posts):
+          - 20-30 hashtags with targeted reach and lower competition
+          - Highest probability of ranking in "Top Posts" for emerging accounts
+          - Core of the hashtag strategy (5-8 per post)
+          - Example categories: sub-niche, specific topics, long-tail interest
+
+          TIER 4 - SMALL/MICRO HASHTAGS (1K-10K posts):
+          - 15-20 highly targeted hashtags with niche audiences
+          - Excellent for community building and ultra-specific targeting
+          - Use strategically (2-4 per post for community content)
+          - Example categories: local, hyper-niche, emerging trends
+
+          TIER 5 - BRANDED HASHTAGS (<1K posts initially):
+          - Primary brand hashtag (e.g., #{input.brand_name})
+          - Campaign-specific hashtags
+          - Content series hashtags
+          - UGC collection hashtags
+          - Community identity hashtags
+
+      1.2 For Each Content Pillar in "{input.content_pillars}":
+          Provide a dedicated hashtag set:
+          - 5 mega hashtags
+          - 8 large hashtags
+          - 10 medium hashtags
+          - 7 small/micro hashtags
+          - 2-3 branded/campaign hashtags
+          Total: 30-33 hashtags per pillar, organized by tier
+
+      1.3 Platform-Specific Hashtag Rules:
+
+          INSTAGRAM:
+          - Optimal hashtag count: 5-15 (test between 5, 10, 15, and 30)
+          - Placement: first comment vs. caption (current algorithm preference)
+          - Hashtag follow feature implications
+          - Banned hashtag monitoring (check regularly, list known banned tags to avoid)
+          - Reels hashtags vs. feed post hashtags (different strategy)
+          - Story hashtags (1-3, use sticker or text)
+          - Alt text and accessibility considerations
+
+          TIKTOK:
+          - Optimal hashtag count: 3-5 (less is more)
+          - FYP and viral hashtags: when to use vs. avoid
+          - Niche hashtag strategy for targeted discovery
+          - Trending hashtag identification and response speed
+          - Hashtag challenges and their mechanics
+          - Sound and hashtag combination strategy
+
+          LINKEDIN:
+          - Optimal hashtag count: 3-5 (max 9)
+          - Professional and industry-specific hashtag selection
+          - Hashtag follow feature and its impact on reach
+          - Avoiding overly casual or spammy hashtags
+          - Company page hashtag strategy vs. personal profile
+
+          TWITTER/X:
+          - Optimal hashtag count: 1-2 (more reduces engagement)
+          - Trending hashtag participation strategy
+          - Chat hashtags for community building
+          - Event and live-tweeting hashtag strategy
+          - Branded hashtag campaign mechanics
+
+          YOUTUBE:
+          - Hashtag placement: title (max 3) vs. description (unlimited)
+          - YouTube search algorithm and hashtag indexing
+          - Shorts-specific hashtag strategy
+          - Trending topics and hashtag discovery
+
+          PINTEREST:
+          - Pin description keyword optimization (hashtags less important)
+          - Board title and description keyword strategy
+          - Search-focused keyword research approach
+
+      ============================================================
+      SECTION 2: HASHTAG SET CREATION
+      ============================================================
+
+      2.1 Pre-Built Hashtag Sets:
+          Create 10-12 ready-to-use hashtag sets (copy-paste ready):
+
+          SET 1: [Content Pillar 1] - Educational Content
+          SET 2: [Content Pillar 1] - Entertaining Content
+          SET 3: [Content Pillar 2] - Educational Content
+          SET 4: [Content Pillar 2] - Entertaining Content
+          SET 5: Product/Service Showcase
+          SET 6: Behind-the-Scenes / Authenticity
+          SET 7: User-Generated Content / Community
+          SET 8: Trending / Timely Content (template with slots for trending tags)
+          SET 9: Local / Geographic Targeting
+          SET 10: Industry Leadership / Thought Leadership
+          SET 11: Promotional / Sales Content
+          SET 12: Collaboration / Partnership Content
+
+          For each set:
+          - Full hashtag list with tier labels
+          - Platform adaptation (which hashtags for which platform)
+          - Rotation schedule (avoid using identical sets consecutively)
+          - Performance tracking approach
+
+      2.2 Seasonal and Event Hashtag Calendar:
+          Map hashtags to key dates in the {input.time_period}:
+          - National/international awareness days and months
+          - Industry events and conferences
+          - Cultural moments and holidays
+          - Trending topic predictions
+          - Seasonal lifestyle shifts
+
+      2.3 Competitor Hashtag Gap Analysis:
+          - Hashtags competitors use that {input.brand_name} should adopt
+          - Hashtags competitors are missing that represent an opportunity
+          - Over-used hashtags to avoid (diminishing returns)
+          - Emerging hashtags that signal new trends
+
+      ============================================================
+      SECTION 3: HASHTAG MONITORING AND OPTIMIZATION
+      ============================================================
+
+      3.1 Performance Tracking Framework:
+          - Metrics to track per hashtag: reach, impressions, engagement, follows from hashtag
+          - A/B testing methodology: test different sets on similar content
+          - Weekly hashtag audit process
+          - Monthly hashtag set refresh schedule
+          - Tools for hashtag analytics (native insights, third-party tools)
+
+      3.2 Hashtag Hygiene:
+          - Banned hashtag check process (Instagram regularly bans hashtags)
+          - Spam association monitoring (remove hashtags that attract bot engagement)
+          - Relevance score assessment (is the hashtag still aligned with content?)
+          - Competitive saturation check (has a hashtag become too crowded?)
+
+      3.3 Hashtag Growth Strategy:
+          - How to grow branded hashtag usage (encourage UGC, create challenges)
+          - Community hashtag adoption tactics
+          - Cross-promotion of hashtags across platforms
+          - Hashtag-based campaigns and their mechanics
+          - Influencer hashtag amplification strategy
+
+      Deliver all hashtag sets as copy-paste ready lists organized by platform, content type, and tier.
+    model: haiku
+    max_turns: 10
+
+  - id: visual-direction
+    depends_on: [audience-analysis]
+    prompt: |
+      You are a creative director specializing in social media visual identity and brand aesthetics. You understand how visual consistency drives brand recognition, how design psychology influences engagement, and how platform-specific visual requirements impact performance. Develop a comprehensive visual direction guide for {input.brand_name}'s social media presence.
+
+      Audience Analysis: {steps.audience-analysis.output}
+
+      Brand Context:
+      - Brand: {input.brand_name}
+      - Platforms: {input.platforms}
+      - Content Pillars: {input.content_pillars}
+      - Brand Voice: {input.brand_voice}
+
+      ============================================================
+      SECTION 1: VISUAL BRAND IDENTITY FOR SOCIAL MEDIA
+      ============================================================
+
+      1.1 Color System:
+          - Primary brand colors (hex codes, RGB, and CMYK for print)
+          - Secondary color palette (complementary and accent colors)
+          - Background colors (light mode, dark mode, gradient options)
+          - Text colors for overlays (ensuring WCAG AA contrast compliance)
+          - Color application rules:
+            * Content pillar color coding (assign colors to pillars for visual consistency)
+            * Platform-specific color considerations (light backgrounds for Instagram, dark for TikTok)
+            * Seasonal color rotations (subtle shifts that keep the feed fresh)
+            * Color psychology: how chosen colors impact engagement and brand perception
+
+      1.2 Typography:
+          - Primary font for headlines/titles (social media friendly, bold, readable at small sizes)
+          - Secondary font for body text (clean, legible on mobile screens)
+          - Accent font for special content (quotes, callouts, emphasis)
+          - Font size hierarchy:
+            * Title/headline: recommended sizes for each platform's typical display
+            * Subtitle: supporting text sizes
+            * Body: caption and detail text sizes
+            * Minimum readable size for each platform (mobile-first)
+          - Font pairing rules and do's/don'ts
+          - Accessible typography considerations (dyslexia-friendly options, contrast)
+
+      1.3 Photography Style:
+          - Photography mood board direction (bright and airy, dark and moody, natural and authentic, bold and saturated)
+          - Composition guidelines (rule of thirds, centered, asymmetric, flat-lay)
+          - Lighting style (natural light preferred, studio lighting specs, golden hour)
+          - Subject styling (product photography, lifestyle in-context, people-centric, abstract)
+          - Color grading/filter recommendations (Lightroom preset direction)
+          - Photo do's and don'ts specific to the brand
+          - Stock photography selection criteria (if used) and recommended sources
+          - UGC quality standards (minimum quality for resharing)
+
+      1.4 Graphic Design Templates:
+          Define template designs for recurring content types:
+
+          QUOTE GRAPHICS:
+          - Layout structure (text placement, background style, attribution)
+          - Typography treatment (large quote text, author/source)
+          - Background options (solid color, gradient, blurred image, pattern)
+
+          CAROUSEL TEMPLATES:
+          - Cover slide design (bold, scroll-stopping, clear topic preview)
+          - Interior slide design (consistent layout, progressive information reveal)
+          - CTA slide design (clear action, swipe prompt, branded)
+          - Transition elements between slides (visual flow)
+
+          TIP/EDUCATIONAL GRAPHICS:
+          - Number/step formatting (circled numbers, progress indicators)
+          - Information hierarchy (headline, supporting text, detail)
+          - Icon and illustration usage
+          - White space management for readability
+
+          TESTIMONIAL/SOCIAL PROOF GRAPHICS:
+          - Quote layout with customer photo/avatar
+          - Star rating visual treatment
+          - Before/after comparison layout
+          - Data visualization for metrics and results
+
+          ANNOUNCEMENT/PROMOTIONAL GRAPHICS:
+          - Launch graphics (product, feature, event)
+          - Sale/offer graphics (urgency elements, countdown)
+          - Event promotion graphics
+          - Milestone celebration graphics
+
+          STORY TEMPLATES:
+          - Poll/quiz templates
+          - Question sticker templates
+          - Countdown templates
+          - Swipe-up/link CTA templates
+          - Multi-story narrative sequence templates
+
+      ============================================================
+      SECTION 2: VIDEO AND MOTION DESIGN DIRECTION
+      ============================================================
+
+      2.1 Video Aesthetic:
+          - Overall video style (polished, raw/authentic, cinematic, playful)
+          - Transition styles (cuts, fades, swipes, custom branded transitions)
+          - Text animation style (type-on, fade-in, kinetic typography)
+          - Lower thirds and name titles design
+          - End card/CTA screen design
+          - Intro and outro sequences (keep short - 1-2 seconds each)
+          - B-roll style and treatment (slow motion, time-lapse, close-ups)
+
+      2.2 Platform-Specific Video Specs:
+          For each platform in {input.platforms}:
+          - Aspect ratios: 1:1, 4:5, 9:16, 16:9 (which for which platform/placement)
+          - Resolution: minimum and recommended
+          - Duration ranges: optimal length for the platform
+          - Safe zones: where text should avoid (account for UI overlays)
+          - Caption/subtitle style: burned-in vs. auto-generated, font, size, position, background
+          - Thumbnail specifications and design guidelines
+          - Audio requirements: music volume, voiceover treatment, sound effects
+
+      2.3 Motion Graphics Elements:
+          - Animated logo usage (intro, watermark, outro)
+          - Icon animation style (bouncing, drawing-on, fading, morphing)
+          - Data visualization animations (chart builds, counter animations)
+          - Progress bar and checklist animations
+          - Text highlight and emphasis animations
+          - Branded transition effects
+
+      ============================================================
+      SECTION 3: FEED AND GRID AESTHETICS
+      ============================================================
+
+      3.1 Instagram Grid Strategy:
+          - Grid pattern recommendation:
+            * Checkerboard (alternating light/dark)
+            * Row-by-row (themed rows of 3)
+            * Column pattern (consistent columns for different content types)
+            * Rainbow fade (gradual color progression)
+            * No rigid pattern (curated but organic feel)
+          - Preview and planning: how to visualize the grid before posting
+          - Grid-breaking strategies (when to intentionally break the pattern for impact)
+          - Profile page first impression optimization
+          - Pinned posts strategy (which 3 posts to pin and why)
+          - Highlight cover design (consistent icon set, branded colors)
+
+      3.2 Cross-Platform Visual Consistency:
+          - Elements that MUST stay consistent across platforms (logo, colors, typography)
+          - Elements that SHOULD adapt per platform (formatting, aspect ratio, complexity)
+          - Elements that CAN be platform-unique (trends, native features, community culture)
+          - Brand recognition test: can someone identify the brand from any single post?
+
+      3.3 Seasonal and Campaign Visual Refresh:
+          - How to evolve visuals seasonally without losing brand recognition
+          - Campaign-specific visual treatments (temporary overlays, filters, badges)
+          - Trend adaptation: incorporating visual trends while maintaining brand identity
+          - Annual visual refresh cycle and what to update vs. maintain
+
+      ============================================================
+      SECTION 4: CONTENT PRODUCTION TOOLKIT
+      ============================================================
+
+      4.1 Design Tool Recommendations:
+          - Canva: template setup and brand kit configuration
+          - Adobe Creative Suite: specific tool recommendations per content type
+          - CapCut/InShot: video editing settings and presets
+          - Lightroom: photo preset settings for consistent photography
+          - Motion design tools: After Effects, LottieFiles, or lightweight alternatives
+          - AI design tools: Midjourney/DALL-E for concept exploration, not final assets
+
+      4.2 Asset Library Organization:
+          - Folder structure for digital assets
+          - Naming convention for files (date_platform_pillar_format_version)
+          - Template version control
+          - Brand asset quick-access kit (logos, fonts, colors, icons, patterns)
+          - Stock media library curation and tagging
+
+      4.3 Quality Control Checklist:
+          Before publishing any visual content, verify:
+          - Brand colors are correct (no shifted hues from compression)
+          - Text is readable at the smallest expected display size
+          - No spelling or grammatical errors in overlay text
+          - Image/video is not pixelated or blurry
+          - Safe zones are clear of important content
+          - Alt text is written for accessibility
+          - File format and size are optimized for the platform
+          - Watermark/logo is present but not obtrusive
+          - Content is on-brand (passes the "brand recognition test")
+
+      Deliver the complete visual direction as a style guide document that a designer, content creator, or social media manager can reference daily when creating content for {input.brand_name}.
+    model: sonnet
+    max_turns: 10
+
+  - id: calendar-compilation
+    depends_on: [content-creation, hashtag-strategy, visual-direction]
+    prompt: |
+      You are a social media operations manager and marketing strategist who excels at synthesizing creative strategy into executable, schedulable content plans. Compile all previous analyses into a final, comprehensive social media content calendar for {input.brand_name} covering {input.time_period}.
+
+      Content Created: {steps.content-creation.output}
+      Hashtag Strategy: {steps.hashtag-strategy.output}
+      Visual Direction: {steps.visual-direction.output}
+      Content Plan: {steps.audience-analysis.output}
+
+      Brand Context:
+      - Brand: {input.brand_name}
+      - Platforms: {input.platforms}
+      - Content Pillars: {input.content_pillars}
+      - Posting Frequency: {input.posting_frequency}
+      - Brand Voice: {input.brand_voice}
+      - Time Period: {input.time_period}
+
+      ============================================================
+      SECTION 1: MASTER CONTENT CALENDAR
+      ============================================================
+
+      1.1 Calendar Overview:
+          - Total posts planned across all platforms
+          - Posts per platform per week
+          - Content pillar distribution (percentage breakdown)
+          - Content format distribution (video, carousel, image, text)
+          - Promotional vs. value content ratio verification (should match 80/20 or 4-1-1)
+          - Key dates and tentpole moments highlighted
+
+      1.2 Day-by-Day Calendar:
+          For each day in the {input.time_period}, provide a complete entry:
+
+          FORMAT:
+          -----------------------------------------------
+          DATE: [Day of Week, Date]
+          PLATFORM: [Primary platform]
+          PILLAR: [Content pillar]
+          FORMAT: [Reel/Carousel/Image/Text/Story/Live]
+          SERIES: [If part of a recurring series]
+          TIME: [Optimal posting time in target timezone]
+          TITLE: [Working title of the content piece]
+          CAPTION: [Full caption text, ready to copy-paste]
+          HASHTAGS: [Complete hashtag set for this post]
+          VISUAL: [Brief visual direction reference]
+          CTA: [Specific call-to-action]
+          CROSS-POST: [Adaptation notes for other platforms, if applicable]
+          PRIORITY: [Must-post / Should-post / Nice-to-have]
+          PRODUCTION STATUS: [Needs: photo/video/graphic/copy only]
+          METRICS TARGET: [Primary KPI for this post]
+          -----------------------------------------------
+
+      1.3 Stories Calendar:
+          Separate story/ephemeral content schedule:
+          - Daily story posting times and themes
+          - Interactive element rotation (polls Monday, quizzes Wednesday, etc.)
+          - Story highlight update schedule
+          - Story-to-feed content promotion strategy
+
+      ============================================================
+      SECTION 2: CONTENT PRODUCTION SCHEDULE
+      ============================================================
+
+      2.1 Weekly Production Blocks:
+          - Monday: [Production activities - e.g., "Write all captions for the week"]
+          - Tuesday: [Production activities]
+          - Wednesday: [Production activities]
+          - Thursday: [Production activities]
+          - Friday: [Production activities]
+          - Weekend: [Minimal production, focus on community engagement]
+
+      2.2 Batch Production Days:
+          Schedule dedicated production sessions:
+          - Photo shoot day (frequency, shot list preparation)
+          - Video production day (batch filming, editing workflow)
+          - Graphic design session (create all graphics for the upcoming period)
+          - Copywriting session (write and schedule all captions)
+          - Review and approval process (internal review before scheduling)
+
+      2.3 Content Queue Management:
+          - Buffer of pre-produced content (always maintain 1-2 weeks ahead)
+          - Emergency content protocols (what to post if something falls through)
+          - Trending content response slots (keep 2-3 open slots per week for reactive content)
+          - Content approval workflow (who reviews, timeline, feedback process)
+
+      ============================================================
+      SECTION 3: SCHEDULING AND AUTOMATION
+      ============================================================
+
+      3.1 Scheduling Tool Setup:
+          - Recommended scheduling tools and comparison for {input.brand_name}'s needs
+          - Tool configuration: connecting accounts, team permissions, approval workflows
+          - Bulk upload format for the calendar (CSV template compatible with major tools)
+          - Auto-scheduling vs. manual scheduling decision framework
+          - Queue management and reshuffling protocols
+
+      3.2 Automation Rules:
+          - Auto-publish: which content can be auto-published vs. requires manual posting
+          - Cross-posting automation: what to automate vs. manually adapt
+          - First comment automation (for hashtags, engagement prompts, links)
+          - Story scheduling limitations and workarounds
+          - DM auto-response setup for common inquiries
+          - Link-in-bio auto-update when new link-focused content publishes
+
+      3.3 Content Calendar Maintenance:
+          - Weekly calendar review process (every Friday: review next week, adjust as needed)
+          - Monthly calendar planning session (last week of month: plan next month)
+          - Quarterly strategy review (adjust pillars, frequency, formats based on data)
+          - Calendar sharing and collaboration (team access, stakeholder visibility)
+
+      ============================================================
+      SECTION 4: PERFORMANCE MONITORING FRAMEWORK
+      ============================================================
+
+      4.1 Daily Monitoring Checklist:
+          - Check engagement on posts from last 24 hours
+          - Respond to all comments and DMs within SLA
+          - Monitor brand mentions and tagged content
+          - Check for trending topics relevant to the brand
+          - Review competitor activity for inspiration or response opportunities
+
+      4.2 Weekly Performance Report Template:
+          - Total posts published (by platform)
+          - Average engagement rate (by platform, by content type)
+          - Top performing post (with analysis of why it worked)
+          - Worst performing post (with analysis of why it underperformed)
+          - Follower growth (net new followers, unfollows, growth rate)
+          - Reach and impressions totals
+          - Website traffic from social (if tracked)
+          - Key learnings and adjustments for next week
+
+      4.3 Monthly Analytics Deep Dive:
+          - Content pillar performance comparison (which pillar drives most engagement?)
+          - Platform performance comparison (which platform is growing fastest?)
+          - Content format performance comparison (which format gets best results?)
+          - Posting time performance analysis (confirm or adjust optimal times)
+          - Hashtag set performance review (which sets drive most discovery?)
+          - Audience growth and demographic shifts
+          - Competitor benchmarking update
+          - ROI analysis (if paid promotion is included)
+          - Strategic adjustments for the next month
+
+      4.4 Optimization Playbook:
+          Based on data patterns, define action items:
+          - If engagement drops > 20%: [specific troubleshooting steps]
+          - If reach drops > 30%: [specific troubleshooting steps]
+          - If follower growth stalls: [specific growth tactics to activate]
+          - If a specific content type outperforms: [how to double down]
+          - If a platform underperforms: [reassess allocation or exit strategy]
+          - Algorithm change response protocol
+
+      ============================================================
+      SECTION 5: CRISIS AND CONTINGENCY PLANNING
+      ============================================================
+
+      5.1 Content Pause Protocol:
+          - When to pause scheduled content (national tragedies, brand crisis, major events)
+          - How to quickly pause all scheduled posts across platforms
+          - Holding statement templates for various crisis scenarios
+          - Resume posting protocol and re-entry messaging
+
+      5.2 Negative Engagement Response:
+          - Troll management policy (when to engage, mute, block, delete)
+          - Negative review or complaint response templates
+          - Escalation matrix (social media manager -> brand manager -> PR/legal)
+          - Screenshot and documentation protocol for serious issues
+
+      5.3 Content Calendar Flexibility:
+          - How to swap content if a planned post becomes inappropriate due to current events
+          - Evergreen content library as backup (pre-approved, ready to deploy)
+          - Trending opportunity slots (built-in flexibility for reactive content)
+          - Content reprioritization framework when resources are constrained
+
+      Deliver the complete calendar as a production-ready document that can be directly imported into scheduling tools or used as a daily reference guide for the social media team.
+    model: sonnet
+    max_turns: 10

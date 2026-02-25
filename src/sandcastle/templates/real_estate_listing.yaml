@@ -1,0 +1,1049 @@
+# name: Real Estate Listing Optimizer
+# description: Optimize real estate listings with AI-enhanced descriptions, comparative market analysis, pricing recommendations, and multi-platform distribution strategy
+# tags: [Real Estate, Listing, CMA, Marketing, Property]
+# category: general_ai
+
+name: real-estate-listing
+description: Optimize real estate listings with AI-enhanced descriptions, comparative market analysis, pricing recommendations, and multi-platform distribution strategy
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["property_address", "property_type", "listing_price", "key_features"]
+  properties:
+    property_address:
+      type: string
+      description: "Full property address including city, state, and ZIP code"
+    property_type:
+      type: string
+      description: "Type of property: residential, commercial, or land"
+      default: "residential"
+    listing_price:
+      type: number
+      description: "Proposed listing price in USD"
+    key_features:
+      type: string
+      description: "Key property features (bedrooms, bathrooms, sqft, lot size, renovations, amenities, etc.)"
+    target_buyer_profile:
+      type: string
+      description: "Ideal buyer demographic and psychographic profile"
+      default: "General buyer seeking move-in ready property"
+
+steps:
+  - id: market-analysis
+    prompt: |
+      You are an elite real estate market analyst with 20+ years of experience in residential, commercial, and land transactions across all major US markets. Conduct a comprehensive local market analysis for the property at {input.property_address}.
+
+      Property Details:
+      - Address: {input.property_address}
+      - Type: {input.property_type}
+      - Proposed Listing Price: ${input.listing_price}
+      - Key Features: {input.key_features}
+      - Target Buyer: {input.target_buyer_profile}
+
+      Perform a DEEP, multi-dimensional market analysis covering every factor that influences property value and marketability. This analysis will serve as the foundation for all subsequent listing optimization steps.
+
+      ============================================================
+      SECTION 1: MACRO-MARKET CONDITIONS
+      ============================================================
+
+      Analyze the broader real estate market environment:
+
+      1.1 National Market Context:
+          - Current phase of the real estate cycle (expansion, peak, contraction, trough)
+          - Federal Reserve interest rate policy and its impact on mortgage rates
+          - Current 30-year fixed mortgage rate trends and 6-month forecast
+          - National housing inventory levels (months of supply) and year-over-year change
+          - Buyer sentiment indices and consumer confidence as they relate to home purchasing
+          - Inflation rate impact on real estate as an asset class
+          - New construction starts and builder confidence index implications
+
+      1.2 Regional Economic Indicators:
+          - Metropolitan Statistical Area (MSA) employment growth rate
+          - Major employers in the area and recent hiring/layoff announcements
+          - Population growth or decline trends (Census Bureau data, 5-year trend)
+          - Median household income for the ZIP code and county
+          - Cost of living index relative to national average
+          - Key infrastructure projects (highway expansions, transit, airports, hospitals)
+          - Zoning changes or development projects that could affect property values
+          - Tax environment: property tax rates, any pending mill levy changes, special assessment districts
+
+      1.3 Local Supply and Demand Dynamics:
+          - Active listings in the same ZIP code within +/- 15% of the listing price
+          - Absorption rate: average number of sales per month in the micro-market
+          - Days on market (DOM) average for similar properties in the last 90 days
+          - List-to-sale price ratio trends (are properties selling above, at, or below asking?)
+          - New listings coming to market weekly (supply pressure analysis)
+          - Seasonal patterns: how does the current month historically perform?
+          - Investor activity level: percentage of cash purchases in the area
+
+      ============================================================
+      SECTION 2: NEIGHBORHOOD SCORING MODEL
+      ============================================================
+
+      Develop a comprehensive Neighborhood Score (1-100) using the following weighted criteria. For each criterion, provide a score from 1-10 and a detailed justification:
+
+      2.1 Education Quality (Weight: 15%):
+          - Elementary school rating (GreatSchools or equivalent, 1-10)
+          - Middle school rating (1-10)
+          - High school rating (1-10)
+          - Proximity to schools (walking distance bonus)
+          - Private and charter school options nearby
+          - Nearest college/university and its impact on the neighborhood
+
+      2.2 Safety and Crime (Weight: 15%):
+          - Violent crime rate per 1,000 residents vs. national average
+          - Property crime rate per 1,000 residents vs. national average
+          - Trend direction (improving, stable, declining) over last 3 years
+          - Neighborhood watch or HOA security presence
+          - Fire station and police station response time estimates
+
+      2.3 Amenities and Lifestyle (Weight: 15%):
+          - Walk Score / Bike Score / Transit Score estimates
+          - Grocery stores within 1 mile (count and quality)
+          - Restaurant and dining scene quality and variety
+          - Parks, green spaces, and recreational facilities within 0.5 miles
+          - Shopping centers, retail corridors, entertainment venues
+          - Healthcare facilities: hospitals, urgent care, specialty clinics
+          - Fitness centers, yoga studios, community recreation centers
+
+      2.4 Transportation and Commute (Weight: 12%):
+          - Average commute time to nearest major employment center
+          - Public transit access (bus stops, rail stations, frequency)
+          - Highway/freeway access and congestion patterns
+          - Airport proximity for frequent travelers
+          - EV charging infrastructure availability
+          - Bike lane and pedestrian infrastructure quality
+
+      2.5 Community and Demographics (Weight: 10%):
+          - Median age of residents and household composition
+          - Owner-occupied vs. renter-occupied ratio
+          - Community organizations, events, and civic engagement level
+          - Cultural institutions: libraries, museums, theaters, galleries
+          - Religious institutions variety
+          - Pet friendliness: dog parks, pet-friendly businesses, vet clinics
+
+      2.6 Future Development and Appreciation Potential (Weight: 13%):
+          - Planned residential developments (impact on supply and character)
+          - Commercial development projects (job creation, amenity improvement)
+          - Infrastructure investments (road improvements, utility upgrades, broadband)
+          - Gentrification indicators (new business types, renovation permits, demographic shifts)
+          - Environmental risk: flood zone, wildfire risk, earthquake zone, superfund proximity
+          - Historical appreciation rate for the neighborhood (5-year and 10-year)
+
+      2.7 Property Tax and HOA Environment (Weight: 10%):
+          - Effective property tax rate vs. state and national average
+          - HOA fees (if applicable) and what they cover
+          - Special taxing districts (school, fire, water, metro)
+          - Mello-Roos or Community Facilities District assessments
+          - Tax assessment trend: is assessed value rising faster than market value?
+
+      2.8 Market Momentum (Weight: 10%):
+          - Price appreciation in the last 12 months for the neighborhood
+          - Inventory trend: increasing or decreasing?
+          - Buyer demand indicators: showing activity, multiple offer situations
+          - New permits filed: renovation permits as a gentrification signal
+          - Rental yield for investors (gross rent as % of property value)
+
+      Calculate the weighted Neighborhood Score and provide a letter grade (A+, A, A-, B+, B, B-, C+, C, C-, D, F).
+
+      ============================================================
+      SECTION 3: BUYER DEMAND PROFILING
+      ============================================================
+
+      Based on the property type ({input.property_type}), price point (${input.listing_price}), features ({input.key_features}), and target buyer ({input.target_buyer_profile}):
+
+      3.1 Primary Buyer Persona:
+          - Demographics: age range, household income, family structure
+          - Psychographics: values, lifestyle priorities, decision-making style
+          - Current housing situation (renting, upsizing, downsizing, relocating)
+          - Motivation drivers: what life event or need triggers the search?
+          - Pain points: what frustrations do they have with current housing?
+          - Search behavior: which platforms, how long they search, how they make decisions
+          - Financial profile: likely down payment range, pre-approval status, DTI ratio
+
+      3.2 Secondary Buyer Personas (up to 3):
+          - For each, provide a brief profile covering the same dimensions
+          - Estimate percentage of buyer pool each persona represents
+
+      3.3 Buyer Psychology and Decision Triggers:
+          - Emotional triggers specific to the property type and price point
+          - Rational justifications buyers use for this type of purchase
+          - Common objections and how to preemptively address them in the listing
+          - "Must-have" vs. "nice-to-have" feature hierarchy for the target buyer
+          - Deal-breakers that could eliminate buyers from the pool
+
+      ============================================================
+      SECTION 4: MARKET POSITIONING STATEMENT
+      ============================================================
+
+      Based on all analysis above, provide:
+      - A clear market positioning statement for this property (2-3 sentences)
+      - The property's key competitive advantages (top 5)
+      - The property's key weaknesses or challenges to address (top 3-5)
+      - Recommended narrative angle for the listing (story to tell)
+      - Price positioning assessment: is ${input.listing_price} aggressive, market-rate, or conservative?
+      - Estimated days on market at the proposed price
+      - Probability of multiple offer situation (low/medium/high) with reasoning
+
+      Format the entire analysis as a structured report with clear section headers, scores, and actionable insights that will inform the comparative analysis, description generation, pricing strategy, and distribution plan.
+    model: sonnet
+    max_turns: 10
+
+  - id: comp-analysis
+    depends_on: [market-analysis]
+    prompt: |
+      You are a licensed real estate appraiser and CMA specialist with deep expertise in comparative market analysis methodology. Using the market analysis findings, conduct a rigorous Comparative Market Analysis (CMA) for the property at {input.property_address}.
+
+      Market Analysis Context: {steps.market-analysis.output}
+
+      Property Details:
+      - Address: {input.property_address}
+      - Type: {input.property_type}
+      - Proposed Price: ${input.listing_price}
+      - Features: {input.key_features}
+
+      ============================================================
+      SECTION 1: COMPARABLE SELECTION METHODOLOGY
+      ============================================================
+
+      1.1 Search Parameters:
+          - Geographic radius: Start at 0.5 miles, expand to 1 mile, then 3 miles if needed
+          - Time frame: prioritize sales from last 90 days, extend to 180 days, max 365 days
+          - Property type match: exact match for {input.property_type}
+          - Size variance: within +/- 20% of subject property square footage
+          - Age/condition match: similar vintage and condition class
+          - Feature match priority: bedroom/bathroom count, garage, lot size, pool, view
+
+      1.2 Comparable Categories (identify 3-5 properties per category):
+
+          RECENTLY SOLD COMPARABLES (Most Important - Weight: 50%):
+          For each comparable, document:
+          - Address, sale date, sale price, original list price
+          - Days on market, number of price reductions (if any)
+          - Property details: beds, baths, sqft, lot size, year built, condition
+          - Financing type: conventional, FHA, VA, cash, seller financing
+          - Concessions: seller credits, included personal property, repair credits
+          - Adjustments needed (detailed line-item):
+            * Location adjustment (+/- $ per factor)
+            * Size adjustment ($/sqft differential)
+            * Condition/age adjustment
+            * Feature adjustments (pool, garage, view, upgrades)
+            * Time adjustment (market appreciation since sale date)
+          - Adjusted sale price after all adjustments
+          - Confidence level in this comparable (high/medium/low) with reasoning
+
+          ACTIVE LISTINGS (Current Competition - Weight: 25%):
+          For each listing, document:
+          - Address, list price, days on market, any price changes
+          - Property details and how they compare to subject
+          - Listing quality assessment: photos, description, staging
+          - Why this is or is not true competition for our listing
+          - Price positioning relative to our subject property
+          - Marketing strategy observations (what they are doing well/poorly)
+
+          PENDING/UNDER CONTRACT (Market Direction - Weight: 15%):
+          - Address, original list price, days on market before going pending
+          - Estimated contract price range based on list-to-sale ratios
+          - What this tells us about current buyer behavior and pricing
+
+          EXPIRED/WITHDRAWN LISTINGS (Cautionary - Weight: 10%):
+          - Address, original list price, days on market before expiration
+          - Why the listing likely failed (overpriced, poor condition, bad marketing?)
+          - Lessons to apply to our listing strategy
+
+      ============================================================
+      SECTION 2: ADJUSTMENT GRID
+      ============================================================
+
+      Create a detailed adjustment grid with the following line items:
+
+      2.1 Location Adjustments:
+          - Neighborhood quality differential
+          - Street appeal and traffic (cul-de-sac, busy road, corner lot)
+          - View premium or deficit
+          - Proximity to amenities differential
+          - School district quality differential
+          - Flood zone or environmental factor adjustment
+
+      2.2 Physical Characteristic Adjustments:
+          - Gross living area ($/sqft based on local paired sales analysis)
+          - Bedroom count adjustment
+          - Bathroom count adjustment (full vs. half vs. three-quarter)
+          - Basement area and finish level
+          - Garage (attached vs. detached, number of cars)
+          - Lot size differential (diminishing returns above certain thresholds)
+          - Year built / effective age adjustment
+          - Condition rating adjustment (C1-C6 scale)
+
+      2.3 Feature-Specific Adjustments:
+          - Swimming pool (in-ground vs. above-ground, market where pools add value?)
+          - Fireplace(s)
+          - Central air conditioning
+          - Updated kitchen (age and quality of renovation)
+          - Updated bathrooms
+          - Hardwood floors vs. carpet vs. tile
+          - Energy efficiency features (solar panels, high-efficiency HVAC, insulation)
+          - Smart home technology
+          - Outdoor living spaces (deck, patio, screened porch, outdoor kitchen)
+          - Storage (attic, shed, barn)
+
+      2.4 Market Condition Adjustments:
+          - Time adjustment factor (monthly appreciation rate applied to older sales)
+          - Concession adjustments (normalize for seller credits, buyer incentives)
+          - Financing premium/discount (cash vs. financed, FHA vs. conventional)
+
+      ============================================================
+      SECTION 3: VALUE RECONCILIATION
+      ============================================================
+
+      3.1 Adjusted Value Range:
+          - Low end of indicated value (most conservative comparable)
+          - Central tendency / most probable value (weighted average of best comparables)
+          - High end of indicated value (most optimistic comparable)
+          - Confidence interval width and what it tells us about market certainty
+
+      3.2 Reconciliation Narrative:
+          - Which comparable(s) deserve the most weight and why?
+          - Qualitative factors that the numbers alone do not capture
+          - Market momentum impact on the value conclusion
+          - Unique features of the subject that have no direct comparable adjustment
+          - Final reconciled value opinion with confidence level
+
+      3.3 Value per Square Foot Analysis:
+          - Subject property $/sqft at proposed price vs. comparable $/sqft range
+          - Median $/sqft for the neighborhood
+          - $/sqft trend (rising, stable, falling) and its implication
+
+      3.4 Price Position Assessment:
+          - Is ${input.listing_price} supported by the CMA data?
+          - Percentage above or below the reconciled value
+          - Risk assessment: probability of appraisal issues at the proposed price
+          - Recommended adjustments if the proposed price diverges from CMA value
+
+      Provide the complete CMA as a structured report suitable for sharing with the property seller, including all comparable data, adjustments, and the final value reconciliation.
+    model: haiku
+    max_turns: 10
+
+  - id: description-generation
+    depends_on: [market-analysis]
+    prompt: |
+      You are a master real estate copywriter who has written over 10,000 property listings that consistently achieve faster sales and higher prices than market averages. Your descriptions combine emotional storytelling with strategic SEO optimization and buyer psychology. Generate a suite of listing descriptions for the property at {input.property_address}.
+
+      Market Analysis Context: {steps.market-analysis.output}
+
+      Property Details:
+      - Address: {input.property_address}
+      - Type: {input.property_type}
+      - Listing Price: ${input.listing_price}
+      - Key Features: {input.key_features}
+      - Target Buyer: {input.target_buyer_profile}
+
+      ============================================================
+      SECTION 1: PRIMARY MLS LISTING DESCRIPTION
+      ============================================================
+
+      Write the definitive MLS listing description following these principles:
+
+      1.1 Structure and Format:
+          - Opening hook: First 20 words MUST capture attention and create desire (this is what appears in search result previews)
+          - Narrative flow: Guide the reader through the property as if on a virtual tour
+          - Feature hierarchy: Lead with the most compelling features for the target buyer
+          - Emotional language: Paint a lifestyle picture, not just a feature list
+          - Call to action: End with urgency and a clear next step
+          - Length: 250-400 words (MLS optimal range for most platforms)
+
+      1.2 SEO Optimization for Real Estate Portals:
+          - Include the neighborhood/subdivision name in the first 2 sentences
+          - Mention the city and state naturally within the description
+          - Use high-search-volume real estate keywords naturally:
+            * Property type keywords: "single family home," "townhouse," "condo," etc.
+            * Feature keywords: "updated kitchen," "hardwood floors," "open floor plan"
+            * Lifestyle keywords: "move-in ready," "turnkey," "entertainer's dream"
+            * Location keywords: "walking distance to," "minutes from downtown"
+          - Avoid ALL CAPS (reduces readability and appears desperate)
+          - Avoid excessive punctuation (!!!) and overused words ("stunning," "gorgeous" - use sparingly)
+          - Include room dimensions or square footage naturally in the flow
+
+      1.3 Buyer Psychology Techniques:
+          - Loss aversion: Subtly convey scarcity ("rare find," "seldom available," "won't last")
+          - Social proof: Reference neighborhood desirability, award-winning schools
+          - Future pacing: Help buyers visualize their life in the home ("imagine hosting...")
+          - Specificity: Specific details are more persuasive than vague claims
+          - Sensory language: Appeal to sight, sound, touch ("sun-drenched," "whisper-quiet")
+          - Value framing: Position features in terms of benefit, not just existence
+
+      1.4 Compliance and Fair Housing:
+          - NEVER include language that violates Fair Housing Act (no references to race, religion, national origin, sex, familial status, disability, or sexual orientation)
+          - Avoid "master bedroom" - use "primary bedroom" or "owner's suite"
+          - Avoid "walk-in" closets if it could be interpreted as ability-based - use "spacious closet" or "large closet"
+          - Do not describe the neighborhood demographics
+          - Do not reference houses of worship, schools by demographic makeup
+          - Include accessibility features if present, but do not emphasize their absence
+
+      Write the complete MLS description following all of the above guidelines.
+
+      ============================================================
+      SECTION 2: PLATFORM-SPECIFIC DESCRIPTIONS
+      ============================================================
+
+      2.1 Zillow/Trulia Description (500 words max):
+          - These platforms allow longer descriptions
+          - Include more lifestyle and neighborhood details
+          - Mention nearby landmarks, restaurants, parks by name
+          - Include commute times to major employment centers
+          - Add a "What I Love About This Home" section (as if from the seller's perspective)
+          - Optimize for Zillow's search algorithm: include zip code area details
+
+      2.2 Realtor.com Description (300 words max):
+          - More professional, data-oriented tone
+          - Emphasize recent upgrades with approximate years
+          - Include utility cost estimates if favorable
+          - Mention HOA details, included appliances, warranty
+          - Reference comparable sales to justify value
+
+      2.3 Social Media Descriptions:
+          - Instagram caption (150 words max, 5-10 relevant hashtags, emoji usage)
+          - Facebook Marketplace post (200 words, casual but informative)
+          - LinkedIn post (for commercial properties or luxury residential, 150 words)
+          - TikTok/Reels script (30-second hook-based script for video tour)
+          - Nextdoor post (hyper-local community-focused, 100 words)
+
+      2.4 Email Marketing Description:
+          - Subject lines (5 options with A/B testing rationale)
+          - Preview text (40-60 characters that complement the subject line)
+          - Email body: 200-word description with embedded CTA
+          - Targeted angles: one version for buyer's agents, one for direct buyers
+
+      ============================================================
+      SECTION 3: HEADLINE AND TAGLINE OPTIONS
+      ============================================================
+
+      Create 10 headline options organized by strategy:
+
+      3.1 Feature-Led Headlines (3 options):
+          - Lead with the single most compelling feature
+          - Example format: "[Key Feature] in [Desirable Location] - [Price or Call to Action]"
+
+      3.2 Lifestyle-Led Headlines (3 options):
+          - Focus on the experience of living there
+          - Example format: "[Lifestyle Benefit] Awaits at [Property Description]"
+
+      3.3 Value-Led Headlines (2 options):
+          - Emphasize pricing advantage or investment potential
+          - Example format: "[Value Proposition] - [Location] [Property Type] at [Price Point]"
+
+      3.4 Urgency-Led Headlines (2 options):
+          - Create time pressure or scarcity without being misleading
+          - Example format: "[Scarcity Signal] - [Property Highlight] in [Location]"
+
+      For each headline, explain the psychology behind it and which buyer persona it targets.
+
+      ============================================================
+      SECTION 4: FEATURE SHEET CONTENT
+      ============================================================
+
+      Create structured content for a property feature sheet / flyer:
+
+      4.1 Quick Facts Grid:
+          - Beds | Baths | SqFt | Lot Size | Year Built | Garage
+          - Price | Price/SqFt | HOA (if applicable) | Taxes
+
+      4.2 Top 10 Features List:
+          - Ranked by buyer appeal for the target demographic
+          - Each feature with a one-line benefit statement
+
+      4.3 Neighborhood Highlights:
+          - 5 key proximity callouts with distances ("3 min to I-95, 10 min to downtown")
+          - School district name and rating
+          - Notable restaurants, shops, parks within walking distance
+
+      4.4 Virtual Tour / Open House Call-to-Action text
+
+      ============================================================
+      SECTION 5: STAGING AND PRESENTATION RECOMMENDATIONS
+      ============================================================
+
+      Based on the property features and target buyer:
+
+      5.1 Staging Priorities:
+          - Which rooms to stage first (ranked by buyer impact)
+          - Style direction (modern, traditional, transitional, farmhouse, coastal, etc.)
+          - Color palette recommendations for walls, accents, textiles
+          - Furniture scale and layout suggestions for key rooms
+          - Decluttering and depersonalization checklist
+
+      5.2 Curb Appeal Enhancements:
+          - Front door and entry improvements
+          - Landscaping quick wins (seasonal flowers, mulch, edging)
+          - Lighting improvements (pathway lights, porch light upgrade)
+          - Driveway and walkway cleaning/repair
+          - Mailbox, house numbers, welcome mat
+
+      5.3 Photography Shot List:
+          - Recommended 25-shot list in shooting order
+          - Best time of day for exterior photos (based on property orientation)
+          - Twilight shot opportunities and which angles to prioritize
+          - Drone / aerial shot recommendations if applicable
+          - Video walkthrough script and sequence
+
+      Deliver the complete copywriting package with all sections clearly labeled and ready for implementation across all platforms.
+    model: sonnet
+    max_turns: 10
+
+  - id: photo-optimization
+    depends_on: [market-analysis]
+    prompt: |
+      You are a professional real estate photography consultant and visual marketing strategist with expertise in how property photos influence buyer behavior, click-through rates, and final sale prices. Based on the market analysis, develop a comprehensive photo and visual optimization strategy for {input.property_address}.
+
+      Market Analysis Context: {steps.market-analysis.output}
+
+      Property Details:
+      - Address: {input.property_address}
+      - Type: {input.property_type}
+      - Listing Price: ${input.listing_price}
+      - Key Features: {input.key_features}
+      - Target Buyer: {input.target_buyer_profile}
+
+      ============================================================
+      SECTION 1: PHOTOGRAPHY STRATEGY AND SHOT PLANNING
+      ============================================================
+
+      1.1 Photo Count and Ordering Strategy:
+          - Optimal number of photos for this property type and price point
+          - Research shows listings with 20-27 photos sell faster - plan accordingly
+          - Photo ordering psychology: which photo appears first has the biggest impact
+          - Lead photo selection criteria (the single most important marketing decision)
+          - Recommended sequence: exterior -> entry -> living areas -> kitchen -> primary suite -> secondary rooms -> bathrooms -> outdoor -> aerial
+
+      1.2 Hero Shot Analysis:
+          - Determine the single best "hero" photo angle for this property
+          - Front exterior at golden hour (typically the winner for residential)
+          - Kitchen or great room for properties where interior is the selling point
+          - Pool/outdoor living for properties where lifestyle is the differentiator
+          - View shot for properties with exceptional views
+          - Explain why the chosen hero shot will maximize clicks on listing portals
+
+      1.3 Room-by-Room Shot Guide:
+          For each key area, specify:
+          - Camera position and height (tripod height, corner placement)
+          - Lens recommendation (wide angle 10-16mm for interiors, 24-35mm for details)
+          - Lighting setup: natural light direction, supplemental flash/strobe placement
+          - Composition rules: leading lines, symmetry, rule of thirds application
+          - What to include and exclude from each frame
+          - Styling/prop placement for each room
+
+          Cover these rooms/areas (as applicable to the property):
+          a) Front exterior (multiple angles: straight-on, angled, across street)
+          b) Back exterior and yard
+          c) Living room / great room
+          d) Kitchen (wide shot + detail shots of counters, appliances, backsplash)
+          e) Dining room or dining area
+          f) Primary bedroom
+          g) Primary bathroom
+          h) Secondary bedrooms
+          i) Secondary bathrooms
+          j) Home office / bonus room
+          k) Basement / recreation room
+          l) Garage (if impressive or well-organized)
+          m) Patio / deck / outdoor living
+          n) Pool and landscaping
+          o) Aerial / drone shots
+
+      ============================================================
+      SECTION 2: PHOTO EDITING AND POST-PROCESSING
+      ============================================================
+
+      2.1 Editing Standards:
+          - HDR processing guidelines: natural-looking HDR, avoid the over-processed "glow"
+          - Window pull technique: properly expose both interior and window views
+          - White balance correction for consistent color temperature throughout the set
+          - Perspective correction: vertical lines must be straight, no barrel distortion
+          - Sky replacement policy: when appropriate, how to do it naturally
+          - Lawn enhancement: green-up if needed, but keep it realistic
+          - Virtual staging vs. physical staging decision framework:
+            * When to use virtual staging (vacant properties, budget constraints)
+            * Virtual staging quality standards (photorealistic, consistent style)
+            * Disclosure requirements for virtually staged photos
+            * Which rooms benefit most from virtual staging
+
+      2.2 Photo Enhancement Checklist:
+          - Brightness and exposure optimization (target histogram)
+          - Shadow recovery in dark corners
+          - Highlight recovery for blown-out windows
+          - Color vibrancy adjustment (enhance without oversaturating)
+          - Noise reduction for low-light interiors
+          - Sharpening and detail enhancement
+          - Lens correction (chromatic aberration, vignetting)
+          - Remove personal items, trash cans, visible wires in post-processing
+          - Remove vehicles from driveway if they detract from the property
+
+      ============================================================
+      SECTION 3: VIDEO AND 3D TOUR STRATEGY
+      ============================================================
+
+      3.1 Video Tour Plan:
+          - Recommended video length: 60-90 seconds for social media, 2-3 minutes for full tour
+          - Script outline with narration points for each room transition
+          - Movement plan: smooth gimbal movements, avoid shaky transitions
+          - Music selection guidance: upbeat for family homes, sophisticated for luxury
+          - Opening hook (first 3 seconds are critical for social media retention)
+          - Closing call-to-action with agent contact information overlay
+          - Vertical video version plan (9:16) for Instagram Reels and TikTok
+          - Horizontal video version plan (16:9) for YouTube and MLS
+
+      3.2 3D Virtual Tour:
+          - Matterport or equivalent 3D tour scan point planning
+          - Scan point placement map for complete coverage with minimal points
+          - Dollhouse view optimization for the floor plan
+          - Highlight reel creation within the 3D tour (5-7 key moments)
+          - Measurement mode activation for buyers who want dimensions
+          - When 3D tours add value vs. when photos alone suffice (price point analysis)
+
+      3.3 Drone/Aerial Content:
+          - Drone shot types: overhead, angled approach, orbit, pull-away reveal
+          - Altitude recommendations for different shots (50ft, 100ft, 200ft, 400ft)
+          - Property boundary visualization from aerial perspective
+          - Neighborhood context shots showing proximity to amenities
+          - FAA Part 107 compliance reminders and no-fly zone checks
+          - Best weather and time of day for drone photography
+          - Video vs. photo drone shots and when each is appropriate
+
+      ============================================================
+      SECTION 4: VISUAL MARKETING ACROSS PLATFORMS
+      ============================================================
+
+      4.1 MLS Photo Requirements:
+          - Minimum resolution: 2048 x 1536 pixels or higher
+          - Maximum file size considerations by MLS system
+          - Photo naming convention for proper ordering
+          - Watermark policy (generally discouraged on MLS)
+          - Required disclosures for enhanced or virtually staged photos
+
+      4.2 Portal-Specific Optimization:
+          - Zillow: first 5 photos are most critical (thumbnail grid display)
+          - Realtor.com: lead photo appears in map search, optimize for small display
+          - Redfin: high-quality photos significantly impact "Hot Home" designation
+          - Social media: square crops for Instagram, 4:5 for feed, 9:16 for stories
+          - Print materials: CMYK color profile, 300 DPI minimum
+
+      4.3 Property Flyer and Print Design:
+          - Layout template recommendation (single page, double-sided, trifold)
+          - Photo selection for print (highest impact 4-6 photos)
+          - QR code placement linking to full photo gallery and virtual tour
+          - Font and color scheme aligned with the property's market positioning
+          - Information hierarchy for print materials
+
+      4.4 Social Media Visual Content Calendar:
+          - Pre-listing teaser content (2-3 posts before going live)
+          - Launch day content suite (carousel, video, story sequence)
+          - Weekly content rotation: new photos, video clips, neighborhood highlights
+          - Countdown to open house visual content
+          - Price adjustment visual content (if needed)
+
+      Deliver the complete visual optimization strategy as an actionable playbook that a listing agent or photographer can execute immediately.
+    model: haiku
+    max_turns: 10
+
+  - id: pricing-strategy
+    depends_on: [market-analysis, comp-analysis]
+    prompt: |
+      You are a pricing strategist with deep expertise in real estate pricing psychology, auction theory, and behavioral economics as applied to property sales. Using both the market analysis and CMA data, develop a comprehensive pricing strategy for {input.property_address}.
+
+      Market Analysis: {steps.market-analysis.output}
+      Comparative Market Analysis: {steps.comp-analysis.output}
+
+      Property Details:
+      - Address: {input.property_address}
+      - Type: {input.property_type}
+      - Proposed Listing Price: ${input.listing_price}
+      - Key Features: {input.key_features}
+      - Target Buyer: {input.target_buyer_profile}
+
+      ============================================================
+      SECTION 1: PRICING FOUNDATION AND CMA RECONCILIATION
+      ============================================================
+
+      1.1 CMA-Derived Value Range:
+          - Minimum supportable price (most conservative CMA interpretation)
+          - Most probable value (weighted CMA central tendency)
+          - Maximum supportable price (most optimistic CMA interpretation)
+          - Confidence interval and range width analysis
+          - How the proposed price of ${input.listing_price} falls within this range
+          - Percentage deviation from CMA central tendency
+
+      1.2 Appraisal Risk Assessment:
+          - Probability of appraisal at or above the listing price (low/medium/high)
+          - Key risk factors that could cause appraisal issues
+          - Comparable support strength for the proposed price
+          - Appraisal gap contingency recommendations
+          - Impact of financing type on appraisal requirements (conventional vs. FHA vs. VA)
+
+      1.3 Market Timing Impact:
+          - Current month's historical performance in this market
+          - Seasonal price premium or discount factor
+          - Interest rate trajectory impact on buyer purchasing power
+          - Inventory trend impact: is competition increasing or decreasing?
+          - Days on market trend and its impact on pricing strategy
+          - Major local events or dates that could affect showing activity
+
+      ============================================================
+      SECTION 2: PRICING PSYCHOLOGY AND STRATEGY OPTIONS
+      ============================================================
+
+      Present three distinct pricing strategies with detailed analysis of each:
+
+      2.1 STRATEGY A - Aspirational Pricing (Above Market):
+          - Recommended price point and exact figure
+          - Price anchoring psychology: how this sets a high reference point
+          - Target buyer: who would pay above market and why?
+          - Pros: higher net if successful, room to negotiate, perception of premium quality
+          - Cons: longer DOM, stigma of price reductions, buyer agent avoidance
+          - Best conditions for this strategy (hot market, unique property, limited inventory)
+          - Expected DOM at this price
+          - Planned price reduction schedule if no offers within timeframes
+          - Net proceeds estimate after extended marketing period costs
+
+      2.2 STRATEGY B - Market-Rate Pricing (At CMA Value):
+          - Recommended price point and exact figure
+          - Rationale for specific number choice (avoid round numbers, use charm pricing?)
+          - Search bracket optimization: price at the top of a bracket, not bottom of next
+            Example: $499,000 appears in $400K-$500K searches, $501,000 only in $500K-$600K
+          - Pros: fastest path to qualified buyers, realistic expectations, strong showings
+          - Cons: may leave money on the table in hot market, less negotiation room
+          - Expected DOM at this price
+          - Probability of multiple offers (based on current market conditions)
+          - Net proceeds estimate
+
+      2.3 STRATEGY C - Value Pricing (Below Market):
+          - Recommended price point (3-5% below CMA central tendency)
+          - Auction dynamics: pricing low to generate a bidding war
+          - When this strategy works (hot market, desirable area, unique property) and when it backfires
+          - Pros: maximum foot traffic, multiple offers, emotional bidding, faster sale
+          - Cons: risk of selling below value if no competition materializes, seller anxiety
+          - Escalation clause strategy and how to manage multiple offers
+          - Offer review date setting and communication strategy
+          - Expected number of showings and offers at this price
+          - Net proceeds estimate (assuming competitive bidding reaches market value or above)
+
+      ============================================================
+      SECTION 3: SEARCH BRACKET OPTIMIZATION
+      ============================================================
+
+      3.1 Portal Search Behavior Analysis:
+          - Common price filter brackets on Zillow, Realtor.com, Redfin
+          - Which brackets the property falls into at the proposed price
+          - Potential exposure gain from price adjustments that cross bracket boundaries
+          - Example: A property at $505,000 misses all buyers searching up to $500K
+          - Recommended price points that maximize search exposure
+
+      3.2 Psychological Price Points:
+          - Charm pricing analysis (ending in 9, 5, or 0)
+          - Prestige pricing analysis (round numbers for luxury, odd numbers for value)
+          - Left-digit effect: $499,000 vs. $500,000 perception difference
+          - Recommended exact list price with reasoning
+
+      3.3 Competition-Based Positioning:
+          - How the recommended price positions against active competing listings
+          - Value proposition comparison: what does the buyer get at this price vs. alternatives?
+          - "Next best alternative" analysis: what would a buyer buy instead?
+
+      ============================================================
+      SECTION 4: NEGOTIATION FRAMEWORK
+      ============================================================
+
+      4.1 Pre-Negotiation Preparation:
+          - Seller's true minimum acceptable price (discuss how to determine)
+          - Seller's motivation level assessment (timeline pressure, financial needs)
+          - Cost of continued holding: mortgage, taxes, insurance, opportunity cost per month
+          - Walk-away point calculation
+
+      4.2 Offer Evaluation Matrix:
+          - Price is only one factor - create a weighted scoring model:
+            * Offer price (weight: 40%)
+            * Financing strength - pre-approval, down payment, lender reputation (weight: 20%)
+            * Contingencies - inspection, appraisal, financing, sale of home (weight: 15%)
+            * Closing timeline alignment with seller's needs (weight: 10%)
+            * Earnest money deposit amount (weight: 5%)
+            * Escalation clause presence and cap (weight: 5%)
+            * Buyer flexibility on repairs and closing costs (weight: 5%)
+          - Score each offer component and calculate a total "Offer Strength Score"
+
+      4.3 Counter-Offer Strategies:
+          - Single offer scenario: counter-offer tactics and positioning
+          - Multiple offer scenario: best-and-final request management
+          - Low-ball offer response strategy (when to counter vs. reject)
+          - Contingency removal negotiation playbook
+          - Repair request negotiation framework (credit vs. fix vs. as-is)
+          - Closing date negotiation leverage points
+
+      4.4 Price Reduction Decision Framework:
+          - Trigger points: after how many days/showings without offers?
+          - Recommended reduction amounts (not token cuts - meaningful reductions)
+          - Communication strategy for price reductions (re-marketing as "new price")
+          - Maximum number of reductions before considering taking off market
+          - Off-market cooling period strategy if needed
+
+      ============================================================
+      SECTION 5: FINANCIAL PROJECTIONS
+      ============================================================
+
+      5.1 Net Proceeds Calculator:
+          For each pricing strategy (A, B, C), calculate estimated seller net proceeds:
+          - Gross sale price (expected, not just list price)
+          - Less: agent commissions (buyer's agent + listing agent, estimate total %)
+          - Less: closing costs (title insurance, escrow fees, transfer taxes)
+          - Less: property tax proration
+          - Less: mortgage payoff (note: we may not know this - present as a variable)
+          - Less: staging and preparation costs (if applicable)
+          - Less: repair credits or concessions (estimated)
+          - Less: home warranty (if offered as incentive)
+          - Equals: estimated net proceeds range
+
+      5.2 Holding Cost Analysis:
+          - Monthly carrying costs (mortgage, taxes, insurance, utilities, HOA, maintenance)
+          - Cost of each additional 30 days on market
+          - Break-even analysis: at what point does a lower price net more than waiting?
+          - Opportunity cost of delayed sale (investment returns on proceeds, moving timeline)
+
+      5.3 Investment Return Analysis (if applicable for {input.property_type}):
+          - Current rental yield at purchase price
+          - Cap rate analysis
+          - Cash-on-cash return for investor buyers
+          - 5-year appreciation projection based on market trends
+          - Total return (appreciation + rental income) vs. alternative investments
+
+      ============================================================
+      SECTION 6: FINAL PRICING RECOMMENDATION
+      ============================================================
+
+      Based on all analysis, provide:
+      - THE recommended listing price (a specific dollar amount)
+      - The primary pricing strategy (A, B, or C) and why
+      - A 90-day pricing roadmap with decision triggers
+      - Key assumptions underlying the recommendation
+      - Risks to monitor that could invalidate the recommendation
+      - Seller conversation talking points to explain and defend the pricing recommendation
+
+      Format as a professional pricing presentation that a listing agent can share with their client.
+    model: sonnet
+    max_turns: 10
+
+  - id: distribution-plan
+    depends_on: [description-generation, photo-optimization, pricing-strategy]
+    prompt: |
+      You are a real estate marketing and distribution strategist specializing in multi-channel listing exposure, digital marketing funnels for real estate, and modern property marketing technologies. Synthesize all previous analyses to create a comprehensive distribution and marketing plan for {input.property_address}.
+
+      Listing Description Package: {steps.description-generation.output}
+      Visual Strategy: {steps.photo-optimization.output}
+      Pricing Strategy: {steps.pricing-strategy.output}
+      Market Analysis: {steps.market-analysis.output}
+
+      Property Details:
+      - Address: {input.property_address}
+      - Type: {input.property_type}
+      - Listing Price: ${input.listing_price}
+      - Target Buyer: {input.target_buyer_profile}
+
+      ============================================================
+      SECTION 1: MLS AND SYNDICATION STRATEGY
+      ============================================================
+
+      1.1 MLS Listing Optimization:
+          - Optimal day and time to enter the listing in MLS (research-backed)
+          - "Coming Soon" status utilization strategy (pros/cons, timing)
+          - Status change tactics: Coming Soon -> Active -> price changes
+          - Broker remarks section: what to include for buyer's agents
+          - Showing instructions optimization (easy access = more showings)
+          - Virtual tour link placement and 3D tour embedding
+          - Open house scheduling (broker's open vs. public open)
+          - Compensation offer strategy and its impact on showing volume
+
+      1.2 Syndication Network:
+          - Primary portals: Zillow, Trulia, Realtor.com, Redfin, Homes.com
+          - Secondary portals: Movoto, Homesnap, HomeLight, Opendoor
+          - International portals: Juwai (Chinese buyers), RightMove (UK), etc. - if applicable
+          - Luxury portals: Mansion Global, LuxuryEstate, Sotheby's (if price qualifies)
+          - Syndication timing: ensure all portals update within 24 hours of MLS entry
+          - IDX feed monitoring: verify listing appears correctly on top agent websites
+          - Enhanced listing features by portal (Zillow Showcase, Realtor.com Advantage)
+
+      1.3 Listing Data Quality Assurance:
+          - Verify all data fields are complete and accurate across all platforms
+          - Photo ordering consistency across syndicated sites
+          - Virtual tour link propagation verification
+          - Contact information and showing instructions accuracy
+          - Auto-correct monitoring for address and feature data
+
+      ============================================================
+      SECTION 2: DIGITAL MARKETING CAMPAIGN
+      ============================================================
+
+      2.1 Social Media Marketing Plan:
+
+          FACEBOOK/META:
+          - Organic: Property listing post with carousel of best photos, neighborhood video
+          - Paid: Facebook/Instagram ads targeting plan
+            * Audience 1: Geographic targeting (10-30 mile radius for local buyers)
+            * Audience 2: Demographic targeting (income level, life events - recently engaged, new job)
+            * Audience 3: Interest targeting (real estate, home improvement, related lifestyle)
+            * Audience 4: Retargeting website visitors who viewed the listing
+            * Audience 5: Lookalike audience based on past buyer profiles
+          - Ad formats: Single image, carousel, video, collection ad
+          - Budget allocation: $X per day, duration, optimization for clicks vs. leads
+          - A/B testing plan: test headlines, images, audiences, ad copy
+          - Facebook Marketplace listing strategy
+
+          INSTAGRAM:
+          - Feed posts: 3-5 carousel posts (property highlights, before/after staging, neighborhood)
+          - Reels: 30-second property tour, neighborhood highlight, "did you know" facts
+          - Stories: behind-the-scenes staging, countdown to open house, poll engagement
+          - IGTV/long-form: full property tour with narration
+          - Hashtag strategy: 30 hashtags per post, mix of branded, local, real estate, lifestyle
+          - Posting schedule and frequency (3-4x per week during active listing)
+          - Collaboration with local lifestyle influencers (if budget allows)
+
+          YOUTUBE:
+          - Full property tour video (2-3 minutes, professionally edited)
+          - Neighborhood guide video (3-5 minutes, lifestyle content)
+          - Video SEO: title, description, tags optimization for local real estate searches
+          - YouTube Shorts for quick property highlights
+          - Thumbnail optimization for maximum click-through rate
+
+          TIKTOK:
+          - 15-30 second property highlights (trending audio, engaging hooks)
+          - "Day in the life" content featuring the neighborhood
+          - Price reveal format (popular trend for real estate)
+          - Trending sound integration strategy
+          - Post frequency: daily during first week of listing
+
+          LINKEDIN (for commercial properties or luxury residential):
+          - Professional angle: investment opportunity, business location benefits
+          - Target audience: business owners, executives, investors
+          - Article: neighborhood development and investment potential
+
+          NEXTDOOR:
+          - Hyper-local community post
+          - Leverage neighbor network for word-of-mouth referrals
+          - Open house announcements
+
+      2.2 Email Marketing Campaigns:
+          - Database segmentation: active buyers, past clients, referral network, agents
+          - Campaign 1: "Just Listed" announcement (day 1)
+          - Campaign 2: "Open House Invitation" (3-5 days before open house)
+          - Campaign 3: "Price Improvement" (if/when applicable)
+          - Campaign 4: "Under Contract" celebration (social proof for future listings)
+          - Agent-to-agent email blast: highlight commission, easy showing, key features
+          - Drip campaign for interested but uncommitted leads (3-email sequence)
+          - Subject line options with open rate optimization
+
+      2.3 Paid Search and Display:
+          - Google Ads: target keywords like "[city] homes for sale," "[neighborhood] real estate"
+          - Retargeting display ads for visitors who viewed the listing online
+          - Geofencing: target ads to people who visited competing open houses
+          - Waze advertising for properties near major roads (drive-by awareness)
+          - Budget allocation and ROI expectations for paid channels
+
+      ============================================================
+      SECTION 3: TRADITIONAL MARKETING
+      ============================================================
+
+      3.1 Signage and Physical Marketing:
+          - Yard sign specifications and placement
+          - Directional signs for open houses (quantity, placement locations)
+          - Rider signs: "New Listing," "Open House," "Price Improved," "Virtual Tour"
+          - QR code integration on signage (link to virtual tour or landing page)
+          - Window display for office listing (if applicable)
+
+      3.2 Print Marketing:
+          - Just Listed postcards: quantity, target area (surrounding neighborhood radius)
+          - Property brochures/flyers: design specs, distribution plan
+          - Magazine advertising: local real estate publications, luxury lifestyle magazines
+          - Newspaper advertising: weekend real estate section (if market demographics warrant)
+          - Door hangers for immediate neighborhood (50-100 surrounding homes)
+
+      3.3 Open House Strategy:
+          - Broker's open: timing, catering, incentives for agent attendance
+          - Public open house: weekend timing, duration, frequency
+          - Twilight open house: for properties that show well at dusk (pool, lighting, views)
+          - Mega open house: event-style with local vendors, food, entertainment
+          - Virtual open house: Facebook Live or Zoom walkthrough for remote buyers
+          - Sign-in and lead capture system (digital preferred for follow-up automation)
+          - Follow-up protocol: 24-hour post-open-house contact with all attendees
+
+      3.4 Networking and Referral Marketing:
+          - Top buyer's agents to personally call or message (list criteria)
+          - Relocation company contacts (corporate relocation listings)
+          - Attorney and CPA referral network activation
+          - Mortgage lender partnership marketing
+          - Builder and developer network (for land or commercial properties)
+
+      ============================================================
+      SECTION 4: TIMELINE AND EXECUTION CALENDAR
+      ============================================================
+
+      Create a day-by-day marketing execution calendar:
+
+      4.1 Pre-Launch (Days -14 to -1):
+          - Day -14: Professional photography and video shoot
+          - Day -10: Photo editing and virtual staging completion
+          - Day -7: "Coming Soon" MLS status + social media teaser campaign
+          - Day -5: Email database "sneak peek" blast
+          - Day -3: Print materials delivered (brochures, postcards, signs)
+          - Day -1: Final listing review, all digital assets prepared
+
+      4.2 Launch Week (Days 1-7):
+          - Day 1: MLS active, all portals syndicated, "Just Listed" email blast
+          - Day 1: Social media launch (all platforms simultaneously)
+          - Day 2: Paid ad campaigns activated
+          - Day 3: Postcards mailed to surrounding neighborhood
+          - Day 4: Personal outreach to top buyer's agents
+          - Day 5: Broker's open house
+          - Day 6-7: First public open house weekend
+
+      4.3 Sustained Marketing (Days 8-30):
+          - Weekly social media content rotation
+          - Bi-weekly open houses (if no offers)
+          - Day 14: Marketing effectiveness review and pivot if needed
+          - Day 21: Price positioning review based on showing feedback
+          - Day 30: Comprehensive marketing review and strategy adjustment
+
+      4.4 Extended Marketing (Days 31-60, if needed):
+          - Fresh content creation (new photos, seasonal updates)
+          - Price adjustment execution plan
+          - New marketing channel activation
+          - Re-targeting campaigns for warm leads
+          - Off-market networking push
+
+      ============================================================
+      SECTION 5: PERFORMANCE TRACKING AND OPTIMIZATION
+      ============================================================
+
+      5.1 Key Performance Indicators:
+          - Online views per week (by portal)
+          - Saved/favorited count (Zillow, Realtor.com)
+          - Showing requests per week
+          - Open house attendance
+          - Social media engagement (impressions, clicks, shares, saves)
+          - Email campaign metrics (open rate, click rate, response rate)
+          - Paid ad performance (CPM, CPC, CPL, conversion rate)
+          - Agent feedback from showings (compile and analyze themes)
+
+      5.2 Optimization Triggers:
+          - If views are low but showings are normal: description/photo issue
+          - If views are high but showings are low: pricing issue
+          - If showings are high but no offers: condition/staging issue or price
+          - If offer quality is poor: marketing channel targeting issue
+          - Decision framework for each scenario with specific action items
+
+      5.3 Reporting:
+          - Weekly seller update template (what happened, what's next, market context)
+          - Showing feedback compilation and analysis format
+          - Monthly marketing expense and ROI report
+          - Competitive listing activity update
+
+      Deliver the complete distribution plan as an actionable playbook with specific dates, budgets, and responsible parties for each initiative.
+    model: sonnet
+    max_turns: 10

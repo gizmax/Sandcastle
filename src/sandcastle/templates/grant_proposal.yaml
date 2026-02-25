@@ -1,0 +1,1523 @@
+# name: Grant Proposal Builder
+# description: Parse grant RFPs, check eligibility, draft comprehensive proposals with budgets, and generate compliance checklists
+# tags: [Grant, Proposal, RFP, Funding, Compliance]
+# category: general_ai
+
+name: grant-proposal
+description: Parse grant RFPs, check eligibility, draft comprehensive proposals with budgets, and generate compliance checklists
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["organization_name", "grant_program", "rfp_url_or_text", "project_description", "requested_amount"]
+  properties:
+    organization_name:
+      type: string
+      description: "Name of the applicant organization"
+    grant_program:
+      type: string
+      description: "Name of the grant program or funding opportunity"
+    rfp_url_or_text:
+      type: string
+      description: "Full text of the RFP/FOA, or URL to the funding opportunity announcement"
+    project_description:
+      type: string
+      description: "Brief description of the proposed project (goals, approach, expected outcomes)"
+    requested_amount:
+      type: number
+      description: "Total amount of funding requested in USD"
+
+steps:
+  - id: rfp-analysis
+    prompt: |
+      You are a senior grants analyst with 20+ years of experience parsing and interpreting federal, state, and private foundation Request for Proposals (RFPs), Funding Opportunity Announcements (FOAs), Notices of Funding Opportunity (NOFOs), and Solicitations. You have deep expertise in federal grant requirements including OMB Uniform Guidance (2 CFR Part 200), agency-specific regulations, and private foundation guidelines.
+
+      Analyze the following RFP/funding opportunity for {input.grant_program}:
+
+      RFP/Funding Opportunity Text:
+      {input.rfp_url_or_text}
+
+      Applicant: {input.organization_name}
+      Requested Amount: ${input.requested_amount}
+      Project Description: {input.project_description}
+
+      Perform an exhaustive analysis of the funding opportunity covering every dimension that will inform the proposal writing process.
+
+      ============================================================
+      SECTION 1: FUNDING OPPORTUNITY OVERVIEW
+      ============================================================
+
+      1.1 Program Identification:
+          - Funding agency/organization name and division/office
+          - Catalog of Federal Domestic Assistance (CFDA) number (if federal)
+          - Funding Opportunity Number / RFP number
+          - Program title and subtitle
+          - Authorization legislation (if applicable - cite the specific public law)
+          - Program purpose statement and legislative intent
+          - Funding mechanism type: grant, cooperative agreement, contract, subaward
+          - New program vs. continuation/recompetition of existing program
+          - Historical context: how many years has this program been funded?
+
+      1.2 Funding Parameters:
+          - Total program funding available for this cycle
+          - Expected number of awards
+          - Award range: minimum and maximum award amounts
+          - Award period: start date, end date, total performance period
+          - Option for continuation/renewal: years and conditions
+          - Cost sharing/matching requirements:
+            * Percentage or fixed amount required
+            * In-kind vs. cash match requirements
+            * Documentation requirements for match
+            * Allowable sources for matching funds
+          - Indirect cost rate provisions:
+            * Agency-specific indirect cost rate limitations
+            * De minimis rate option (10% of MTDC if no negotiated rate)
+            * Training grant indirect cost limitations
+            * Administrative cost caps (if any)
+          - Pre-award costs allowability
+          - Budget period vs. project period distinction
+
+      1.3 Key Dates and Timeline:
+          - Application due date and time (include timezone)
+          - Letter of Intent (LOI) deadline (if required)
+          - Pre-application deadline (if applicable)
+          - Questions/inquiries deadline
+          - Applicant webinar/conference dates
+          - Anticipated award announcement date
+          - Anticipated award start date
+          - Mandatory reporting deadlines during project period
+          - No-cost extension policies
+
+      ============================================================
+      SECTION 2: ELIGIBILITY AND REQUIREMENTS ANALYSIS
+      ============================================================
+
+      2.1 Eligible Applicant Types:
+          - Organization type eligibility checklist:
+            * State governments
+            * County governments
+            * City or township governments
+            * Special district governments
+            * Independent school districts
+            * Public and state-controlled institutions of higher education
+            * Private institutions of higher education
+            * Nonprofits with 501(c)(3) status
+            * Nonprofits without 501(c)(3) status
+            * For-profit organizations (small businesses)
+            * Native American tribal governments
+            * Native American tribal organizations
+            * Faith-based organizations
+            * Community-based organizations
+            * Individuals
+            * Unaffiliated individuals
+            * Foreign entities
+          - Is {input.organization_name} an eligible applicant type? (Assess based on name)
+          - Consortium/partnership eligibility rules
+          - Subrecipient/subcontractor eligibility requirements
+          - PI/PD eligibility requirements (degree, experience, citizenship)
+          - Debarment/suspension check requirement (SAM.gov)
+
+      2.2 Registration Requirements:
+          - SAM.gov registration (active and current, UEI number)
+          - Grants.gov registration and authorized organizational representative (AOR)
+          - Agency-specific registration systems (eRA Commons, Research.gov, etc.)
+          - DUNS/UEI number requirement
+          - Registration timeline warnings (SAM can take 2-8 weeks)
+          - State single point of contact (SPOC) requirements (Executive Order 12372)
+
+      2.3 Program-Specific Eligibility:
+          - Geographic restrictions (specific states, regions, urban/rural, tribal areas)
+          - Population served requirements (specific demographics, underserved communities)
+          - Programmatic requirements (evidence-based interventions, specific approaches)
+          - Prior award restrictions (can previous grantees apply?)
+          - Number of applications per organization limitations
+          - Mandatory partnerships or collaboration requirements
+          - Letter of support requirements (from whom, how many)
+
+      ============================================================
+      SECTION 3: APPLICATION STRUCTURE AND REQUIREMENTS
+      ============================================================
+
+      3.1 Required Application Components:
+          List every required document and form with specifications:
+
+          STANDARD FEDERAL FORMS (if federal grant):
+          - SF-424: Application for Federal Assistance (which version: individual, formula, mandatory?)
+          - SF-424A: Budget Information - Non-Construction Programs
+          - SF-424B: Assurances - Non-Construction Programs
+          - SF-424C: Budget Information - Construction Programs (if applicable)
+          - SF-424D: Assurances - Construction Programs (if applicable)
+          - SF-LLL: Disclosure of Lobbying Activities
+          - Key Personnel forms
+          - Research & Related (R&R) forms (if research grant)
+          - PHS 398 forms (if NIH/HHS)
+
+          NARRATIVE COMPONENTS:
+          For each required narrative section:
+          - Section name and heading
+          - Page limit and formatting requirements
+          - Content requirements and specific questions to address
+          - Review criteria alignment (which review criteria does this section address?)
+          - Recommended subsections and organization
+          - Page allocation strategy within limits
+
+          SUPPORTING DOCUMENTS:
+          - Budget narrative/justification requirements
+          - Biographical sketches/CVs (format, page limit, required information)
+          - Current and pending support documentation
+          - Facilities and equipment description
+          - Letters of support/commitment (from whom, what they should say)
+          - Data management plan (if applicable)
+          - Human subjects protection documentation
+          - Environmental impact documentation
+          - Organizational charts
+          - Resumes and job descriptions for key personnel
+          - Logic model or theory of change (if required)
+          - Evaluation plan requirements
+          - Sustainability plan requirements
+          - Dissemination plan requirements
+          - Timeline/Gantt chart requirements
+          - Indirect cost rate agreement (NICRA) documentation
+
+      3.2 Formatting Requirements:
+          - Font type and size (typically Times New Roman 12pt or Arial 11pt)
+          - Margins (typically 1 inch on all sides)
+          - Line spacing (single, 1.5, or double)
+          - Page numbering requirements
+          - Header/footer requirements
+          - File naming conventions
+          - File format requirements (PDF, Word, Excel)
+          - Maximum file sizes
+          - Appendix policies (what can/cannot be included)
+          - Reference/citation format requirements
+          - Table and figure inclusion rules
+
+      3.3 Submission Requirements:
+          - Submission portal (Grants.gov, agency-specific system, email, mail)
+          - Electronic submission technical requirements
+          - Submission confirmation and tracking
+          - Late submission policies
+          - Withdrawal and resubmission policies
+          - Multi-part submission requirements (if application has multiple components)
+
+      ============================================================
+      SECTION 4: REVIEW CRITERIA AND SCORING
+      ============================================================
+
+      4.1 Review Process:
+          - Review type: peer review, panel review, merit review, technical review
+          - Number of reviewers per application
+          - Reviewer expertise and selection process
+          - Review timeline
+          - Scored vs. unscored review criteria
+          - Minimum score thresholds for funding consideration
+          - Programmatic priorities or preferences (bonus points for certain populations, approaches)
+
+      4.2 Detailed Scoring Rubric:
+          For each scored criterion:
+          - Criterion name and weight (points or percentage)
+          - Sub-criteria and point distribution within the criterion
+          - Scoring levels (Excellent/Good/Fair/Poor with point ranges)
+          - What "excellent" looks like for each criterion (reviewer expectations)
+          - Common weaknesses that result in low scores
+          - Specific questions reviewers will ask
+          - Evidence and documentation that strengthens scores
+
+          Typical federal grant criteria include:
+          a) Need/Problem Statement (typically 15-20%):
+             - Data quality and recency expectations
+             - Local vs. national data requirements
+             - Gap analysis expectations
+             - Target population description requirements
+
+          b) Goals/Objectives/Project Design (typically 25-35%):
+             - SMART objectives expectations
+             - Logic model or theory of change requirements
+             - Evidence base requirements (What Works Clearinghouse, SAMHSA NREPP, etc.)
+             - Innovation vs. replication expectations
+             - Implementation plan detail level
+
+          c) Organizational Capacity (typically 15-20%):
+             - Track record demonstration requirements
+             - Key personnel qualifications expectations
+             - Partnership documentation strength
+             - Financial management capacity indicators
+             - Past performance review process
+
+          d) Evaluation Plan (typically 10-15%):
+             - Process vs. outcome evaluation expectations
+             - Data collection methodology requirements
+             - External evaluator requirements
+             - Performance measures and targets
+             - Data analysis approach
+
+          e) Budget/Cost Effectiveness (typically 10-15%):
+             - Budget reasonableness standards
+             - Cost per participant/unit expectations
+             - Budget-narrative alignment requirements
+             - Cost effectiveness demonstration
+             - Leveraged resources and sustainability
+
+          f) Sustainability Plan (typically 5-10%):
+             - Post-funding continuation strategy
+             - Diversified funding sources
+             - Institutionalization evidence
+             - Community ownership demonstration
+
+      4.3 Competitive Intelligence:
+          - Estimated number of applications expected
+          - Historical funding rates for this program
+          - Average scores of funded vs. unfunded applications
+          - Common reasons for rejection in this program
+          - Reviewer pet peeves and preferences
+          - Agency priorities that may influence funding decisions beyond scores
+          - Congressional or political factors that may influence awards
+
+      ============================================================
+      SECTION 5: STRATEGIC ASSESSMENT
+      ============================================================
+
+      5.1 Fit Assessment:
+          - Overall alignment score (1-10) between {input.organization_name}'s project and the RFP
+          - Strengths of the application (natural competitive advantages)
+          - Weaknesses to address or mitigate in the proposal
+          - Opportunities to differentiate from competitors
+          - Threats to the application's competitiveness
+          - Go/no-go recommendation with detailed reasoning
+
+      5.2 Proposal Strategy Recommendations:
+          - Key messages to emphasize throughout the proposal
+          - Narrative framing strategy (what story to tell)
+          - Data and evidence strategy (what to cite, what to collect)
+          - Partnership strategy (who to involve and why)
+          - Budget strategy (how to allocate ${input.requested_amount} for maximum impact and reviewer appeal)
+          - Reviewer psychology: what makes reviewers champion an application
+
+      Format the entire RFP analysis as a reference document that the proposal writing team will use throughout the drafting process. Be exhaustive - every detail matters in competitive grant writing.
+    model: sonnet
+    max_turns: 10
+
+  - id: eligibility-check
+    depends_on: [rfp-analysis]
+    prompt: |
+      You are a grants compliance specialist with deep expertise in federal regulations (2 CFR Part 200 - Uniform Administrative Requirements, Cost Principles, and Audit Requirements for Federal Awards), state grant requirements, and private foundation eligibility criteria. Perform a comprehensive eligibility verification for {input.organization_name} against the requirements identified in the RFP analysis.
+
+      RFP Analysis: {steps.rfp-analysis.output}
+
+      Organization: {input.organization_name}
+      Grant Program: {input.grant_program}
+      Requested Amount: ${input.requested_amount}
+      Project: {input.project_description}
+
+      ============================================================
+      SECTION 1: ORGANIZATIONAL ELIGIBILITY VERIFICATION
+      ============================================================
+
+      1.1 Entity Type Verification:
+          - Required entity types per the RFP
+          - Assessment: does {input.organization_name} likely qualify?
+          - Documentation needed to prove eligibility:
+            * IRS determination letter (501(c)(3) status)
+            * Articles of incorporation
+            * State registration documentation
+            * Tribal recognition documentation (if applicable)
+          - Red flags or concerns about organizational eligibility
+          - Workarounds if direct eligibility is questionable (fiscal sponsor, consortium)
+
+      1.2 Registration and Administrative Readiness:
+          Create a checklist with status assessment:
+
+          [ ] SAM.gov Registration:
+              - Active registration required? YES/NO
+              - UEI number obtained? [Action item if not]
+              - Registration current or needs renewal? [Check annually]
+              - Estimated time to register if not yet registered: 2-8 weeks
+              - CRITICAL: If not registered, this may be a timeline blocker
+
+          [ ] Grants.gov Registration:
+              - Account created and AOR designated? [Action item if not]
+              - E-Biz POC authorized AOR in Grants.gov? [Critical step often missed]
+              - Test submission completed? [Recommended to avoid technical issues]
+              - Estimated time to complete: 1-3 weeks
+
+          [ ] Agency-Specific System Registration:
+              - eRA Commons (NIH/HHS) - PI account and institutional profile
+              - Research.gov (NSF) - organizational registration
+              - ASAP.gov (Treasury) - payment management
+              - Other agency-specific portals identified in RFP
+
+          [ ] DUNS/UEI Number:
+              - Current and valid?
+              - Matches SAM.gov registration?
+              - Listed correctly on all documents?
+
+          [ ] Indirect Cost Rate:
+              - Negotiated Indirect Cost Rate Agreement (NICRA) with cognizant agency?
+              - If no NICRA, can use 10% de minimis rate?
+              - Agency-specific indirect cost limitations apply?
+              - Indirect cost rate documentation available?
+
+          [ ] Single Audit (2 CFR Part 200, Subpart F):
+              - Does organization expend >$750,000 in federal awards annually?
+              - If yes, Single Audit completed and submitted to Federal Audit Clearinghouse?
+              - Any audit findings that need to be disclosed or resolved?
+              - Corrective action plans for any prior findings?
+
+          [ ] Financial Management Systems:
+              - Accounting system capable of tracking federal funds separately?
+              - Time and effort reporting system in place?
+              - Procurement policies compliant with 2 CFR 200.317-200.327?
+              - Property management system for equipment purchased with grant funds?
+              - Record retention policy (minimum 3 years after final report)?
+
+      1.3 Debarment and Exclusion Check:
+          - SAM.gov Exclusions search requirement
+          - Office of Inspector General (OIG) exclusion list check
+          - State-level debarment list check
+          - Applies to organization AND key personnel
+          - Subrecipient/subcontractor debarment verification responsibility
+
+      ============================================================
+      SECTION 2: PROGRAMMATIC ELIGIBILITY ASSESSMENT
+      ============================================================
+
+      2.1 Geographic Eligibility:
+          - RFP geographic requirements (specific states, regions, communities)
+          - Organization's location and service area
+          - Project implementation location
+          - Evidence needed to demonstrate geographic eligibility
+          - Multi-site considerations (if project spans multiple locations)
+
+      2.2 Population/Community Eligibility:
+          - Target population requirements from the RFP
+          - Organization's demonstrated connection to the target population
+          - Data available to document population characteristics
+          - Community needs assessment availability
+          - Letters of support from target population or community leaders
+
+      2.3 Programmatic Approach Eligibility:
+          - Required evidence-based practices or approaches
+          - Organization's experience with required methodologies
+          - Adaptation vs. fidelity requirements
+          - Required partnerships or collaboration structures
+          - Required infrastructure (technology, facilities, certifications)
+
+      2.4 Key Personnel Eligibility:
+          - PI/PD qualifications requirements (degree, experience, certifications)
+          - Assessment of whether current leadership meets requirements
+          - Co-PI or key personnel requirements
+          - Percent effort requirements (often 25-51% for PI)
+          - Conflict of interest disclosure requirements
+          - Current and pending support limitations
+
+      ============================================================
+      SECTION 3: FINANCIAL ELIGIBILITY AND CAPACITY
+      ============================================================
+
+      3.1 Budget Eligibility:
+          - Is ${input.requested_amount} within the award range?
+          - Cost sharing/match requirements:
+            * Required match amount (calculate exact dollar figure)
+            * Allowable match sources (federal funds cannot match federal funds)
+            * In-kind match calculation methodology
+            * Match documentation requirements
+            * Timeline for match expenditure
+          - Budget category restrictions or caps
+          - Unallowable costs specific to this program
+          - Pre-award cost provisions
+
+      3.2 Financial Capacity Assessment:
+          - Organizational annual budget relative to the grant amount
+            (Rule of thumb: grant should not exceed 50% of annual budget for new grantees)
+          - Cash flow management: can organization advance costs before reimbursement?
+          - Audit history and any findings
+          - Financial management staffing adequacy
+          - Subrecipient monitoring capacity (if planning subawards)
+
+      3.3 Cost Principles Compliance (2 CFR Part 200, Subpart E):
+          Quick assessment of key cost principles:
+          - Allowable costs: general principles of allowability
+          - Reasonable costs: prudent person standard
+          - Allocable costs: proportional benefit to the grant
+          - Consistent treatment: same costs treated the same way for all funding sources
+          - Specific cost items commonly flagged:
+            * Compensation: salary caps (NIH salary cap, if applicable)
+            * Travel: GSA per diem and mileage rates
+            * Equipment: $5,000 threshold, prior approval requirements
+            * Participant support costs: typically not included in indirect cost base
+            * Food and beverages: generally unallowable unless programmatic justification
+            * Consultants: daily rate limitations and documentation
+            * Subcontracts: F&A treatment and monitoring requirements
+
+      ============================================================
+      SECTION 4: ELIGIBILITY RISK ASSESSMENT AND MITIGATION
+      ============================================================
+
+      4.1 Eligibility Risk Matrix:
+          For each eligibility dimension, provide:
+
+          | Requirement | Status | Risk Level | Mitigation Strategy |
+          |------------|--------|-----------|-------------------|
+          | [Req 1]    | Met/Partially Met/Not Met/Unknown | High/Med/Low | [Action item] |
+          | [Req 2]    | ...    | ...       | ...               |
+          | ...        | ...    | ...       | ...               |
+
+      4.2 Critical Path Items:
+          - Requirements that MUST be resolved before submission
+          - Timeline for each critical item
+          - Responsible party assignments
+          - Contingency plans if requirements cannot be met in time
+
+      4.3 Eligibility Narrative Recommendations:
+          - How to present organizational eligibility compellingly in the proposal
+          - How to address potential eligibility concerns proactively
+          - How to demonstrate capacity beyond minimum requirements
+          - How to frame partnerships to strengthen eligibility
+
+      ============================================================
+      SECTION 5: GO/NO-GO DECISION FRAMEWORK
+      ============================================================
+
+      5.1 Eligibility Scorecard:
+          Score each dimension (1-5 scale):
+          - Organizational eligibility: [score] / 5
+          - Administrative readiness: [score] / 5
+          - Programmatic eligibility: [score] / 5
+          - Financial capacity: [score] / 5
+          - Key personnel eligibility: [score] / 5
+          - Partnership requirements: [score] / 5
+          - Overall eligibility score: [weighted average] / 5
+
+      5.2 Final Eligibility Determination:
+          - ELIGIBLE: Organization meets all requirements
+          - CONDITIONALLY ELIGIBLE: Requirements can be met with specific actions before deadline
+          - NOT ELIGIBLE: Fundamental eligibility barriers exist
+          - Detailed explanation of determination
+          - Required actions with deadlines if conditionally eligible
+
+      5.3 Submission Readiness Timeline:
+          - Days until submission deadline
+          - Critical milestones and deadlines between now and submission
+          - Team assignments and workload estimates
+          - External dependencies (letters of support, partner commitments, registrations)
+
+      Deliver the eligibility check as a clear, actionable report that the grants team can use to confirm readiness and prioritize pre-submission tasks.
+    model: haiku
+    max_turns: 10
+
+  - id: proposal-drafting
+    depends_on: [rfp-analysis, eligibility-check]
+    prompt: |
+      You are an award-winning grant writer with a 75%+ funding success rate across federal agencies (NIH, NSF, DOE, ED, SAMHSA, HRSA, DOJ, EPA, USDA), state programs, and private foundations. You understand how to craft narratives that score at the top of reviewer rubrics while remaining authentic and compelling. Draft a comprehensive proposal for {input.organization_name}'s application to {input.grant_program}.
+
+      RFP Analysis: {steps.rfp-analysis.output}
+      Eligibility Assessment: {steps.eligibility-check.output}
+
+      Organization: {input.organization_name}
+      Project: {input.project_description}
+      Requested Amount: ${input.requested_amount}
+
+      ============================================================
+      SECTION 1: EXECUTIVE SUMMARY / ABSTRACT
+      ============================================================
+
+      Write a compelling executive summary (typically 1 page or 250-300 words) that:
+      - Opens with a powerful statement of need grounded in data
+      - Clearly states the project purpose and goals
+      - Describes the target population and geographic area
+      - Outlines the proposed approach in 2-3 sentences
+      - Highlights organizational qualifications in 1-2 sentences
+      - States the funding amount requested and project duration
+      - Closes with expected outcomes and impact
+      - Uses language directly from the RFP criteria (mirror the funder's vocabulary)
+      - Can stand alone as a complete project summary for reviewers and program officers
+
+      Write TWO versions:
+      - Version A: Data-driven, formal tone (for federal grants)
+      - Version B: Story-driven, compelling tone (for foundations)
+
+      ============================================================
+      SECTION 2: STATEMENT OF NEED / PROBLEM STATEMENT
+      ============================================================
+
+      Write a comprehensive needs statement that:
+
+      2.1 National Context:
+          - Present national-level data establishing the scope of the problem
+          - Cite authoritative sources (CDC, Census Bureau, BLS, NCES, peer-reviewed journals)
+          - Show trend data (the problem is growing/persistent/underserved)
+          - Reference relevant policy context (legislation, executive orders, agency priorities)
+          - Use the most recent data available (within last 2-3 years)
+
+      2.2 Local Context:
+          - Present local/regional data specific to the service area
+          - Compare local data to state and national benchmarks (show the gap)
+          - Include demographic data on the target population
+          - Present data on existing service gaps
+          - Include qualitative data (quotes, case examples, focus group findings)
+          - Reference community needs assessments, strategic plans, or other local data sources
+          - Demonstrate cultural and contextual understanding of the community
+
+      2.3 Target Population:
+          - Define the target population with precision (demographics, geography, characteristics)
+          - Present population-specific data on needs and barriers
+          - Describe the lived experience of the target population (humanize the data)
+          - Explain why this population is underserved or disproportionately affected
+          - Quantify the population to be served (realistic numbers based on capacity)
+
+      2.4 Root Cause Analysis:
+          - Identify systemic factors contributing to the problem
+          - Explain why previous approaches have been insufficient
+          - Connect root causes to the proposed intervention approach
+          - Demonstrate understanding of complexity (avoid oversimplification)
+
+      2.5 Consequences of Inaction:
+          - What happens if this funding is not provided?
+          - Economic costs of the problem (cost-burden analysis)
+          - Human costs (health, education, safety, quality of life)
+          - Community-level impact of continued inaction
+
+      Data Formatting Rules:
+      - Every claim backed by a citation
+      - Data tables for complex comparisons
+      - Bullet points for clarity in dense statistical sections
+      - Transition sentences connecting data to the proposed solution
+      - Avoid "data dumping" - every statistic must serve a narrative purpose
+
+      ============================================================
+      SECTION 3: PROJECT DESIGN / APPROACH
+      ============================================================
+
+      3.1 Theory of Change / Logic Model:
+
+          INPUTS -> ACTIVITIES -> OUTPUTS -> SHORT-TERM OUTCOMES -> LONG-TERM OUTCOMES
+
+          Create a complete logic model:
+
+          INPUTS:
+          - Staff (positions, FTE, qualifications)
+          - Funding (${input.requested_amount} + match/leverage)
+          - Facilities and equipment
+          - Partnerships and collaborations
+          - Existing organizational infrastructure
+
+          ACTIVITIES:
+          For each major project activity:
+          - Activity name and description
+          - Evidence base (what research supports this approach?)
+          - Target population for this activity
+          - Frequency, duration, dosage
+          - Responsible staff
+          - Implementation timeline
+          - Fidelity measures
+
+          OUTPUTS (Process Measures):
+          - Number of participants served
+          - Number of sessions/services delivered
+          - Materials produced
+          - Events conducted
+          - Partnerships established
+          - Staff trained
+
+          SHORT-TERM OUTCOMES (1-2 years):
+          - Knowledge/awareness changes
+          - Skill development
+          - Behavior changes
+          - Service access improvements
+          - System changes
+
+          LONG-TERM OUTCOMES (3-5 years):
+          - Population-level changes
+          - System-level changes
+          - Policy changes
+          - Sustainability indicators
+          - Scaled impact
+
+      3.2 Detailed Project Narrative:
+          For each major project component:
+
+          a) Purpose and Rationale:
+             - What the component does and why
+             - Evidence base supporting this approach
+             - How it addresses the identified needs
+             - Alignment with RFP priorities and review criteria
+
+          b) Implementation Plan:
+             - Step-by-step implementation process
+             - Timeline with milestones (Year 1, Year 2, etc.)
+             - Staffing assignments
+             - Participant recruitment and retention strategies
+             - Cultural competency and linguistic accessibility measures
+             - Technology and data infrastructure requirements
+             - Quality assurance and continuous improvement processes
+
+          c) Innovation and Significance:
+             - What makes this approach innovative or distinctive?
+             - How does it build on or advance existing knowledge?
+             - What will be learned regardless of outcome?
+             - Replicability and scalability potential
+
+      3.3 Project Timeline:
+          Create a detailed Gantt chart narrative:
+          - Pre-implementation phase (hiring, training, setup)
+          - Implementation phases (ramp-up, full implementation, sustainability)
+          - Key milestones and deliverables by quarter
+          - Decision points and course-correction opportunities
+          - Reporting deadlines aligned with funder requirements
+
+      3.4 Partnerships and Collaboration:
+          For each key partner:
+          - Organization name and role
+          - Specific contributions (in-kind, financial, programmatic)
+          - History of collaboration with {input.organization_name}
+          - How the partnership strengthens the project
+          - MOU or letter of commitment summary
+          - Governance structure for multi-partner projects
+
+      ============================================================
+      SECTION 4: ORGANIZATIONAL CAPACITY
+      ============================================================
+
+      4.1 Organizational Overview:
+          - Mission, history, and track record
+          - Annual budget and revenue sources
+          - Number of staff and organizational structure
+          - Geographic reach and communities served
+          - Key accomplishments relevant to this project
+          - Awards, recognitions, accreditations
+
+      4.2 Relevant Experience:
+          - Similar projects successfully implemented (with outcomes data)
+          - Federal grant management experience (specific awards, amounts, agencies)
+          - Current programs serving the target population
+          - Evaluation and data collection experience
+          - Financial management and compliance track record
+
+      4.3 Key Personnel:
+          For each key position:
+          - Name (or "To Be Hired") and title
+          - Percent effort on this project
+          - Qualifications and relevant experience
+          - Role and responsibilities on this project
+          - How their expertise specifically strengthens the project
+          - Biosketches/CVs summary (highlight most relevant credentials)
+
+      4.4 Facilities and Resources:
+          - Physical space for project implementation
+          - Technology infrastructure
+          - Data management systems
+          - Transportation resources (if relevant)
+          - Existing materials, curricula, or tools to leverage
+
+      ============================================================
+      SECTION 5: EVALUATION PLAN
+      ============================================================
+
+      5.1 Evaluation Framework:
+          - Evaluation approach (formative + summative)
+          - Internal vs. external evaluator decision and rationale
+          - Evaluation questions aligned with project goals
+          - Evaluation design (quasi-experimental, pre-post, comparison group, RCT)
+          - IRB considerations and human subjects protections
+
+      5.2 Performance Measures:
+          For each GPRA/program-specific performance measure:
+          - Measure name and definition
+          - Data source and collection method
+          - Collection frequency
+          - Baseline data (if available)
+          - Annual targets (realistic, ambitious, data-informed)
+          - How data will be disaggregated (by demographics, site, etc.)
+
+      5.3 Data Collection and Analysis:
+          - Data collection instruments (surveys, assessments, administrative data)
+          - Data collection timeline
+          - Data quality assurance procedures
+          - Analysis methods (quantitative: statistical tests; qualitative: coding, themes)
+          - Data management and security protocols
+          - Missing data handling strategies
+
+      5.4 Continuous Improvement:
+          - How evaluation data will inform program adjustments
+          - Feedback loops between evaluation and implementation
+          - Quality improvement meeting cadence
+          - Stakeholder involvement in evaluation and improvement
+
+      5.5 Dissemination Plan:
+          - How findings will be shared with the field
+          - Publication and presentation plans
+          - Community reporting and engagement
+          - Data sharing with funder and evaluation clearinghouses
+
+      ============================================================
+      SECTION 6: SUSTAINABILITY PLAN
+      ============================================================
+
+      6.1 Post-Funding Sustainability Strategy:
+          - Which project components will continue after funding ends
+          - Revenue diversification plan:
+            * Fee-for-service opportunities
+            * State and local government funding
+            * Other federal funding sources
+            * Private foundation grants
+            * Corporate partnerships
+            * Individual giving and fundraising
+            * Earned revenue models
+          - Organizational commitment to continued implementation
+          - Partner commitments for sustained collaboration
+          - Policy and systems changes that institutionalize the work
+
+      6.2 Capacity Building for Sustainability:
+          - Staff development and succession planning
+          - Knowledge management and documentation
+          - Community ownership development
+          - Infrastructure investments that outlast the grant period
+          - Relationship building with future funders
+
+      Deliver the complete proposal draft as a polished document with all sections clearly labeled, page-ready formatting, and margin notes indicating where organization-specific data, citations, and attachments need to be inserted.
+    model: sonnet
+    max_turns: 10
+
+  - id: budget-development
+    depends_on: [rfp-analysis, proposal-drafting]
+    prompt: |
+      You are a grants budget specialist with expertise in federal cost principles (2 CFR Part 200, Subpart E), state budget requirements, and private foundation budget expectations. You understand how budget reviewers evaluate proposals and how to construct budgets that are both compliant and competitive. Develop a comprehensive budget for {input.organization_name}'s ${input.requested_amount} proposal to {input.grant_program}.
+
+      RFP Analysis: {steps.rfp-analysis.output}
+      Proposal Draft: {steps.proposal-drafting.output}
+
+      Organization: {input.organization_name}
+      Grant Program: {input.grant_program}
+      Requested Amount: ${input.requested_amount}
+      Project: {input.project_description}
+
+      ============================================================
+      SECTION 1: BUDGET SUMMARY TABLE
+      ============================================================
+
+      1.1 Object Class Category Budget (SF-424A Format):
+          Create a detailed budget table for each budget period:
+
+          | Category | Year 1 | Year 2 | Year 3 | Total |
+          |----------|--------|--------|--------|-------|
+          | a. Personnel | | | | |
+          | b. Fringe Benefits | | | | |
+          | c. Travel | | | | |
+          | d. Equipment | | | | |
+          | e. Supplies | | | | |
+          | f. Contractual | | | | |
+          | g. Construction | | | | |
+          | h. Other | | | | |
+          | i. Total Direct Costs | | | | |
+          | j. Indirect Costs | | | | |
+          | k. TOTAL | | | | |
+          | l. Program Income | | | | |
+          | m. Cost Sharing/Match | | | | |
+
+      1.2 Budget Allocation Strategy:
+          - Percentage breakdown by category (compare to typical funded projects)
+          - Personnel-to-total ratio (should typically be 50-70% for service delivery grants)
+          - Direct costs to indirect costs ratio
+          - Year-over-year increases or decreases with justification (typically 3% annual increase for personnel)
+          - Cost per participant/unit calculation
+          - Comparison to other funded projects in this program (if data available)
+
+      ============================================================
+      SECTION 2: DETAILED BUDGET BY CATEGORY
+      ============================================================
+
+      2.1 PERSONNEL:
+          For each position:
+          - Position title (must match proposal narrative)
+          - Name (if known) or "TBH" (To Be Hired)
+          - Annual salary/hourly rate
+          - Percent effort (FTE) on this project
+          - Months of employment per year
+          - Grant-funded amount per year
+          - Salary escalation factor (typically 3% per year)
+          - Justification: why this position is needed, what they will do
+          - Note any salary caps (NIH: Executive Level II, currently ~$221,900)
+
+          Example format:
+          Project Director - [Name/TBH]
+          Annual Salary: $XX,XXX | Effort: XX% FTE | Months: 12
+          Year 1: $XX,XXX | Year 2: $XX,XXX | Year 3: $XX,XXX
+          Justification: [2-3 sentences explaining role and necessity]
+
+      2.2 FRINGE BENEFITS:
+          - Fringe benefit rate (composite or individual component rates)
+          - Component breakdown:
+            * FICA/Social Security: 7.65%
+            * Health insurance: $XXX/month/employee
+            * Retirement/pension: X%
+            * Workers' compensation: X%
+            * Unemployment insurance: X%
+            * Life insurance: X%
+            * Disability insurance: X%
+            * Other benefits: [list]
+          - Full-time vs. part-time benefit rate differential
+          - Annual benefit cost increases
+          - Basis for fringe rate (negotiated rate, organizational policy, or estimate)
+
+      2.3 TRAVEL:
+          For each planned trip/travel activity:
+          - Purpose of travel (directly tied to project activities)
+          - Destination and frequency
+          - Number of travelers
+          - Transportation costs:
+            * Airfare estimate (use current GSA city pair rates)
+            * Ground transportation (rental car, rideshare, taxi)
+            * Mileage for local travel (current GSA rate: $0.67/mile)
+          - Per diem costs:
+            * Lodging (GSA per diem rate for destination city)
+            * Meals and incidental expenses (M&IE rate for destination)
+          - Number of days per trip
+          - Total per trip and annual total
+          - Conference registration fees (if applicable)
+          - Mandatory grantee meeting travel (typically 1-2 per year in DC)
+
+      2.4 EQUIPMENT:
+          - Definition: tangible personal property with useful life >1 year and cost >$5,000
+          - Each item:
+            * Description and justification
+            * Quantity
+            * Unit cost
+            * Total cost
+            * Why purchase vs. lease
+            * Why existing equipment is insufficient
+          - Prior approval requirements (most federal grants require prior approval for equipment)
+          - Equipment management and disposition plan
+
+      2.5 SUPPLIES:
+          - General office supplies (aggregate estimate with basis)
+          - Program-specific supplies (training materials, curriculum, assessment tools)
+          - Technology supplies (under $5,000 each):
+            * Laptops/computers
+            * Software licenses
+            * Tablets or mobile devices
+            * Printers, peripherals
+          - Printing and copying costs
+          - Postage and shipping
+          - Other consumable supplies
+
+      2.6 CONTRACTUAL / SUBAWARDS:
+          Distinguish between contractors and subrecipients (2 CFR 200.331):
+
+          SUBRECIPIENTS (carry out part of the program):
+          For each subrecipient:
+          - Organization name and description
+          - Scope of work summary
+          - Budget summary (include their own budget breakdown)
+          - Selection process (competitive or sole-source justification)
+          - Subrecipient monitoring plan
+
+          CONTRACTORS (provide goods/services):
+          For each contractor:
+          - Type of service
+          - Estimated cost and basis for estimate
+          - Daily/hourly rate (if consulting)
+          - Number of days/hours
+          - Procurement method and justification
+          - External evaluator costs (if applicable)
+
+      2.7 OTHER COSTS:
+          - Participant support costs:
+            * Stipends/incentives (common amounts and justification)
+            * Childcare for participants
+            * Transportation assistance
+            * Food for program events (with programmatic justification)
+            * NOTE: Participant support costs typically excluded from indirect cost base
+          - Communication costs (phone, internet, website)
+          - Facilities costs (rent, utilities) - if not covered by indirect
+          - Insurance costs
+          - Audit costs (if required)
+          - Professional development for staff
+          - Memberships and subscriptions
+          - Background checks (if working with minors/vulnerable populations)
+
+      2.8 INDIRECT COSTS:
+          - Indirect cost rate and basis:
+            * Negotiated rate from NICRA: [rate]% of [base]
+            * De minimis rate: 10% of Modified Total Direct Costs (MTDC)
+            * Agency-specific cap (if applicable)
+          - MTDC calculation:
+            * Total direct costs
+            * Less: equipment over $5,000
+            * Less: participant support costs
+            * Less: subaward amounts over $25,000 per subaward
+            * Less: rental costs of space (if applicable)
+            * Less: tuition remission (if applicable)
+            * Equals: MTDC base
+          - Indirect cost calculation: [rate]% x MTDC = indirect costs
+          - Documentation: attach NICRA or explain de minimis election
+
+      ============================================================
+      SECTION 3: BUDGET NARRATIVE / JUSTIFICATION
+      ============================================================
+
+      Write a complete budget narrative that:
+      - Explains and justifies EVERY line item in the budget
+      - Connects each cost to specific project activities in the proposal narrative
+      - Demonstrates reasonableness (how cost estimates were derived)
+      - Shows necessity (why each cost is essential to the project)
+      - Demonstrates allocability (costs benefit the grant-funded project)
+      - Follows the same order as the budget summary table
+      - Uses consistent formatting with clear headers for each category
+      - Includes calculation formulas so reviewers can verify the math
+      - Addresses any costs that might raise reviewer questions proactively
+
+      ============================================================
+      SECTION 4: COST SHARING / MATCHING BUDGET
+      ============================================================
+
+      If cost sharing/matching is required:
+
+      4.1 Match Budget Table:
+          | Source | Type (Cash/In-Kind) | Year 1 | Year 2 | Year 3 | Total |
+          |--------|-------------------|--------|--------|--------|-------|
+          | [Source 1] | | | | | |
+          | [Source 2] | | | | | |
+          | TOTAL MATCH | | | | | |
+
+      4.2 Match Sources Detail:
+          For each match source:
+          - Source organization and contact
+          - Type: cash contribution, in-kind, donated services, volunteer time
+          - Valuation methodology:
+            * Cash: documented pledges or commitments
+            * In-kind: fair market value determination
+            * Volunteer time: Bureau of Labor Statistics rate or local equivalent
+            * Donated space: fair rental value appraisal
+          - Commitment documentation (letters, MOUs)
+          - Match tracking and reporting methodology
+          - Contingency plan if a match source falls through
+
+      4.3 Match Compliance:
+          - Match must be allowable under 2 CFR 200.306
+          - Match cannot come from other federal funds (unless authorized by statute)
+          - Match must be verifiable from grantee's records
+          - Match must be necessary and reasonable for the project
+          - Match must not be counted toward other federal grant match requirements
+
+      ============================================================
+      SECTION 5: BUDGET RISK ANALYSIS AND MODIFICATIONS
+      ============================================================
+
+      5.1 Budget Scenarios:
+          - Scenario A: Fully funded at ${input.requested_amount}
+          - Scenario B: Funded at 75% - what gets cut and what's the impact?
+          - Scenario C: Funded at 50% - minimum viable project scope
+          - For each scenario, provide a revised budget table and narrative adjustment
+
+      5.2 Common Budget Reviewer Concerns:
+          - Is the PI/PD effort sufficient? (commonly flagged if <25%)
+          - Are salaries reasonable for the geographic area?
+          - Is travel necessary and justified?
+          - Are consultant rates reasonable (typically $650/day cap for federal)?
+          - Is equipment necessary vs. available at the organization?
+          - Are indirect costs calculated correctly?
+          - Does the budget align with the project narrative?
+          - Is cost per participant reasonable for the program type?
+
+      5.3 Budget Optimization Recommendations:
+          - Areas where spending could be reduced without impacting quality
+          - Areas where increased spending would strengthen the proposal
+          - Cost-effectiveness improvements
+          - Leveraged resources that demonstrate organizational commitment
+          - Budget presentation tips for maximum reviewer confidence
+
+      Deliver the complete budget package as a submission-ready document including the summary table, detailed line-item budget, budget narrative, and match documentation (if applicable).
+    model: sonnet
+    max_turns: 10
+
+  - id: compliance-check
+    depends_on: [rfp-analysis, proposal-drafting]
+    prompt: |
+      You are a grants compliance officer with expertise in federal regulations (2 CFR Part 200), agency-specific grant conditions, OMB circulars, and the Code of Federal Regulations as they apply to grant-funded programs. You have a meticulous eye for detail and understand that compliance failures are the most common reason for grant applications being rejected without review. Conduct a comprehensive compliance audit for {input.organization_name}'s proposal to {input.grant_program}.
+
+      RFP Analysis: {steps.rfp-analysis.output}
+      Proposal Draft: {steps.proposal-drafting.output}
+
+      Organization: {input.organization_name}
+      Grant Program: {input.grant_program}
+      Requested Amount: ${input.requested_amount}
+
+      ============================================================
+      SECTION 1: SUBMISSION COMPLIANCE CHECKLIST
+      ============================================================
+
+      Create an exhaustive checklist of every required document, form, and attachment. For each item:
+
+      FORMAT:
+      [ ] ITEM: [Name of document/form]
+          - Requirement source: [RFP section/page, regulation citation]
+          - Status: REQUIRED / OPTIONAL / CONDITIONAL
+          - Format: [PDF, Word, Excel, specific form number]
+          - Page limit: [X pages maximum, if applicable]
+          - Naming convention: [Required file name format]
+          - Due: [Submission deadline or advance deadline]
+          - Notes: [Special instructions, common mistakes to avoid]
+
+      1.1 Standard Federal Forms Checklist:
+          [ ] SF-424 Application for Federal Assistance
+              - Version: [Individual/Formula/Mandatory/Short Organizational]
+              - All fields completed? Critical fields: CFDA number, UEI, project dates
+              - Authorized Representative signature block
+              - Intergovernmental review (E.O. 12372) compliance
+
+          [ ] SF-424A Budget Information
+              - Matches detailed budget exactly
+              - All periods completed
+              - Non-federal funding (match) entered correctly
+              - Program income estimated
+
+          [ ] SF-424B Assurances
+              - Signed by authorized representative
+              - No modifications to standard language
+
+          [ ] SF-LLL Disclosure of Lobbying Activities
+              - Required even if "Not Applicable" (check the box)
+
+          [ ] Additional forms per agency:
+              [List all agency-specific forms from RFP analysis]
+
+      1.2 Narrative Components Checklist:
+          For each required narrative section identified in the RFP:
+          [ ] [Section Name]
+              - Page limit: [X pages]
+              - Addresses review criteria: [list specific criteria]
+              - All required sub-topics covered
+              - Formatting compliant (font, margins, spacing)
+              - Within page limit
+
+      1.3 Supporting Documents Checklist:
+          [ ] Budget narrative/justification
+          [ ] Biographical sketches for key personnel
+          [ ] Current and pending support (if research)
+          [ ] Organizational chart
+          [ ] Letters of support/commitment
+          [ ] Logic model / theory of change
+          [ ] Data management plan
+          [ ] Evaluation plan (if separate from narrative)
+          [ ] Indirect cost rate agreement
+          [ ] Proof of nonprofit status
+          [ ] Board of Directors list
+          [ ] Audit report (most recent)
+          [ ] Conflict of interest policy
+          [ ] Federalwide Assurance (FWA) for human subjects (if applicable)
+          [ ] Environmental compliance documents (if applicable)
+          [ ] [Any additional documents from RFP]
+
+      ============================================================
+      SECTION 2: REGULATORY COMPLIANCE REVIEW
+      ============================================================
+
+      2.1 Federal Regulations Compliance:
+
+          2 CFR Part 200 (Uniform Guidance):
+          [ ] Subpart A - Acronyms and Definitions: consistent use of defined terms
+          [ ] Subpart B - General Provisions: compliance with general award terms
+          [ ] Subpart C - Pre-Award Requirements:
+              - Merit review process acknowledgment
+              - Pre-award risk assessment preparation
+              - Specific conditions awareness
+          [ ] Subpart D - Post-Award Requirements:
+              - Financial management standards (200.302)
+              - Internal controls (200.303)
+              - Payment provisions (200.305)
+              - Cost sharing documentation (200.306)
+              - Program income treatment (200.307)
+              - Period of performance (200.309)
+              - Real and personal property management (200.310-200.316)
+              - Procurement standards (200.317-200.327)
+              - Performance and financial monitoring (200.328-200.329)
+              - Subrecipient monitoring (200.332)
+              - Record retention (200.334) - 3 years minimum
+              - Remedies for noncompliance (200.339-200.343)
+              - Closeout procedures (200.344-200.345)
+          [ ] Subpart E - Cost Principles:
+              - Allowable costs (200.403)
+              - Reasonable costs (200.404)
+              - Allocable costs (200.405)
+              - Specific cost items (200.420-200.476) - review each applicable item
+          [ ] Subpart F - Audit Requirements:
+              - Single Audit threshold ($750,000)
+              - Audit resolution status
+
+      2.2 Cross-Cutting Federal Requirements:
+          [ ] Civil Rights compliance (Title VI, Title IX, Section 504, ADA, Age Discrimination Act)
+          [ ] Drug-Free Workplace Act
+          [ ] Debarment and Suspension (E.O. 12549)
+          [ ] Anti-Lobbying (31 U.S.C. 1352)
+          [ ] Environmental compliance (NEPA, if applicable)
+          [ ] Historic preservation (Section 106, if applicable)
+          [ ] Flood insurance requirements (if applicable)
+          [ ] Animal welfare (if applicable)
+          [ ] Human subjects protection (Common Rule, 45 CFR Part 46, if applicable)
+          [ ] Government Performance and Results Act (GPRA) reporting
+          [ ] Data Universal Numbering System (DUNS/UEI)
+          [ ] Federal Funding Accountability and Transparency Act (FFATA)
+          [ ] Whistleblower Protection
+          [ ] Trafficking Victims Protection Act
+
+      2.3 Agency-Specific Requirements:
+          Based on the identified funding agency, check for:
+          [ ] Agency-specific grant conditions and terms
+          [ ] Agency-specific reporting requirements
+          [ ] Agency-specific cost limitations or caps
+          [ ] Agency-specific performance measures (GPRA)
+          [ ] Agency-specific prior approval requirements
+          [ ] Agency-specific intellectual property provisions
+          [ ] Agency-specific data sharing requirements
+          [ ] Agency-specific publication and acknowledgment requirements
+
+      ============================================================
+      SECTION 3: NARRATIVE COMPLIANCE REVIEW
+      ============================================================
+
+      3.1 Review Criteria Alignment Check:
+          For each scored review criterion:
+          - Criterion: [name and weight]
+          - Where addressed in narrative: [section and page]
+          - Completeness: all sub-criteria covered? [YES/PARTIAL/NO]
+          - Evidence quality: data, citations, examples adequate? [YES/PARTIAL/NO]
+          - Alignment with funder priorities: [STRONG/MODERATE/WEAK]
+          - Gaps or weaknesses identified: [specific issues]
+          - Improvement recommendations: [specific actions]
+
+      3.2 Consistency Check:
+          Verify internal consistency across all proposal components:
+          - Budget amounts match across SF-424, SF-424A, budget narrative, and proposal narrative
+          - Project dates are consistent across all forms and narrative
+          - Personnel names, titles, and FTE are consistent
+          - Partner names and roles are consistent
+          - Performance targets match between narrative and evaluation plan
+          - Geographic area descriptions are consistent
+          - Target population numbers are consistent
+          - Acronyms are defined at first use and used consistently
+
+      3.3 Formatting Compliance:
+          [ ] Font type: [required font] used throughout
+          [ ] Font size: [required size] used throughout (including tables, figures, footnotes)
+          [ ] Margins: [required margins] maintained on all pages
+          [ ] Line spacing: [required spacing] maintained throughout
+          [ ] Page numbers: present on all pages (per requirements)
+          [ ] Headers/footers: compliant with requirements
+          [ ] Page limits: each section within specified limits
+          [ ] Table of contents: included if required
+          [ ] Appendices: only allowable materials included
+          [ ] References/bibliography: within or excluded from page count as required
+          [ ] File format: [required format - PDF, Word, etc.]
+          [ ] File naming: follows specified convention
+          [ ] File size: within portal limits
+
+      ============================================================
+      SECTION 4: RISK AND RED FLAG IDENTIFICATION
+      ============================================================
+
+      4.1 Automatic Disqualification Risks:
+          Identify any issues that could cause the application to be rejected without review:
+          [ ] Submitted after deadline
+          [ ] Missing required forms
+          [ ] Over page limits
+          [ ] Wrong formatting (could trigger non-compliance rejection)
+          [ ] Missing required sections
+          [ ] Ineligible applicant type
+          [ ] Budget exceeds maximum award
+          [ ] Missing authorized signature
+          [ ] SAM.gov registration expired
+          [ ] DUNS/UEI mismatch
+          [ ] Wrong CFDA number
+
+      4.2 Competitive Weakness Flags:
+          Issues that will not disqualify but will reduce scores:
+          - Vague or unsupported claims
+          - Missing data or citations
+          - Unrealistic timeline
+          - Budget not aligned with activities
+          - Weak evaluation plan
+          - No sustainability strategy
+          - Generic content not tailored to the RFP
+          - Missing evidence-based practice justification
+          - Insufficient organizational capacity demonstration
+          - Weak partnership documentation
+
+      4.3 Post-Award Compliance Preparation:
+          Even before winning the grant, ensure readiness for:
+          - Federal Financial Report (SF-425) requirements
+          - Performance progress report requirements
+          - FFATA/USASpending.gov reporting (subawards >$30,000)
+          - Subrecipient monitoring procedures
+          - Time and effort reporting system
+          - Equipment tracking system
+          - Record retention procedures (3-year minimum post-closeout)
+          - Corrective action response capability
+
+      ============================================================
+      SECTION 5: FINAL COMPLIANCE SCORECARD
+      ============================================================
+
+      5.1 Compliance Score by Category:
+          | Category | Items Checked | Compliant | Non-Compliant | N/A | Score |
+          |----------|--------------|-----------|---------------|-----|-------|
+          | Forms and Documents | | | | | /100 |
+          | Federal Regulations | | | | | /100 |
+          | Narrative Compliance | | | | | /100 |
+          | Budget Compliance | | | | | /100 |
+          | Formatting | | | | | /100 |
+          | OVERALL | | | | | /100 |
+
+      5.2 Critical Action Items:
+          List all non-compliant items in priority order:
+          - CRITICAL (must fix or application will be rejected): [list]
+          - HIGH (likely to significantly reduce scores): [list]
+          - MEDIUM (may reduce scores): [list]
+          - LOW (minor issues): [list]
+
+      5.3 Pre-Submission Checklist:
+          Final checklist for the day of submission:
+          [ ] All forms signed and dated
+          [ ] All narratives proofread (no tracked changes visible)
+          [ ] All attachments in correct format and order
+          [ ] Budget calculations verified (no math errors)
+          [ ] All required certifications completed
+          [ ] System confirmation/receipt obtained
+          [ ] Backup submission method identified (if electronic fails)
+          [ ] Post-submission confirmation email sent to grant program office
+
+      Deliver the compliance check as a definitive quality assurance document that ensures nothing is missed before the final submission.
+    model: haiku
+    max_turns: 10
+
+  - id: final-assembly
+    depends_on: [proposal-drafting, budget-development, compliance-check]
+    prompt: |
+      You are a senior grants director who oversees final proposal assembly, quality control, and strategic positioning for competitive grant submissions. Your role is to ensure every element of the proposal is polished, aligned, compliant, and positioned for the highest possible score. Assemble and finalize the complete grant proposal package for {input.organization_name}'s application to {input.grant_program}.
+
+      Proposal Draft: {steps.proposal-drafting.output}
+      Budget Package: {steps.budget-development.output}
+      Compliance Audit: {steps.compliance-check.output}
+      RFP Analysis: {steps.rfp-analysis.output}
+
+      Organization: {input.organization_name}
+      Grant Program: {input.grant_program}
+      Requested Amount: ${input.requested_amount}
+      Project: {input.project_description}
+
+      ============================================================
+      SECTION 1: PROPOSAL QUALITY REVIEW AND ENHANCEMENT
+      ============================================================
+
+      1.1 Narrative Strength Assessment:
+          Review the complete proposal narrative for:
+
+          CLARITY:
+          - Is the problem clearly defined in the first paragraph?
+          - Can a non-expert reviewer understand the project approach?
+          - Are technical terms defined on first use?
+          - Is the writing concise (no unnecessary jargon, redundancy, or filler)?
+          - Do section transitions flow logically?
+          - Rate clarity: [1-10] with specific improvement recommendations
+
+          PERSUASIVENESS:
+          - Does the opening create urgency and emotional connection?
+          - Are claims supported by credible, recent data?
+          - Is the value proposition clear (what changes because of this project)?
+          - Does the narrative convey confidence without arrogance?
+          - Are potential weaknesses acknowledged and addressed proactively?
+          - Rate persuasiveness: [1-10] with specific improvement recommendations
+
+          SPECIFICITY:
+          - Are goals and objectives SMART (Specific, Measurable, Achievable, Relevant, Time-bound)?
+          - Are implementation details concrete (not vague promises)?
+          - Are target numbers realistic and well-justified?
+          - Is the timeline specific with milestones and deliverables?
+          - Are staff roles and responsibilities clearly delineated?
+          - Rate specificity: [1-10] with specific improvement recommendations
+
+          ALIGNMENT:
+          - Does every section explicitly address RFP review criteria?
+          - Is the funder's language and terminology mirrored throughout?
+          - Are agency priorities and strategic goals referenced?
+          - Does the budget align perfectly with the narrative activities?
+          - Is the evaluation plan measuring what the narrative promises?
+          - Rate alignment: [1-10] with specific improvement recommendations
+
+      1.2 Reviewer Experience Optimization:
+          Make the proposal easy to score highly:
+          - Add bold section headers that mirror review criteria names exactly
+          - Add marginal callouts or bold text highlighting key scoring elements
+          - Ensure each review criterion is addressable from a single, clearly labeled section
+          - Add a "Reviewer Quick Reference" table at the start of the narrative:
+            | Review Criterion | Section | Page(s) |
+            |-----------------|---------|---------|
+            | Need | Section 2 | pp. X-Y |
+            | Project Design | Section 3 | pp. X-Y |
+            | ...             | ...     | ...     |
+          - Verify table of contents accuracy
+
+      1.3 Strategic Enhancements:
+          - Add "compelling quotes" from community members or partners (fabricate realistic examples that the organization should replace with real quotes)
+          - Add data visualization suggestions (charts, graphs, maps that would strengthen the case)
+          - Add cross-references between sections ("as described in Section 3.2...")
+          - Ensure the sustainability plan is woven throughout, not just in its dedicated section
+          - Verify that innovation claims are substantiated and not hyperbolic
+          - Check that equity and inclusion language is genuine and integrated, not performative
+
+      ============================================================
+      SECTION 2: BUDGET-NARRATIVE ALIGNMENT VERIFICATION
+      ============================================================
+
+      2.1 Line-by-Line Alignment:
+          For each major budget item, verify:
+          - The activity or resource is mentioned in the narrative
+          - The justification in the budget narrative matches the project design
+          - Personnel FTE matches the scope of work described
+          - Travel is tied to specific activities in the implementation plan
+          - Contractual costs are supported by partnership descriptions
+          - Supplies and equipment are connected to specific program components
+
+      2.2 Cost-Effectiveness Demonstration:
+          - Calculate and present cost per participant
+          - Compare cost per participant to similar programs
+          - Calculate cost per outcome (if applicable)
+          - Demonstrate efficient use of taxpayer/funder dollars
+          - Show leveraged resources (match, in-kind, existing infrastructure)
+
+      2.3 Budget Narrative Polish:
+          - Ensure all calculations are clearly shown
+          - Verify math accuracy across all cells and totals
+          - Add context for any costs that might seem unusual or high
+          - Ensure escalation factors are applied consistently
+          - Verify indirect cost calculation is correct and documented
+
+      ============================================================
+      SECTION 3: COMPLIANCE RESOLUTION
+      ============================================================
+
+      3.1 Address All Compliance Findings:
+          For each issue identified in the compliance audit:
+          - Issue: [description]
+          - Severity: [CRITICAL/HIGH/MEDIUM/LOW]
+          - Resolution: [specific action taken or recommended]
+          - Verification: [how to confirm the issue is resolved]
+
+      3.2 Final Compliance Verification:
+          Run through the complete submission checklist one final time:
+          - All required forms present and correctly completed
+          - All narrative sections within page limits
+          - All formatting requirements met
+          - All required signatures obtained
+          - All supporting documents included
+          - File naming conventions followed
+          - Submission platform tested and ready
+
+      ============================================================
+      SECTION 4: COMPLETE PROPOSAL PACKAGE ASSEMBLY
+      ============================================================
+
+      4.1 Submission Package Table of Contents:
+          List every document in the final submission package in order:
+
+          1. Cover Letter (if required/allowed)
+          2. SF-424 Application for Federal Assistance
+          3. SF-424A Budget Information
+          4. SF-424B Assurances
+          5. SF-LLL Disclosure of Lobbying Activities
+          6. Table of Contents
+          7. Project Abstract / Executive Summary
+          8. Project Narrative
+             a. Statement of Need
+             b. Project Design / Approach
+             c. Organizational Capacity
+             d. Evaluation Plan
+             e. Sustainability Plan
+          9. Budget Detail and Narrative
+          10. Biographical Sketches / Key Personnel
+          11. Letters of Support and Commitment
+          12. Logic Model / Theory of Change
+          13. Organizational Chart
+          14. Other Required Attachments
+              [List specific to this RFP]
+
+      4.2 Cover Letter Template:
+          Draft a professional cover letter that:
+          - Identifies the specific funding opportunity
+          - States the applicant organization and requested amount
+          - Summarizes the project in 2-3 compelling sentences
+          - Highlights the most compelling competitive advantage
+          - Includes authorized representative contact information
+          - Is addressed to the correct program officer or office
+
+      4.3 Final Polished Abstract:
+          Revise the abstract one final time incorporating all refinements from the proposal drafting process. Ensure it:
+          - Captures the full essence of the project in the word/page limit
+          - Uses the strongest data points from the needs statement
+          - Highlights the most innovative aspects of the approach
+          - States measurable outcomes clearly
+          - Could be published as-is in a grant awards database
+
+      ============================================================
+      SECTION 5: POST-SUBMISSION STRATEGY
+      ============================================================
+
+      5.1 Submission Process:
+          - Step-by-step submission instructions for the specific portal
+          - Common technical issues and troubleshooting
+          - Backup submission methods (if primary fails)
+          - Confirmation tracking (save confirmation emails, screenshots, tracking numbers)
+          - Who to contact if submission issues occur
+
+      5.2 Post-Submission Timeline:
+          - Expected review timeline
+          - Opportunities to provide additional information if requested
+          - Site visit preparation (if applicable)
+          - Award negotiation preparation
+          - If funded: immediate next steps (hiring, procurement, setup)
+          - If not funded: debrief request process, reviewer comments analysis, resubmission strategy
+
+      5.3 Continuous Improvement:
+          - Document lessons learned from this application process
+          - Identify areas for strengthening organizational capacity
+          - Build relationships with program officers
+          - Track competing applications and learn from funded projects
+          - Maintain data and partnerships for future applications
+          - Calendar reminders for next funding cycle
+
+      ============================================================
+      SECTION 6: EXECUTIVE BRIEFING
+      ============================================================
+
+      Provide a one-page executive briefing for organizational leadership:
+
+      6.1 Application Summary:
+          - Grant program and funding agency
+          - Amount requested: ${input.requested_amount}
+          - Project period: [start - end date]
+          - Key activities and expected outcomes
+          - Match/cost share commitments required
+
+      6.2 Competitive Assessment:
+          - Estimated competitiveness (STRONG / MODERATE / NEEDS IMPROVEMENT)
+          - Top 3 strengths of the application
+          - Top 3 risks or weaknesses
+          - Estimated probability of funding (based on historical rates and proposal quality)
+
+      6.3 Decision Points:
+          - Any organizational commitments implied by the proposal
+          - Hiring plans contingent on award
+          - Partner commitments that need formal execution
+          - Match contributions that need board approval
+          - Infrastructure investments needed if funded
+
+      6.4 Timeline:
+          - Submission date
+          - Expected award notification
+          - Expected project start date
+          - Key milestones in Year 1
+
+      Deliver the complete assembly as a polished, submission-ready package with every component finalized and a clear roadmap for the submission process.
+    model: sonnet
+    max_turns: 10

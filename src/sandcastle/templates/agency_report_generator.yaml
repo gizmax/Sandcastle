@@ -1,0 +1,873 @@
+# name: Agency Report Generator
+# description: Generate comprehensive multi-client agency performance reports with cross-channel analytics, benchmarking, and strategic recommendations
+# tags: [Marketing, Analytics, Reporting, Agency, Multi-Channel]
+# category: marketing
+
+name: agency-report-generator
+description: Generate comprehensive multi-client agency performance reports with cross-channel analytics, benchmarking, and strategic recommendations
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["agency_name", "client_list", "reporting_period", "channels"]
+  properties:
+    agency_name:
+      type: string
+      description: "Name of the agency generating the report (e.g. 'Apex Digital Media')"
+    client_list:
+      type: string
+      description: "Comma-separated list of client names to include (e.g. 'Acme Corp, GlobalTech, FreshFoods Inc')"
+    reporting_period:
+      type: string
+      description: "Reporting period for analysis (e.g. 'Q4 2025', 'January 2026', '2025 Full Year')"
+    channels:
+      type: string
+      description: "Comma-separated marketing channels to analyze (e.g. 'paid_search, paid_social, seo, email, display')"
+    kpi_targets:
+      type: string
+      description: "Key performance indicator targets and benchmarks in natural language (e.g. 'ROAS target 4.0, CPA under $35, CTR above 2.5%, email open rate 25%+')"
+      default: "Industry standard benchmarks"
+
+steps:
+  - id: data-aggregation
+    prompt: |
+      You are a senior marketing data analyst at {input.agency_name}. Your task is to structure and
+      normalize the raw performance data framework for a multi-client agency report covering the
+      period: {input.reporting_period}.
+
+      Clients to cover: {input.client_list}
+      Channels to analyze: {input.channels}
+      KPI targets and benchmarks: {input.kpi_targets}
+
+      IMPORTANT: Since you do not have access to actual analytics platforms, you must generate a
+      realistic, internally-consistent simulated dataset that serves as the analytical foundation
+      for the entire report pipeline. The data must be plausible for the given clients, channels,
+      and reporting period. Use industry benchmarks and typical performance ranges to ground your
+      simulated figures.
+
+      For EACH client in the list, produce a comprehensive data structure covering every channel
+      specified. Follow this exact framework:
+
+      ---
+
+      ## DATA AGGREGATION FRAMEWORK
+
+      ### 1. Client Profile Context
+      For each client, establish:
+      - **Business vertical** - infer from the client name (e.g. SaaS, e-commerce, CPG, B2B services)
+      - **Estimated monthly media spend** - a plausible range for their vertical and size
+      - **Primary conversion goals** - what constitutes a conversion for this business type
+        (purchases, leads, sign-ups, demos, app installs)
+      - **Customer lifetime value estimate** - approximate CLV to contextualize CPA targets
+      - **Sales cycle length** - immediate (e-commerce) vs extended (B2B enterprise)
+      - **Seasonality factors** - any seasonal patterns relevant to {input.reporting_period}
+
+      ### 2. Per-Channel Performance Metrics
+      For EACH channel in [{input.channels}], generate the following metrics per client:
+
+      **Paid Search (if applicable):**
+      - Total spend, impressions, clicks, CTR, avg CPC, conversions, conversion rate, CPA, ROAS
+      - Brand vs non-brand split (spend, impressions, clicks, conversions)
+      - Match type distribution (exact, phrase, broad) with performance per match type
+      - Top 10 performing keywords by conversion volume
+      - Top 5 underperforming keywords by spend-to-conversion ratio
+      - Quality Score distribution (% of keywords at QS 7+, 5-6, below 5)
+      - Impression share metrics (search IS, search lost IS budget, search lost IS rank)
+      - Device breakdown (desktop, mobile, tablet) with CPA and ROAS per device
+      - Geographic performance (top 5 regions by conversion volume)
+      - Day-of-week and hour-of-day performance patterns
+
+      **Paid Social (if applicable):**
+      - Total spend, impressions, reach, frequency, clicks, CTR, CPC, conversions, CPA, ROAS
+      - Platform breakdown (Meta/Facebook, Instagram, LinkedIn, TikTok, X/Twitter, Pinterest)
+      - Campaign objective distribution (awareness, consideration, conversion)
+      - Audience segment performance (prospecting vs retargeting, lookalike vs interest-based)
+      - Creative format performance (single image, carousel, video, stories, reels)
+      - Engagement metrics (likes, shares, comments, saves, video views, ThruPlays)
+      - Funnel metrics by audience temperature (cold, warm, hot)
+      - Frequency cap analysis and audience fatigue indicators
+      - A/B test results for top 3 creative tests run during the period
+
+      **SEO (if applicable):**
+      - Organic sessions, users, new users, bounce rate, pages per session, avg session duration
+      - Organic conversions and conversion rate
+      - Keyword ranking distribution (position 1-3, 4-10, 11-20, 21-50, 50+)
+      - Ranking changes - keywords gained/lost in top 10 vs prior period
+      - Top 20 organic landing pages by traffic and conversions
+      - Domain authority/domain rating trend (current vs prior period)
+      - Backlink profile (new links acquired, total referring domains, link quality distribution)
+      - Core Web Vitals status (LCP, FID/INP, CLS) per key page template
+      - Content performance (new content published, traffic to new vs existing content)
+      - Featured snippet and SERP feature capture rate
+
+      **Email (if applicable):**
+      - Total sends, delivered, open rate, unique open rate, click rate, CTOR, unsubscribe rate
+      - Revenue attributed to email (direct and assisted)
+      - Campaign type breakdown (promotional, lifecycle, transactional, re-engagement)
+      - Automation/flow performance (welcome series, abandoned cart, post-purchase, winback)
+      - List health metrics (total subscribers, growth rate, bounce rate, spam complaint rate)
+      - Segmentation performance (by engagement tier, purchase history, demographic)
+      - A/B test results (subject lines, send times, content variations)
+      - Deliverability metrics (inbox placement rate, domain reputation)
+
+      **Display (if applicable):**
+      - Total spend, impressions, reach, clicks, CTR, CPC, view-through conversions, click-through conversions, total CPA, ROAS
+      - Network/exchange breakdown (Google Display Network, programmatic DSP, direct buys)
+      - Targeting method performance (contextual, behavioral, remarketing, managed placements)
+      - Ad format performance (static banners, responsive display, rich media, native, video)
+      - Viewability rate and brand safety metrics
+      - Frequency distribution and optimal frequency analysis
+      - Publisher/placement performance (top 10 placements by conversions)
+
+      ### 3. Cross-Channel Attribution Data
+      For each client, provide:
+      - First-touch attribution breakdown by channel
+      - Last-touch attribution breakdown by channel
+      - Estimated multi-touch (linear) attribution breakdown by channel
+      - Average conversion path length (number of touchpoints)
+      - Most common conversion path sequences (top 5 paths)
+      - Time lag distribution (days from first touch to conversion)
+      - Assisted conversion counts per channel
+
+      ### 4. Period-over-Period Comparison
+      For each metric, include:
+      - Current period value
+      - Prior period value (previous quarter/month/year as appropriate)
+      - Absolute change
+      - Percentage change
+      - Trend direction indicator (up/down/flat)
+
+      ### 5. Budget Utilization
+      For each client and channel:
+      - Allocated budget for {input.reporting_period}
+      - Actual spend
+      - Utilization rate (%)
+      - Pacing status (ahead/on-track/behind)
+      - Remaining budget and projected end-of-period spend
+
+      ---
+
+      OUTPUT FORMAT: Return the complete dataset as structured text with clear headers and
+      consistent formatting. Use tables where they improve readability. Ensure all numbers
+      are internally consistent (e.g. conversions * CPA = spend, clicks * CPC = spend,
+      impressions * CTR = clicks). This data will feed directly into channel analysis,
+      benchmarking, and recommendation steps.
+    model: haiku
+    max_turns: 12
+
+  - id: channel-analysis
+    depends_on: [data-aggregation]
+    prompt: |
+      You are a senior performance marketing strategist at {input.agency_name}. Using the
+      aggregated data below, produce a deep-dive analysis for each marketing channel across
+      all clients during {input.reporting_period}.
+
+      Aggregated performance data:
+      {steps.data-aggregation.output}
+
+      Clients: {input.client_list}
+      Channels: {input.channels}
+      KPI targets: {input.kpi_targets}
+
+      For EACH channel present in the data, conduct the following analysis:
+
+      ---
+
+      ## CHANNEL DEEP-DIVE ANALYSIS FRAMEWORK
+
+      ### 1. Paid Search Analysis
+
+      **A. Overall Health Assessment**
+      - Summarize total paid search performance across all clients
+      - Assess whether aggregate and per-client KPIs are being met vs {input.kpi_targets}
+      - Identify the highest-performing and lowest-performing client accounts
+      - Calculate the agency-wide paid search efficiency score (weighted ROAS across clients)
+
+      **B. Account Structure Evaluation**
+      - Evaluate the brand vs non-brand investment ratio for each client
+        - Is brand spend cannibalizing organic traffic? Quantify the estimated organic cannibalization
+        - Is non-brand spend efficiently acquiring new customers?
+      - Assess match type strategy effectiveness
+        - Broad match adoption rate and its impact on CPAs
+        - Exact match impression share capture rate
+        - Negative keyword coverage adequacy
+      - Evaluate campaign structure hygiene
+        - Single keyword ad groups (SKAGs) vs themed ad groups performance comparison
+        - RSA asset combinations and their quality ratings
+
+      **C. Bidding and Budget Analysis**
+      - Analyze bid strategy performance (manual CPC vs target CPA vs target ROAS vs max conversions)
+      - Identify underspending campaigns with strong efficiency (scale opportunities)
+      - Identify overspending campaigns with declining returns (diminishing marginal ROAS)
+      - Calculate the marginal CPA for each additional 10% budget increase per client
+      - Assess impression share loss due to budget vs rank and prioritize fixes
+
+      **D. Audience and Targeting Insights**
+      - Device performance disparities and bid adjustment recommendations
+      - Geographic performance variance and geo-targeting optimization opportunities
+      - Day-parting analysis with recommended scheduling adjustments
+      - Audience layering effectiveness (in-market, affinity, custom intent, RLSA)
+
+      **E. Landing Page and Conversion Funnel**
+      - Landing page experience scores and their correlation with Quality Score
+      - Conversion rate by landing page template/type
+      - Mobile vs desktop conversion rate gap analysis
+      - Identify friction points in the conversion funnel using bounce rate and exit rate data
+
+      ### 2. Paid Social Analysis
+
+      **A. Platform Mix Effectiveness**
+      - Compare performance across platforms (Meta, Instagram, LinkedIn, TikTok, etc.)
+      - Assess platform-to-platform audience overlap and incremental reach
+      - Evaluate whether the platform mix aligns with each client's audience demographics
+      - Calculate platform-specific efficiency metrics (cost per ThruPlay, cost per engagement)
+
+      **B. Audience Strategy Assessment**
+      - Prospecting vs retargeting spend ratio and its efficiency
+      - Lookalike audience quality - compare LAL performance to interest-based targeting
+      - Custom audience freshness and performance trends
+      - Audience saturation analysis - frequency impact on CPA over time
+      - Identify audience segments with best LTV-to-CAC ratio (if data available)
+
+      **C. Creative Performance Analysis**
+      - Creative format winner/loser analysis with statistical significance assessment
+      - Creative fatigue indicators (rising frequency + declining CTR over time)
+      - Hook rate analysis for video content (3-second views / impressions)
+      - Video completion rates by format and length
+      - Ad copy theme analysis - which messaging angles drive best results
+      - UGC vs polished creative performance comparison
+
+      **D. Funnel Stage Optimization**
+      - TOFU (awareness) efficiency - cost per 1000 reached, brand lift indicators
+      - MOFU (consideration) efficiency - cost per engaged user, content consumption rates
+      - BOFU (conversion) efficiency - CPA, ROAS, purchase frequency from social-acquired users
+      - Full-funnel attribution impact - how does TOFU spend influence BOFU performance?
+
+      ### 3. SEO Analysis
+
+      **A. Organic Visibility Assessment**
+      - Overall organic traffic trend and its correlation with algorithm updates
+      - Keyword ranking portfolio health (distribution shift across position buckets)
+      - SERP feature capture analysis (featured snippets, PAA, local pack, image pack)
+      - Share of voice estimate vs key competitors
+
+      **B. Technical SEO Health**
+      - Core Web Vitals compliance rate and impact on rankings
+      - Crawl budget efficiency - crawled pages vs indexed pages ratio
+      - Site architecture issues (orphan pages, deep pages, redirect chains)
+      - Mobile usability score and mobile-first indexing status
+
+      **C. Content Performance**
+      - New content ROI - traffic and conversions from content published during the period
+      - Content gap analysis - high-volume keywords without dedicated landing pages
+      - Content decay identification - previously high-performing pages losing traffic
+      - Internal linking effectiveness and topical authority assessment
+
+      **D. Backlink Profile Analysis**
+      - New links acquired vs lost during the period
+      - Link quality distribution (DR/DA of referring domains)
+      - Toxic link identification and disavow recommendations
+      - Competitor backlink gap analysis
+
+      ### 4. Email Analysis
+
+      **A. Program Health Assessment**
+      - Overall deliverability health score based on inbox placement, bounces, complaints
+      - List growth rate and quality trend (engagement distribution)
+      - Revenue per email (RPE) trend and its drivers
+      - Email's contribution to overall marketing revenue (direct + assisted)
+
+      **B. Campaign Optimization Analysis**
+      - Subject line performance patterns (length, personalization, urgency, emoji usage)
+      - Send time optimization findings from A/B tests
+      - Content type performance (product-focused vs editorial vs promotional)
+      - Segmentation lift analysis - targeted vs batch-and-blast performance gap
+
+      **C. Automation/Flow Assessment**
+      - Revenue contribution per automation flow
+      - Flow conversion rates and bottleneck identification
+      - Time-to-conversion analysis per flow type
+      - Suppression and exit condition effectiveness
+
+      ### 5. Display Analysis
+
+      **A. Reach and Awareness Metrics**
+      - Incremental reach analysis - users reached only via display (not reached by other channels)
+      - Viewability rate trends and compliance with MRC standards
+      - Brand safety incident tracking and vendor performance
+      - Frequency optimization - impact of frequency caps on conversion rates
+
+      **B. Targeting Effectiveness**
+      - Contextual vs behavioral targeting performance comparison
+      - Remarketing segment performance (recency-based, product-viewed, cart abandoners)
+      - Managed placement performance vs open exchange
+      - Audience suppression effectiveness (reducing wasted impressions on converters)
+
+      **C. View-Through Attribution Assessment**
+      - View-through vs click-through conversion ratio analysis
+      - Incrementality estimation for display campaigns
+      - Optimal attribution window recommendation based on conversion lag data
+      - Cross-device conversion path analysis
+
+      ---
+
+      For each channel section, conclude with:
+      1. **Performance Grade** (A/B/C/D/F) based on KPI target achievement
+      2. **Top 3 Wins** - what worked well during {input.reporting_period}
+      3. **Top 3 Opportunities** - specific areas for improvement with estimated impact
+      4. **Risk Flags** - any concerning trends requiring immediate attention
+
+      Format the output with clear channel headers and subsections. Use data points from the
+      aggregated data to support every claim. Never make a qualitative statement without a
+      quantitative reference.
+    model: sonnet
+    max_turns: 12
+
+  - id: client-benchmarking
+    depends_on: [data-aggregation]
+    prompt: |
+      You are a senior analytics director at {input.agency_name}. Your task is to benchmark
+      each client's performance against industry standards, peer performance within the agency
+      portfolio, and their own historical trajectory during {input.reporting_period}.
+
+      Aggregated performance data:
+      {steps.data-aggregation.output}
+
+      Clients: {input.client_list}
+      Channels: {input.channels}
+      KPI targets: {input.kpi_targets}
+
+      Conduct a multi-dimensional benchmarking analysis using the following framework:
+
+      ---
+
+      ## CLIENT BENCHMARKING FRAMEWORK
+
+      ### 1. Industry Benchmark Comparison
+
+      For each client, compare their key metrics against published industry benchmarks
+      for their specific vertical. Use the following benchmark sources and ranges:
+
+      **Paid Search Benchmarks (by vertical):**
+      - Average CTR by industry (Google Ads benchmark reports)
+      - Average CPC by industry
+      - Average conversion rate by industry
+      - Average CPA by industry
+      - Typical ROAS range by business model (e-commerce: 3-5x, lead gen: 5-10x, SaaS: 3-8x)
+
+      **Paid Social Benchmarks (by platform and vertical):**
+      - Meta/Facebook average CPM, CPC, CTR by industry
+      - LinkedIn average CPM, CPC, CTR (typically 3-5x more expensive than Meta)
+      - TikTok average CPM, CPC, engagement rate
+      - Typical social ROAS by funnel stage and vertical
+
+      **SEO Benchmarks:**
+      - Organic CTR by SERP position (position 1: ~28%, position 2: ~15%, etc.)
+      - Domain authority percentile for the vertical
+      - Typical organic conversion rates by industry (e-commerce: 2-3%, B2B: 2-5%, SaaS: 3-7%)
+      - Content indexation rate benchmarks (target: 90%+)
+
+      **Email Benchmarks (by vertical):**
+      - Open rate by industry (Mailchimp/HubSpot published benchmarks)
+      - Click rate by industry
+      - Unsubscribe rate threshold (above 0.5% = concerning)
+      - Revenue per email by vertical
+
+      **Display Benchmarks:**
+      - Average CTR (0.05-0.10% for standard display, 0.2-0.5% for native)
+      - Viewability rate benchmark (70%+ = good)
+      - Average CPM by targeting method
+
+      For each client-channel combination, produce a benchmark scorecard:
+      | Metric | Client Value | Industry Benchmark | Delta | Percentile |
+      Show whether each client is above, at, or below benchmark with percentage deviation.
+
+      ### 2. Intra-Portfolio Peer Comparison
+
+      Compare clients against each other within the {input.agency_name} portfolio:
+
+      **Efficiency Ranking:**
+      - Rank all clients by blended ROAS (highest to lowest)
+      - Rank all clients by blended CPA (lowest to highest)
+      - Rank all clients by overall conversion rate
+      - Identify the "efficiency frontier" - clients achieving best ROAS at their spend level
+
+      **Spend-Efficiency Curve:**
+      - Plot (conceptually) each client on a spend vs ROAS curve
+      - Identify clients above the curve (over-performing for their spend level)
+      - Identify clients below the curve (under-performing for their spend level)
+      - Determine the optimal spend zone for each client based on marginal returns
+
+      **Channel Mix Comparison:**
+      - Compare channel allocation percentages across clients
+      - Identify clients with similar profiles but divergent performance (peer learning opportunities)
+      - Highlight channel mix anomalies (e.g. a client with 0% email despite high repeat purchase rates)
+
+      **Growth Trajectory Comparison:**
+      - Period-over-period growth rate ranking
+      - Identify clients with accelerating vs decelerating growth
+      - Correlate growth trajectory with channel mix changes and budget changes
+
+      ### 3. Historical Self-Benchmarking
+
+      For each client, analyze their own performance trajectory:
+
+      **Trend Analysis:**
+      - Month-over-month or quarter-over-quarter trend for all primary KPIs
+      - Identify inflection points (when did performance notably improve or decline?)
+      - Correlate performance changes with known events (campaign launches, website changes,
+        seasonal factors, competitive moves, algorithm updates)
+
+      **Maturity Assessment:**
+      - Where is each client on the performance maturity curve?
+        - Phase 1: Foundation (getting basics right, inefficient spend)
+        - Phase 2: Optimization (improving efficiency, scaling what works)
+        - Phase 3: Saturation (diminishing returns, need new channels/strategies)
+        - Phase 4: Innovation (testing new approaches, expanding TAM)
+      - What specific indicators place them in this phase?
+      - What must happen to progress to the next phase?
+
+      **Goal Achievement Tracking:**
+      - For each KPI target in {input.kpi_targets}, calculate:
+        - Current achievement percentage
+        - Trajectory forecast (will they hit the target by end of period?)
+        - Gap analysis (what specific improvements are needed to close the gap?)
+        - Confidence level in achieving the target (high/medium/low with rationale)
+
+      ### 4. Competitive Context
+
+      For each client, provide inferred competitive positioning:
+      - Estimated impression share vs key competitors (for paid channels)
+      - Share of voice trends in organic search
+      - Competitive creative and messaging landscape observations
+      - Market dynamics that may be affecting performance (new entrants, price wars, demand shifts)
+
+      ### 5. Client Health Score
+
+      Synthesize all benchmarking dimensions into a single Client Health Score (0-100):
+      - Performance vs industry benchmarks: 25% weight
+      - Performance vs portfolio peers: 20% weight
+      - Historical trajectory: 25% weight
+      - Goal achievement: 30% weight
+
+      Classify each client:
+      - 80-100: Thriving - maintain and scale
+      - 60-79: Healthy - optimize and grow
+      - 40-59: At Risk - requires strategic intervention
+      - 0-39: Critical - urgent action needed
+
+      ---
+
+      OUTPUT: Deliver the complete benchmarking analysis with clear per-client sections,
+      comparison tables, and the synthesized Client Health Scores. Flag the top performing
+      client (agency case study candidate) and the most at-risk client (requires QBR
+      escalation).
+    model: sonnet
+    max_turns: 12
+
+  - id: cross-channel-insights
+    depends_on: [data-aggregation]
+    prompt: |
+      You are a marketing science lead at {input.agency_name}, specializing in cross-channel
+      analytics and media mix optimization. Analyze the interaction effects between channels
+      for all clients during {input.reporting_period}.
+
+      Aggregated performance data:
+      {steps.data-aggregation.output}
+
+      Clients: {input.client_list}
+      Channels: {input.channels}
+      KPI targets: {input.kpi_targets}
+
+      Conduct a comprehensive cross-channel interaction analysis:
+
+      ---
+
+      ## CROSS-CHANNEL INSIGHTS FRAMEWORK
+
+      ### 1. Multi-Touch Attribution Analysis
+
+      For each client, analyze the multi-touch attribution data to understand true channel
+      contribution:
+
+      **Attribution Model Comparison:**
+      - Compare first-touch, last-touch, and linear attribution models
+      - Identify channels that are significantly over-credited by last-touch (typically: branded
+        paid search, direct, retargeting display)
+      - Identify channels that are significantly under-credited by last-touch (typically: upper
+        funnel paid social, organic content, display prospecting)
+      - Calculate the "attribution gap" for each channel: the difference between last-touch and
+        linear attribution as a percentage of total conversions
+      - Recommend the most appropriate attribution model for each client based on their sales
+        cycle and channel mix
+
+      **Conversion Path Analysis:**
+      - Map the most common multi-channel conversion paths
+      - Calculate average path length and time to conversion
+      - Identify the most effective "introducer" channels (first touch in converting paths)
+      - Identify the most effective "closer" channels (last touch in converting paths)
+      - Identify the most effective "assist" channels (middle touches that significantly increase
+        conversion probability)
+      - Calculate the Conversion Path Efficiency Score: (converting paths / total paths) by
+        length bucket (1-touch, 2-3 touches, 4-6 touches, 7+ touches)
+
+      **Assisted Conversion Impact:**
+      - For each channel, calculate the assist-to-last-click ratio
+      - Channels with ratio > 1.0 are providing more assist value than direct conversion value
+      - Quantify the "halo effect" of each channel on other channels' performance
+      - Estimate the revenue impact if any single channel were removed from the mix
+
+      ### 2. Channel Synergy Mapping
+
+      Analyze how channels interact and amplify each other:
+
+      **Synergy Pairs:**
+      - Identify statistically significant positive synergies between channel pairs
+        (e.g. "users exposed to paid social + paid search convert at 2.5x the rate of
+        paid search alone")
+      - Common synergy patterns to test for:
+        - Paid social prospecting + paid search branded (awareness driving search demand)
+        - Email + paid social retargeting (multi-touch nurture effect)
+        - SEO content + email (organic discovery leading to email capture and nurture)
+        - Display prospecting + paid search (display exposure increasing brand search volume)
+        - Paid social video + display retargeting (video view audiences converting via display)
+      - Quantify the synergy multiplier for each significant pair
+      - Identify anti-synergy pairs (channels that cannibalize each other)
+
+      **Channel Interaction Heatmap:**
+      - Create a matrix showing the lift/drag coefficient between every channel pair
+      - Positive values indicate synergy, negative values indicate cannibalization
+      - Highlight the strongest positive and negative interactions per client
+
+      **Sequential Exposure Analysis:**
+      - Does channel exposure order matter? Analyze conversion rates for different channel
+        sequences:
+        - Social -> Search -> Convert (typical awareness-to-intent path)
+        - Email -> Social -> Convert (nurture-to-engagement path)
+        - Display -> Search -> Convert (awareness-to-intent path)
+      - Identify the highest-converting channel sequences per client
+      - Recommend optimal customer journey orchestration based on findings
+
+      ### 3. Media Mix Modeling (Simplified)
+
+      Provide a simplified media mix model analysis:
+
+      **Current Mix Assessment:**
+      - For each client, show the current budget allocation by channel as percentages
+      - Calculate the marginal ROAS per channel (estimated ROAS for the next $1,000 invested)
+      - Identify channels with highest marginal ROAS (under-invested)
+      - Identify channels with lowest marginal ROAS (over-invested or at saturation)
+
+      **Optimal Mix Recommendation:**
+      - Based on marginal ROAS analysis, recommend an optimal budget reallocation
+      - Show the current vs recommended allocation side-by-side
+      - Estimate the total portfolio ROAS improvement from reallocation
+      - Provide confidence intervals: conservative, moderate, and aggressive reallocation scenarios
+      - Account for minimum viable spend thresholds per channel (channels need minimum investment
+        to maintain algorithmic learning and audience building)
+
+      **Diminishing Returns Analysis:**
+      - For each channel, estimate the saturation point (where marginal ROAS drops below 1.0)
+      - Show the response curve shape (linear, logarithmic, S-curve) for each channel
+      - Identify the "efficient frontier" spend level per channel per client
+      - Calculate the total addressable budget that can be efficiently deployed
+
+      ### 4. Customer Journey Orchestration
+
+      Analyze the customer journey holistically across channels:
+
+      **Funnel Stage Mapping:**
+      - Map each channel's primary funnel contribution (awareness/consideration/conversion/retention)
+      - Identify funnel gaps - stages with insufficient channel coverage
+      - Calculate drop-off rates between funnel stages
+      - Recommend channel activations to plug funnel leaks
+
+      **Audience Flow Analysis:**
+      - How do audiences move between channels? (e.g. 30% of email subscribers first discovered
+        the brand via paid social)
+      - Identify "golden paths" - the audience journeys with highest LTV
+      - Identify "leaky paths" - journeys where audience drops off before converting
+      - Recommend audience suppression and inclusion strategies across channels
+
+      **Time-to-Conversion Optimization:**
+      - Analyze how different channel combinations affect time-to-conversion
+      - Identify which channel sequences accelerate the conversion timeline
+      - Recommend "fast track" strategies for shortening the sales cycle through
+        coordinated multi-channel touches
+
+      ### 5. Incrementality Assessment
+
+      Estimate the true incremental impact of each channel:
+
+      **Incrementality Framework:**
+      - For each channel, estimate the percentage of conversions that are truly incremental
+        (would not have happened without the channel) vs those that would have occurred anyway
+      - Paid brand search: typically 30-60% incremental (rest would convert via organic)
+      - Paid social prospecting: typically 70-90% incremental
+      - Retargeting: typically 20-50% incremental (many would convert without reminder)
+      - Email to existing customers: typically 40-60% incremental
+      - Display prospecting: typically 60-80% incremental
+
+      **Adjusted Performance Metrics:**
+      - Recalculate CPA and ROAS for each channel using incrementality-adjusted conversion counts
+      - Show the gap between reported metrics and incrementality-adjusted metrics
+      - Identify channels that look efficient on paper but have low incrementality
+      - Identify channels that look expensive but have high incrementality
+
+      ---
+
+      OUTPUT: Deliver the complete cross-channel analysis with clear actionable findings.
+      Include a "Top 5 Cross-Channel Insights" summary per client that captures the most
+      impactful findings. These insights will directly feed into the recommendation engine.
+    model: sonnet
+    max_turns: 12
+
+  - id: recommendations
+    depends_on: [client-benchmarking, cross-channel-insights]
+    prompt: |
+      You are the VP of Strategy at {input.agency_name}. Synthesize the benchmarking data
+      and cross-channel insights to produce actionable strategic recommendations for each
+      client and for the agency's overall portfolio approach during {input.reporting_period}.
+
+      Client benchmarking analysis:
+      {steps.client-benchmarking.output}
+
+      Cross-channel insights:
+      {steps.cross-channel-insights.output}
+
+      Channel analysis context:
+      {steps.channel-analysis.output}
+
+      Clients: {input.client_list}
+      KPI targets: {input.kpi_targets}
+
+      ---
+
+      ## STRATEGIC RECOMMENDATIONS FRAMEWORK
+
+      ### 1. Per-Client Strategic Recommendations
+
+      For EACH client, provide a tailored strategic plan:
+
+      **A. Priority Matrix (Impact vs Effort)**
+      Create a 2x2 priority matrix of recommendations:
+      - **Quick Wins** (High Impact, Low Effort) - implement immediately
+        - List 3-5 specific tactical changes with estimated impact
+        - Include timeline (this week/this month)
+        - Example: "Shift $2,000/month from broad match brand terms to non-brand exact match
+          to reduce cannibalization and improve incremental CPA by ~15%"
+      - **Strategic Bets** (High Impact, High Effort) - plan and resource
+        - List 2-3 major initiatives with projected impact
+        - Include timeline (this quarter/next quarter)
+        - Example: "Launch full-funnel YouTube strategy with sequential messaging to reduce
+          blended CPA by 20% over 90 days"
+      - **Maintenance Items** (Low Impact, Low Effort) - batch and automate
+        - List ongoing optimization tasks
+      - **Deprioritize** (Low Impact, High Effort) - table for later
+        - List items that should NOT be pursued in the near term
+
+      **B. Budget Reallocation Plan**
+      Based on the media mix modeling insights:
+      - Specific dollar amounts to shift between channels (from -> to)
+      - Rationale for each shift tied to marginal ROAS data
+      - Expected impact on blended ROAS and CPA
+      - Risk mitigation plan (monitoring period, rollback triggers)
+      - Phased implementation timeline:
+        - Week 1-2: Reallocate X% of budget from [channel] to [channel]
+        - Week 3-4: Monitor and validate performance
+        - Week 5-6: Full reallocation if metrics confirm improvement
+
+      **C. Channel-Specific Optimization Roadmap**
+      For each active channel, provide 3-5 specific optimization recommendations:
+      - What to change (specific setting, creative, targeting, or strategy change)
+      - Why it matters (data-backed rationale from the analysis)
+      - Expected impact (quantified in terms of key metrics)
+      - How to measure success (specific KPIs and thresholds)
+      - Timeline and dependencies
+
+      **D. Testing Agenda**
+      Prioritized list of A/B and multivariate tests to run:
+      - Test hypothesis (e.g. "Video creative will outperform static by >20% CTR on Meta")
+      - Test design (control vs variant, audience, budget, duration)
+      - Minimum sample size for statistical significance
+      - Primary and secondary success metrics
+      - Expected test duration
+      - Decision framework (what result leads to what action)
+
+      **E. Risk Mitigation**
+      For each client, identify:
+      - Top 3 performance risks for the next period
+      - Early warning indicators for each risk
+      - Contingency actions if risk materializes
+      - Competitive threats to monitor
+
+      ### 2. Portfolio-Level Agency Recommendations
+
+      **A. Agency Operational Improvements**
+      - Cross-client learnings that can be systematized
+      - Processes to standardize across accounts
+      - Technology or tool investments that would improve efficiency
+      - Team skill gaps identified through the analysis
+      - Reporting and communication cadence optimization
+
+      **B. Revenue Growth Opportunities**
+      - Clients with untapped channel expansion potential (upsell opportunities)
+      - New service offerings justified by the data (e.g. CRO, content marketing, influencer)
+      - Clients approaching contract renewal - build case for increased scope
+      - Cross-pollination opportunities (learnings from Client A applicable to Client B)
+
+      **C. Thought Leadership Angles**
+      - Identify 2-3 interesting data points from the analysis that could become:
+        - Client case studies (with client permission)
+        - Blog posts or whitepapers on channel performance trends
+        - Conference presentation topics
+        - Social media content for agency brand building
+
+      ### 3. 90-Day Action Plan
+
+      For each client, produce a consolidated 90-day action plan:
+
+      **Month 1: Foundation**
+      - Quick wins to implement immediately
+      - Tests to launch
+      - Budget shifts to initiate
+      - Tracking and measurement setup
+
+      **Month 2: Optimization**
+      - Analyze first month results
+      - Scale winning strategies
+      - Kill underperforming tests
+      - Mid-course corrections
+
+      **Month 3: Scale and Plan**
+      - Full implementation of validated strategies
+      - Results documentation
+      - Next quarter planning
+      - QBR preparation
+
+      ---
+
+      OUTPUT: Deliver the complete recommendation set organized by client, with the
+      portfolio-level insights as a separate section. Every recommendation must be specific,
+      measurable, and tied to data from the analysis. Avoid vague suggestions like "improve
+      targeting" - instead say "shift 30% of interest-based targeting budget to 1% lookalike
+      audiences based on purchasers, which showed 2.3x better CPA in the current period."
+    model: sonnet
+    max_turns: 12
+
+  - id: report-compilation
+    depends_on: [channel-analysis, client-benchmarking, cross-channel-insights, recommendations]
+    prompt: |
+      You are the Chief Strategy Officer at {input.agency_name}. Compile all analysis into a
+      polished, executive-ready Quarterly Business Review (QBR) report for {input.reporting_period}.
+
+      Channel analysis: {steps.channel-analysis.output}
+      Client benchmarking: {steps.client-benchmarking.output}
+      Cross-channel insights: {steps.cross-channel-insights.output}
+      Strategic recommendations: {steps.recommendations.output}
+
+      Agency: {input.agency_name}
+      Clients: {input.client_list}
+      Channels: {input.channels}
+      KPI targets: {input.kpi_targets}
+
+      ---
+
+      ## QBR REPORT COMPILATION FRAMEWORK
+
+      Produce the final report in the following structure. Use clean markdown formatting with
+      professional language appropriate for C-suite and VP-level marketing stakeholders.
+
+      ### REPORT STRUCTURE
+
+      **COVER PAGE**
+      - Report title: "{input.agency_name} - Performance Report - {input.reporting_period}"
+      - Prepared for: [Client names]
+      - Date of report
+      - Confidentiality notice
+
+      **EXECUTIVE SUMMARY** (1 page equivalent - ~500 words)
+      - 3-sentence portfolio performance snapshot
+      - Key headline metrics in a dashboard-style summary box:
+        - Total managed spend across all clients
+        - Blended portfolio ROAS
+        - Blended portfolio CPA
+        - Total conversions delivered
+        - Period-over-period growth rate
+      - Top 3 wins of the period (with specific metrics)
+      - Top 3 challenges and how they are being addressed
+      - One-line strategic outlook for next period
+
+      **PORTFOLIO OVERVIEW** (dashboard-style)
+      - Client-by-client summary table:
+        | Client | Spend | ROAS | CPA | Conversions | Health Score | Trend |
+      - Channel mix allocation across the portfolio (pie chart description)
+      - Budget utilization summary
+      - KPI target achievement scorecard:
+        | KPI | Target | Actual | Achievement % | Status |
+
+      **PER-CLIENT DEEP DIVES**
+      For each client, include:
+      - Client header with key stats dashboard
+      - Channel performance summary table
+      - Top 3 highlights (wins) with supporting data
+      - Top 3 challenges with root cause analysis
+      - Benchmarking position (vs industry, vs portfolio peers)
+      - Key strategic recommendations (top 5, prioritized)
+      - 90-day action plan summary
+      - Appendix reference for detailed channel data
+
+      **CROSS-CHANNEL INTELLIGENCE SECTION**
+      - Attribution insights summary (the most important 3-5 findings)
+      - Channel synergy map (text-based visualization)
+      - Media mix optimization recommendation with projected impact
+      - Customer journey key findings
+
+      **STRATEGIC RECOMMENDATIONS SUMMARY**
+      - Portfolio-level strategic priorities (top 5)
+      - Budget reallocation recommendations per client (summary table)
+      - Testing agenda for next period (top 10 tests across portfolio)
+      - Risk register with mitigation plans
+
+      **APPENDIX**
+      - Detailed metric tables per client per channel
+      - Methodology notes and benchmark sources
+      - Glossary of metrics and abbreviations
+      - Data limitations and assumptions
+
+      ---
+
+      ## FORMATTING AND STYLE GUIDELINES
+
+      - Use professional, confident but measured language
+      - Lead with insights, not data dumps - every number must tell a story
+      - Use comparison and context for every metric (vs target, vs benchmark, vs prior period)
+      - Bold key numbers and findings for scannability
+      - Use markdown tables for structured data comparison
+      - Include "callout boxes" (formatted as blockquotes) for critical findings
+      - Use consistent metric formatting:
+        - Currency: $X,XXX format
+        - Percentages: X.X% format
+        - Large numbers: abbreviated (e.g. 1.2M impressions)
+      - Every section must end with a clear "So What?" takeaway
+      - Avoid jargon that non-marketing stakeholders would not understand
+      - When using acronyms, spell out on first use
+
+      ## TONE AND NARRATIVE
+
+      - Frame the report as a strategic conversation, not a data readout
+      - Acknowledge challenges honestly but pair with solutions
+      - Celebrate wins but attribute them to specific actions (not luck)
+      - Create a forward-looking narrative that builds confidence in the agency relationship
+      - Use "we" language to position the agency as a partner, not a vendor
+      - End with a compelling vision for the next period that aligns with client business goals
+
+      ---
+
+      OUTPUT: The complete, final QBR report in markdown format. This is the deliverable that
+      {input.agency_name} will present to clients. It must be thorough, data-rich, strategically
+      insightful, and presentation-ready.
+    model: sonnet
+    max_turns: 12

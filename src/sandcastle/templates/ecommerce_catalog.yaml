@@ -1,0 +1,1221 @@
+# name: E-Commerce Catalog Enrichment
+# description: Enrich e-commerce product catalogs with SEO-optimized descriptions, attribute extraction, cross-sell mapping, and A/B title variants
+# tags: [E-Commerce, SEO, Catalog, Product, Marketing]
+# category: marketing
+
+name: ecommerce-catalog
+description: Enrich e-commerce product catalogs with SEO-optimized descriptions, attribute extraction, cross-sell mapping, and A/B title variants
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["catalog_source", "product_category", "brand_name"]
+  properties:
+    catalog_source:
+      type: string
+      description: "Raw product catalog data - can be CSV-formatted, JSON, or plain text with product names, SKUs, basic descriptions, and prices"
+    product_category:
+      type: string
+      description: "Primary product category (e.g. 'outdoor furniture', 'organic skincare', 'running shoes', 'smart home devices')"
+    brand_name:
+      type: string
+      description: "Brand name for consistent voice and messaging (e.g. 'TerraVerde', 'NovaPeak Athletics')"
+    target_marketplace:
+      type: string
+      description: "Target e-commerce platform: 'shopify', 'amazon', 'woocommerce', 'bigcommerce', 'etsy', 'walmart'"
+      default: "shopify"
+    competitor_urls:
+      type: string
+      description: "Comma-separated competitor product page URLs or brand names for competitive positioning analysis"
+      default: "No specific competitors provided"
+
+steps:
+  - id: catalog-ingestion
+    prompt: |
+      You are a senior product data analyst specializing in e-commerce catalog management.
+      Your task is to parse, normalize, and structure the raw product catalog data into a
+      clean, standardized format that will serve as the foundation for all downstream
+      enrichment steps.
+
+      Raw catalog data:
+      {input.catalog_source}
+
+      Product category: {input.product_category}
+      Brand: {input.brand_name}
+      Target marketplace: {input.target_marketplace}
+
+      ---
+
+      ## CATALOG INGESTION AND NORMALIZATION FRAMEWORK
+
+      ### 1. Raw Data Parsing
+
+      Parse the provided catalog data and extract all available product information. Handle
+      the following data formats gracefully:
+
+      **Structured Data (CSV/JSON):**
+      - Map column/field names to standard product attributes
+      - Identify and flag data quality issues (missing values, formatting inconsistencies)
+      - Normalize data types (prices to numeric, dimensions to consistent units)
+
+      **Unstructured Data (plain text, lists):**
+      - Extract product names, descriptions, and any embedded attributes
+      - Infer product relationships (parent/child, variants, bundles)
+      - Identify implicit attributes from description text
+
+      ### 2. Product Identity Normalization
+
+      For EACH product identified, establish:
+
+      **Core Identifiers:**
+      - **SKU/Product ID** - use existing or generate a logical SKU structure
+        (e.g. [BRAND]-[CATEGORY]-[VARIANT]-[NUMBER])
+      - **Product name** - clean, standardized name
+      - **Product type** - classify within the {input.product_category} taxonomy
+      - **Variant information** - size, color, material, style, configuration
+      - **Parent/child relationships** - group variants under parent products
+
+      **Pricing Data:**
+      - **Base price** - regular retail price
+      - **Compare-at price** - MSRP or original price (if sale pricing applies)
+      - **Cost price** - if provided (for margin calculation)
+      - **Price tier** - classify as budget, mid-range, premium, or luxury within the category
+      - **Currency** - normalize to a single currency
+
+      **Inventory and Fulfillment:**
+      - **Weight** - if provided, normalize to a standard unit (oz/lbs or g/kg)
+      - **Dimensions** - length, width, height if available
+      - **Shipping class** - infer from weight/dimensions (small parcel, standard, freight)
+
+      ### 3. Product Taxonomy Classification
+
+      Classify each product within a standardized taxonomy:
+
+      **Category Hierarchy:**
+      Build a 3-4 level category tree for the catalog:
+      - Level 1: {input.product_category} (top category)
+      - Level 2: Sub-category (e.g. "outdoor furniture" -> "dining sets", "lounge chairs", "umbrellas")
+      - Level 3: Product type (e.g. "lounge chairs" -> "adirondack", "recliner", "hanging")
+      - Level 4: Material/style variant (e.g. "adirondack" -> "teak", "recycled plastic", "cedar")
+
+      **Google Product Taxonomy Mapping:**
+      Map each product to the appropriate Google Product Category (GPC) for Google Shopping:
+      - Use the most specific level available in the Google taxonomy
+      - Provide the full taxonomy path (e.g. "Home & Garden > Lawn & Garden > Outdoor Furniture > Outdoor Chairs")
+      - Note the GPC ID number for feed integration
+
+      **Schema.org Product Type:**
+      Map to the appropriate schema.org product type for structured data markup:
+      - Product, ProductGroup, ProductModel as applicable
+      - Identify applicable schema.org properties for the category
+
+      ### 4. Existing Content Quality Assessment
+
+      For each product's existing content (if any), score on these dimensions:
+
+      **Description Quality Score (1-10):**
+      - Completeness: Does it cover key features, benefits, and specifications?
+      - Readability: Is it scannable, well-structured, and free of errors?
+      - Persuasiveness: Does it sell the product or just describe it?
+      - SEO-friendliness: Does it include natural keyword usage?
+      - Uniqueness: Does it appear to be original or manufacturer-copied boilerplate?
+      - Brand voice: Does it match {input.brand_name}'s positioning?
+
+      **Data Completeness Score (percentage):**
+      Calculate what percentage of ideal product data fields are populated:
+      - Required fields: name, description, price, category, images (count as percentage)
+      - Recommended fields: weight, dimensions, materials, care instructions
+      - Optional fields: origin, certifications, warranty, compatibility
+
+      **Enrichment Priority:**
+      Rank products by enrichment urgency:
+      - Priority 1: High-traffic/revenue products with poor content (biggest impact)
+      - Priority 2: New products with no content
+      - Priority 3: Mid-tier products with adequate but improvable content
+      - Priority 4: Low-traffic products with acceptable content
+
+      ### 5. Competitive Landscape Context
+
+      Based on {input.competitor_urls} and general category knowledge:
+      - Identify the competitive positioning of {input.brand_name} (value, premium, luxury, etc.)
+      - Note common product claims and messaging themes in the category
+      - Identify differentiation opportunities (what competitors are NOT saying)
+      - Document price positioning relative to the competitive set
+
+      ### 6. Marketplace Requirements Check
+
+      For {input.target_marketplace}, document:
+
+      **Shopify:**
+      - Title: max 255 characters, recommended under 70
+      - Description: HTML allowed, no character limit but keep scannable
+      - Tags: up to 250 tags per product
+      - Variant options: max 3 option types, 100 variants per product
+      - SEO title: max 70 characters (separate from product title)
+      - SEO description: max 320 characters
+
+      **Amazon:**
+      - Title: max 200 characters (category-dependent, some as low as 80)
+      - Bullet points: 5 bullets, max 500 characters each (some categories 200)
+      - Description: max 2,000 characters (standard) or A+ Content (Brand Registry)
+      - Backend search terms: max 250 bytes
+      - Required attributes vary by category (check category-specific requirements)
+
+      **WooCommerce:**
+      - Short description: recommended 150-300 characters
+      - Long description: no limit, supports HTML and shortcodes
+      - Product attributes: unlimited custom attributes
+      - SEO via Yoast/RankMath plugin requirements
+
+      **BigCommerce:**
+      - Product name: max 250 characters
+      - Description: supports HTML, recommended under 5,000 characters
+      - Custom fields: up to 250 per product
+
+      **Etsy:**
+      - Title: max 140 characters
+      - Description: max 6,000 characters, no HTML
+      - Tags: max 13 tags, each max 20 characters
+      - Attributes: category-specific required attributes
+
+      **Walmart:**
+      - Product name: 50-75 characters recommended
+      - Key features: 3-10 bullet points
+      - Description: max 4,000 characters
+      - Rich media: A+ content equivalent for approved brands
+
+      ### 7. Normalized Catalog Output
+
+      Produce the final normalized catalog as a structured table:
+
+      | Field | Product 1 | Product 2 | ... |
+      |-------|-----------|-----------|-----|
+      | SKU | | | |
+      | Name | | | |
+      | Category Path | | | |
+      | Price | | | |
+      | Variant Parent | | | |
+      | Quality Score | | | |
+      | Priority | | | |
+      | GPC ID | | | |
+      | Key Attributes | | | |
+
+      ---
+
+      OUTPUT: Return the complete normalized catalog with quality assessments, taxonomy
+      mapping, marketplace requirements, and enrichment priority rankings. This structured
+      data feeds all downstream enrichment steps.
+    model: haiku
+    max_turns: 10
+
+  - id: attribute-extraction
+    depends_on: [catalog-ingestion]
+    prompt: |
+      You are a product information management (PIM) specialist with deep expertise in
+      e-commerce product attributes and structured data. Extract, infer, and enrich all
+      product attributes from the normalized catalog.
+
+      Normalized catalog data:
+      {steps.catalog-ingestion.output}
+
+      Product category: {input.product_category}
+      Brand: {input.brand_name}
+      Target marketplace: {input.target_marketplace}
+
+      ---
+
+      ## ATTRIBUTE EXTRACTION AND ENRICHMENT FRAMEWORK
+
+      ### 1. Universal Product Attributes
+
+      For EACH product in the catalog, extract or infer these standard attributes:
+
+      **Physical Attributes:**
+      - **Material(s)** - primary and secondary materials with composition percentages if applicable
+        (e.g. "95% organic cotton, 5% elastane" or "solid acacia wood with stainless steel hardware")
+      - **Color** - standardized color name plus hex code for digital consistency
+        (e.g. "Midnight Navy - #191970", "Desert Sand - #EDC9AF")
+      - **Size/Dimensions** - all relevant measurements in both metric and imperial
+        - For apparel: S/M/L/XL or numeric sizing with measurement charts
+        - For furniture: L x W x H, seat height, weight capacity
+        - For electronics: device dimensions, screen size
+        - For consumables: volume, weight, serving count
+      - **Weight** - product weight and shipping weight
+      - **Finish/Texture** - matte, glossy, brushed, distressed, smooth, textured, etc.
+      - **Pattern** - solid, striped, floral, geometric, abstract, etc.
+
+      **Functional Attributes:**
+      - **Primary use case** - the main intended use
+      - **Secondary use cases** - alternative applications
+      - **Key features** - ranked list of 5-10 distinguishing features
+      - **Specifications** - technical specs relevant to the category:
+        - Electronics: battery life, connectivity, processor, storage, resolution
+        - Furniture: weight capacity, assembly required, indoor/outdoor use
+        - Apparel: fit type, stretch, moisture-wicking, UV protection
+        - Skincare: key ingredients, skin type, SPF, volume
+        - Shoes: cushioning type, drop, arch support, terrain
+      - **Compatibility** - what this product works with (devices, accessories, systems)
+      - **Included items** - what comes in the box/package
+      - **Power requirements** - voltage, battery type, charging method (if applicable)
+
+      **Quality and Certification Attributes:**
+      - **Certifications** - relevant industry certifications
+        (e.g. OEKO-TEX, FSC, USDA Organic, Energy Star, UL Listed, CE marked)
+      - **Warranty** - manufacturer warranty terms
+      - **Country of origin** - manufacturing location
+      - **Care instructions** - cleaning, maintenance, storage recommendations
+      - **Durability rating** - inferred lifespan or usage rating
+      - **Safety ratings** - applicable safety standards met
+
+      **Lifestyle and Positioning Attributes:**
+      - **Target audience** - demographic and psychographic profile
+      - **Style/aesthetic** - modern, traditional, minimalist, rustic, industrial, etc.
+      - **Occasion** - everyday, special occasion, professional, casual, outdoor adventure
+      - **Season** - year-round, spring/summer, fall/winter, seasonal specific
+      - **Gift suitability** - is this a good gift? For whom? For what occasion?
+      - **Sustainability attributes** - eco-friendly aspects (recycled materials, carbon neutral,
+        biodegradable packaging, ethical sourcing, vegan, cruelty-free)
+
+      ### 2. Category-Specific Attribute Templates
+
+      Based on {input.product_category}, apply category-specific attribute sets:
+
+      **Outdoor Furniture:**
+      - Weather resistance rating (UV, moisture, temperature range)
+      - Assembly difficulty (tool-free, basic tools, professional recommended)
+      - Stackable/foldable for storage
+      - Cushion included (Y/N, removable, washable)
+      - Weight capacity (per seat/surface)
+      - Set composition (for sets: what pieces included)
+
+      **Skincare/Beauty:**
+      - Key active ingredients with concentrations
+      - Skin type compatibility (oily, dry, combination, sensitive, all)
+      - Concern targeting (acne, aging, hydration, brightening, etc.)
+      - Application method and frequency
+      - Fragrance (scented, fragrance-free, naturally scented)
+      - Cruelty-free, vegan, dermatologist-tested statuses
+      - pH level (if relevant)
+
+      **Footwear:**
+      - Shoe type (running, walking, hiking, casual, dress)
+      - Closure type (lace-up, slip-on, velcro, buckle)
+      - Sole material and type (rubber, EVA, Vibram, leather)
+      - Heel height/drop
+      - Arch support level (neutral, stability, motion control)
+      - Waterproof/water-resistant rating
+      - Terrain suitability (road, trail, mixed)
+
+      **Electronics/Smart Home:**
+      - Connectivity (WiFi, Bluetooth, Zigbee, Z-Wave, Thread, Matter)
+      - Smart home ecosystem compatibility (Alexa, Google Home, Apple HomeKit)
+      - Power source (battery, wired, solar, USB)
+      - App required (Y/N, iOS/Android compatibility)
+      - Voice control capability
+      - Setup difficulty
+      - Data privacy features
+
+      **Apparel:**
+      - Fit type (slim, regular, relaxed, oversized)
+      - Fabric weight (lightweight, midweight, heavyweight)
+      - Stretch (none, 2-way, 4-way)
+      - Moisture management (wicking, breathable, waterproof)
+      - Temperature rating (if performance/outdoor)
+      - Pockets (number, type)
+      - Closure type
+
+      ### 3. Schema.org Structured Data Attributes
+
+      For each product, map attributes to schema.org Product properties:
+
+      ```
+      @type: Product
+      name: [product name]
+      description: [description - from later step]
+      brand:
+        @type: Brand
+        name: {input.brand_name}
+      sku: [SKU]
+      gtin: [if available]
+      mpn: [manufacturer part number if available]
+      color: [color name]
+      material: [material]
+      size: [size]
+      weight:
+        @type: QuantitativeValue
+        value: [weight value]
+        unitCode: [unit]
+      offers:
+        @type: Offer
+        price: [price]
+        priceCurrency: [currency]
+        availability: [InStock/OutOfStock/PreOrder]
+        seller:
+          @type: Organization
+          name: {input.brand_name}
+      aggregateRating: (placeholder for reviews)
+      additionalProperty: [category-specific attributes as PropertyValue]
+      ```
+
+      Identify which schema.org properties are populated vs missing and flag gaps.
+
+      ### 4. Marketplace-Specific Attribute Mapping
+
+      Map extracted attributes to {input.target_marketplace} required and recommended fields:
+
+      **For Amazon (if applicable):**
+      - Identify the correct Amazon Browse Node
+      - Map attributes to Amazon's "Item Type Keyword" and "Search Terms"
+      - Identify required attributes that must be populated to list in the category
+      - Map to Amazon's variation theme (if multi-variant product)
+
+      **For Shopify (if applicable):**
+      - Map to Shopify's standard product metafields
+      - Identify custom metafields needed for filtering and SEO
+      - Map variant options (max 3: e.g. Color, Size, Material)
+
+      **For Google Shopping (if applicable):**
+      - Map to Google Merchant Center required attributes
+      - Identify optional attributes that improve ad performance
+      - Ensure compliance with Google's product data specification
+
+      ### 5. Attribute Confidence Scoring
+
+      For each extracted attribute, assign a confidence level:
+      - **Confirmed** (from source data) - directly stated in the catalog
+      - **Inferred** (from context) - logically derived from available information
+      - **Estimated** (category default) - based on typical category values
+      - **Missing** - not available and cannot be reasonably inferred
+
+      Flag all "Estimated" and "Missing" attributes for manual verification by the
+      catalog manager.
+
+      ### 6. Attribute Completeness Report
+
+      Produce a completeness summary:
+
+      | Product | Required Attrs | Recommended Attrs | Optional Attrs | Completeness % |
+      |---------|---------------|-------------------|----------------|----------------|
+      [One row per product]
+
+      Identify the top 5 missing attributes across the catalog that would have the
+      highest impact on search visibility and conversion rate if populated.
+
+      ---
+
+      OUTPUT: Return the complete attribute extraction for every product, including
+      schema.org mapping, marketplace-specific field mapping, confidence scores, and
+      the completeness report. This feeds into description generation, SEO optimization,
+      and cross-sell mapping.
+    model: haiku
+    max_turns: 12
+
+  - id: description-generation
+    depends_on: [catalog-ingestion]
+    prompt: |
+      You are a senior e-commerce copywriter with expertise in conversion-optimized product
+      descriptions for the {input.product_category} category. Generate compelling, brand-
+      consistent product descriptions for every product in the catalog.
+
+      Normalized catalog data:
+      {steps.catalog-ingestion.output}
+
+      Brand: {input.brand_name}
+      Product category: {input.product_category}
+      Target marketplace: {input.target_marketplace}
+      Competitors: {input.competitor_urls}
+
+      ---
+
+      ## PRODUCT DESCRIPTION GENERATION FRAMEWORK
+
+      ### 1. Brand Voice Definition
+
+      Before writing any descriptions, establish the {input.brand_name} voice guide:
+
+      **Voice Attributes:**
+      Based on the brand name, product category, and price positioning, define:
+      - **Tone** (e.g. warm and approachable, sleek and technical, earthy and authentic)
+      - **Personality** (e.g. the knowledgeable friend, the expert authority, the trusted artisan)
+      - **Language level** (e.g. conversational, semi-formal, technical)
+      - **Power words** - 10-15 brand-aligned adjectives and verbs to use consistently
+        (e.g. "crafted", "engineered", "curated", "effortless", "elevated")
+      - **Words to avoid** - terms that conflict with brand positioning
+        (e.g. "cheap" for premium brands, "basic" for aspirational brands)
+      - **Sentence style** - short and punchy vs flowing and descriptive
+      - **Point of view** - second person "you" (direct), third person (editorial), first
+        person plural "we" (intimate brand)
+
+      ### 2. Description Templates by Marketplace
+
+      Generate descriptions formatted for {input.target_marketplace}:
+
+      **Shopify Product Description:**
+
+      Structure each description with this framework:
+
+      *Opening Hook (1-2 sentences):*
+      - Lead with the primary benefit or emotional appeal
+      - Address the customer's desire, pain point, or aspiration
+      - Create immediate relevance ("Finally, a [product] that [solves problem]")
+      - Do NOT start with the product name or "Introducing..."
+
+      *Feature-Benefit Body (3-5 paragraphs):*
+      For each key feature, use the Feature-Benefit-Proof framework:
+      - **Feature:** What it has or does (factual)
+      - **Benefit:** Why that matters to the customer (emotional/practical)
+      - **Proof:** Evidence or specificity that makes it credible (material, certification, test result)
+
+      Example:
+      - Feature: "Made from FSC-certified teak wood"
+      - Benefit: "so you can enjoy outdoor entertaining for decades without worry"
+      - Proof: "Teak's natural oils resist moisture, UV damage, and insects without chemical treatments"
+
+      Apply the "so what?" test to every feature. If a feature doesn't clearly connect
+      to a customer benefit, reframe it or cut it.
+
+      *Scannable Specifications (bullet list):*
+      - 5-8 key specifications in bullet format
+      - Lead each bullet with the benefit, follow with the spec
+      - Example: "Seats 6 comfortably - 72" L x 36" W dining surface"
+      - Use consistent formatting across all products
+
+      *Social Proof / Trust Signals:*
+      - Warranty information
+      - Certification badges (organic, sustainable, safety tested)
+      - Awards or notable press mentions (if applicable)
+      - Satisfaction guarantee language
+
+      *Call to Action:*
+      - Urgency or scarcity cue if appropriate (without being manipulative)
+      - Cross-sell suggestion ("Pairs perfectly with...")
+      - Clear next step ("Add to cart", "Choose your size")
+
+      **Amazon Listing (if target_marketplace is amazon):**
+
+      *Title (max 200 characters):*
+      - Format: Brand + Product Line + Key Feature + Size/Color + Product Type
+      - Front-load important keywords
+      - Do not use ALL CAPS or excessive punctuation
+
+      *Bullet Points (5 bullets, max 500 characters each):*
+      - Bullet 1: Primary benefit and use case
+      - Bullet 2: Key material/quality differentiator
+      - Bullet 3: Ease of use/assembly/care
+      - Bullet 4: Specifications and compatibility
+      - Bullet 5: Warranty/guarantee/brand promise
+      - Start each bullet with a CAPITALIZED benefit phrase
+      - Include keywords naturally (no keyword stuffing)
+
+      *A+ Content Description (if Brand Registry):*
+      - Brand story module
+      - Comparison chart (vs other products in the line)
+      - Feature highlight with lifestyle imagery descriptions
+      - Technical specification table
+      - FAQ module content
+
+      ### 3. Per-Product Description Generation
+
+      For EACH product in the catalog, generate:
+
+      **Short Description (150-300 characters):**
+      - One powerful sentence capturing the core value proposition
+      - Used for product cards, search results, social sharing
+      - Must include the primary keyword naturally
+      - Must differentiate from other products in the catalog
+
+      **Medium Description (500-800 characters):**
+      - 2-3 paragraph version for product listing pages
+      - Covers primary benefit, top 3 features, and a trust signal
+      - Optimized for mobile reading (short paragraphs, scannable)
+
+      **Full Description (1,500-3,000 characters):**
+      - Complete marketplace-formatted description per the templates above
+      - Includes all feature-benefit pairs, specifications, and CTAs
+      - Formatted with HTML tags appropriate for {input.target_marketplace}:
+        - Shopify: <h3>, <p>, <ul><li>, <strong>, <em>
+        - Amazon: Limited HTML (bold, line breaks, no custom styling)
+        - WooCommerce: Full HTML support
+        - Etsy: Plain text only, use line breaks and symbols for structure
+
+      **Image Alt Text (for each product, generate 3-5 alt text variations):**
+      - Primary alt: Descriptive, keyword-rich, under 125 characters
+      - Secondary alt: Lifestyle/context-focused
+      - Accessibility alt: Purely descriptive for screen readers
+      - Social sharing alt: Optimized for Pinterest/social preview
+
+      ### 4. Copywriting Quality Checks
+
+      For each description, verify:
+
+      **Conversion Optimization:**
+      - Does the opening hook create desire or solve a problem?
+      - Are benefits prioritized over features?
+      - Is there a clear emotional appeal?
+      - Does it address common objections preemptively?
+      - Is there a sense of differentiation from competitors?
+      - Is the CTA clear and compelling?
+
+      **Readability:**
+      - Flesch-Kincaid Grade Level: target 6-8 (accessible to broad audience)
+      - Average sentence length: 12-18 words
+      - No paragraphs longer than 3 sentences
+      - Active voice (minimize passive constructions)
+      - No jargon unless the target audience expects technical language
+
+      **Brand Consistency:**
+      - Does the tone match the voice guide established in step 1?
+      - Are power words used consistently across products?
+      - Is the point of view consistent?
+      - Does the premium/value positioning come through appropriately?
+
+      **Factual Accuracy:**
+      - Do all specifications match the catalog data?
+      - Are no unsubstantiated claims made?
+      - Are comparative claims appropriate ("best-in-class" requires substantiation)?
+      - Are warranty/guarantee terms accurate?
+
+      ### 5. Variant Description Strategy
+
+      For products with variants (size, color, material):
+      - **Parent description**: Covers the product line broadly
+      - **Variant-specific details**: Color-specific descriptions (e.g. "Midnight Navy pairs
+        effortlessly with neutral outdoor cushions")
+      - **Size-specific notes**: Address different use cases by size
+      - **Material-specific benefits**: Highlight unique properties of each material option
+
+      ### 6. Competitive Differentiation Layer
+
+      Based on {input.competitor_urls}:
+      - Identify claims competitors are making that {input.brand_name} can match or exceed
+      - Identify gaps in competitor descriptions that represent differentiation opportunities
+      - Weave competitive advantages into descriptions without naming competitors
+      - Use "Unlike typical [products]..." or "Where others [common shortcoming], {input.brand_name}..."
+        phrasing to differentiate subtly
+
+      ---
+
+      OUTPUT: Return the complete set of product descriptions (short, medium, full) for
+      every product in the catalog, plus image alt text, brand voice guide, and the quality
+      check results. These descriptions feed into SEO optimization and A/B variant generation.
+    model: sonnet
+    max_turns: 12
+
+  - id: seo-optimization
+    depends_on: [catalog-ingestion]
+    prompt: |
+      You are an e-commerce SEO specialist with deep expertise in product page optimization,
+      structured data, and marketplace search algorithms. Optimize every product listing for
+      maximum organic discoverability on {input.target_marketplace} and Google Shopping.
+
+      Normalized catalog data:
+      {steps.catalog-ingestion.output}
+
+      Product category: {input.product_category}
+      Brand: {input.brand_name}
+      Target marketplace: {input.target_marketplace}
+      Competitors: {input.competitor_urls}
+
+      ---
+
+      ## SEO OPTIMIZATION FRAMEWORK
+
+      ### 1. Keyword Research and Mapping
+
+      For EACH product, conduct comprehensive keyword analysis:
+
+      **Primary Keyword Selection:**
+      - Identify the single most valuable keyword/phrase for the product
+      - Selection criteria:
+        - Search volume estimate (high/medium/low relative to the category)
+        - Commercial intent (transactional > informational)
+        - Relevance to the specific product (exact match to product type)
+        - Competition level (prefer medium competition with high intent)
+      - The primary keyword should appear in: title, H1, first 100 words of description,
+        URL slug, meta title, image alt text
+
+      **Secondary Keywords (5-10 per product):**
+      - Long-tail variations of the primary keyword
+      - Feature-based keywords (e.g. "waterproof outdoor dining table")
+      - Benefit-based keywords (e.g. "weather-resistant patio furniture")
+      - Material-based keywords (e.g. "teak outdoor furniture")
+      - Use-case keywords (e.g. "backyard entertaining furniture")
+      - Comparison keywords (e.g. "best outdoor dining set under $500")
+      - Question keywords (e.g. "how to choose outdoor furniture")
+
+      **LSI (Latent Semantic Indexing) Keywords:**
+      - Identify 10-15 semantically related terms per product
+      - These are words that search engines expect to see in content about this topic
+      - Example for "outdoor dining table": patio, backyard, weatherproof, umbrella hole,
+        seating, entertaining, garden, deck, rust-resistant, assembly, extension leaf
+
+      **Negative/Cannibalization Keywords:**
+      - Identify terms that could cause internal cannibalization between products
+      - Map each product to distinct keyword targets to avoid competing with yourself
+      - Create a keyword-to-product assignment matrix for the entire catalog
+
+      ### 2. On-Page SEO Element Optimization
+
+      For EACH product, generate all SEO-critical elements:
+
+      **Meta Title (SEO Title):**
+      - Format: [Primary Keyword] - [Key Differentiator] | {input.brand_name}
+      - Max length: 60 characters (to avoid truncation in SERPs)
+      - Front-load the primary keyword
+      - Include a compelling differentiator or modifier
+      - Include brand name (at end, separated by pipe)
+      - Generate 2 variants for testing
+
+      **Meta Description:**
+      - Max length: 155 characters (optimal for SERP display)
+      - Include primary keyword naturally (will be bolded in search results)
+      - Include a clear value proposition
+      - Include a call-to-action ("Shop now", "Free shipping", "Limited stock")
+      - Use numbers or specific details to stand out ("4.8 star rated", "Ships in 24hrs")
+      - Generate 2 variants for testing
+
+      **URL Slug:**
+      - Format: /collections/[category]/[product-name-keyword]
+      - Keep under 75 characters
+      - Include primary keyword
+      - Use hyphens to separate words
+      - Remove stop words (the, and, or, in, of)
+      - Lowercase only, no special characters
+
+      **H1 Tag:**
+      - Should match or closely mirror the product name
+      - Include primary keyword
+      - One H1 per product page (critical for SEO)
+
+      **Heading Structure (H2-H4):**
+      Recommend a heading hierarchy for the product page:
+      - H2: "Features & Benefits" (or category-appropriate section name)
+      - H2: "Specifications"
+      - H2: "What's Included"
+      - H2: "Care & Maintenance" (if applicable)
+      - H2: "Reviews" (for user-generated content section)
+      - H3s within each section for subsections
+      - Include secondary keywords in H2/H3 tags naturally
+
+      **Image Optimization:**
+      - Primary image alt text: descriptive + primary keyword (max 125 chars)
+      - Secondary image alt texts: feature-focused + secondary keywords
+      - Image file name recommendation: [brand]-[product-name]-[descriptor].jpg
+      - Recommend image dimensions and aspect ratios for {input.target_marketplace}:
+        - Shopify: 2048x2048 recommended, 1:1 aspect ratio
+        - Amazon: 1000x1000 minimum (for zoom), white background for main image
+        - Google Shopping: 100x100 minimum, 800x800 recommended
+
+      ### 3. Schema.org Structured Data
+
+      Generate complete JSON-LD structured data for each product:
+
+      ```json
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "[product name]",
+        "description": "[meta description]",
+        "image": "[primary image URL placeholder]",
+        "brand": {
+          "@type": "Brand",
+          "name": "{input.brand_name}"
+        },
+        "sku": "[SKU]",
+        "offers": {
+          "@type": "Offer",
+          "url": "[product URL placeholder]",
+          "priceCurrency": "USD",
+          "price": "[price]",
+          "availability": "https://schema.org/InStock",
+          "seller": {
+            "@type": "Organization",
+            "name": "{input.brand_name}"
+          }
+        },
+        "additionalProperty": [
+          {
+            "@type": "PropertyValue",
+            "name": "[attribute name]",
+            "value": "[attribute value]"
+          }
+        ]
+      }
+      ```
+
+      Include all relevant properties:
+      - aggregateRating (placeholder structure for when reviews exist)
+      - material, color, size, weight where applicable
+      - Additional properties for category-specific attributes
+      - BreadcrumbList schema for navigation path
+      - FAQ schema if FAQ content is generated
+
+      ### 4. Marketplace-Specific Search Optimization
+
+      **Shopify SEO:**
+      - Product tags for collection filtering (map to keyword clusters)
+      - Collection page SEO (recommend collection descriptions with category keywords)
+      - Internal linking strategy (related products, collection hierarchy)
+      - Sitemap structure recommendations
+
+      **Amazon A9/A10 Algorithm Optimization:**
+      - Backend search terms (250 bytes, no punctuation, no repeated words from title)
+      - Subject matter fields
+      - Target audience fields
+      - Intended use fields
+      - Platinum/generic keyword fields (if available)
+      - Relevance factors: title keywords, bullet keywords, backend terms, sales velocity
+      - Conversion factors: reviews, pricing, FBA status, image quality
+
+      **Google Shopping Optimization:**
+      - Product data feed attribute optimization
+      - Custom labels for campaign segmentation
+      - GTIN/MPN requirements for competitive pricing
+      - Product type vs Google Product Category distinction
+      - Promotion feed integration points
+
+      ### 5. Content Gap and Opportunity Analysis
+
+      Based on the category and competitors:
+
+      **Content Opportunities:**
+      - Buying guide content recommendations (e.g. "How to Choose the Right [Product Category]")
+      - Comparison content opportunities ("[Product A] vs [Product B]")
+      - FAQ content that targets question-based searches
+      - User-generated content strategy (reviews, photos, Q&A)
+      - Video content SEO recommendations (YouTube product reviews, unboxing, how-to)
+
+      **Technical SEO Recommendations:**
+      - Canonical URL strategy for variant pages (one canonical per parent product or per variant)
+      - Pagination handling for collection pages
+      - Faceted navigation SEO (robots.txt, noindex, canonicalization)
+      - Page speed optimization priorities (image compression, lazy loading, critical CSS)
+      - Mobile optimization checklist for product pages
+
+      ### 6. Keyword Density and Natural Language Score
+
+      For each product, analyze the generated content:
+      - Primary keyword density: target 1-2% (avoid over-optimization)
+      - Secondary keyword coverage: at least 60% of secondary keywords used once
+      - LSI keyword coverage: at least 50% of LSI terms present
+      - Natural language score: rate how naturally keywords are integrated (1-10)
+      - Keyword stuffing risk: flag any content that feels forced or unnatural
+
+      ### 7. SEO Optimization Summary
+
+      Produce a per-product SEO optimization scorecard:
+
+      | Product | Primary KW | Meta Title | Meta Desc | URL Slug | Schema | Score |
+      |---------|-----------|------------|-----------|----------|--------|-------|
+      [One row per product with optimization status]
+
+      Catalog-level SEO health score: [X/100]
+      Top 3 SEO priorities for the catalog overall.
+
+      ---
+
+      OUTPUT: Return the complete SEO optimization package for every product including
+      meta elements, structured data, keyword maps, and marketplace-specific search
+      optimization. This feeds into the final A/B variant generation step.
+    model: haiku
+    max_turns: 12
+
+  - id: cross-sell-mapping
+    depends_on: [attribute-extraction, description-generation]
+    prompt: |
+      You are a merchandising strategist specializing in e-commerce product relationships,
+      recommendation engines, and basket-building strategies. Map all cross-sell, upsell,
+      and complementary product relationships within the catalog.
+
+      Product attributes:
+      {steps.attribute-extraction.output}
+
+      Product descriptions:
+      {steps.description-generation.output}
+
+      Product category: {input.product_category}
+      Brand: {input.brand_name}
+      Target marketplace: {input.target_marketplace}
+
+      ---
+
+      ## CROSS-SELL AND PRODUCT RELATIONSHIP MAPPING FRAMEWORK
+
+      ### 1. Product Relationship Types
+
+      For each product in the catalog, identify and score all relevant relationships:
+
+      **Cross-Sell (Complementary Products):**
+      Products that are frequently bought together or naturally complement each other.
+      - Score: 1-10 relationship strength
+      - Rationale: Why these products work together
+      - Customer context: When/why a customer buying product A would also want product B
+      - Display recommendation: Where to show this relationship (PDP, cart, checkout, email)
+      - Example: Outdoor dining table -> outdoor chair set, table umbrella, outdoor cushions
+
+      **Upsell (Premium Alternatives):**
+      Products that are a step up in quality, features, or size.
+      - Score: 1-10 upsell likelihood
+      - Price differential: What additional value justifies the price increase
+      - Messaging: "Upgrade to..." or "Also available in..." framing
+      - Display recommendation: PDP comparison table, cart upgrade prompt
+      - Example: Standard dining table -> extending dining table, same table in premium wood
+
+      **Down-sell (Value Alternatives):**
+      Products that serve a similar purpose at a lower price point.
+      - Score: 1-10 conversion rescue potential
+      - Price savings: How much the customer saves
+      - Trade-off messaging: What they give up vs what they save
+      - Display recommendation: Exit intent, abandoned cart email
+      - Example: Premium teak table -> acacia wood table, same design in smaller size
+
+      **Bundle Opportunities:**
+      Products that should be sold as a curated set.
+      - Bundle composition: Which specific products make up the bundle
+      - Bundle discount: Recommended percentage discount (typically 10-20%)
+      - Bundle value proposition: Why buying together is better than individually
+      - Bundle naming: Creative, benefit-oriented bundle name
+      - Example: "Complete Outdoor Dining Set" = table + 6 chairs + umbrella + cushion set
+
+      **Accessory/Add-on Products:**
+      Products that enhance or are required for the primary product.
+      - Necessity level: Essential, recommended, or nice-to-have
+      - Price point: Low-cost add-ons are most effective (under 20% of primary product price)
+      - Messaging: "Don't forget..." or "Complete your setup with..."
+      - Display recommendation: Add-to-cart popup, bundle builder
+      - Example: Outdoor furniture -> furniture cover, cleaning kit, touch-up paint
+
+      ### 2. Relationship Scoring Methodology
+
+      Score each product relationship on multiple dimensions:
+
+      **Functional Compatibility (0-3 points):**
+      - 3: Products are designed to work together (matching set, compatible system)
+      - 2: Products serve complementary functions in the same context
+      - 1: Products appeal to the same customer but serve different functions
+      - 0: No functional relationship
+
+      **Aesthetic Compatibility (0-3 points):**
+      - 3: Products share design language, color palette, or collection theme
+      - 2: Products have compatible aesthetics when used together
+      - 1: Products are stylistically neutral (neither match nor clash)
+      - 0: Products conflict aesthetically
+
+      **Purchase Context Alignment (0-2 points):**
+      - 2: Products are typically needed at the same time (furnishing a new patio)
+      - 1: Products are needed sequentially (furniture now, covers before winter)
+      - 0: No temporal purchase alignment
+
+      **Price Point Compatibility (0-2 points):**
+      - 2: Cross-sell is 10-30% of primary product price (optimal add-on range)
+      - 1: Cross-sell is 30-75% of primary product price (considered purchase)
+      - 0: Cross-sell exceeds primary product price (unlikely impulse add)
+
+      **Total Relationship Score: 0-10**
+      - 8-10: Strong relationship (always recommend)
+      - 5-7: Moderate relationship (recommend when relevant)
+      - 3-4: Weak relationship (recommend only as fallback)
+      - 0-2: No relationship (do not recommend together)
+
+      ### 3. Product Relationship Matrix
+
+      Build a complete relationship matrix for the catalog:
+
+      | Product A | Product B | Type | Score | Display Location | Messaging |
+      |-----------|-----------|------|-------|-----------------|-----------|
+      [All scored relationships above threshold of 5]
+
+      ### 4. Collection and Category Organization
+
+      Based on the relationship mapping, recommend:
+
+      **Smart Collections:**
+      - "Shop the Look" / "Complete the Set" collections
+      - Seasonal collections (e.g. "Summer Patio Essentials")
+      - Price-based collections ("Under $100", "Premium Collection")
+      - Use-case collections ("Outdoor Dining", "Lounge & Relax", "Small Space Solutions")
+      - New arrivals, best sellers (dynamic collections)
+
+      **Collection Page Merchandising:**
+      - Product sort order within each collection (bestsellers first, new items featured)
+      - Featured product highlights per collection
+      - Cross-collection linking strategy ("You might also like this collection...")
+
+      ### 5. Recommendation Engine Configuration
+
+      Provide configuration data for common recommendation widgets:
+
+      **"Frequently Bought Together":**
+      For each product, list top 3 complementary products with:
+      - Product IDs/SKUs
+      - Relationship strength score
+      - Combined discount suggestion (if applicable)
+      - "Customers who bought [A] also bought [B], [C], [D]" copy
+
+      **"You May Also Like":**
+      For each product, list top 4-6 similar but different products:
+      - Same category, different price points
+      - Same function, different styles
+      - Same brand, adjacent categories
+
+      **"Complete the Look / Complete Your Setup":**
+      For each product, list the ideal companion products:
+      - Full set completion items
+      - Accessory recommendations
+      - Maintenance/care product recommendations
+
+      **"Recently Viewed + Recommended":**
+      Define affinity rules:
+      - If viewed [Category A], recommend [Category B]
+      - If viewed [Price Range X], recommend within [Price Range Y]
+      - If viewed [Feature Z], recommend other products with [Feature Z]
+
+      ### 6. Email and Post-Purchase Cross-Sell Strategy
+
+      Map cross-sell recommendations for lifecycle email sequences:
+
+      **Order Confirmation Email:**
+      - Show 2-3 complementary products based on what was just purchased
+      - "Complete your [purchase context] with..." messaging
+      - Limited-time offer to incentivize quick re-purchase
+
+      **Post-Purchase Follow-Up (7-14 days):**
+      - Accessory and care product recommendations
+      - "How are you enjoying your [product]? Here's how to get even more from it..."
+      - Review request + product recommendation combo
+
+      **Seasonal Re-Engagement:**
+      - Map which products lead to seasonal cross-sell opportunities
+      - "Your [summer product] needs [winter care product]"
+      - "New season, new additions to your [category] collection"
+
+      ### 7. Revenue Impact Estimation
+
+      For each cross-sell relationship, estimate:
+      - **Add-to-cart rate**: estimated % of customers who would add the cross-sell
+        (industry benchmarks: 3-8% for PDP recommendations, 10-15% for cart add-ons)
+      - **Revenue per recommendation impression**: cross-sell price x add-to-cart rate
+      - **Annual revenue opportunity**: based on estimated traffic to the primary product
+      - **AOV impact**: estimated increase in average order value from cross-sell program
+      - Prioritize cross-sell implementations by revenue opportunity (highest first)
+
+      ---
+
+      OUTPUT: Return the complete cross-sell mapping with scored relationships, matrix,
+      collection recommendations, recommendation engine configuration, email strategy,
+      and revenue impact estimates. This is a key merchandising deliverable.
+    model: sonnet
+    max_turns: 12
+
+  - id: ab-variants
+    depends_on: [description-generation, seo-optimization, cross-sell-mapping]
+    prompt: |
+      You are a conversion rate optimization (CRO) specialist with deep expertise in
+      A/B testing for e-commerce product pages. Generate strategic A/B test variants
+      for product titles, descriptions, and key page elements across the entire catalog.
+
+      Product descriptions:
+      {steps.description-generation.output}
+
+      SEO optimization data:
+      {steps.seo-optimization.output}
+
+      Cross-sell mapping:
+      {steps.cross-sell-mapping.output}
+
+      Brand: {input.brand_name}
+      Product category: {input.product_category}
+      Target marketplace: {input.target_marketplace}
+
+      ---
+
+      ## A/B VARIANT GENERATION AND TESTING FRAMEWORK
+
+      ### 1. Title Variant Strategy
+
+      For EACH product, generate 3-4 title variants testing different psychological
+      triggers and information hierarchies:
+
+      **Variant A - Feature-Led (Control/Baseline):**
+      - Standard descriptive title focusing on product attributes
+      - Format: [Brand] + [Product Type] + [Key Feature] + [Size/Variant]
+      - Example: "TerraVerde Teak Outdoor Dining Table - Extendable, Seats 8"
+      - Hypothesis: Informational titles appeal to research-stage shoppers
+
+      **Variant B - Benefit-Led:**
+      - Lead with the primary customer benefit, not the product feature
+      - Format: [Benefit Statement] + [Product Type] + [Brand]
+      - Example: "Effortless Outdoor Entertaining - Extendable Teak Dining Table by TerraVerde"
+      - Hypothesis: Benefit-led titles increase CTR from search results and category pages
+
+      **Variant C - Social Proof / Authority:**
+      - Include a trust signal or social proof element in the title
+      - Format: [Product Type] + [Trust Signal] + [Brand]
+      - Example: "Award-Winning Teak Dining Table | FSC Certified | TerraVerde"
+      - Hypothesis: Trust signals in titles increase CTR for high-consideration purchases
+
+      **Variant D - Urgency/Scarcity (where appropriate):**
+      - Include a time or availability signal
+      - Format: [Product Type] + [Urgency Element] + [Key Feature]
+      - Example: "TerraVerde Teak Dining Table - Limited Edition 2026 Collection - Seats 8"
+      - Hypothesis: Scarcity cues increase click-through for ready-to-buy shoppers
+      - NOTE: Only generate this variant for products where urgency is genuine and appropriate
+
+      For each variant, provide:
+      - The complete title text
+      - Character count (and compliance with {input.target_marketplace} limits)
+      - Primary keyword presence (Y/N and position)
+      - Psychological trigger being tested
+      - Expected impact hypothesis
+
+      ### 2. Description Variant Strategy
+
+      For each product, generate 2-3 description variants testing different copy approaches:
+
+      **Variant A - Problem-Solution Framework (Control):**
+      - Open with the customer's pain point or unmet need
+      - Position the product as the solution
+      - Close with the transformation (life after purchase)
+      - Structure: Problem -> Agitation -> Solution -> Proof -> CTA
+      - Example opening: "Tired of flimsy patio furniture that warps after one season? Your
+        backyard deserves better."
+      - Tone: Empathetic, then confident
+
+      **Variant B - Storytelling/Lifestyle Framework:**
+      - Paint a picture of the ideal usage scenario
+      - Immerse the reader in the experience of owning the product
+      - Use sensory language and emotional imagery
+      - Structure: Scene Setting -> Product Introduction -> Feature Tour -> Vision -> CTA
+      - Example opening: "Picture this: a warm summer evening, friends gathered around a
+        beautiful table, laughter filling the air as the sun sets over your garden."
+      - Tone: Aspirational, warm, evocative
+
+      **Variant C - Technical/Authority Framework:**
+      - Lead with expertise and specifications
+      - Appeal to the analytical, research-oriented buyer
+      - Use data points, comparisons, and detailed specifications
+      - Structure: Key Spec -> Why It Matters -> Comparison -> Expert Endorsement -> CTA
+      - Example opening: "Engineered from Grade A plantation teak (Tectona grandis) with a
+        natural oil content of 5-8%, this dining table delivers laboratory-tested resistance
+        to moisture, UV, and temperature extremes from -20F to 120F."
+      - Tone: Authoritative, precise, data-rich
+
+      For each variant:
+      - Complete description text (full marketplace-formatted version)
+      - Word count and readability score
+      - Key differentiators from other variants
+      - Target buyer persona (who this variant appeals to most)
+      - Expected conversion rate impact hypothesis
+
+      ### 3. Bullet Point / Feature Variants
+
+      Generate 2 versions of feature bullet points:
+
+      **Version A - Benefit-First Bullets:**
+      Each bullet starts with the customer benefit, then explains the feature.
+      - "Entertains up to 8 guests - extends from 60" to 84" with easy butterfly leaf mechanism"
+      - "Lasts for decades outdoors - premium Grade A teak naturally resists weather without treatment"
+
+      **Version B - Feature-First Bullets:**
+      Each bullet starts with the specification, then connects to the benefit.
+      - "Extends from 60" to 84" with butterfly leaf - perfect for hosting dinner parties of up to 8"
+      - "Grade A plantation teak construction - naturally weather-resistant for decades of outdoor use"
+
+      ### 4. CTA (Call to Action) Variants
+
+      Generate CTA button text and supporting copy variants:
+
+      **CTA Button Text Options:**
+      - "Add to Cart" (standard)
+      - "Claim Yours" (ownership language)
+      - "Start Enjoying [Benefit]" (benefit-focused)
+      - "Get [Product] Today" (immediacy)
+      - "Shop Now - Free Shipping" (value-added)
+      - "Reserve Yours" (scarcity)
+
+      **Supporting CTA Copy:**
+      - Variant A: Free shipping message ("Free shipping on orders over $X")
+      - Variant B: Guarantee message ("30-day money-back guarantee")
+      - Variant C: Scarcity message ("Only X left in stock")
+      - Variant D: Social proof ("Join 5,000+ happy customers")
+
+      ### 5. Price Presentation Variants
+
+      Recommend A/B tests for price display:
+      - Standard price display vs anchored pricing (show "compare at" price)
+      - Price per unit/per use framing (e.g. "$2.50 per dinner party for 10 years")
+      - Monthly payment presentation (for high-ticket items)
+      - Bundle savings display ("Save $X when you buy the set")
+
+      ### 6. Cross-Sell Placement Variants
+
+      Based on the cross-sell mapping, test different recommendation approaches:
+      - **Position test**: Below description vs sidebar vs above fold
+      - **Quantity test**: 2 recommendations vs 4 vs 6
+      - **Format test**: Product cards vs text links vs bundled offer
+      - **Messaging test**: "Frequently bought together" vs "Complete the look" vs "You may also like"
+
+      ### 7. A/B Test Implementation Plan
+
+      For each test, provide:
+
+      **Test Configuration:**
+      | Test ID | Element | Variant A (Control) | Variant B | Metric | Min Sample | Duration |
+      |---------|---------|--------------------|-----------| -------|------------|----------|
+      [One row per test]
+
+      **Testing Priority:**
+      Rank all tests by expected impact and ease of implementation:
+      1. Title tests (high impact, easy to implement)
+      2. CTA tests (medium-high impact, easy to implement)
+      3. Description tests (high impact, medium effort)
+      4. Price presentation tests (medium impact, medium effort)
+      5. Cross-sell placement tests (medium impact, requires development)
+
+      **Statistical Requirements:**
+      - Minimum sample size per variant: calculate based on expected conversion rate
+        and minimum detectable effect (typically 10-20% relative lift)
+      - Recommended test duration: minimum 2 business cycles (typically 2-4 weeks)
+      - Statistical significance threshold: 95% confidence level
+      - One-tailed vs two-tailed test recommendation per test type
+
+      **Measurement Framework:**
+      Primary metrics to track for each test:
+      - Click-through rate (for titles, from search/category pages)
+      - Add-to-cart rate (for descriptions, CTAs)
+      - Conversion rate (for all tests)
+      - Revenue per visitor (holistic impact)
+      - Average order value (for cross-sell and bundle tests)
+
+      Secondary metrics:
+      - Bounce rate
+      - Time on page
+      - Scroll depth
+      - Return rate (quality indicator - are set expectations accurate?)
+
+      ### 8. Compiled Catalog Output
+
+      Produce the final enriched catalog with all variants:
+
+      For each product, deliver a structured output containing:
+      - Product identifier (SKU, name)
+      - Title variants (A, B, C, D) with labels
+      - Description variants (A, B, C) with labels
+      - Bullet point variants (A, B) with labels
+      - SEO elements (meta title, meta description, URL slug)
+      - Schema.org JSON-LD
+      - Cross-sell product IDs and messaging
+      - Image alt text variants
+      - CTA recommendations
+      - Testing priority and configuration
+
+      ---
+
+      OUTPUT: Deliver the complete A/B variant package for the entire catalog. This is the
+      final deliverable that the e-commerce team will use to implement and test product
+      page optimizations. Include a summary of expected total revenue impact if the top
+      5 highest-priority tests yield their hypothesized improvements.
+    model: sonnet
+    max_turns: 12
