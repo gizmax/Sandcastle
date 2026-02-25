@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -694,38 +695,14 @@ async def execute_step_with_retry(
     step_overrides: dict | None = None,
 ) -> StepResult:
     """Execute a step with retry logic and exponential backoff."""
-    # Apply step overrides for fork
+    # Apply step overrides for fork (use dataclasses.replace to preserve all fields)
     if step_overrides:
-        if "prompt" in step_overrides:
-            step = StepDefinition(
-                id=step.id,
-                prompt=step_overrides["prompt"],
-                depends_on=step.depends_on,
-                model=step_overrides.get("model", step.model),
-                max_turns=step_overrides.get("max_turns", step.max_turns),
-                timeout=step_overrides.get("timeout", step.timeout),
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-            )
-        elif "model" in step_overrides:
-            step = StepDefinition(
-                id=step.id,
-                prompt=step.prompt,
-                depends_on=step.depends_on,
-                model=step_overrides["model"],
-                max_turns=step_overrides.get("max_turns", step.max_turns),
-                timeout=step_overrides.get("timeout", step.timeout),
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-            )
+        override_fields = {}
+        for key in ("prompt", "model", "max_turns", "timeout"):
+            if key in step_overrides:
+                override_fields[key] = step_overrides[key]
+        if override_fields:
+            step = dataclasses.replace(step, **override_fields)
 
     # AutoPilot: pick variant if configured
     autopilot_experiment = None
@@ -1200,11 +1177,15 @@ async def _execute_step_once(
             and (context._memory_config.auto_inject or (step.memory and step.memory.read))
         )
 
+        # Resolve template variables first (cheap string interpolation) so the
+        # cache key reflects the actual inputs, not the raw template string.
+        prompt = resolve_templates(step.prompt, context, step.depends_on)
+
         # Step result cache - check before executing (skip for memory steps)
         cache_key = ""
         if not _step_reads_memory:
             cache_key = _compute_cache_key(
-                context.workflow_name, step.id, step.prompt, effective_model or step.model
+                context.workflow_name, step.id, prompt, effective_model or step.model
             )
             cached = await _get_cached_result(cache_key)
             if cached:
@@ -1219,8 +1200,6 @@ async def _execute_step_once(
                     status="completed",
                     attempt=attempt,
                 )
-
-        prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
 
         # Inject agent memories into the prompt (semantic search with step prompt)
@@ -3791,51 +3770,15 @@ async def _prepare_and_run_step(
     overrides = (step_overrides or {}).get(step_id)
     use_dead_letter = workflow.on_failure and workflow.on_failure.dead_letter
 
-    # Resolve policies
+    # Resolve policies (use dataclasses.replace to preserve all fields)
     if global_policies and step.policies is None:
-        step = StepDefinition(
-            id=step.id,
-            prompt=step.prompt,
-            depends_on=step.depends_on,
-            model=step.model,
-            max_turns=step.max_turns,
-            timeout=step.timeout,
-            parallel_over=step.parallel_over,
-            output_schema=step.output_schema,
-            retry=step.retry,
-            fallback=step.fallback,
-            type=step.type,
-            approval_config=step.approval_config,
-            autopilot=step.autopilot,
-            sub_workflow=step.sub_workflow,
-            csv_output=step.csv_output,
-            pdf_report=step.pdf_report,
-            policies=global_policies,
-        )
+        step = dataclasses.replace(step, policies=global_policies)
     elif global_policies and step.policies:
         try:
             from sandcastle.engine.policy import resolve_step_policies
 
             resolved = resolve_step_policies(step.policies, global_policies)
-            step = StepDefinition(
-                id=step.id,
-                prompt=step.prompt,
-                depends_on=step.depends_on,
-                model=step.model,
-                max_turns=step.max_turns,
-                timeout=step.timeout,
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                type=step.type,
-                approval_config=step.approval_config,
-                autopilot=step.autopilot,
-                sub_workflow=step.sub_workflow,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-                policies=resolved,
-            )
+            step = dataclasses.replace(step, policies=resolved)
         except Exception as e:
             logger.warning(f"Could not resolve step policies: {e}")
 
@@ -4156,7 +4099,7 @@ async def _prepare_and_run_step(
             if result.status == "failed":
                 on_fail = step.retry.on_failure if step.retry else "abort"
                 if use_dead_letter:
-                    await _send_to_dead_letter(
+                    dlq_ok = await _send_to_dead_letter(
                         run_id=context.run_id,
                         step_id=step_id,
                         error=result.error,
@@ -4164,6 +4107,8 @@ async def _prepare_and_run_step(
                         attempts=result.attempt,
                         parallel_index=i,
                     )
+                    if not dlq_ok:
+                        logger.warning(f"DLQ persist failed for step '{step_id}' item {i}")
                     fan_out_items.append(None)
                 elif on_fail == "abort":
                     raise StepExecutionError(f"Step '{step_id}' item {i} failed: {result.error}")
@@ -4186,13 +4131,15 @@ async def _prepare_and_run_step(
     if result.status == "failed":
         on_fail = step.retry.on_failure if step.retry else "abort"
         if use_dead_letter:
-            await _send_to_dead_letter(
+            dlq_ok = await _send_to_dead_letter(
                 run_id=context.run_id,
                 step_id=step_id,
                 error=result.error,
                 input_data=context.input,
                 attempts=result.attempt,
             )
+            if not dlq_ok:
+                logger.warning(f"DLQ persist failed for step '{step_id}'")
             context.step_outputs[step_id] = None
         elif on_fail == "abort":
             raise StepExecutionError(f"Step '{step_id}' failed: {result.error}")
@@ -4692,8 +4639,11 @@ async def _send_to_dead_letter(
     input_data: dict | None,
     attempts: int,
     parallel_index: int | None = None,
-) -> None:
-    """Insert a failed step into the dead letter queue."""
+) -> bool:
+    """Insert a failed step into the dead letter queue.
+
+    Returns True if the item was persisted, False on failure.
+    """
     try:
         from sandcastle.models.db import DeadLetterItem, async_session
 
@@ -4720,8 +4670,10 @@ async def _send_to_dead_letter(
         )
 
         logger.info(f"Step '{step_id}' sent to dead letter queue")
+        return True
     except Exception as e:
         logger.error(f"Failed to insert into dead letter queue: {e}")
+        return False
 
 
 class StepExecutionError(Exception):
