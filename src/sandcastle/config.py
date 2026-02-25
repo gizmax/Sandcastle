@@ -102,6 +102,10 @@ class Settings(BaseSettings):
 
     # Memory
     memory_enabled: bool = True
+    memory_backend: str = "local"  # "local" | "cloud"
+    memory_graph_enabled: bool = False
+    memory_max_age_days: int = 90  # TTL for memory decay (0 = no expiry)
+    memory_admit_threshold: float = 0.3  # Minimum importance score to store
 
     # Logging
     log_level: str = "info"

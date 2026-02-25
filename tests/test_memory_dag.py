@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from sandcastle.engine.dag import (
     MemoryConfig,
     StepMemoryConfig,
@@ -11,8 +9,8 @@ from sandcastle.engine.dag import (
     validate,
 )
 
-
 # --- Workflow YAML fixtures ---
+
 
 WORKFLOW_WITH_MEMORY = """
 name: standup-summary
@@ -103,6 +101,45 @@ steps:
     prompt: "Do something"
 """
 
+WORKFLOW_V2_FULL = """
+name: v2-full-config
+description: Workflow with all v2 memory fields
+default_model: sonnet
+
+memory:
+  scope: agent
+  agent: research-bot
+  auto_inject: true
+  max_inject: 25
+  max_age_days: 365
+  admit_threshold: 0.5
+  enrich: true
+  conflict_check: true
+
+steps:
+  - id: analyze
+    memory:
+      read: true
+      write: true
+      admit_threshold: 0.4
+    prompt: "Analyze with enriched memory"
+"""
+
+WORKFLOW_V2_DEFAULTS = """
+name: v2-defaults
+description: Workflow where v2 fields use defaults
+default_model: sonnet
+
+memory:
+  scope: workflow
+
+steps:
+  - id: step1
+    memory:
+      read: true
+    prompt: "Simple step"
+"""
+
 
 # --- Parsing tests ---
 
@@ -162,6 +199,55 @@ class TestMemoryParsing:
         assert wf.memory.agent == ""  # default
 
 
+# --- V2 field parsing tests ---
+
+
+class TestMemoryV2Parsing:
+    """Test parsing of new v2 memory fields."""
+
+    def test_v2_full_config_parsed(self):
+        wf = parse_yaml_string(WORKFLOW_V2_FULL)
+        m = wf.memory
+        assert m is not None
+        assert m.max_age_days == 365
+        assert m.admit_threshold == 0.5
+        assert m.enrich is True
+        assert m.conflict_check is True
+
+    def test_v2_step_admit_threshold(self):
+        wf = parse_yaml_string(WORKFLOW_V2_FULL)
+        step = wf.get_step("analyze")
+        assert step.memory is not None
+        assert step.memory.admit_threshold == 0.4
+
+    def test_v2_defaults_max_age_days(self):
+        wf = parse_yaml_string(WORKFLOW_V2_DEFAULTS)
+        m = wf.memory
+        assert m is not None
+        assert m.max_age_days == 0  # default
+
+    def test_v2_defaults_admit_threshold(self):
+        wf = parse_yaml_string(WORKFLOW_V2_DEFAULTS)
+        m = wf.memory
+        assert m.admit_threshold == 0.0  # default
+
+    def test_v2_defaults_enrich(self):
+        wf = parse_yaml_string(WORKFLOW_V2_DEFAULTS)
+        m = wf.memory
+        assert m.enrich is True  # default
+
+    def test_v2_defaults_conflict_check(self):
+        wf = parse_yaml_string(WORKFLOW_V2_DEFAULTS)
+        m = wf.memory
+        assert m.conflict_check is True  # default
+
+    def test_v2_step_admit_threshold_default(self):
+        wf = parse_yaml_string(WORKFLOW_V2_DEFAULTS)
+        step = wf.get_step("step1")
+        assert step.memory is not None
+        assert step.memory.admit_threshold == 0.0
+
+
 # --- Validation tests ---
 
 
@@ -191,6 +277,16 @@ class TestMemoryValidation:
         errors = validate(wf)
         assert errors == []
 
+    def test_v2_full_config_valid(self):
+        wf = parse_yaml_string(WORKFLOW_V2_FULL)
+        errors = validate(wf)
+        assert errors == []
+
+    def test_v2_defaults_valid(self):
+        wf = parse_yaml_string(WORKFLOW_V2_DEFAULTS)
+        errors = validate(wf)
+        assert errors == []
+
 
 # --- Dataclass tests ---
 
@@ -201,9 +297,36 @@ class TestMemoryDataclasses:
         assert cfg.read is True
         assert cfg.write is False
 
+    def test_step_memory_config_admit_threshold_default(self):
+        cfg = StepMemoryConfig()
+        assert cfg.admit_threshold == 0.0
+
     def test_memory_config_defaults(self):
         cfg = MemoryConfig()
         assert cfg.agent == ""
         assert cfg.scope == "workflow"
         assert cfg.auto_inject is True
         assert cfg.max_inject == 10
+
+    def test_memory_config_v2_defaults(self):
+        cfg = MemoryConfig()
+        assert cfg.max_age_days == 0
+        assert cfg.admit_threshold == 0.0
+        assert cfg.enrich is True
+        assert cfg.conflict_check is True
+
+    def test_memory_config_custom_values(self):
+        cfg = MemoryConfig(
+            scope="agent",
+            agent="my-bot",
+            max_age_days=180,
+            admit_threshold=0.4,
+            enrich=False,
+            conflict_check=False,
+        )
+        assert cfg.scope == "agent"
+        assert cfg.agent == "my-bot"
+        assert cfg.max_age_days == 180
+        assert cfg.admit_threshold == 0.4
+        assert cfg.enrich is False
+        assert cfg.conflict_check is False

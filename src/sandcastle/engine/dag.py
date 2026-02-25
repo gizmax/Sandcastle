@@ -310,6 +310,7 @@ class StepMemoryConfig:
 
     read: bool = True
     write: bool = False
+    admit_threshold: float = 0.0  # 0 = use workflow/global default
 
 
 @dataclass
@@ -320,6 +321,11 @@ class MemoryConfig:
     scope: str = "workflow"  # workflow | agent | global
     auto_inject: bool = True
     max_inject: int = 10
+    max_age_days: int = 0  # 0 = use global default from config
+    admit_threshold: float = 0.0  # 0 = use global default from config
+    graph: bool = False  # Enable graph memory (requires neo4j)
+    enrich: bool = True  # Auto-enrich with keywords/tags
+    conflict_check: bool = True  # Detect contradictions before saving
 
 
 VALID_STEP_TYPES = frozenset(
@@ -659,6 +665,7 @@ def _parse_step_memory(data) -> StepMemoryConfig | None:
     return StepMemoryConfig(
         read=data.get("read", True),
         write=data.get("write", False),
+        admit_threshold=float(data.get("admit_threshold", 0.0)),
     )
 
 
@@ -671,6 +678,11 @@ def _parse_memory_config(data) -> MemoryConfig | None:
         scope=data.get("scope", "workflow"),
         auto_inject=data.get("auto_inject", True),
         max_inject=data.get("max_inject", 10),
+        max_age_days=int(data.get("max_age_days", 0)),
+        admit_threshold=float(data.get("admit_threshold", 0.0)),
+        graph=data.get("graph", False),
+        enrich=data.get("enrich", True),
+        conflict_check=data.get("conflict_check", True),
     )
 
 
