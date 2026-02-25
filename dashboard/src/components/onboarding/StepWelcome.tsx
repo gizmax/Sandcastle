@@ -31,8 +31,11 @@ export function StepWelcome({ onNext, onSkip }: StepWelcomeProps) {
   return (
     <div className="space-y-8 text-center">
       {/* Brand mark */}
-      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/10 glow-accent">
-        <Castle className="h-10 w-10 text-accent" />
+      <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
+        <div className="absolute inset-0 rounded-2xl bg-accent/10 blur-md ambient-glow" />
+        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-accent/10 glow-accent scale-in-bounce">
+          <Castle className="h-10 w-10 text-accent" />
+        </div>
       </div>
 
       <div>
@@ -45,7 +48,7 @@ export function StepWelcome({ onNext, onSkip }: StepWelcomeProps) {
       </div>
 
       {/* Value props */}
-      <div className="mx-auto max-w-md space-y-4 text-left">
+      <div className="mx-auto max-w-md space-y-4 text-left stagger-left">
         {VALUE_PROPS.map((prop) => (
           <div key={prop.title} className="flex items-start gap-3">
             <span className="mt-0.5 text-lg leading-none">{prop.emoji}</span>
@@ -62,7 +65,7 @@ export function StepWelcome({ onNext, onSkip }: StepWelcomeProps) {
         <button
           onClick={onNext}
           className={cn(
-            "inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-accent-foreground",
+            "inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-accent-foreground btn-shimmer",
             "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
           )}
         >
