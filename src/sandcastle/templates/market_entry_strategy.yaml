@@ -1,0 +1,353 @@
+# name: Market Entry Strategy
+# description: Comprehensive market entry analysis covering sizing, competitive landscape, regulatory environment, customer research, and go-to-market strategy
+# tags: [Strategy, Market-Entry, TAM, Research]
+# category: marketing
+
+name: market-entry-strategy
+description: Comprehensive market entry analysis covering sizing, competitive landscape, regulatory environment, customer research, and go-to-market strategy
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["product_concept", "target_geography", "target_industry"]
+  properties:
+    product_concept:
+      type: string
+      description: "Description of the product or service entering the market"
+    target_geography:
+      type: string
+      description: "Geographic market to enter (e.g. 'European Union', 'Japan', 'Southeast Asia')"
+    target_industry:
+      type: string
+      description: "Industry vertical to target (e.g. 'Financial Services', 'Healthcare', 'Retail')"
+
+steps:
+  - id: market-sizing
+    prompt: |
+      Conduct comprehensive market sizing for this product entering a new market.
+
+      Product concept: {input.product_concept}
+      Target geography: {input.target_geography}
+      Target industry: {input.target_industry}
+
+      Perform both top-down and bottom-up market sizing:
+
+      **Top-Down Analysis:**
+      1. Total IT/software spend in {input.target_industry} within {input.target_geography}
+      2. Relevant category spend (the specific solution category this product fits)
+      3. Applicable market share based on category maturity and competitive density
+      4. Year-over-year growth rate (historical 3-year and projected 5-year CAGR)
+      5. Currency and purchasing power considerations for the geography
+
+      **Bottom-Up Analysis:**
+      1. Total number of potential customer organizations by size tier
+         (Enterprise: 1000+ employees, Mid-Market: 100-999, SMB: 10-99)
+      2. Estimated adoption rate per tier based on technology maturity in the region
+      3. Average annual contract value per tier (adjusted for local pricing norms)
+      4. Natural expansion revenue from seat growth and feature upgrades
+
+      **Market sizing output:**
+      - TAM: Total addressable market in {input.target_geography} for {input.target_industry}
+      - SAM: Serviceable addressable market given product scope and initial focus
+      - SOM: Realistic obtainable market in Years 1, 2, and 3
+      - Key assumptions documented with confidence levels
+      - Low / Base / High scenarios with sensitivity analysis
+
+      All figures in USD and local currency equivalent. Include data sources.
+    model: haiku
+    max_turns: 10
+
+  - id: competitive-landscape
+    prompt: |
+      Map the competitive landscape in the target market.
+
+      Product: {input.product_concept}
+      Geography: {input.target_geography}
+      Industry: {input.target_industry}
+
+      Identify and analyze all significant players:
+
+      1. **Local incumbents** - companies headquartered in {input.target_geography}
+         that serve {input.target_industry}. These often have regulatory advantage,
+         local relationships, and cultural fit.
+         - Company name, estimated market share, key strengths, vulnerabilities
+
+      2. **Global competitors already present** - international companies that have
+         already entered this market. Study their entry strategy:
+         - When did they enter? How long to reach current market share?
+         - What localization did they do (language, features, pricing, partnerships)?
+         - What challenges did they face (based on public reports, reviews, news)?
+
+      3. **Adjacent players** - companies in related categories that could expand
+         into this space. Assess likelihood of competitive entry.
+
+      4. **Ecosystem map** - Key technology partners, system integrators, resellers,
+         and consultants active in this market that could be allies or gatekeepers.
+
+      5. **Competitive dynamics** - Is the market consolidating, fragmenting, or stable?
+         What recent M&A activity signals about competitive trajectory?
+
+      For each significant competitor, provide:
+      - SWOT summary (2-3 bullet points each)
+      - Estimated pricing in local market
+      - Customer sentiment (from local review sites and forums)
+      - Key differentiator we could exploit
+
+      Return as a structured competitive landscape map.
+    model: sonnet
+    max_turns: 10
+
+  - id: regulatory-scan
+    prompt: |
+      Scan the regulatory and compliance environment for entering this market.
+
+      Product: {input.product_concept}
+      Geography: {input.target_geography}
+      Industry: {input.target_industry}
+
+      Research and document:
+
+      1. **Data protection and privacy** - Local data privacy laws (GDPR, LGPD, PIPA,
+         APPI, etc.). Data residency requirements - must data stay in-country?
+         Cross-border transfer mechanisms needed. Consent requirements.
+
+      2. **Industry-specific regulations** - Licensing, certifications, or approvals
+         required for {input.target_industry} in {input.target_geography}. Timeline
+         and cost to obtain required certifications.
+
+      3. **AI and technology regulations** - Any AI-specific legislation, algorithmic
+         transparency requirements, or automated decision-making rules that apply.
+         Consider both existing law and pending legislation.
+
+      4. **Financial regulations** - If applicable: payment processing rules, anti-money
+         laundering requirements, financial licensing. Tax implications for SaaS
+         revenue in the target geography (VAT, digital services taxes, withholding).
+
+      5. **Accessibility requirements** - Mandatory accessibility standards for
+         software in this market (WCAG, EN 301 549, JIS X 8341).
+
+      6. **Government procurement** - If targeting public sector: procurement rules,
+         security certifications needed (FedRAMP equivalent), local preference policies.
+
+      7. **Labor and operational** - If hiring locally: employment law considerations,
+         entity setup requirements, IP protection, non-compete enforceability.
+
+      For each regulatory area:
+      - Current requirement status (active/pending/proposed)
+      - Compliance effort estimate (Low/Medium/High)
+      - Cost estimate to achieve compliance
+      - Timeline to compliance
+      - Risk of non-compliance (fines, market access denial, reputational)
+
+      Flag any regulatory showstoppers that could prevent or significantly delay entry.
+    model: sonnet
+    max_turns: 10
+
+  - id: customer-research
+    prompt: |
+      Research target customer needs, behavior, and buying patterns in the market.
+
+      Product: {input.product_concept}
+      Geography: {input.target_geography}
+      Industry: {input.target_industry}
+
+      Investigate local customer dynamics:
+
+      1. **Buyer personas** - How do buying decisions differ in this market vs others?
+         - Decision-making hierarchy (top-down vs consensus vs bottom-up adoption)
+         - Typical buying committee composition and size
+         - Role of IT vs business stakeholders in purchasing
+         - Procurement process length and formality
+
+      2. **Technology adoption maturity** - Where is {input.target_geography} on the
+         adoption curve for this type of solution?
+         - Are buyers early adopters or do they wait for proven solutions?
+         - Do they prefer local vendors or are they open to international?
+         - Cloud adoption readiness vs on-premise preference
+
+      3. **Cultural considerations** - Business communication norms, relationship-building
+         expectations, language requirements, localization depth expected
+         (translated UI only vs culturally adapted experience).
+
+      4. **Pricing sensitivity** - How do local buyers perceive pricing?
+         - Acceptable pricing models (subscription vs perpetual, per-seat vs usage)
+         - Local budget cycles and purchasing windows
+         - Currency preference and billing expectations
+         - Comparison to local salary benchmarks and IT budgets
+
+      5. **Channel preferences** - How do buyers in this market discover and evaluate
+         new software?
+         - Online research behavior (which platforms and review sites)
+         - Role of events, conferences, and trade shows
+         - Importance of analyst coverage (local analysts vs global)
+         - Partner and reseller channel reliance
+
+      6. **Reference customer requirements** - Do buyers require local case studies
+         and references? How important are industry-specific references?
+
+      Produce buyer persona profiles specific to {input.target_geography}.
+    model: sonnet
+    max_turns: 10
+
+  - id: swot-analysis
+    depends_on: [market-sizing, competitive-landscape, regulatory-scan, customer-research]
+    prompt: |
+      Synthesize all research into a comprehensive SWOT analysis for this market entry.
+
+      Market sizing: {steps.market-sizing.output}
+      Competitive landscape: {steps.competitive-landscape.output}
+      Regulatory scan: {steps.regulatory-scan.output}
+      Customer research: {steps.customer-research.output}
+
+      Product: {input.product_concept}
+      Geography: {input.target_geography}
+      Industry: {input.target_industry}
+
+      **Strengths** (internal advantages for market entry):
+      - Product capabilities that address local market gaps
+      - Technology advantages over local and global competitors
+      - Existing assets that transfer to this market (brand, IP, team)
+      - Pricing model advantages for local buyer preferences
+
+      **Weaknesses** (internal challenges to overcome):
+      - Localization gaps (language, cultural, regulatory)
+      - Brand awareness deficit in the target geography
+      - Local market knowledge gaps
+      - Resource constraints for parallel market operations
+
+      **Opportunities** (external factors favoring entry):
+      - Market growth trajectory and timing alignment
+      - Competitive whitespace or incumbent vulnerabilities
+      - Regulatory changes that open the market
+      - Technology trends that favor our approach
+      - Partnership or acquisition opportunities
+
+      **Threats** (external factors that could impede success):
+      - Regulatory barriers or upcoming legislation
+      - Strong incumbent defensive positions
+      - Cultural or market fit challenges
+      - Economic or political instability risks
+      - Competitor likely responses to our entry
+
+      For each SWOT item:
+      - Rank importance (1-10)
+      - Identify which research data supports this assessment
+      - Note interdependencies (e.g., a strength that mitigates a specific threat)
+
+      Produce a SWOT matrix with cross-analysis: SO strategies (use strengths to
+      capture opportunities), WO strategies (address weaknesses to capture opportunities),
+      ST strategies (use strengths to counter threats), WT strategies (minimize
+      weaknesses and avoid threats).
+    model: sonnet
+    max_turns: 10
+
+  - id: channel-analysis
+    depends_on: [customer-research, competitive-landscape]
+    prompt: |
+      Analyze go-to-market channel options for this market entry.
+
+      Customer research: {steps.customer-research.output}
+      Competitive landscape: {steps.competitive-landscape.output}
+      Product: {input.product_concept}
+      Geography: {input.target_geography}
+      Industry: {input.target_industry}
+
+      Evaluate each channel option:
+
+      1. **Direct sales** - Feasibility of selling directly.
+         - Cost to hire local sales team (salary benchmarks, ramp time)
+         - Language and timezone coverage requirements
+         - Pipeline generation approach (outbound vs inbound)
+         - Expected ramp to first deal and positive ROI
+
+      2. **Channel partners and resellers** - Local partner ecosystem.
+         - Identify 5-10 potential channel partners by name and profile
+         - Typical partner margin expectations in this market
+         - Partner recruitment and enablement timeline
+         - Revenue share models that work locally
+
+      3. **System integrators and consultancies** - Enterprise channel.
+         - Key SIs operating in {input.target_industry} in {input.target_geography}
+         - How to establish SI relationships and get recommended
+         - Certification and training programs needed
+
+      4. **Product-led growth** - Self-serve adoption potential.
+         - Is PLG viable for this market and buyer profile?
+         - Localization requirements for self-serve (language, payment methods)
+         - Free tier or trial strategy for the local market
+         - Community building and developer relations approach
+
+      5. **Marketplace and platform channels** - Relevant app stores, marketplaces,
+         or platform partnerships (AWS, Azure, Google Cloud marketplaces, Salesforce
+         AppExchange, etc.).
+
+      For each channel:
+      - Estimated cost to launch and operate annually
+      - Time to first revenue
+      - Expected contribution to Year 1 and Year 3 revenue
+      - Key risks and dependencies
+      - Recommended investment level (Primary / Secondary / Exploratory)
+    model: sonnet
+    max_turns: 10
+
+  - id: strategy-document
+    depends_on: [swot-analysis, channel-analysis, market-sizing]
+    prompt: |
+      Compile the complete market entry strategy into an executive-ready document.
+
+      SWOT analysis: {steps.swot-analysis.output}
+      Channel analysis: {steps.channel-analysis.output}
+      Market sizing: {steps.market-sizing.output}
+      Product: {input.product_concept}
+      Geography: {input.target_geography}
+      Industry: {input.target_industry}
+
+      Structure the strategy document as:
+
+      **1. Executive Summary** (half page)
+      - Market opportunity size and growth trajectory
+      - Entry recommendation: Go / No-Go / Conditional Go
+      - Expected time to break-even and Year 3 revenue target
+      - Total investment required
+
+      **2. Market Entry Score** (0-100)
+      Composite score weighing: market attractiveness (30%), competitive position (25%),
+      regulatory feasibility (20%), go-to-market readiness (15%), strategic fit (10%).
+      Explain each component score.
+
+      **3. Recommended Entry Strategy**
+      - Entry mode: organic build, partnership, acquisition, or hybrid
+      - Beachhead segment: which specific customer profile to target first and why
+      - Positioning statement tailored for {input.target_geography}
+      - Pricing strategy for local market conditions
+      - Primary and secondary go-to-market channels
+
+      **4. Localization Roadmap**
+      - Phase 1 (Month 1-3): minimum viable localization for launch
+      - Phase 2 (Month 4-9): market-driven localization based on early feedback
+      - Phase 3 (Month 10-18): deep localization for scale
+      - Resource requirements per phase
+
+      **5. Financial Plan**
+      - Investment breakdown by category (headcount, marketing, legal, infrastructure)
+      - Revenue projections by quarter for Years 1-3 (low/base/high)
+      - Unit economics: CAC, LTV, payback period for the local market
+      - Break-even timeline
+
+      **6. Risk Register**
+      - Top 10 risks ranked by likelihood x impact
+      - Mitigation strategy for each
+      - Kill criteria: conditions under which to exit the market
+
+      **7. 90-Day Launch Plan**
+      - Week-by-week action items with owners
+      - Key milestones and decision gates
+      - Quick wins to validate market fit before full commitment
+      - Metrics dashboard: what to track from Day 1
+
+      Write with conviction and clarity. This document should give leadership
+      everything they need to make a Go/No-Go decision.
+    model: opus
+    max_turns: 10

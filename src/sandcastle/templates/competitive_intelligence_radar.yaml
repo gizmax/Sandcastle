@@ -1,0 +1,223 @@
+# name: Competitive Intelligence Radar
+# description: Monitor competitor activity, detect strategic changes, update battlecards, and distribute alerts
+# tags: [Competitive-Intel, Monitoring, Strategy, Battlecards]
+# category: marketing
+
+name: competitive-intelligence-radar
+description: Monitor competitor activity, detect strategic changes, update battlecards, and distribute alerts
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack]
+
+input_schema:
+  required: ["competitors", "product_name"]
+  properties:
+    competitors:
+      type: string
+      description: "Comma-separated list of competitor names to monitor (e.g. 'Acme Corp, Globex, Initech')"
+    product_name:
+      type: string
+      description: "Your product name for battlecard context"
+    focus_areas:
+      type: string
+      description: "Comma-separated focus areas for monitoring (default: pricing,features,positioning)"
+      default: "pricing,features,positioning"
+
+steps:
+  - id: monitor-sources
+    prompt: |
+      Scan publicly available sources for recent activity from the following competitors.
+
+      Competitors: {input.competitors}
+      Focus areas: {input.focus_areas}
+
+      For each competitor, research the following sources and time period (last 30 days):
+
+      1. **Product updates** - changelog entries, blog posts announcing new features,
+         beta programs, deprecations, or platform changes
+      2. **Pricing changes** - new plans, price increases/decreases, packaging changes,
+         free tier modifications, enterprise pricing signals
+      3. **Hiring signals** - job postings that indicate strategic direction (e.g., hiring
+         ML engineers suggests AI investment, sales reps in new regions suggest expansion)
+      4. **Partnerships and integrations** - new technology partners, marketplace listings,
+         channel partner announcements, co-marketing activities
+      5. **Content and positioning** - new landing pages, messaging changes, case studies,
+         thought leadership, conference talks, analyst mentions
+      6. **Funding and corporate** - funding rounds, acquisitions, leadership changes,
+         office expansions, layoffs, restructuring
+
+      For each finding, record: competitor name, source type, date, summary, significance
+      level (High/Medium/Low), and source URL or reference.
+
+      Return as structured JSON grouped by competitor.
+    model: haiku
+    max_turns: 10
+
+  - id: detect-changes
+    depends_on: [monitor-sources]
+    prompt: |
+      Analyze the raw monitoring data to detect meaningful strategic changes and patterns.
+
+      Monitoring data: {steps.monitor-sources.output}
+      Competitors: {input.competitors}
+      Focus areas: {input.focus_areas}
+
+      Perform change detection analysis:
+
+      1. **New signals** - activity or moves that were not present in typical competitor
+         behavior. Flag anything surprising or out of pattern.
+      2. **Acceleration signals** - areas where a competitor appears to be investing
+         more heavily than before (hiring sprees, rapid feature shipping, increased
+         marketing spend)
+      3. **Convergence patterns** - are multiple competitors making similar moves?
+         This could indicate market-wide trends or validated opportunities.
+      4. **Pivot indicators** - signs that a competitor is shifting strategy, entering
+         new segments, or abandoning existing ones
+      5. **Threat severity ranking** - rank each detected change by potential impact
+         on our product ({input.product_name}) on a 1-10 scale
+
+      Categorize each change as: Offensive (expanding/attacking), Defensive (protecting
+      position), or Neutral (routine). Flag any that require immediate response.
+
+      Return a prioritized list of strategic changes with analysis.
+    model: sonnet
+    max_turns: 10
+
+  - id: threat-assessment
+    depends_on: [detect-changes]
+    prompt: |
+      Conduct a detailed threat assessment for changes that could impact our competitive position.
+
+      Detected changes: {steps.detect-changes.output}
+      Our product: {input.product_name}
+      Focus areas: {input.focus_areas}
+
+      For each change rated 7+ in threat severity:
+
+      1. **Impact analysis** - How does this change affect our positioning, pricing,
+         feature advantage, or target market? Be specific about which customer segments
+         and use cases are most affected.
+      2. **Timeline assessment** - How quickly will this change impact the market?
+         Is it immediate (pricing change) or gradual (new product in beta)?
+      3. **Response options** - List 2-3 concrete response strategies we could pursue:
+         - Match: replicate the move
+         - Differentiate: double down on our unique strengths
+         - Preempt: move faster in a different direction
+         - Ignore: if the change is unlikely to affect our core market
+      4. **Win rate impact** - Estimate how this change might affect win rates in
+         competitive deals over the next quarter
+      5. **Customer risk** - Identify which of our existing customers might be
+         most susceptible to this competitive move
+
+      Produce a threat matrix with severity, urgency, and recommended response.
+    model: sonnet
+    max_turns: 10
+
+  - id: battlecard-update
+    depends_on: [detect-changes]
+    prompt: |
+      Generate updated competitive battlecard content based on the detected changes.
+
+      Detected changes: {steps.detect-changes.output}
+      Our product: {input.product_name}
+      Competitors: {input.competitors}
+
+      For each competitor with significant changes, produce battlecard updates:
+
+      1. **Competitor snapshot** (updated)
+         - Company overview, key metrics, recent momentum direction
+         - Primary target market and positioning statement
+
+      2. **What changed** (new section)
+         - Bullet-point summary of recent moves with dates
+         - Impact on their strengths/weaknesses profile
+
+      3. **How we win against them** (updated talking points)
+         - Top 3 differentiators we should emphasize now
+         - Proof points and customer quotes to reference
+         - Objection handling for their new features or pricing
+
+      4. **How we lose** (updated risk factors)
+         - Scenarios where this competitor now has an edge
+         - Trap questions they might set in competitive deals
+         - What our champion needs to defend our position
+
+      5. **Landmines to set**
+         - Questions our sales team should ask prospects early to expose
+           this competitor's weaknesses before they are positioned
+
+      Format each battlecard section for easy copy-paste into a sales enablement tool.
+    model: sonnet
+    max_turns: 10
+
+  - id: strategic-brief
+    depends_on: [threat-assessment, battlecard-update]
+    prompt: |
+      Compile all findings into a concise competitive intelligence strategic brief.
+
+      Threat assessment: {steps.threat-assessment.output}
+      Battlecard updates: {steps.battlecard-update.output}
+      Our product: {input.product_name}
+
+      Structure the brief as:
+
+      **Competitive Intelligence Brief - {input.product_name}**
+
+      **1. Executive summary** (3-5 sentences)
+      - Overall competitive landscape health: Favorable / Neutral / Concerning
+      - Most significant competitive development this period
+      - Recommended priority action
+
+      **2. Threat dashboard**
+      - Table: Competitor | Change | Severity | Urgency | Recommended Response
+      - Highlight any requiring C-level attention
+
+      **3. Market momentum indicators**
+      - Which competitors are gaining vs losing momentum and why
+      - Market-wide trend observations
+
+      **4. Recommended actions** (prioritized)
+      - Immediate (this week): urgent competitive responses
+      - Short-term (this month): positioning or product adjustments
+      - Strategic (this quarter): larger competitive initiatives
+
+      **5. Battlecard change log**
+      - Summary of what was updated per competitor
+
+      Keep the brief under 800 words for executive consumption. Use bullet points
+      and bold text for scannability.
+    model: sonnet
+    max_turns: 10
+
+  - id: alert-distribution
+    depends_on: [strategic-brief]
+    prompt: |
+      Distribute the competitive intelligence brief to the team via Slack.
+
+      Strategic brief: {steps.strategic-brief.output}
+      Competitors: {input.competitors}
+      Product: {input.product_name}
+
+      Use the Slack tool to post the alert:
+        node /home/user/tools/slack.mjs post_message '#competitive-intel' '<message>'
+
+      Format the Slack message as:
+
+      :radar: *Competitive Intelligence Radar - {input.product_name}*
+
+      Post a condensed version of the strategic brief:
+      - Overall landscape status emoji (green/yellow/red circle)
+      - Top 3 most important competitive developments as bullet points
+      - For any Critical threats: bold callout with recommended immediate action
+      - Link or note about where to find full battlecard updates
+
+      If there are no significant changes detected, post a brief "All clear" status
+      with a summary of what was monitored.
+
+      Keep the Slack message concise - no more than 15 lines. Executives should be
+      able to scan it in under 30 seconds.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

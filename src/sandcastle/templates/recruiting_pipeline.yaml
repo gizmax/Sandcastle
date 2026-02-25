@@ -1,0 +1,308 @@
+# name: Recruiting Pipeline
+# description: End-to-end recruiting workflow from job description to offer preparation with candidate evaluation and interview coordination
+# tags: [HR, Recruiting, Hiring, Talent]
+# category: hr_legal
+
+name: recruiting-pipeline
+description: End-to-end recruiting workflow from job description to offer preparation with candidate evaluation and interview coordination
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack]
+
+input_schema:
+  required: ["role_title", "department", "requirements"]
+  properties:
+    role_title:
+      type: string
+      description: "Job title for the open position (e.g. 'Senior Backend Engineer')"
+    department:
+      type: string
+      description: "Hiring department (e.g. 'Engineering', 'Product', 'Marketing')"
+    requirements:
+      type: string
+      description: "Key requirements, skills, and experience needed for the role"
+    salary_range:
+      type: string
+      description: "Compensation range for the role (e.g. '$150K-$180K + equity')"
+    location:
+      type: string
+      description: "Work location or remote policy (default: 'Remote')"
+      default: "Remote"
+
+steps:
+  - id: job-description
+    prompt: |
+      Create a compelling, inclusive job description for the open role.
+
+      Role: {input.role_title}
+      Department: {input.department}
+      Requirements: {input.requirements}
+      Location: {input.location}
+      Compensation: {input.salary_range}
+
+      Write a job description that includes:
+
+      1. **Role summary** (2-3 sentences) - what makes this role exciting and impactful.
+         Focus on the problems the person will solve and the team they will join.
+         Avoid generic corporate language.
+      2. **Key responsibilities** (5-7 bullets) - specific, outcome-oriented
+         responsibilities. Use action verbs. Each bullet should describe what
+         the person will actually do day-to-day, not vague platitudes.
+      3. **Required qualifications** - based on {input.requirements}, translate into
+         clear, measurable criteria. Separate true requirements from nice-to-haves.
+         Avoid inflated year counts (e.g. "5+ years" when 3 would suffice).
+      4. **Nice-to-have qualifications** (3-4 items) - bonus skills that would
+         make a candidate stand out but are not dealbreakers.
+      5. **What we offer** - based on the location ({input.location}) and salary
+         ({input.salary_range}), describe the value proposition. Include growth
+         opportunities, team culture, and any standout benefits.
+      6. **Inclusive language check** - ensure the description avoids gendered
+         language, unnecessary jargon, and requirements that may inadvertently
+         exclude qualified candidates from underrepresented groups.
+
+      The tone should be professional yet authentic. The description should make
+      a talented person excited to apply.
+    model: sonnet
+    max_turns: 10
+
+  - id: resume-screening
+    depends_on: [job-description]
+    prompt: |
+      Design a structured resume screening framework for evaluating applicants.
+
+      Job description: {steps.job-description.output}
+      Role: {input.role_title}
+      Requirements: {input.requirements}
+
+      Create a comprehensive screening rubric:
+
+      1. **Must-have criteria** (auto-reject if missing) - extract from the required
+         qualifications. For each criterion:
+         - What to look for in a resume (specific keywords, experiences, certifications)
+         - How to verify (is it clearly stated or needs to be inferred?)
+         - Common red flags for exaggeration
+      2. **Scored criteria** (1-5 scale each) - build a scoring matrix:
+         - Technical skills match (weight: 30%)
+         - Relevant experience depth (weight: 25%)
+         - Career trajectory and growth (weight: 15%)
+         - Industry/domain relevance (weight: 15%)
+         - Education and certifications (weight: 10%)
+         - Communication quality (resume clarity, conciseness) (weight: 5%)
+      3. **Bias mitigation guidelines** - specific instructions to:
+         - Ignore candidate name, photo, age indicators
+         - Focus on skills demonstrated, not prestigious company names
+         - Value non-traditional backgrounds that meet skill requirements
+         - Account for career gaps without penalizing (caregiving, health, transitions)
+      4. **Screening workflow** - define the process:
+         - Initial pass: must-have check (2 min per resume)
+         - Scoring pass: full rubric evaluation (5 min per resume)
+         - Calibration: compare top candidates to ensure consistent scoring
+         - Cutoff threshold for advancing to next round
+
+      Output the complete screening rubric as a ready-to-use evaluation template.
+    model: sonnet
+    max_turns: 10
+
+  - id: candidate-ranking
+    depends_on: [resume-screening]
+    prompt: |
+      Apply the screening rubric to generate a ranked candidate shortlist with
+      detailed evaluations.
+
+      Screening rubric: {steps.resume-screening.output}
+      Role: {input.role_title}
+      Department: {input.department}
+
+      Produce a candidate evaluation framework that:
+
+      1. **Simulates scoring** - using the rubric, demonstrate how 8-10 hypothetical
+         candidate profiles would score. Create realistic candidate archetypes:
+         - The perfect match (all criteria met)
+         - The strong-but-different background (non-traditional path)
+         - The overqualified candidate (may be a flight risk)
+         - The high-potential junior (growing fast but light on experience)
+         - The industry specialist (deep domain, lighter technical skills)
+         - Borderline candidates (some must-haves, strong in other areas)
+      2. **Ranking methodology** - explain the weighted scoring calculation and
+         how ties are broken. Include guidance on when to override the score
+         (e.g. exceptional portfolio overrides lower experience score).
+      3. **Shortlist recommendation** - for a typical 50-applicant pool:
+         - Advance top 8-12 candidates to phone screen
+         - Place 5-8 in a "maybe" pool for reconsideration
+         - Provide rejection rationale templates for declined candidates
+      4. **Diversity check** - at the shortlist stage, review the pool composition
+         and flag if it lacks diversity. Suggest sourcing adjustments if needed.
+
+      Output a complete ranking template with example scores and decision guidance.
+    model: sonnet
+    max_turns: 10
+
+  - id: screening-questions
+    depends_on: [candidate-ranking]
+    prompt: |
+      Design a structured phone screen question set for shortlisted candidates.
+
+      Candidate ranking framework: {steps.candidate-ranking.output}
+      Role: {input.role_title}
+      Requirements: {input.requirements}
+
+      Create a 30-minute phone screen script:
+
+      1. **Opening** (2 min) - warm introduction, role overview, screen structure.
+         Set expectations: "I'll ask about your background, a few technical
+         questions, and your interests. You'll have time for questions at the end."
+      2. **Background questions** (8 min) - 3 questions to understand:
+         - Walk me through your most relevant experience for this role
+         - What attracted you to this opportunity?
+         - What does your ideal next role look like?
+         For each question, include what a strong, average, and weak answer looks like.
+      3. **Technical/skill assessment** (12 min) - 4 role-specific questions based
+         on {input.requirements}. Each question should:
+         - Test a specific required skill
+         - Be answerable in 2-3 minutes
+         - Have a clear scoring rubric (1-5)
+         - Include follow-up probes for vague answers
+      4. **Culture and values fit** (5 min) - 2 behavioral questions:
+         - Describe a time you [relevant scenario]. What was the outcome?
+         - How do you approach [relevant work challenge]?
+         Include STAR framework evaluation criteria.
+      5. **Candidate questions** (3 min) - allow candidate to ask questions.
+         Note that the quality of their questions is itself an evaluation signal.
+      6. **Scoring sheet** - a quick post-call scorecard with pass/fail threshold.
+
+      Output the complete phone screen guide with scoring rubrics for each section.
+    model: sonnet
+    max_turns: 10
+
+  - id: interview-scheduling
+    depends_on: [screening-questions]
+    prompt: |
+      Design the on-site/virtual interview loop structure and coordination plan.
+
+      Phone screen design: {steps.screening-questions.output}
+      Role: {input.role_title}
+      Department: {input.department}
+      Location: {input.location}
+
+      Create a comprehensive interview loop:
+
+      1. **Interview panel composition** - recommend 4-5 interviewers:
+         - Hiring manager (final decision maker)
+         - Technical peer (skill depth assessment)
+         - Cross-functional partner (collaboration assessment)
+         - Skip-level leader (culture and strategic fit)
+         - Optional: team member the candidate would work closely with
+      2. **Interview schedule** - design a half-day (3-4 hour) loop:
+         - Session 1 (45 min): Technical deep-dive with peer interviewer
+         - Session 2 (45 min): System design / case study with hiring manager
+         - Session 3 (30 min): Behavioral/culture with cross-functional partner
+         - Session 4 (30 min): Career vision with skip-level leader
+         - Session 5 (15 min): Casual chat with future teammate (no scoring)
+         Include 15-minute breaks between sessions.
+      3. **Logistics template** - email templates for:
+         - Interview invitation to candidate (with agenda and prep tips)
+         - Interviewer briefing (role context, what to assess, what others cover)
+         - Calendar invite format
+      4. **Remote interview considerations** - if {input.location} includes remote:
+         - Video platform setup and backup plan
+         - Screen sharing protocols for technical sessions
+         - Time zone coordination guidance
+
+      Include a Slack notification template to alert the interview panel.
+    model: haiku
+    max_turns: 8
+
+  - id: interviewer-briefing
+    depends_on: [interview-scheduling, candidate-ranking]
+    prompt: |
+      Prepare detailed interviewer briefing packets for each interview session.
+
+      Interview structure: {steps.interview-scheduling.output}
+      Candidate evaluation framework: {steps.candidate-ranking.output}
+      Role: {input.role_title}
+      Requirements: {input.requirements}
+
+      For each interview session, create a briefing packet:
+
+      1. **Session 1 - Technical Deep-Dive**
+         - 3 technical problems scaled to the role level, each with:
+           - Problem statement and expected approach
+           - Evaluation rubric (1-5) covering problem-solving process, code quality,
+             communication, and handling of edge cases
+           - Time allocation per problem
+           - What "hire" vs "no hire" looks like for this session
+      2. **Session 2 - System Design / Case Study**
+         - 1 open-ended design problem relevant to {input.department}
+         - Key discussion points and follow-up questions
+         - Assessment criteria: scope definition, trade-off analysis, scalability
+           thinking, communication clarity
+         - Interviewer prompts for when candidate gets stuck
+      3. **Session 3 - Behavioral/Culture**
+         - 4 behavioral questions using STAR framework
+         - Competencies being assessed: collaboration, conflict resolution,
+           ownership, adaptability
+         - Red flags to watch for
+      4. **Session 4 - Career Vision**
+         - Questions about growth goals, leadership philosophy, alignment with
+           company direction
+         - Assessment: self-awareness, ambition, realistic expectations
+      5. **Debrief guide** - structured format for the post-interview debrief:
+         - Each interviewer submits independent scorecard before group discussion
+         - Debrief agenda: 5 min per interviewer, then open discussion
+         - Decision framework: strong yes, yes, lean yes, lean no, no, strong no
+         - Consensus requirements for advancing to offer
+
+      Emphasize that interviewers should avoid sharing opinions before submitting
+      independent scores to prevent anchoring bias.
+    model: sonnet
+    max_turns: 10
+
+  - id: offer-preparation
+    depends_on: [interviewer-briefing]
+    prompt: |
+      Prepare a comprehensive offer package and negotiation framework for the
+      selected candidate.
+
+      Interview process: {steps.interviewer-briefing.output}
+      Role: {input.role_title}
+      Department: {input.department}
+      Salary range: {input.salary_range}
+      Location: {input.location}
+
+      Create the offer preparation package:
+
+      1. **Compensation structure** - based on {input.salary_range}:
+         - Base salary recommendation (positioning within range based on
+           candidate experience and interview performance)
+         - Equity/stock option grant (if applicable) with vesting schedule
+         - Signing bonus considerations (when to offer, typical amounts)
+         - Annual bonus target and structure
+         - Benefits overview highlights
+      2. **Offer letter template** - professional offer letter including:
+         - Role title, department, reporting structure
+         - Start date (recommend 2-4 weeks for notice period)
+         - Compensation details
+         - Key benefits and perks
+         - Contingencies (background check, references)
+         - Acceptance deadline (typically 5-7 business days)
+      3. **Negotiation playbook** - prepare for common negotiation scenarios:
+         - Candidate asks for 10-15% above the offered base salary
+         - Candidate wants more equity and less base
+         - Candidate has a competing offer
+         - Candidate wants to negotiate start date
+         - Candidate asks for title change
+         For each scenario: recommended response, walk-away threshold, creative
+         alternatives (remote stipend, extra PTO, professional development budget).
+      4. **Closing strategy** - personalized approach to maximize acceptance:
+         - Key selling points to emphasize based on candidate's stated priorities
+         - Hiring manager personal call talking points
+         - Team introduction or virtual coffee before decision deadline
+      5. **Rejection templates** - professional, warm rejection emails for
+         candidates not selected, with encouragement to stay connected.
+
+      The output should be ready for the hiring manager and HR to execute
+      immediately upon debrief decision.
+    model: sonnet
+    max_turns: 10

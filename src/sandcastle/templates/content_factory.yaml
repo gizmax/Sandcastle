@@ -1,0 +1,317 @@
+# name: Content Factory
+# description: Generate a complete multi-platform content package from a single brief with SEO-optimized article and social posts
+# tags: [Content, SEO, Social-Media, Marketing]
+# category: marketing
+
+name: content-factory
+description: Generate a complete multi-platform content package from a single brief with SEO-optimized article and social posts
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack]
+
+input_schema:
+  required: ["topic", "target_audience"]
+  properties:
+    topic:
+      type: string
+      description: "The content topic or theme to create content around"
+    brand_voice:
+      type: string
+      description: "Brand voice and tone guidelines (e.g. professional, casual, authoritative, playful)"
+      default: "professional"
+    target_audience:
+      type: string
+      description: "Description of the target audience (demographics, interests, pain points)"
+    platforms:
+      type: string
+      description: "Comma-separated list of social platforms to create content for"
+      default: "linkedin,twitter,instagram"
+
+steps:
+  - id: brief-intake
+    prompt: |
+      Analyze the content brief and create a comprehensive content strategy document.
+
+      Topic: {input.topic}
+      Brand voice: {input.brand_voice}
+      Target audience: {input.target_audience}
+      Platforms: {input.platforms}
+
+      Develop the content strategy:
+
+      1. Topic Analysis:
+         - Core message and unique angle to differentiate from existing content
+         - Key takeaways the audience should remember
+         - Emotional triggers and value proposition for the target audience
+         - Content gap analysis - what is missing in current coverage of this topic
+
+      2. Audience Persona:
+         - Refined target audience profile based on the brief
+         - Pain points this content addresses
+         - Questions the audience is likely asking about this topic
+         - Preferred content format and consumption habits by platform
+
+      3. Content Pillars:
+         - 3-5 main themes or subtopics to cover
+         - Hierarchy of information (what to lead with, what to deep-dive on)
+         - Supporting data points, statistics, or examples to include
+         - Call-to-action strategy for each platform
+
+      4. Platform-Specific Guidelines:
+         - Tone and format adjustments for each platform ({input.platforms})
+         - Optimal content length for each platform
+         - Hashtag and keyword strategy
+         - Visual content recommendations (image types, video suggestions)
+
+      This strategy document will guide all subsequent content creation steps.
+    model: sonnet
+    max_turns: 10
+
+  - id: seo-research
+    depends_on: [brief-intake]
+    prompt: |
+      Conduct thorough SEO keyword research for the content topic.
+
+      Content strategy: {steps.brief-intake.output}
+      Topic: {input.topic}
+
+      Perform the following SEO research:
+
+      1. Primary Keyword Identification:
+         - Select 1 primary keyword with high relevance and reasonable competition
+         - Search volume estimate (high/medium/low)
+         - Search intent classification (informational, commercial, transactional)
+         - Current SERP landscape analysis (what type of content ranks)
+
+      2. Secondary Keywords (5-8):
+         - Related terms and semantic variations
+         - Long-tail keywords with lower competition
+         - Question-based keywords (how, what, why, best, vs.)
+         - LSI (Latent Semantic Indexing) keywords for topical relevance
+
+      3. Content Structure Recommendations:
+         - Suggested H1 title with primary keyword (under 60 characters)
+         - H2 section headings incorporating secondary keywords
+         - Featured snippet optimization opportunities
+         - Internal and external linking suggestions
+         - Meta description template (under 155 characters)
+
+      4. Competitive Content Analysis:
+         - Top 3 ranking articles for the primary keyword
+         - Their word count, structure, and approach
+         - Gaps and opportunities they miss
+         - How to create content that is 10x better
+
+      Output a keyword map with placement recommendations for the article.
+    model: haiku
+    max_turns: 8
+
+  - id: long-form-article
+    depends_on: [seo-research]
+    prompt: |
+      Write a comprehensive, SEO-optimized long-form article based on the keyword
+      research and content strategy.
+
+      SEO research: {steps.seo-research.output}
+      Content strategy: {steps.brief-intake.output}
+      Brand voice: {input.brand_voice}
+
+      Article requirements:
+
+      1. Structure:
+         - Compelling H1 title optimized for primary keyword and click-through
+         - Hook introduction (first 2-3 sentences must capture attention and include primary keyword)
+         - 5-7 H2 sections with logical flow, each targeting secondary keywords
+         - H3 subsections where depth is needed
+         - Conclusion with clear takeaways and call-to-action
+         - Target word count: 1800-2500 words
+
+      2. SEO Best Practices:
+         - Primary keyword in title, first paragraph, and 2-3 H2 headings
+         - Secondary keywords distributed naturally throughout
+         - Short paragraphs (3-4 sentences max) for readability
+         - Bullet points and numbered lists for scanability
+         - Transition sentences between sections for flow
+
+      3. Content Quality:
+         - Original insights and perspectives, not generic advice
+         - Specific examples, data points, and case studies
+         - Actionable takeaways the reader can implement immediately
+         - Address common objections and misconceptions
+         - Write in the {input.brand_voice} tone consistently
+
+      4. Engagement Elements:
+         - Pull quotes or highlighted statistics
+         - Expert tip callout boxes
+         - Suggested image or infographic placements with descriptions
+         - Internal linking opportunities noted in brackets
+         - CTA placement at natural decision points
+
+      Output the complete article in markdown format with all headings, body text, and notes.
+    model: sonnet
+    max_turns: 10
+
+  - id: social-linkedin
+    depends_on: [long-form-article]
+    prompt: |
+      Create a high-engagement LinkedIn post derived from the long-form article.
+
+      Article: {steps.long-form-article.output}
+      Brand voice: {input.brand_voice}
+      Target audience: {input.target_audience}
+
+      LinkedIn post requirements:
+
+      1. Hook (first 2 lines before "see more"):
+         - Bold, provocative, or surprising statement that stops the scroll
+         - Must make the reader want to click "see more"
+         - Can use a contrarian take, surprising statistic, or personal insight
+
+      2. Body Structure:
+         - Use line breaks liberally for readability
+         - Include 3-5 key insights from the article, reformulated for LinkedIn's audience
+         - Each insight should be a standalone valuable nugget
+         - Use a conversational, thought-leadership tone
+         - Include 1-2 specific numbers or data points for credibility
+
+      3. Engagement Drivers:
+         - End with a specific question to encourage comments
+         - Tag relevant topics or concepts (not people)
+         - Include 3-5 relevant hashtags at the bottom
+         - Suggest a carousel or image concept that could accompany the post
+
+      4. Formatting:
+         - Total length: 1000-1300 characters
+         - Use single-line paragraphs separated by blank lines
+         - No emojis at the start of lines (LinkedIn algorithm preference)
+         - First-person voice for authenticity
+
+      Output the complete post ready to copy-paste into LinkedIn.
+    model: sonnet
+    max_turns: 5
+
+  - id: social-twitter
+    depends_on: [long-form-article]
+    prompt: |
+      Create an engaging X/Twitter thread derived from the long-form article.
+
+      Article: {steps.long-form-article.output}
+      Brand voice: {input.brand_voice}
+      Target audience: {input.target_audience}
+
+      Twitter thread requirements:
+
+      1. Thread Structure (6-8 tweets):
+         - Tweet 1: Hook - bold claim, surprising fact, or contrarian take that demands
+           attention. Must work as a standalone tweet. End with "Thread:" or a thread emoji
+         - Tweets 2-6: Each covers one key insight from the article
+           - One idea per tweet, crystal clear
+           - Use concrete examples, numbers, or analogies
+           - Each tweet should deliver value even if read in isolation
+         - Tweet 7: Summary or practical takeaway, the "so what" for the reader
+         - Tweet 8: CTA - link to full article, ask for follows, or pose a discussion question
+
+      2. Formatting Rules:
+         - Each tweet MUST be under 280 characters
+         - Number tweets as 1/ 2/ 3/ etc.
+         - Use line breaks within tweets for readability
+         - Minimal hashtags (1-2 max, only in final tweet)
+         - No links except in the final CTA tweet
+
+      3. Engagement Optimization:
+         - First tweet determines 90% of thread performance - make it exceptional
+         - Include at least one tweet with a specific, shareable statistic
+         - Use pattern interrupts (short punchy tweet after a longer one)
+         - Ask a mini-question in one middle tweet to boost replies
+
+      Output each tweet separately, clearly numbered, with character count noted.
+    model: sonnet
+    max_turns: 5
+
+  - id: social-instagram
+    depends_on: [long-form-article]
+    prompt: |
+      Create an Instagram content package derived from the long-form article.
+
+      Article: {steps.long-form-article.output}
+      Brand voice: {input.brand_voice}
+      Target audience: {input.target_audience}
+
+      Instagram content package:
+
+      1. Carousel Post Concept (8-10 slides):
+         - Slide 1: Attention-grabbing title slide with hook statement
+         - Slides 2-8: Key insights formatted as visually scannable text cards
+           - One core message per slide
+           - Short headline + 1-2 supporting sentences per slide
+           - Suggest background color/style for each slide
+         - Slide 9: Summary or actionable takeaway
+         - Slide 10: CTA slide (save, share, follow, link in bio)
+
+      2. Caption:
+         - Opening hook (first line visible before "more")
+         - 3-4 short paragraphs expanding on the carousel content
+         - Personal or relatable angle that connects with {input.target_audience}
+         - Clear CTA (save this post, share with someone who needs this, etc.)
+         - Total caption: 150-300 words
+
+      3. Hashtag Strategy:
+         - 5 high-volume hashtags (500K+ posts)
+         - 10 medium-volume hashtags (50K-500K posts)
+         - 5 niche hashtags (under 50K posts) specific to the topic
+         - Separate from caption in first comment
+
+      4. Reel/Story Concept:
+         - 30-60 second reel script covering the top 3 takeaways
+         - Hook in first 3 seconds
+         - On-screen text suggestions
+         - Music/audio mood recommendation
+         - 3 story frames with poll or question sticker ideas
+
+      Output all components clearly labeled and ready for production.
+    model: haiku
+    max_turns: 5
+
+  - id: performance-summary
+    depends_on: [social-linkedin, social-twitter, social-instagram]
+    prompt: |
+      Compile the complete content package and create a distribution summary with
+      performance tracking recommendations.
+
+      Long-form article: {steps.long-form-article.output}
+      LinkedIn post: {steps.social-linkedin.output}
+      Twitter thread: {steps.social-twitter.output}
+      Instagram package: {steps.social-instagram.output}
+
+      Create the content distribution playbook:
+
+      1. Content Package Summary:
+         - Article: title, word count, primary keyword, target URL slug
+         - LinkedIn: post preview, estimated reach category
+         - Twitter: thread length, hook tweet preview
+         - Instagram: carousel concept, caption preview
+
+      2. Publishing Schedule:
+         - Recommended publishing order across platforms
+         - Optimal posting times for each platform (by audience timezone)
+         - Spacing between platform posts to maximize total reach
+         - Cross-promotion strategy (how each platform drives to others)
+
+      3. Performance Tracking:
+         - KPIs to monitor for each platform (impressions, engagement rate, clicks, shares)
+         - Benchmark targets for the {input.target_audience} audience
+         - A/B testing suggestions (alternative hooks, CTAs, posting times)
+         - 7-day and 30-day review checkpoints
+
+      4. Repurposing Opportunities:
+         - Email newsletter excerpt recommendations
+         - Podcast talking points derived from the article
+         - Webinar or presentation outline potential
+         - Community forum discussion starters
+
+      Use the Slack tool to post a summary notification to the content team channel.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

@@ -1,0 +1,240 @@
+# name: Demand Forecasting
+# description: Multi-signal demand forecasting combining statistical models, market intelligence, and social trends for inventory planning
+# tags: [Supply-Chain, Forecasting, Analytics, Inventory]
+# category: general_ai
+
+name: demand-forecasting
+description: Multi-signal demand forecasting combining statistical models, market intelligence, and social trends for inventory planning
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["product_category"]
+  properties:
+    product_category:
+      type: string
+      description: "Product category or SKU group to forecast (e.g. 'outdoor furniture', 'GPU accelerators', 'organic snacks')"
+    historical_period:
+      type: string
+      description: "Historical data window to consider (default: '12 months')"
+      default: "12 months"
+    forecast_horizon:
+      type: string
+      description: "How far ahead to forecast (default: 'next quarter')"
+      default: "next quarter"
+
+steps:
+  - id: data-ingestion
+    prompt: |
+      Prepare a comprehensive data foundation for demand forecasting of the specified
+      product category.
+
+      Product category: {input.product_category}
+      Historical period: {input.historical_period}
+      Forecast horizon: {input.forecast_horizon}
+
+      Compile and structure the following data dimensions:
+
+      1. **Historical demand patterns** - describe the typical sales cycle for
+         {input.product_category} over the past {input.historical_period}. Identify:
+         - Monthly/weekly demand volumes and revenue
+         - Seasonal patterns (peak months, low months, holiday effects)
+         - Day-of-week and intra-month patterns if relevant
+         - Year-over-year growth rates
+      2. **External variables catalog** - list all external factors that historically
+         influence demand for this category:
+         - Weather/climate patterns, economic indicators (CPI, consumer confidence)
+         - Competitor pricing moves, promotional calendar
+         - Raw material costs, shipping cost trends
+         - Regulatory changes affecting the category
+      3. **Data quality assessment** - note any gaps, anomalies, or COVID-era
+         distortions in the historical data that need adjustment
+      4. **Baseline metrics** - establish current run-rate, trailing averages,
+         and naive forecast benchmarks to beat
+
+      Structure the output as a clean data foundation document that the parallel
+      forecasting models can each reference independently.
+    model: haiku
+    max_turns: 8
+
+  - id: statistical-model
+    depends_on: [data-ingestion]
+    prompt: |
+      Generate a statistical demand forecast using time-series decomposition methods.
+
+      Data foundation: {steps.data-ingestion.output}
+      Product category: {input.product_category}
+      Forecast horizon: {input.forecast_horizon}
+
+      Apply the following statistical modeling approach:
+
+      1. **Trend decomposition** - separate the historical demand signal into:
+         - Long-term trend (linear or polynomial fit)
+         - Seasonal component (identify dominant cycle - weekly, monthly, quarterly)
+         - Residual/noise component
+      2. **ARIMA-style projection** - based on the decomposed components:
+         - Project the trend forward over {input.forecast_horizon}
+         - Overlay seasonal multipliers for each period in the forecast window
+         - Calculate prediction intervals (80% and 95% confidence bands)
+      3. **Exponential smoothing** - apply Holt-Winters triple exponential smoothing
+         as a cross-check. Compare the ARIMA and Holt-Winters forecasts and note
+         where they diverge significantly.
+      4. **Anomaly adjustment** - identify and adjust for known one-time events
+         in the historical data (supply disruptions, viral demand spikes, pandemic
+         effects) that should not recur in the forecast period.
+      5. **Output** - provide point forecasts per period (weekly or monthly) within
+         the forecast horizon, along with upper and lower bounds. Include a model
+         fit assessment (MAPE, MAE on holdout data if applicable).
+
+      Present results in a structured table format with clear confidence intervals.
+    model: sonnet
+    max_turns: 10
+
+  - id: market-signals
+    depends_on: [data-ingestion]
+    prompt: |
+      Analyze market intelligence signals that could shift demand beyond what
+      historical patterns would predict.
+
+      Data foundation: {steps.data-ingestion.output}
+      Product category: {input.product_category}
+      Forecast horizon: {input.forecast_horizon}
+
+      Research and assess the following market signal categories:
+
+      1. **Competitive landscape shifts** - new product launches, competitor exits,
+         pricing changes, or market share movements in the {input.product_category}
+         space. Estimate demand impact as percentage uplift or drag.
+      2. **Macroeconomic indicators** - GDP forecasts, consumer spending trends,
+         business investment outlook, interest rate trajectory. Map each indicator
+         to its expected impact on category demand.
+      3. **Industry-specific drivers** - regulatory changes, technology shifts,
+         input cost movements (raw materials, energy, labor), and logistics
+         capacity/cost trends that affect this category.
+      4. **Channel dynamics** - e-commerce vs brick-and-mortar mix shifts, new
+         distribution partnerships, marketplace algorithm changes, or B2B
+         procurement cycle timing.
+      5. **Promotional calendar** - planned marketing campaigns, seasonal sales
+         events (Prime Day, Black Friday, back-to-school), loyalty program changes
+         that could create demand spikes.
+
+      For each signal, provide:
+      - Description and source
+      - Estimated demand impact (% change from baseline)
+      - Confidence in the signal (high/medium/low)
+      - Timing within the forecast horizon
+
+      Rank signals by expected impact magnitude.
+    model: sonnet
+    max_turns: 10
+
+  - id: social-trends
+    depends_on: [data-ingestion]
+    prompt: |
+      Analyze social media, search, and cultural trend signals for demand indicators
+      in the product category.
+
+      Data foundation: {steps.data-ingestion.output}
+      Product category: {input.product_category}
+      Forecast horizon: {input.forecast_horizon}
+
+      Investigate leading indicators from social and digital channels:
+
+      1. **Search trend analysis** - describe Google Trends trajectory for key terms
+         related to {input.product_category}. Compare current search volume to the
+         same period last year. Identify any breakout queries or rising related terms
+         that signal shifting consumer interest.
+      2. **Social media sentiment** - analyze the conversation volume and sentiment
+         around this category on major platforms (TikTok, Instagram, Reddit, X).
+         Look for viral moments, influencer endorsements, or backlash that could
+         drive demand shifts.
+      3. **Review and rating signals** - assess recent product review trends.
+         Are customers increasingly satisfied or dissatisfied? Any emerging
+         quality issues or praise that could affect word-of-mouth?
+      4. **Cultural and lifestyle trends** - identify broader cultural movements
+         (sustainability, wellness, nostalgia, minimalism) that intersect with
+         this product category and could amplify or dampen demand.
+      5. **User-generated content velocity** - track the rate of unboxing videos,
+         hauls, tutorials, and comparison content. Rising UGC often precedes
+         demand surges by 2-4 weeks.
+
+      For each signal, estimate:
+      - Direction (positive/negative/neutral for demand)
+      - Magnitude (% demand impact estimate)
+      - Lead time (how far ahead this signal predicts)
+      - Confidence level
+    model: haiku
+    max_turns: 8
+
+  - id: ensemble-forecast
+    depends_on: [statistical-model, market-signals, social-trends]
+    prompt: |
+      Combine all three forecasting perspectives into a single ensemble demand forecast.
+
+      Statistical forecast: {steps.statistical-model.output}
+      Market signals: {steps.market-signals.output}
+      Social trends: {steps.social-trends.output}
+      Forecast horizon: {input.forecast_horizon}
+
+      Build the ensemble forecast as follows:
+
+      1. **Base layer** - start with the statistical model's point forecast as the
+         quantitative foundation. This carries 50% weight in the ensemble.
+      2. **Market adjustment layer** - apply market signal adjustments to the base
+         forecast. Weight high-confidence signals at 30% of their estimated impact,
+         medium at 15%, low at 5%. This layer carries 30% overall weight.
+      3. **Social trend layer** - overlay social/digital signal adjustments.
+         Apply the same confidence-weighted approach. This carries 20% weight.
+      4. **Ensemble output** - for each period in {input.forecast_horizon}:
+         - Point forecast (weighted combination)
+         - Optimistic scenario (all positive signals materialize)
+         - Pessimistic scenario (all negative signals materialize)
+         - Most likely range (50% probability band)
+      5. **Forecast accuracy estimate** - based on signal agreement:
+         - High confidence: all three perspectives align directionally
+         - Medium confidence: two of three agree
+         - Low confidence: significant disagreement between perspectives
+
+      Present the final ensemble forecast in a period-by-period table with
+      scenario ranges. Highlight any periods where the three models diverge
+      significantly and explain the source of disagreement.
+    model: sonnet
+    max_turns: 10
+
+  - id: inventory-recommendations
+    depends_on: [ensemble-forecast]
+    prompt: |
+      Translate the ensemble demand forecast into actionable inventory and
+      procurement recommendations.
+
+      Ensemble forecast: {steps.ensemble-forecast.output}
+      Product category: {input.product_category}
+      Forecast horizon: {input.forecast_horizon}
+
+      Generate specific operational recommendations:
+
+      1. **Inventory targets** - for each period in the forecast horizon, recommend:
+         - Safety stock level (based on forecast uncertainty band width)
+         - Reorder point (accounting for lead time assumptions)
+         - Target inventory days-of-supply
+         - Maximum stock level to avoid overstock risk
+      2. **Procurement actions** - based on forecast trajectory:
+         - Purchase order timing and quantities
+         - Supplier allocation if multi-sourced
+         - Advance purchase recommendations for periods with expected supply tightness
+         - Defer/reduce orders for periods with demand softness
+      3. **Scenario playbook** - if demand tracks the optimistic or pessimistic scenario:
+         - Trigger points for activating the alternate plan
+         - Pre-negotiated supplier flex capacity to reserve
+         - Markdown or promotional levers for excess inventory
+      4. **Working capital impact** - estimate the inventory investment required
+         for each scenario (base, optimistic, pessimistic)
+      5. **Monitoring cadence** - recommend how frequently to refresh the forecast
+         and which leading indicators to track weekly
+
+      Format as an actionable procurement brief with clear dates, quantities,
+      and decision triggers that a supply chain manager can execute against.
+    model: sonnet
+    max_turns: 10

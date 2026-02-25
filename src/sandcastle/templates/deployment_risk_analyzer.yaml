@@ -1,0 +1,194 @@
+# name: Deployment Risk Analyzer
+# description: Analyze deployment risk by scanning diffs, dependencies, and performance impact before go/no-go decision
+# tags: [DevOps, CI-CD, Security, Risk]
+# category: engineering
+
+name: deployment-risk-analyzer
+description: Analyze deployment risk by scanning diffs, dependencies, and performance impact before go/no-go decision
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [github]
+
+input_schema:
+  required: ["repo_url", "deploy_target"]
+  properties:
+    repo_url:
+      type: string
+      description: "GitHub repository URL (e.g. 'https://github.com/org/repo')"
+    branch:
+      type: string
+      description: "Branch to analyze for deployment (default: main)"
+      default: "main"
+    deploy_target:
+      type: string
+      description: "Deployment target environment (e.g. 'production', 'staging', 'canary')"
+
+steps:
+  - id: diff-analysis
+    prompt: |
+      Analyze the code changes in branch {input.branch} of {input.repo_url}
+      that are pending deployment to {input.deploy_target}.
+
+      Use the GitHub tool to fetch the diff:
+        node /home/user/tools/github.mjs compare_branches '{input.repo_url}' 'main...{input.branch}'
+
+      Perform a thorough change analysis:
+      1. **Change summary** - total files changed, lines added/removed, and
+         change categories (application code, tests, configuration, infrastructure,
+         migrations, dependencies).
+      2. **Critical path changes** - identify modifications to authentication,
+         authorization, payment processing, data models, or API contracts.
+         These carry higher deployment risk.
+      3. **Database migrations** - detect any schema changes (ALTER TABLE, new
+         indexes, data migrations). Flag irreversible migrations that cannot
+         be rolled back safely.
+      4. **Configuration changes** - environment variables, feature flags,
+         service endpoints, timeout values, rate limits. Flag any changes
+         that differ between staging and production.
+      5. **API contract changes** - detect breaking changes to request/response
+         schemas, removed endpoints, or changed authentication requirements.
+      6. **Test coverage** - are the changed files covered by new or updated
+         tests? Flag any critical path changes without test coverage.
+
+      Return a structured risk inventory with each change categorized by
+      risk level (critical/high/medium/low) and the reasoning.
+    model: sonnet
+    max_turns: 10
+
+  - id: dependency-scan
+    depends_on: [diff-analysis]
+    prompt: |
+      Scan all dependency changes in the deployment for security vulnerabilities
+      and compatibility risks.
+
+      Code diff analysis: {steps.diff-analysis.output}
+      Repository: {input.repo_url} Branch: {input.branch}
+
+      Use the GitHub tool to inspect dependency files:
+        node /home/user/tools/github.mjs get_file '{input.repo_url}' '{input.branch}' 'package.json'
+        node /home/user/tools/github.mjs get_file '{input.repo_url}' '{input.branch}' 'requirements.txt'
+
+      Perform comprehensive dependency analysis:
+      1. **New dependencies** - list every newly added package. For each, check:
+         weekly downloads, last publish date, maintainer count, known CVEs,
+         and license compatibility (flag GPL in MIT projects).
+      2. **Version bumps** - identify major version upgrades that may include
+         breaking changes. Check the changelog/release notes for migration
+         requirements.
+      3. **CVE scan** - cross-reference all dependencies against the NVD and
+         GitHub Advisory Database. Report severity (CVSS score), affected
+         versions, and whether a patched version is available.
+      4. **Transitive dependencies** - flag any transitive dependency with
+         critical or high severity CVEs. Note the dependency chain.
+      5. **Supply chain risk** - check for typosquatting indicators, recently
+         transferred package ownership, or packages with install scripts
+         that execute arbitrary code.
+
+      Return a dependency risk report with a pass/warn/fail verdict for each
+      category and an overall dependency risk score (0-100).
+    model: haiku
+    max_turns: 8
+
+  - id: performance-check
+    depends_on: [diff-analysis]
+    prompt: |
+      Evaluate the potential performance impact of the pending deployment
+      to {input.deploy_target}.
+
+      Code diff analysis: {steps.diff-analysis.output}
+      Repository: {input.repo_url} Branch: {input.branch}
+
+      Analyze performance implications:
+      1. **Query changes** - identify new or modified database queries. Flag
+         queries that lack indexes, use full table scans, contain N+1 patterns,
+         or join more than 3 tables. Estimate impact on p95 latency.
+      2. **Memory impact** - detect changes that may increase memory usage:
+         new in-memory caches, larger data structures, removed pagination,
+         file uploads without streaming.
+      3. **Network calls** - count new external API calls or service-to-service
+         requests added in the hot path. Flag synchronous calls that should
+         be async, missing timeouts, or missing circuit breakers.
+      4. **Concurrency concerns** - identify race conditions, missing locks,
+         shared mutable state, or connection pool sizing changes.
+      5. **Scaling implications** - will this change affect horizontal scaling?
+         Check for added state, sticky sessions, or singleton patterns.
+      6. **Load test readiness** - based on the changes, recommend whether a
+         load test is needed before deploying to {input.deploy_target}. If yes,
+         specify which endpoints should be load tested and suggested RPS targets.
+
+      Return a performance risk assessment with impact severity per category
+      and an overall performance confidence score (0-100).
+    model: haiku
+    max_turns: 8
+
+  - id: blast-radius-assessment
+    depends_on: [dependency-scan, performance-check]
+    prompt: |
+      Assess the blast radius of deploying branch {input.branch} to {input.deploy_target}.
+
+      Dependency scan results: {steps.dependency-scan.output}
+      Performance check results: {steps.performance-check.output}
+      Code diff analysis: {steps.diff-analysis.output}
+
+      Build a comprehensive blast radius map:
+      1. **Service dependency graph** - which downstream services consume APIs
+         or events from this service? Map first-degree and second-degree
+         dependencies that could be affected by this deployment.
+      2. **User impact scope** - estimate what percentage of users could be
+         affected if the deployment causes a regression. Consider geographic
+         distribution, feature flag coverage, and traffic routing.
+      3. **Data impact** - could this deployment corrupt, lose, or expose
+         data? Assess database migration safety, cache invalidation,
+         and data pipeline impacts.
+      4. **Rollback complexity** - how quickly can this deployment be rolled
+         back? Flag database migrations, feature flags without kill switches,
+         published API changes, or data format changes that complicate rollback.
+      5. **Deployment strategy recommendation** - based on blast radius, recommend:
+         full deploy, canary (with suggested percentage), blue-green, feature
+         flag gating, or staged rollout with specific region ordering.
+      6. **Monitoring checklist** - list the top 10 metrics and alerts to watch
+         during and after deployment, with specific thresholds for rollback triggers.
+
+      Return the blast radius assessment with an overall risk score (1-10)
+      and the recommended deployment strategy.
+    model: sonnet
+    max_turns: 10
+
+  - id: go-nogo-recommendation
+    depends_on: [blast-radius-assessment]
+    prompt: |
+      Deliver the final go/no-go recommendation for deploying {input.branch}
+      to {input.deploy_target}.
+
+      Blast radius assessment: {steps.blast-radius-assessment.output}
+      Dependency scan: {steps.dependency-scan.output}
+      Performance check: {steps.performance-check.output}
+      Code diff analysis: {steps.diff-analysis.output}
+
+      Produce a deployment decision brief:
+      1. **Verdict** - GO, NO-GO, or CONDITIONAL GO. A CONDITIONAL GO must
+         list specific prerequisites that must be completed first.
+      2. **Risk summary table** - consolidate all risk signals into a single
+         table: category, severity, finding, mitigation status.
+      3. **Blocking issues** - any critical or high severity findings that
+         have not been mitigated. These must be resolved before deployment.
+      4. **Accepted risks** - medium/low findings that are acceptable for
+         this deployment, with justification for acceptance.
+      5. **Pre-deploy checklist**:
+         - [ ] All CI checks passing
+         - [ ] Database migrations tested in staging
+         - [ ] Feature flags configured for gradual rollout
+         - [ ] Rollback runbook reviewed
+         - [ ] On-call engineer briefed
+         - [ ] Monitoring dashboards open
+      6. **Recommended deploy window** - suggest optimal deployment time
+         based on traffic patterns and team availability.
+      7. **Post-deploy validation** - specific health checks to run
+         immediately after deployment and at 15m, 1h, and 24h intervals.
+
+      Format as a concise executive briefing suitable for a deployment
+      review meeting. Include the overall risk score and confidence level.
+    model: sonnet
+    max_turns: 10

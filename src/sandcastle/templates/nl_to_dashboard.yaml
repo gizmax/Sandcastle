@@ -1,0 +1,285 @@
+# name: NL to Dashboard
+# description: Transform natural language business questions into optimized SQL queries, visualizations, and narrative insights
+# tags: [Analytics, SQL, Visualization, Data]
+# category: engineering
+
+name: nl-to-dashboard
+description: Transform natural language business questions into optimized SQL queries, visualizations, and narrative insights
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [postgres]
+
+input_schema:
+  required: ["business_question", "database_schema"]
+  properties:
+    business_question:
+      type: string
+      description: "The business question to answer in plain English (e.g. 'Which products have the highest return rate by region in the last 6 months?')"
+    database_schema:
+      type: string
+      description: "Description of available tables and columns (e.g. 'orders(id, customer_id, product_id, amount, status, region, created_at), products(id, name, category, price), returns(id, order_id, reason, created_at)')"
+    visualization_type:
+      type: string
+      description: "Preferred chart type: 'auto', 'bar', 'line', 'pie', 'table', 'heatmap' (default: 'auto')"
+      default: "auto"
+
+steps:
+  - id: question-analysis
+    prompt: |
+      Analyze the business question to understand the analytical intent and required data.
+
+      Business question: {input.business_question}
+      Available schema: {input.database_schema}
+
+      Decompose the question into structured analytical components:
+
+      1. **Intent classification** - what type of analysis is being requested?
+         - Comparison (A vs B, before/after, across segments)
+         - Trend (change over time, growth rates, trajectories)
+         - Distribution (breakdown, composition, concentration)
+         - Ranking (top/bottom N, leaders/laggards)
+         - Correlation (relationship between variables)
+         - Anomaly (outliers, exceptions, unusual patterns)
+      2. **Entity extraction** - identify the key business entities:
+         - Metrics: what is being measured? (revenue, count, rate, average, etc.)
+         - Dimensions: what is it being grouped by? (region, product, time period)
+         - Filters: what constraints are applied? (date range, status, category)
+         - Sort/limit: is there a ranking or limit? (top 10, highest, lowest)
+      3. **Schema mapping** - map extracted entities to database objects:
+         - Which tables are needed?
+         - Which columns map to which entities?
+         - What joins are required?
+         - Are there any derived metrics (calculated fields, ratios)?
+      4. **Ambiguity resolution** - flag any ambiguous aspects:
+         - Does "last 6 months" mean calendar months or rolling 180 days?
+         - Does "return rate" mean count-based or value-based?
+         - Should "by region" include regions with zero data?
+         - Make reasonable assumptions and state them explicitly.
+      5. **Complexity assessment** - rate the query complexity:
+         - Simple (single table, basic aggregation)
+         - Moderate (2-3 joins, window functions)
+         - Complex (subqueries, CTEs, multiple aggregation levels)
+
+      Output a structured analysis document that will guide SQL generation.
+    model: sonnet
+    max_turns: 8
+
+  - id: query-decomposition
+    depends_on: [question-analysis]
+    prompt: |
+      Break the analytical question into a logical query plan with intermediate steps.
+
+      Question analysis: {steps.question-analysis.output}
+      Database schema: {input.database_schema}
+
+      Design a query execution plan:
+
+      1. **Data sourcing** - identify the base datasets needed:
+         - Primary table(s) and their role in answering the question
+         - Reference/dimension tables for enrichment (names, categories, labels)
+         - Aggregation tables if available for performance
+      2. **Join strategy** - plan the table joins:
+         - Join type for each relationship (INNER, LEFT, RIGHT, CROSS)
+         - Join keys and any join conditions beyond simple key equality
+         - Expected row count impact of each join (fan-out risk assessment)
+         - Order of joins for optimal performance
+      3. **Filter strategy** - plan the WHERE/HAVING conditions:
+         - Pre-aggregation filters (WHERE) - applied early for performance
+         - Post-aggregation filters (HAVING) - applied after GROUP BY
+         - Date range handling (inclusive/exclusive boundaries, timezone considerations)
+         - NULL handling strategy for each filter
+      4. **Aggregation plan** - define the GROUP BY and metrics:
+         - Grouping columns (dimensions)
+         - Aggregate functions per metric (SUM, COUNT, AVG, etc.)
+         - Window functions if needed (running totals, rank, percent of total)
+         - Multiple aggregation levels if a rollup is needed
+      5. **CTE structure** - if the query is complex, break into CTEs:
+         - CTE 1: base data with filters
+         - CTE 2: aggregated metrics
+         - CTE 3: enrichment and derived calculations
+         - Final SELECT: presentation layer
+
+      Output a detailed query blueprint ready for SQL translation.
+    model: sonnet
+    max_turns: 8
+
+  - id: sql-generation
+    depends_on: [query-decomposition]
+    prompt: |
+      Generate production-quality SQL from the query plan.
+
+      Query plan: {steps.query-decomposition.output}
+      Database schema: {input.database_schema}
+      Business question: {input.business_question}
+
+      Write the SQL query following these standards:
+
+      1. **Query structure** - use CTEs for readability and maintainability:
+         ```sql
+         WITH base AS (...),
+              aggregated AS (...),
+              enriched AS (...)
+         SELECT ... FROM enriched ...
+         ```
+      2. **Best practices**
+         - Use explicit column names (never SELECT *)
+         - Alias all computed columns with clear, descriptive names
+         - Use COALESCE for NULL handling in metrics (avoid NULLs in output)
+         - Cast data types explicitly where needed
+         - Use ISO date format for date literals
+         - Parameterize date ranges as comments for easy modification
+      3. **Performance considerations**
+         - Filter as early as possible in the CTE chain
+         - Avoid correlated subqueries where a JOIN would suffice
+         - Use appropriate index-friendly predicates (sargable conditions)
+         - Add comments noting which columns should be indexed
+      4. **Safety guardrails**
+         - Add LIMIT clause to prevent runaway queries (default LIMIT 1000)
+         - Use read-only compatible syntax (no INSERT, UPDATE, DELETE)
+         - Avoid non-deterministic functions that would cause different results on re-run
+      5. **Output format**
+         - Column ordering: dimensions first, then metrics
+         - Sort by the primary metric (descending) unless the question implies otherwise
+         - Include row_number or rank if a ranking was requested
+         - Round decimals to 2 places for currency, 1 place for percentages
+
+      Use the Postgres tool to execute the query:
+        node /home/user/tools/postgres.mjs query '<sql>'
+
+      Output the complete SQL query with inline comments explaining each section.
+    model: sonnet
+    max_turns: 10
+    tools: [postgres]
+
+  - id: query-optimization
+    depends_on: [sql-generation]
+    prompt: |
+      Review and optimize the generated SQL for performance and correctness.
+
+      Generated SQL and results: {steps.sql-generation.output}
+      Database schema: {input.database_schema}
+
+      Perform a thorough query review:
+
+      1. **Correctness verification**
+         - Does the query actually answer the business question asked?
+         - Are the join conditions correct? (no accidental cross-joins)
+         - Is the aggregation granularity right? (not double-counting)
+         - Are edge cases handled? (division by zero, empty groups, NULLs)
+         - Spot-check: do the numbers make directional sense?
+      2. **Performance optimization**
+         - Identify table scan candidates and suggest index additions
+         - Check for expensive operations (DISTINCT on large sets, LIKE '%...',
+           functions on indexed columns)
+         - Evaluate if materialized views or summary tables would help
+         - Estimate query cost relative to dataset size
+         - Suggest partition pruning opportunities if tables are partitioned
+      3. **Readability improvements**
+         - Simplify overly complex expressions
+         - Add or improve inline comments
+         - Standardize naming conventions
+         - Break long lines for readability
+      4. **Alternative approaches**
+         - If the query is complex, suggest a simpler alternative that trades
+           precision for speed (80/20 approach)
+         - If results are large, suggest a summary version
+      5. **Index recommendations**
+         - List specific CREATE INDEX statements that would improve this query
+         - Estimate the performance improvement expected
+         - Note any existing indexes that are redundant
+
+      Output the final optimized SQL query and a brief optimization report.
+    model: haiku
+    max_turns: 8
+
+  - id: visualization-selection
+    depends_on: [query-optimization]
+    prompt: |
+      Select the optimal visualization type and design the dashboard layout
+      for presenting the query results.
+
+      Query results and analysis: {steps.query-optimization.output}
+      Preferred visualization: {input.visualization_type}
+      Business question: {input.business_question}
+
+      Design the visualization:
+
+      1. **Chart type selection** - if {input.visualization_type} is 'auto', choose
+         based on the data characteristics:
+         - **Bar chart**: categorical comparisons (regions, products, teams)
+         - **Line chart**: time series trends (daily, weekly, monthly)
+         - **Pie/donut**: composition/share (market share, category mix)
+         - **Table**: detailed multi-column data or when exact numbers matter
+         - **Heatmap**: two-dimensional patterns (time x category, region x product)
+         - **Scatter plot**: correlation between two numeric variables
+         Justify the selection based on the data structure and analytical intent.
+      2. **Chart configuration**
+         - X-axis: dimension, label, and formatting
+         - Y-axis: metric(s), label, scale (linear/log), and formatting
+         - Color encoding: what does color represent? Color palette recommendation
+         - Sort order: by value, by category name, or by time
+         - Legend placement and format
+      3. **Supporting elements**
+         - Title: clear, specific (not "Chart 1" - something like "Return Rate
+           by Region, Last 6 Months")
+         - Subtitle: time range, filters applied, data freshness timestamp
+         - Reference lines: averages, targets, thresholds if applicable
+         - Annotations: call out notable data points
+      4. **Multiple views** - if the data supports it, recommend a mini-dashboard:
+         - Primary chart (answers the main question)
+         - Summary KPI cards (key numbers at a glance)
+         - Detail table (for drill-down)
+         - Trend sparkline (if time component exists)
+      5. **Interactivity recommendations**
+         - Filter controls (date range picker, dimension dropdown)
+         - Drill-down paths (click region -> see products in that region)
+         - Tooltip content (what to show on hover)
+
+      Output a complete visualization specification in a structured format
+      that a frontend developer or BI tool could implement.
+    model: sonnet
+    max_turns: 8
+
+  - id: insight-narrative
+    depends_on: [visualization-selection]
+    prompt: |
+      Write a narrative insight summary that explains the data story to
+      business stakeholders.
+
+      Visualization design and data: {steps.visualization-selection.output}
+      Business question: {input.business_question}
+
+      Craft a compelling data narrative:
+
+      1. **Headline finding** (1 sentence) - the single most important answer to
+         the business question. Lead with the insight, not the methodology.
+         Example: "Product returns in the Northeast region are 3.2x higher than
+         the company average, driven primarily by electronics category quality issues."
+      2. **Key findings** (3-5 bullets) - supporting insights ranked by importance:
+         - Each finding should include the specific number/metric
+         - Compare against a meaningful benchmark (average, prior period, target)
+         - Note the business implication of each finding
+      3. **Context and caveats**
+         - Data freshness and coverage (what period, any gaps?)
+         - Sample size considerations (is the data statistically significant?)
+         - Known data quality issues that may affect interpretation
+         - Assumptions made in the analysis
+      4. **Root cause hypotheses** - go beyond "what" to explore "why":
+         - For the top finding, suggest 2-3 probable causes
+         - Reference supporting data points that hint at causation
+         - Recommend follow-up analyses to validate hypotheses
+      5. **Recommended actions** - translate insights into decisions:
+         - What should the business do differently based on this data?
+         - Quick wins (immediate actions)
+         - Strategic recommendations (longer-term changes)
+         - What to monitor going forward
+      6. **Executive-ready format** - structure the narrative so a C-level
+         executive can read the headline and key findings in 30 seconds,
+         then dive deeper as needed. Use plain business language, avoid
+         technical jargon (no "LEFT JOIN" or "CTE" references).
+
+      Output a polished insight document ready for presentation or email distribution.
+    model: sonnet
+    max_turns: 10

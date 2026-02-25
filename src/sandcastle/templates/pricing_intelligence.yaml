@@ -1,0 +1,244 @@
+# name: Pricing Intelligence
+# description: Analyze competitor pricing, feature-value perception, and willingness to pay to optimize packaging and pricing strategy
+# tags: [Pricing, Competitive-Intel, Strategy, Revenue]
+# category: marketing
+
+name: pricing-intelligence
+description: Analyze competitor pricing, feature-value perception, and willingness to pay to optimize packaging and pricing strategy
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["product_name", "competitor_urls"]
+  properties:
+    product_name:
+      type: string
+      description: "Your product name for pricing comparison context"
+    competitor_urls:
+      type: string
+      description: "Comma-separated list of competitor pricing page URLs or company names"
+    target_segments:
+      type: string
+      description: "Target customer segments to analyze (e.g. 'SMB, Mid-Market, Enterprise')"
+
+steps:
+  - id: price-scraping
+    prompt: |
+      Research and document the complete pricing structures of competitors in this market.
+
+      Product: {input.product_name}
+      Competitors/URLs: {input.competitor_urls}
+      Target segments: {input.target_segments}
+
+      For each competitor, document:
+      1. **Plan tiers** - Name, price point (monthly and annual), and what triggers
+         tier upgrades (seats, usage, features)
+      2. **Feature gating** - Which features are available at each tier? Create a
+         feature-by-tier matrix for each competitor.
+      3. **Free tier / trial** - What is offered for free? Trial length? Credit card
+         required? What are the limitations?
+      4. **Enterprise pricing** - Is there a "Contact sales" tier? What signals suggest
+         the enterprise price range? (Job postings, case studies, public contracts)
+      5. **Add-ons and overages** - What costs extra beyond the base plan? (Storage,
+         API calls, premium support, advanced features)
+      6. **Discounting patterns** - Annual vs monthly discount percentage, startup
+         programs, non-profit pricing, volume discounts
+      7. **Recent pricing changes** - Any price increases, plan restructures, or
+         grandfathering policies in the past 12 months
+
+      Present the data in a structured comparison table format.
+      Note any pricing that is unclear or estimated with confidence levels.
+    model: sonnet
+    max_turns: 10
+
+  - id: review-sentiment
+    depends_on: [price-scraping]
+    prompt: |
+      Analyze customer sentiment specifically around pricing and value perception
+      for each competitor.
+
+      Pricing data: {steps.price-scraping.output}
+      Competitors: {input.competitor_urls}
+      Product: {input.product_name}
+
+      Research reviews, forums, and social media for pricing-specific feedback:
+
+      1. **Value perception** - Do customers feel they get good value for money?
+         Score each competitor 1-10 on perceived value.
+      2. **Price sensitivity triggers** - At what price points do customers complain?
+         What pricing changes caused the most backlash?
+      3. **Feature-value alignment** - Which features do customers consider "must-have"
+         vs "nice-to-have" vs "never use but pay for"?
+      4. **Switching cost perception** - How much does pricing influence switching
+         decisions? What price difference triggers evaluation of alternatives?
+      5. **Hidden cost complaints** - Unexpected charges, overage fees, or mandatory
+         add-ons that frustrate customers
+      6. **Positive pricing sentiment** - What do customers appreciate about certain
+         pricing models? (Transparent pricing, generous free tier, fair scaling)
+      7. **Segment-specific reactions** - Do SMBs, mid-market, and enterprise buyers
+         have different pricing sensitivities?
+
+      Include 5-10 representative quotes about pricing from real reviews.
+      Identify the "willingness to pay ceiling" for each customer segment.
+    model: sonnet
+    max_turns: 10
+
+  - id: feature-value-mapping
+    depends_on: [price-scraping, review-sentiment]
+    prompt: |
+      Map features to their perceived value and create a feature-value hierarchy.
+
+      Pricing structures: {steps.price-scraping.output}
+      Pricing sentiment: {steps.review-sentiment.output}
+      Product: {input.product_name}
+      Segments: {input.target_segments}
+
+      Create a comprehensive feature-value analysis:
+
+      1. **Feature importance ranking** - Based on review data and pricing tier patterns,
+         rank features by how much customers value them. Use the Kano model:
+         - Must-have (expected, causes dissatisfaction if missing)
+         - Performance (more is better, linear satisfaction)
+         - Delighter (unexpected, causes disproportionate satisfaction)
+         - Indifferent (no impact on satisfaction)
+
+      2. **Monetization potential per feature** - Which features can justify premium
+         pricing? Which should be free to drive adoption?
+
+      3. **Feature bundling analysis** - Which features are naturally used together?
+         Identify logical bundles that create coherent tier value propositions.
+
+      4. **Segment-feature matrix** - Which features matter most to each target segment?
+         This drives tier design and packaging decisions.
+
+      5. **Competitive feature gaps** - Features our competitors charge premium for that
+         we could include at lower tiers as a differentiator, and vice versa.
+
+      Output a structured feature-value map with scoring and segment relevance.
+    model: sonnet
+    max_turns: 10
+
+  - id: willingness-analysis
+    depends_on: [feature-value-mapping, review-sentiment]
+    prompt: |
+      Analyze willingness to pay across segments and use cases.
+
+      Feature-value mapping: {steps.feature-value-mapping.output}
+      Pricing sentiment: {steps.review-sentiment.output}
+      Product: {input.product_name}
+      Target segments: {input.target_segments}
+
+      Conduct a willingness-to-pay analysis:
+
+      1. **Segment WTP ranges** - For each target segment, estimate the acceptable
+         price range based on:
+         - Current market pricing anchors from competitors
+         - Value perception data from reviews
+         - Budget signals from job postings and company sizes
+         - Switching cost considerations
+
+      2. **Price sensitivity curves** - For each segment, map the relationship between
+         price point and likely adoption rate. Identify the price points where demand
+         drops sharply (price cliffs).
+
+      3. **Value metrics analysis** - What is the right unit to charge on?
+         (Per seat, per usage, per project, flat fee, hybrid)
+         Analyze what feels fair to customers vs what maximizes revenue.
+
+      4. **Anchoring effects** - How do competitor prices anchor customer expectations?
+         Are there opportunities to reframe the value metric to escape unfavorable
+         price anchoring?
+
+      5. **Upgrade triggers** - What causes customers to move from free to paid, or
+         from a lower tier to higher? Map the natural expansion revenue motions.
+
+      6. **Price elasticity by feature** - Which features have inelastic demand
+         (customers will pay almost any price) vs elastic (price-sensitive)?
+
+      Express all estimates in monthly and annual terms with confidence intervals.
+    model: sonnet
+    max_turns: 10
+
+  - id: elasticity-model
+    depends_on: [willingness-analysis]
+    prompt: |
+      Build a pricing elasticity model and revenue optimization framework.
+
+      Willingness-to-pay analysis: {steps.willingness-analysis.output}
+      Product: {input.product_name}
+      Segments: {input.target_segments}
+
+      Develop the following:
+
+      1. **Revenue model scenarios** - For 3 pricing strategies, estimate revenue outcomes:
+         - Penetration pricing (below market, maximize adoption)
+         - Value pricing (at market, balanced approach)
+         - Premium pricing (above market, maximize ARPU)
+         For each, estimate: conversion rate, average deal size, total addressable
+         revenue, customer lifetime value, and payback period.
+
+      2. **Sensitivity analysis** - How does a 10%, 20%, or 30% price change in each
+         direction affect projected revenue? Identify the revenue-maximizing price point
+         per segment.
+
+      3. **Expansion revenue modeling** - What percentage of revenue should come from
+         upsells and usage growth vs new customer acquisition? Model the mix
+         for Years 1-3.
+
+      4. **Discount framework** - Maximum discount guidelines by segment, deal size,
+         and competitive situation. When should sales discount and when should they
+         hold firm?
+
+      5. **Price increase path** - If launching with penetration pricing, model a
+         credible price increase path over 18-24 months without causing churn spikes.
+
+      Present results in table format with clear assumptions documented.
+    model: sonnet
+    max_turns: 10
+
+  - id: packaging-recommendations
+    depends_on: [elasticity-model, feature-value-mapping]
+    prompt: |
+      Produce final pricing and packaging recommendations with a complete strategy document.
+
+      Elasticity model: {steps.elasticity-model.output}
+      Feature-value mapping: {steps.feature-value-mapping.output}
+      Product: {input.product_name}
+      Segments: {input.target_segments}
+
+      Deliver a comprehensive pricing strategy:
+
+      **1. Recommended pricing structure**
+      - Number of tiers and their names
+      - Price points (monthly and annual) per tier
+      - Feature allocation per tier with rationale
+      - Value metric (what you charge on and why)
+
+      **2. Tier design rationale**
+      - How each tier maps to a specific buyer persona and use case
+      - Why the feature gating drives natural upgrades
+      - How the packaging compares to competitors (where you are cheaper,
+        where you are premium, and why)
+
+      **3. Go-to-market pricing playbook**
+      - Launch pricing vs steady-state pricing
+      - Introductory offers and early adopter incentives
+      - Channel partner pricing and margins
+      - Discount authority matrix for the sales team
+
+      **4. Competitive positioning guide**
+      - How to frame pricing conversations against each competitor
+      - When to lead with price and when to lead with value
+      - Objection handling for "your competitor is cheaper"
+
+      **5. Metrics and iteration plan**
+      - KPIs to track (conversion by tier, upgrade rate, churn by tier, ARPU)
+      - Decision triggers for pricing adjustments
+      - A/B testing recommendations for pricing page optimization
+
+      Write with confidence and decisiveness. This should be ready for a pricing
+      committee presentation.
+    model: opus
+    max_turns: 10

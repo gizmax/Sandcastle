@@ -1,0 +1,303 @@
+# name: Org Health Pulse
+# description: Analyze employee survey data to surface sentiment trends, flight risks, and targeted intervention recommendations
+# tags: [HR, Analytics, Culture, Engagement]
+# category: hr_legal
+
+name: org-health-pulse
+description: Analyze employee survey data to surface sentiment trends, flight risks, and targeted intervention recommendations
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack]
+
+input_schema:
+  required: ["survey_data"]
+  properties:
+    survey_data:
+      type: string
+      description: "Description of survey data source or raw survey response data (e.g. 'Q4 2025 engagement survey - 450 responses across Engineering, Product, Sales, Marketing')"
+    department_filter:
+      type: string
+      description: "Filter analysis to a specific department, or 'all' for company-wide (default: 'all')"
+      default: "all"
+    comparison_period:
+      type: string
+      description: "Prior period to compare against for trend analysis (default: 'previous quarter')"
+      default: "previous quarter"
+
+steps:
+  - id: survey-ingestion
+    prompt: |
+      Parse and structure the employee survey data for analysis.
+
+      Survey data: {input.survey_data}
+      Department filter: {input.department_filter}
+      Comparison period: {input.comparison_period}
+
+      Process the survey data into an analysis-ready format:
+
+      1. **Data inventory** - catalog the available data dimensions:
+         - Response count and response rate (overall and by department)
+         - Question categories (engagement, satisfaction, management, growth,
+           compensation, culture, work-life balance, DEI)
+         - Response scales (Likert 1-5, NPS 0-10, free text, multiple choice)
+         - Demographic breakdowns available (department, tenure, level, location)
+      2. **Data quality assessment**
+         - Identify departments or groups with low response rates (<60%) that
+           may have non-response bias
+         - Flag questions with high skip rates
+         - Note any unusual patterns (all 5s from a team, identical free-text
+           responses suggesting coordinated input)
+      3. **Baseline metrics** - compute key aggregate scores:
+         - Overall engagement score (eNPS or equivalent)
+         - Category scores (average per question category)
+         - Department-level breakdowns
+         - Tenure and level breakdowns
+      4. **Historical comparison setup** - if comparison data from
+         {input.comparison_period} is described, align the metrics for
+         period-over-period comparison. Note any survey methodology changes
+         that could affect comparability.
+
+      Output a clean, structured data summary ready for deep analysis.
+    model: haiku
+    max_turns: 8
+
+  - id: sentiment-analysis
+    depends_on: [survey-ingestion]
+    prompt: |
+      Perform deep sentiment analysis on the survey responses, focusing on both
+      quantitative scores and qualitative free-text feedback.
+
+      Structured survey data: {steps.survey-ingestion.output}
+      Department filter: {input.department_filter}
+
+      Analyze sentiment across multiple dimensions:
+
+      1. **Quantitative sentiment mapping** - for each question category:
+         - Mean score and standard deviation
+         - Score distribution (% strongly agree through strongly disagree)
+         - Identify polarized questions (bimodal distribution indicating divided opinion)
+         - Bottom 5 and top 5 scoring questions
+      2. **Free-text sentiment analysis** - process open-ended responses:
+         - Classify each response as positive, negative, neutral, or mixed
+         - Extract specific emotions: frustrated, anxious, proud, hopeful,
+           disengaged, overwhelmed, motivated, unheard
+         - Identify the intensity of sentiment (mild concern vs strong complaint)
+         - Flag responses mentioning specific actionable issues (tooling, process,
+           management, compensation, workload)
+      3. **Sentiment by segment** - break down sentiment across:
+         - Department (which teams are thriving vs struggling?)
+         - Tenure (are new hires optimistic? are veterans burned out?)
+         - Level (IC vs manager vs leadership perception gaps)
+         - Location/remote status
+      4. **Sentiment anomalies** - flag any surprising findings:
+         - Teams with high engagement but low satisfaction (or vice versa)
+         - Individuals expressing extreme distress in free text
+         - Disconnect between manager and IC sentiment in the same team
+
+      Present findings with specific quotes (anonymized) that illustrate key themes.
+    model: sonnet
+    max_turns: 10
+
+  - id: theme-clustering
+    depends_on: [sentiment-analysis]
+    prompt: |
+      Cluster the sentiment analysis findings into actionable themes and prioritize them.
+
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Department filter: {input.department_filter}
+
+      Identify and cluster recurring themes:
+
+      1. **Theme extraction** - group related feedback into 8-12 major themes.
+         For each theme:
+         - Theme name (clear, specific - e.g. "Manager 1:1 Quality" not just "Management")
+         - Volume: how many responses touch this theme (count and %)
+         - Sentiment: net positive, negative, or mixed
+         - Intensity: how strongly people feel about it (based on language analysis)
+         - Sample quotes (3-5 representative anonymized quotes)
+      2. **Theme prioritization matrix** - rank themes using:
+         - Impact (how much does this affect engagement and retention?)
+         - Volume (how many people raised this?)
+         - Actionability (can the org realistically address this?)
+         - Urgency (is this getting worse or is it stable?)
+         Plot themes on an Impact x Effort matrix.
+      3. **Cross-cutting patterns** - identify themes that span departments:
+         - Company-wide systemic issues (affects >3 departments)
+         - Department-specific concerns (concentrated in 1-2 teams)
+         - Level-specific themes (e.g. "career growth" mainly from mid-level)
+      4. **Positive themes** - don't just focus on problems. Identify what the
+         organization is doing well that should be preserved and amplified.
+         Celebrate wins: which initiatives got positive feedback?
+      5. **Theme evolution** - if comparison data is available, show which themes
+         are new, recurring, improving, or worsening vs {input.comparison_period}.
+
+      Output a prioritized theme report with clear categorization.
+    model: sonnet
+    max_turns: 10
+
+  - id: trend-detection
+    depends_on: [theme-clustering]
+    prompt: |
+      Analyze trends and trajectory of organizational health metrics over time.
+
+      Theme clusters: {steps.theme-clustering.output}
+      Comparison period: {input.comparison_period}
+      Department filter: {input.department_filter}
+
+      Perform trend analysis:
+
+      1. **Score trajectory** - for each key metric, analyze the trend direction:
+         - Overall engagement: improving, stable, or declining?
+         - Category scores: which are moving up vs down?
+         - Department scores: which teams are improving vs deteriorating?
+         - Calculate rate of change (points per quarter)
+      2. **Leading indicators** - identify metrics that typically predict future
+         engagement changes:
+         - Manager relationship scores (leading indicator for team engagement)
+         - Career growth perception (leading indicator for voluntary turnover)
+         - Workload sustainability (leading indicator for burnout and absenteeism)
+         - Belonging and inclusion scores (leading indicator for diverse talent retention)
+      3. **Inflection point detection** - flag any metrics that have crossed
+         critical thresholds:
+         - Engagement score dropping below 50 (danger zone)
+         - Manager scores dropping >10 points quarter-over-quarter (crisis signal)
+         - Any department with eNPS below -20 (active detractor majority)
+      4. **Predictive outlook** - based on current trends, project where key
+         metrics will be in 3 and 6 months if no intervention occurs.
+         Identify the "do nothing" cost.
+      5. **Peer benchmarking** - compare scores against industry benchmarks
+         for similar-sized companies. Where does the org sit in the distribution?
+
+      Output a trend report with trajectory charts (described in text format)
+      and projected outlook scenarios.
+    model: sonnet
+    max_turns: 8
+
+  - id: flight-risk
+    depends_on: [theme-clustering]
+    prompt: |
+      Identify flight risk patterns and predict which teams or segments are most
+      likely to experience elevated voluntary turnover.
+
+      Theme clusters: {steps.theme-clustering.output}
+      Department filter: {input.department_filter}
+
+      Build a flight risk assessment:
+
+      1. **Risk factor analysis** - weight the following turnover predictors:
+         - Low engagement score (<3.0 on 5-point scale) - high weight
+         - Declining career growth satisfaction - high weight
+         - Below-market compensation perception - high weight
+         - Manager relationship deterioration - medium weight
+         - Workload unsustainability signals - medium weight
+         - Low belonging/inclusion scores - medium weight
+         - Recent organizational changes (reorg, layoffs, leadership change) - context weight
+      2. **Segment risk scoring** - for each analyzable segment (department x level):
+         - Composite flight risk score (1-100)
+         - Primary risk driver
+         - Estimated attrition probability increase vs baseline
+         - Potential revenue/productivity impact of departures
+      3. **Critical talent hotspots** - identify segments where flight risk is
+         BOTH high AND the talent is hard to replace:
+         - Senior engineers with deep system knowledge
+         - Revenue-generating roles (sales, customer success)
+         - Specialized skill sets with tight labor markets
+      4. **Early warning signals** - based on survey responses, identify specific
+         warning signs that precede voluntary departures:
+         - "I am actively looking for other opportunities" responses
+         - Sharp score drops from previously engaged individuals
+         - Disengagement signals in free text (passive language, short responses)
+      5. **Retention cost analysis** - estimate the cost of replacing departing
+         employees vs the cost of retention interventions. Build the business
+         case for proactive investment.
+
+      Output a flight risk heat map by segment with retention priority ranking.
+    model: sonnet
+    max_turns: 8
+
+  - id: intervention-recommendations
+    depends_on: [trend-detection, flight-risk]
+    prompt: |
+      Generate targeted intervention recommendations based on trends and flight risk analysis.
+
+      Trend analysis: {steps.trend-detection.output}
+      Flight risk assessment: {steps.flight-risk.output}
+      Department filter: {input.department_filter}
+
+      Design a multi-level intervention plan:
+
+      1. **Immediate actions (0-30 days)** - quick wins to address urgent concerns:
+         - Manager talking points for 1:1 conversations about survey themes
+         - Town hall or all-hands communication acknowledging key findings
+         - Quick policy fixes for easy-to-solve frustrations
+         - Personal outreach to flight-risk critical talent (VP/Director-led)
+      2. **Short-term initiatives (1-3 months)** - structured programs:
+         - For each top 5 negative theme, a specific initiative with:
+           - Objective and success metric
+           - Owner (role, not name)
+           - Timeline and milestones
+           - Budget estimate (if applicable)
+         - Manager coaching program for teams with low manager scores
+         - Career pathing workshops for segments with growth concerns
+      3. **Systemic changes (3-6 months)** - structural improvements:
+         - Process or policy changes to address root causes
+         - Compensation review for below-market segments
+         - Organizational design adjustments if structure is driving dysfunction
+         - Culture initiatives to reinforce positive themes
+      4. **Measurement framework** - how to track intervention effectiveness:
+         - Pulse survey schedule (monthly or quarterly mini-surveys)
+         - Leading indicator dashboards
+         - Retention metrics by segment
+         - Manager effectiveness tracking
+
+      For each recommendation, include expected impact on engagement score and
+      estimated ROI based on retention improvement.
+    model: sonnet
+    max_turns: 10
+
+  - id: executive-summary
+    depends_on: [intervention-recommendations, trend-detection, flight-risk]
+    prompt: |
+      Compile all findings into a concise executive summary for leadership.
+
+      Interventions: {steps.intervention-recommendations.output}
+      Trends: {steps.trend-detection.output}
+      Flight risks: {steps.flight-risk.output}
+      Survey data context: {input.survey_data}
+
+      Create an executive-ready report:
+
+      **Format: 2-page executive summary + detailed appendix**
+
+      **Page 1 - Health Snapshot:**
+      - Overall engagement score with trend arrow (up/down/flat vs prior period)
+      - Top 3 strengths (what is working well)
+      - Top 3 concerns (what needs attention)
+      - Flight risk summary (X teams at elevated risk, $Y revenue exposure)
+      - Key stat callouts (most improved metric, most declined metric)
+
+      **Page 2 - Action Plan:**
+      - Prioritized intervention roadmap (timeline view)
+      - Resource requirements and budget estimate
+      - Expected outcomes (engagement score target, retention target)
+      - Accountability matrix (who owns what)
+      - Next measurement checkpoint
+
+      **Appendix (detailed):**
+      - Full theme analysis with supporting data
+      - Department-by-department breakdown
+      - Flight risk heat map
+      - Historical trend charts
+      - Methodology notes and data quality caveats
+
+      Use the Slack tool to post a brief summary to the leadership team:
+        node /home/user/tools/slack.mjs post_message '#leadership' '<summary>'
+
+      The Slack message should be a 5-bullet executive snapshot with a link
+      to the full report. Use a professional, data-driven tone. Avoid alarmism
+      but do not sugarcoat concerning findings.
+    model: sonnet
+    max_turns: 10
+    tools: [slack]

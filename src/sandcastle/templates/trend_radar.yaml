@@ -1,0 +1,282 @@
+# name: Trend Radar
+# description: Scan academic research, startup activity, social signals, and investment patterns to identify emerging trends and assess their strategic impact
+# tags: [Trends, Research, Innovation, Strategy]
+# category: marketing
+
+name: trend-radar
+description: Scan academic research, startup activity, social signals, and investment patterns to identify emerging trends and assess their strategic impact
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["industry_keywords"]
+  properties:
+    industry_keywords:
+      type: string
+      description: "Comma-separated industry keywords to scan for trends (e.g. 'developer tools, API management, observability')"
+    technology_domains:
+      type: string
+      description: "Specific technology domains to focus on (e.g. 'AI/ML, edge computing, serverless')"
+    timeframe:
+      type: string
+      description: "Lookback period for trend signals (default: 6 months)"
+      default: "6 months"
+
+steps:
+  - id: academic-scan
+    prompt: |
+      Scan academic and research publications for emerging concepts and technologies
+      relevant to this industry.
+
+      Industry keywords: {input.industry_keywords}
+      Technology domains: {input.technology_domains}
+      Timeframe: {input.timeframe}
+
+      Research the following sources for recent publications and breakthroughs:
+      1. arXiv preprints in relevant categories (cs.AI, cs.SE, cs.DC, etc.)
+      2. Recent conference proceedings (NeurIPS, ICML, SIGMOD, OSDI, KDD, etc.)
+      3. IEEE and ACM digital library publications
+      4. Google Scholar trending papers in the relevant domains
+      5. University research lab announcements and blog posts
+
+      For each significant finding:
+      - Paper/publication title and authors
+      - Core innovation or breakthrough in plain language
+      - Potential commercial applications
+      - Technology readiness level (1-9 TRL scale)
+      - Estimated time to market adoption (immediate, 1-2 years, 3-5 years, 5+ years)
+      - Citation velocity or attention metrics if available
+
+      Focus on research that bridges theory and practice - papers that could become
+      products within 3 years. Flag any research that directly threatens or enables
+      existing market categories.
+
+      Return as a structured list of 10-15 research signals, ranked by commercial relevance.
+    model: haiku
+    max_turns: 10
+
+  - id: startup-scan
+    prompt: |
+      Scan the startup ecosystem for new companies and products signaling emerging trends.
+
+      Industry keywords: {input.industry_keywords}
+      Technology domains: {input.technology_domains}
+      Timeframe: {input.timeframe}
+
+      Research startup activity across:
+      1. Recent YC, Techstars, and other accelerator batches
+      2. Product Hunt launches in relevant categories
+      3. Crunchbase and PitchBook for newly funded companies
+      4. AngelList/Wellfound for new startup listings
+      5. GitHub trending repositories that indicate new tools or frameworks
+      6. Indie Hackers and bootstrapped product launches
+
+      For each notable startup or product:
+      - Company name, founding date, location, and team background
+      - What they are building (one-sentence description)
+      - Funding status and investors (if known)
+      - Traction signals (users, revenue, GitHub stars, waitlist size)
+      - Which existing category they are disrupting or what new category they are creating
+      - Unique approach or technology differentiation
+      - Growth trajectory indicators
+
+      Identify cluster patterns - are multiple startups converging on the same problem?
+      This is a strong trend signal. Group startups by the problem they are solving.
+
+      Return 15-20 startup signals organized by problem cluster.
+    model: haiku
+    max_turns: 10
+
+  - id: social-signals
+    prompt: |
+      Analyze social media and community discussions for emerging trend signals.
+
+      Industry keywords: {input.industry_keywords}
+      Technology domains: {input.technology_domains}
+      Timeframe: {input.timeframe}
+
+      Monitor and analyze:
+      1. Twitter/X discussions among industry thought leaders and practitioners
+      2. LinkedIn trending topics and viral posts in the relevant space
+      3. Reddit subreddit discussions (trending topics, recurring themes)
+      4. Hacker News front page frequency for related topics
+      5. YouTube and podcast content trends - what are creators covering more?
+      6. Newsletter trends - what topics are industry newsletters featuring?
+      7. Conference talk submissions and agenda trends
+
+      Extract:
+      - Emerging buzzwords and terminology gaining traction
+      - Topics seeing increased discussion volume vs 6 months ago
+      - Debates and controversies that indicate a market inflection point
+      - Practitioner adoption signals (people sharing real-world use cases vs hype)
+      - Backlash or disillusionment signals for previously hyped trends
+      - Geographic patterns - are certain regions driving specific trends?
+
+      Distinguish between genuine trend signals and noise/hype. Apply a
+      signal-to-noise rating (1-10) for each identified trend.
+
+      Return 10-15 social trend signals with supporting data points.
+    model: haiku
+    max_turns: 10
+
+  - id: search-trends
+    prompt: |
+      Analyze search and content consumption patterns for quantitative trend validation.
+
+      Industry keywords: {input.industry_keywords}
+      Technology domains: {input.technology_domains}
+      Timeframe: {input.timeframe}
+
+      Research search and content trends:
+      1. Google Trends data for relevant keywords - identify rising queries,
+         breakout terms, and declining interest patterns
+      2. Stack Overflow question trends - which technologies are seeing more
+         questions (indicating adoption) vs fewer (indicating maturity/decline)
+      3. npm/PyPI/crates.io download trends for relevant packages and frameworks
+      4. Documentation site traffic patterns for emerging tools
+      5. Job posting keyword trends - which skills and technologies are appearing
+         more frequently in job descriptions
+      6. Course and tutorial creation trends on Udemy, Coursera, and YouTube
+
+      For each quantitative signal:
+      - The specific metric and its trajectory (growing, stable, declining)
+      - Growth rate (percentage change over the timeframe)
+      - Comparison to related/competing terms
+      - Geographic concentration of interest
+      - Correlation with other trend signals
+
+      Focus on identifying leading indicators - metrics that predict market shifts
+      before they are obvious. A technology appearing in job postings 6 months
+      before it trends on social media is a strong leading signal.
+
+      Return 10-15 quantitative trend signals with growth metrics.
+    model: haiku
+    max_turns: 10
+
+  - id: investment-signals
+    prompt: |
+      Analyze venture capital and corporate investment patterns for trend validation.
+
+      Industry keywords: {input.industry_keywords}
+      Technology domains: {input.technology_domains}
+      Timeframe: {input.timeframe}
+
+      Research investment activity:
+      1. VC funding rounds in relevant categories - total dollars deployed,
+         deal count, average deal size, and stage distribution
+      2. Corporate venture capital activity - which large companies are investing
+         in the space and what does that signal about their strategy
+      3. M&A activity - acquisitions that indicate market consolidation or
+         strategic bets by incumbents
+      4. IPO pipeline and public market interest in the category
+      5. Government grants and R&D funding in related technology areas
+      6. Crypto/web3 funding if relevant to the technology domains
+
+      For each investment signal:
+      - Total capital deployed in the category over the timeframe
+      - Notable deals (company, amount, investors, valuation)
+      - Year-over-year investment trend (increasing, stable, decreasing)
+      - Investor quality signal - are top-tier VCs (a16z, Sequoia, etc.) entering
+        the category for the first time?
+      - Acquirer profiles - are strategic acquirers paying premium valuations?
+      - Fund formation - are new specialist funds launching for this category?
+
+      Money follows conviction. Identify where smart money is flowing and where
+      it is pulling back. Distinguish between momentum investing (following hype)
+      and conviction investing (early bets on fundamental shifts).
+
+      Return 8-12 investment signals with dollar amounts and trend analysis.
+    model: haiku
+    max_turns: 10
+
+  - id: trend-synthesis
+    depends_on: [academic-scan, startup-scan, social-signals, search-trends, investment-signals]
+    prompt: |
+      Synthesize all trend signals into a unified trend radar analysis.
+
+      Academic research signals: {steps.academic-scan.output}
+      Startup ecosystem signals: {steps.startup-scan.output}
+      Social and community signals: {steps.social-signals.output}
+      Search and quantitative signals: {steps.search-trends.output}
+      Investment signals: {steps.investment-signals.output}
+      Industry: {input.industry_keywords}
+
+      Perform cross-source trend synthesis:
+
+      1. **Trend identification** - Identify the top 8-12 distinct trends. A trend is
+         considered validated when it appears across 3+ signal sources. For each trend:
+         - Name and one-sentence description
+         - Signal sources that validate it (academic, startup, social, search, investment)
+         - Cross-source signal strength (Strong/Moderate/Emerging)
+         - Current phase: Discovery, Hype, Adoption, Maturity, or Decline
+
+      2. **Trend radar visualization data** - Place each trend on a radar with axes:
+         - Ring: Impact timeline (Now, 1-2 years, 3-5 years)
+         - Quadrant: Category (Technology, Business Model, Market, Regulatory)
+         - Size: Potential market impact (Small/Medium/Large/Transformative)
+
+      3. **Trend relationships** - Map how trends interact:
+         - Enabling relationships (Trend A enables Trend B)
+         - Competing relationships (Trend A vs Trend B for same market)
+         - Converging relationships (Trends merging into a mega-trend)
+
+      4. **Confidence calibration** - For each trend, assess data quality and
+         completeness. Flag trends where signal is strong but data is thin.
+
+      5. **Noise filter** - Explicitly list 3-5 topics that appear trendy but
+         are likely hype bubbles with weak fundamentals.
+
+      Return a structured trend radar with all trends scored and categorized.
+    model: sonnet
+    max_turns: 10
+
+  - id: impact-assessment
+    depends_on: [trend-synthesis]
+    prompt: |
+      Assess the strategic impact of each identified trend and produce actionable recommendations.
+
+      Trend radar: {steps.trend-synthesis.output}
+      Industry: {input.industry_keywords}
+      Technology domains: {input.technology_domains}
+
+      For each validated trend on the radar:
+
+      **1. Business impact assessment**
+      - Revenue opportunity: potential new revenue streams or market expansion
+      - Disruption risk: could this trend make existing products or business models obsolete
+      - Competitive impact: which competitors are best/worst positioned for this trend
+      - Customer impact: how will this trend change buyer expectations and behavior
+
+      **2. Strategic options** (pick the most appropriate for each trend)
+      - Lead: invest aggressively to capture first-mover advantage
+      - Fast-follow: monitor closely and be ready to move quickly when validated
+      - Integrate: incorporate the trend into existing product/strategy
+      - Hedge: make small bets to maintain optionality
+      - Ignore: the trend is not relevant enough to warrant action
+
+      **3. Trend radar report**
+
+      Executive summary (3-5 sentences) covering:
+      - The most important trend to act on now and why
+      - The biggest emerging threat on the 1-2 year horizon
+      - The most overhyped trend to avoid investing in
+
+      Detailed trend cards (top 5 trends):
+      - Trend name and description
+      - Evidence strength (1-10)
+      - Impact potential (1-10)
+      - Urgency (1-10)
+      - Recommended action with specific next steps
+      - Key metrics to track for ongoing monitoring
+
+      **4. 90-day action plan**
+      - Which trends require immediate investigation or investment
+      - Which require monitoring dashboards to be set up
+      - Which team or function should own each trend response
+      - Budget implications for the recommended actions
+
+      Write decisively. This should drive quarterly planning conversations.
+    model: sonnet
+    max_turns: 10
