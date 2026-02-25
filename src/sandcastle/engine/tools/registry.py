@@ -1022,6 +1022,132 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="intercom.mjs",
         icon="intercom",
     ),
+    "browser": ToolDefinition(
+        name="browser",
+        description=(
+            "Browser automation for web apps and legacy systems. Navigate pages, "
+            "fill forms, click buttons, take screenshots, and extract data. Supports "
+            "both CSS selector-based automation (Playwright) and visual AI-driven "
+            "automation (Computer Use)."
+        ),
+        category="general",
+        functions=[
+            ToolFunction(
+                name="navigate",
+                description="Navigate to a URL",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "URL to navigate to"},
+                    },
+                    "required": ["url"],
+                },
+            ),
+            ToolFunction(
+                name="click",
+                description="Click an element by CSS selector or text content",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS selector or text to match"},
+                        "method": {
+                            "type": "string",
+                            "description": "Selection method: 'css', 'text', 'xpath'. Default: 'css'",
+                            "default": "css",
+                        },
+                    },
+                    "required": ["selector"],
+                },
+            ),
+            ToolFunction(
+                name="type_text",
+                description="Type text into an input field",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS selector of the input field"},
+                        "text": {"type": "string", "description": "Text to type"},
+                        "clear": {
+                            "type": "boolean",
+                            "description": "Clear field before typing. Default: true",
+                            "default": True,
+                        },
+                    },
+                    "required": ["selector", "text"],
+                },
+            ),
+            ToolFunction(
+                name="screenshot",
+                description="Take a screenshot of the current page. Returns base64-encoded PNG image.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "full_page": {
+                            "type": "boolean",
+                            "description": "Capture full page. Default: false",
+                            "default": False,
+                        },
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_text",
+                description="Extract text content from an element",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS selector to extract text from"},
+                    },
+                    "required": ["selector"],
+                },
+            ),
+            ToolFunction(
+                name="wait_for",
+                description="Wait for an element to appear on the page",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS selector to wait for"},
+                        "timeout": {
+                            "type": "number",
+                            "description": "Max wait time in milliseconds. Default: 10000",
+                            "default": 10000,
+                        },
+                    },
+                    "required": ["selector"],
+                },
+            ),
+            ToolFunction(
+                name="select_option",
+                description="Select an option from a dropdown",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS selector of the select element"},
+                        "value": {"type": "string", "description": "Option value or visible text to select"},
+                    },
+                    "required": ["selector", "value"],
+                },
+            ),
+            ToolFunction(
+                name="get_page_html",
+                description="Get the current page HTML content (for analysis)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {
+                            "type": "string",
+                            "description": "Optional CSS selector to get HTML of specific element. Default: 'body'",
+                            "default": "body",
+                        },
+                    },
+                },
+            ),
+        ],
+        credential_env_vars=[],  # No credentials needed - browser runs in sandbox
+        connector_file="browser.mjs",
+        icon="browser",
+    ),
 }
 
 # All known tool names (for YAML validation)
