@@ -1393,7 +1393,7 @@ const MOCK_TEMPLATES = [
 ];
 
 const TEMPLATE_YAMLS: Record<string, string> = {
-  summarize: `name: "summarize"
+  "text-summarizer": `name: "summarize"
 description: "Summarize text input with configurable detail level"
 default_model: sonnet
 default_max_turns: 10
@@ -1416,7 +1416,7 @@ steps:
     depends_on:
       - "extract"
 `,
-  translate: `name: "translate"
+  "language-translator": `name: "translate"
 description: "Detect language and translate to target language"
 default_model: sonnet
 default_max_turns: 10
@@ -1438,7 +1438,7 @@ steps:
     depends_on:
       - "detect_language"
 `,
-  research_agent: `name: "research_agent"
+  "research-agent": `name: "research_agent"
 description: "Multi-source research with parallel analysis and fact extraction"
 default_model: sonnet
 default_max_turns: 10
@@ -1480,7 +1480,7 @@ steps:
     depends_on:
       - "extract_facts"
 `,
-  chain_of_thought: `name: "chain_of_thought"
+  "chain-of-thought-solver": `name: "chain_of_thought"
 description: "Step-by-step reasoning through complex problems"
 default_model: sonnet
 default_max_turns: 10
@@ -1511,7 +1511,7 @@ steps:
     depends_on:
       - "reason"
 `,
-  review_and_approve: `name: "review_and_approve"
+  "review-and-approve": `name: "review_and_approve"
 description: "Content generation with human approval gate before publishing"
 default_model: sonnet
 default_max_turns: 10
@@ -1545,7 +1545,7 @@ steps:
     depends_on:
       - "review"
 `,
-  blog_to_social: `# name: Blog to Social Media
+  "blog-to-social": `# name: Blog to Social Media
 # description: Transform a blog post into platform-specific social media content
 # tags: [Marketing, Content, Social]
 
@@ -1612,7 +1612,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 3
 `,
-  seo_content: `# name: SEO Content Writer
+  "seo-content-writer": `# name: SEO Content Writer
 # description: Research keywords and create SEO-optimized article with meta tags
 # tags: [Marketing, SEO, Content]
 
@@ -1669,7 +1669,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 3
 `,
-  email_campaign: `# name: Email Campaign Generator
+  "email-campaign-generator": `# name: Email Campaign Generator
 # description: Generate email campaign with subject line variants and A/B copy
 # tags: [Marketing, Email, Campaign]
 
@@ -1737,7 +1737,7 @@ steps:
       on_timeout: abort
       allow_edit: true
 `,
-  competitor_analysis: `# name: Competitor Analysis
+  "competitor-analysis": `# name: Competitor Analysis
 # description: Analyze competitor positioning, strengths, weaknesses, and opportunities
 # tags: [Marketing, Strategy, Research]
 
@@ -1795,7 +1795,7 @@ steps:
     model: claude-sonnet-4-20250514
     max_turns: 10
 `,
-  ad_copy_generator: `# name: Ad Copy Generator
+  "ad-copy-generator": `# name: Ad Copy Generator
 # description: Generate ad copy variants for Google Ads and Meta Ads campaigns
 # tags: [Marketing, Advertising, Copywriting]
 
@@ -1854,7 +1854,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 3
 `,
-  lead_enrichment: `# name: Lead Enrichment
+  "lead-enrichment": `# name: Lead Enrichment
 # description: Research and enrich lead data with company info, scoring, and outreach angles
 # tags: [Sales, Research, Lead-Gen]
 
@@ -1926,7 +1926,7 @@ steps:
     model: claude-sonnet-4-20250514
     max_turns: 10
 `,
-  proposal_generator: `# name: Proposal Generator
+  "proposal-generator": `# name: Proposal Generator
 # description: Generate a customized business proposal from meeting notes and product info
 # tags: [Sales, Document, Proposal]
 
@@ -1985,7 +1985,7 @@ steps:
       on_timeout: abort
       allow_edit: true
 `,
-  meeting_recap: `# name: Meeting Recap
+  "meeting-recap": `# name: Meeting Recap
 # description: Transform meeting transcript into summary, action items, and follow-up email
 # tags: [Sales, Productivity, Communication]
 
@@ -2033,7 +2033,7 @@ steps:
     model: claude-sonnet-4-20250514
     max_turns: 8
 `,
-  ticket_classifier: `# name: Ticket Classifier
+  "ticket-classifier": `# name: Ticket Classifier
 # description: Classify support ticket, assign priority, and draft response
 # tags: [Support, Classification, Automation]
 
@@ -2109,7 +2109,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 5
 `,
-  review_sentiment: `# name: Review Sentiment
+  "review-sentiment": `# name: Review Sentiment
 # description: Analyze customer reviews to extract sentiment trends and actionable insights
 # tags: [Support, Analytics, Sentiment]
 
@@ -2169,7 +2169,7 @@ steps:
     model: claude-sonnet-4-20250514
     max_turns: 10
 `,
-  job_description: `# name: Job Description Generator
+  "job-description-generator": `# name: Job Description Generator
 # description: Generate inclusive job description with requirements, benefits, and interview plan
 # tags: [HR, Recruiting, Content]
 
@@ -2220,7 +2220,7 @@ steps:
     model: claude-sonnet-4-20250514
     max_turns: 5
 `,
-  resume_screener: `# name: Resume Screener
+  "resume-screener": `# name: Resume Screener
 # description: Screen resume against job description with match scoring and interview recommendations
 # tags: [HR, Recruiting, Screening]
 
@@ -2311,7 +2311,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 3
 `,
-  contract_review: `# name: Contract Review
+  "contract-review": `# name: Contract Review
 # description: Review contract for key terms, risks, and generate plain-language summary
 # tags: [Legal, Compliance, Document]
 
@@ -2407,7 +2407,7 @@ steps:
     model: claude-sonnet-4-20250514
     max_turns: 10
 `,
-  release_notes: `# name: Release Notes Generator
+  "release-notes-generator": `# name: Release Notes Generator
 # description: Generate user-facing release notes and internal changelog from commit history
 # tags: [Product, Engineering, Documentation]
 
@@ -2461,7 +2461,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 3
 `,
-  data_extractor: `# name: Data Extractor
+  "data-extractor": `# name: Data Extractor
 # description: Extract structured data from documents with validation and error handling
 # tags: [Product, Data, Automation]
 
@@ -2552,7 +2552,7 @@ steps:
     model: claude-haiku-4-5-20251001
     max_turns: 3
 `,
-  sales_pipeline_autopilot: `# name: Sales Pipeline Autopilot
+  "sales-pipeline-autopilot": `# name: Sales Pipeline Autopilot
 # description: Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks
 # tags: [Sales, Pipeline, CRM, Automation]
 # category: sales_crm
@@ -2614,7 +2614,7 @@ steps:
     max_turns: 5
     tools: [slack]
 `,
-  lead_scoring: `# name: Lead Scoring
+  "lead-scoring": `# name: Lead Scoring
 # description: Fetch leads from Salesforce, enrich with research data, score, and update CRM
 # tags: [Sales, Salesforce, Lead-Gen, Scoring]
 # category: sales_crm
@@ -2670,7 +2670,7 @@ steps:
     model: haiku
     max_turns: 15
 `,
-  support_ticket_triage: `# name: Support Ticket Triage
+  "support-ticket-triage": `# name: Support Ticket Triage
 # description: Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack
 # tags: [Support, Zendesk, Triage, Automation]
 # category: support
@@ -2728,7 +2728,7 @@ steps:
     max_turns: 5
     tools: [slack]
 `,
-  customer_health_check: `# name: Customer Health Check
+  "customer-health-check": `# name: Customer Health Check
 # description: Aggregate Salesforce account data and Zendesk tickets to assess customer health
 # tags: [Support, Salesforce, Zendesk, Analytics]
 # category: support
@@ -2782,7 +2782,7 @@ steps:
     model: sonnet
     max_turns: 8
 `,
-  sprint_standup: `# name: Sprint Standup
+  "sprint-standup": `# name: Sprint Standup
 # description: Synthesize Jira sprint progress and GitHub PRs into a daily standup summary
 # tags: [Engineering, Jira, GitHub, Standup]
 # category: engineering
