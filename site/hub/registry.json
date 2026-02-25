@@ -3,11 +3,11 @@
   "generated_at": "2026-02-25T12:00:00Z",
   "templates": [
     {
-      "slug": "gizmax/ad-copy-generator",
+      "slug": "lena-content/ad-copy-generator",
       "name": "Ad Copy Generator",
       "description": "Generate ad copy variants for Google Ads and Meta Ads campaigns",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -33,11 +33,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/api-docs-generator",
+      "slug": "tomr-eng/api-docs-generator",
       "name": "API Docs Generator",
       "description": "Generate comprehensive API documentation from code repositories or OpenAPI specs",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "tomr-eng",
+      "author_url": "https://github.com/tomr-eng",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -65,11 +65,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/blog-to-social",
+      "slug": "elena-growth/blog-to-social",
       "name": "Blog to Social Media",
       "description": "Transform a blog post into platform-specific social media content",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "elena-growth",
+      "author_url": "https://github.com/elena-growth",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -95,11 +95,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/chain-of-thought",
+      "slug": "workflow-lab/chain-of-thought",
       "name": "Chain of Thought Solver",
       "description": "Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -124,11 +124,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/competitor-analysis",
+      "slug": "content-queen/competitor-analysis",
       "name": "Competitor Analysis",
       "description": "Analyze competitor positioning, strengths, weaknesses, and opportunities",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "content-queen",
+      "author_url": "https://github.com/content-queen",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -153,11 +153,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/compliance-checker",
+      "slug": "marcus-hr/compliance-checker",
       "name": "Compliance Checker",
       "description": "Review documents for regulatory compliance against GDPR, SOC2, HIPAA, or custom frameworks",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "marcus-hr",
+      "author_url": "https://github.com/marcus-hr",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -215,11 +215,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/crm-enrichment",
+      "slug": "jmartinez/crm-enrichment",
       "name": "CRM Contact Enrichment",
       "description": "Enrich HubSpot contacts with research data and create follow-up deals",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -283,11 +283,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/customer-health-check",
+      "slug": "supportflow/customer-health-check",
       "name": "Customer Health Check",
       "description": "Aggregate Salesforce account data and Zendesk tickets to assess customer health",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "supportflow",
+      "author_url": "https://github.com/supportflow",
       "version": "1.0.0",
       "category": "support",
       "tags": [
@@ -317,11 +317,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/data-extractor",
+      "slug": "tomr-eng/data-extractor",
       "name": "Data Extractor",
       "description": "Extract structured data from documents with validation and error handling",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "tomr-eng",
+      "author_url": "https://github.com/tomr-eng",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -347,11 +347,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/email-campaign",
+      "slug": "content-queen/email-campaign",
       "name": "Email Campaign Generator",
       "description": "Generate email campaign with subject line variants and A/B copy",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "content-queen",
+      "author_url": "https://github.com/content-queen",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -376,11 +376,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/faq-generator",
+      "slug": "nadia-cx/faq-generator",
       "name": "FAQ Generator",
       "description": "Analyze resolved support tickets to auto-generate FAQ entries and publish to Notion",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "nadia-cx",
+      "author_url": "https://github.com/nadia-cx",
       "version": "1.0.0",
       "category": "support",
       "tags": [
@@ -410,11 +410,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/jira-triage",
+      "slug": "tomr-eng/jira-triage",
       "name": "Jira Issue Triage",
       "description": "Auto-triage new Jira issues with priority, labels, and assignment suggestions",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "tomr-eng",
+      "author_url": "https://github.com/tomr-eng",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -442,11 +442,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/job-description",
+      "slug": "marcus-hr/job-description",
       "name": "Job Description Generator",
       "description": "Generate inclusive job description with requirements, benefits, and interview plan",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "marcus-hr",
+      "author_url": "https://github.com/marcus-hr",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -501,11 +501,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/lead-scoring",
+      "slug": "jmartinez/lead-scoring",
       "name": "Lead Scoring",
       "description": "Fetch leads from Salesforce, enrich with research data, score, and update CRM",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -534,11 +534,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/meeting-recap",
+      "slug": "revops-sam/meeting-recap",
       "name": "Meeting Recap",
       "description": "Transform meeting transcript into summary, action items, and follow-up email",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "revops-sam",
+      "author_url": "https://github.com/revops-sam",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -564,11 +564,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/onboarding-workflow",
+      "slug": "lawtech-ai/onboarding-workflow",
       "name": "Employee Onboarding",
       "description": "Automate new employee onboarding - checklist, welcome email, accounts, training plan, and manager notification",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lawtech-ai",
+      "author_url": "https://github.com/lawtech-ai",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -600,11 +600,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/pdf-summary",
+      "slug": "datacraft-io/pdf-summary",
       "name": "PDF Summary",
       "description": "Scan a directory for PDF files, summarize each one in parallel, and create a final report",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "datacraft-io",
+      "author_url": "https://github.com/datacraft-io",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -630,11 +630,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/proposal-generator",
+      "slug": "revops-sam/proposal-generator",
       "name": "Proposal Generator",
       "description": "Generate a customized business proposal from meeting notes and product info",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "revops-sam",
+      "author_url": "https://github.com/revops-sam",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -659,11 +659,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/release-notes",
+      "slug": "ops-ninja/release-notes",
       "name": "Release Notes Generator",
       "description": "Generate user-facing release notes and internal changelog from commit history",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "ops-ninja",
+      "author_url": "https://github.com/ops-ninja",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -689,11 +689,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/research-agent",
+      "slug": "priya-fintech/research-agent",
       "name": "Research Agent",
       "description": "Searches for information, then analyzes sources and extracts facts in parallel, and combines all results",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -719,11 +719,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/resume-screener",
+      "slug": "lawtech-ai/resume-screener",
       "name": "Resume Screener",
       "description": "Screen resume against job description with match scoring and interview recommendations",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lawtech-ai",
+      "author_url": "https://github.com/lawtech-ai",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -749,11 +749,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/review-and-approve",
+      "slug": "amira-dev/review-and-approve",
       "name": "Review and Approve",
       "description": "Generates content, pauses for human review and approval, then publishes the approved content",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "amira-dev",
+      "author_url": "https://github.com/amira-dev",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -810,11 +810,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/sales-pipeline-autopilot",
+      "slug": "jmartinez/sales-pipeline-autopilot",
       "name": "Sales Pipeline Autopilot",
       "description": "Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -844,11 +844,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/seo-content",
+      "slug": "lena-content/seo-content",
       "name": "SEO Content Writer",
       "description": "Research keywords and create SEO-optimized article with meta tags",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -874,11 +874,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/sla-watchdog",
+      "slug": "supportflow/sla-watchdog",
       "name": "SLA Watchdog",
       "description": "Monitor SLA compliance, check ticket response times, and alert on breaches via Slack",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "supportflow",
+      "author_url": "https://github.com/supportflow",
       "version": "1.0.0",
       "category": "support",
       "tags": [
@@ -908,11 +908,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/slack-standup",
+      "slug": "k8s-ops/slack-standup",
       "name": "Slack Standup Summary",
       "description": "Collect daily standup updates from Slack and post a summary",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "k8s-ops",
+      "author_url": "https://github.com/k8s-ops",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -940,11 +940,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/sprint-standup",
+      "slug": "k8s-ops/sprint-standup",
       "name": "Sprint Standup",
       "description": "Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "k8s-ops",
+      "author_url": "https://github.com/k8s-ops",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -975,11 +975,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/summarize",
+      "slug": "priya-fintech/summarize",
       "name": "Text Summarizer",
       "description": "Takes text input, summarizes it, and formats the summary for output",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -1039,11 +1039,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/ticket-classifier",
+      "slug": "nadia-cx/ticket-classifier",
       "name": "Ticket Classifier",
       "description": "Classify support ticket, assign priority, and draft response",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "nadia-cx",
+      "author_url": "https://github.com/nadia-cx",
       "version": "1.0.0",
       "category": "support",
       "tags": [
@@ -1069,11 +1069,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/translate",
+      "slug": "priya-fintech/translate",
       "name": "Language Translator",
       "description": "Detects the source language and translates text to the target language",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -1396,11 +1396,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/competitive-intelligence-radar",
+      "slug": "content-queen/competitive-intelligence-radar",
       "name": "Competitive Intelligence Radar",
       "description": "Monitor competitor activity, detect strategic changes, update battlecards, and distribute alerts",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "content-queen",
+      "author_url": "https://github.com/content-queen",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -1429,11 +1429,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/voice-of-market",
+      "slug": "social-sage/voice-of-market",
       "name": "Voice of Market",
       "description": "Mine forums, reviews, and social channels to extract sentiment, unmet needs, and buyer personas",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "social-sage",
+      "author_url": "https://github.com/social-sage",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -1459,11 +1459,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/pricing-intelligence",
+      "slug": "pricewatch/pricing-intelligence",
       "name": "Pricing Intelligence",
       "description": "Analyze competitor pricing, feature-value perception, and willingness to pay to optimize packaging and pricing strategy",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "pricewatch",
+      "author_url": "https://github.com/pricewatch",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -1490,11 +1490,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/trend-radar",
+      "slug": "lena-content/trend-radar",
       "name": "Trend Radar",
       "description": "Scan academic research, startup activity, social signals, and investment patterns to identify emerging trends and assess their strategic impact",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -1554,11 +1554,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/market-entry-strategy",
+      "slug": "lena-content/market-entry-strategy",
       "name": "Market Entry Strategy",
       "description": "Comprehensive market entry analysis covering sizing, competitive landscape, regulatory environment, customer research, and go-to-market strategy",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -1620,11 +1620,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/deal-velocity-optimizer",
+      "slug": "nadia-cx/deal-velocity-optimizer",
       "name": "Deal Velocity Optimizer",
       "description": "Analyze pipeline health, score deal risks, recommend actions, and build competitive battle cards to accelerate deal closure",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "nadia-cx",
+      "author_url": "https://github.com/nadia-cx",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -1652,11 +1652,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/revenue-forecast-ensemble",
+      "slug": "priya-fintech/revenue-forecast-ensemble",
       "name": "Revenue Forecast Ensemble",
       "description": "Generate revenue forecasts using statistical, ML, and LLM-based methods in parallel, then synthesize into an ensemble prediction with scenario analysis",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -1684,11 +1684,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/churn-prediction-pipeline",
+      "slug": "revops-sam/churn-prediction-pipeline",
       "name": "Churn Prediction Pipeline",
       "description": "Analyze customer usage patterns, score churn risk, identify root causes, generate retention offers, and orchestrate outreach campaigns",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "revops-sam",
+      "author_url": "https://github.com/revops-sam",
       "version": "1.0.0",
       "category": "sales_crm",
       "tags": [
@@ -1718,11 +1718,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/incident-command-center",
+      "slug": "kai-security/incident-command-center",
       "name": "Incident Command Center",
       "description": "Automated incident response - ingest alerts, analyze logs and metrics in parallel, find root cause, and generate remediation runbooks",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "kai-security",
+      "author_url": "https://github.com/kai-security",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -1752,11 +1752,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/deployment-risk-analyzer",
+      "slug": "kai-security/deployment-risk-analyzer",
       "name": "Deployment Risk Analyzer",
       "description": "Analyze deployment risk by scanning diffs, dependencies, and performance impact before go/no-go decision",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "kai-security",
+      "author_url": "https://github.com/kai-security",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -1785,11 +1785,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/soc-triage-pipeline",
+      "slug": "kai-security/soc-triage-pipeline",
       "name": "SOC Triage Pipeline",
       "description": "Security Operations Center alert triage - deduplicate, enrich with threat intel, map to MITRE ATT&CK, and recommend containment",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "kai-security",
+      "author_url": "https://github.com/kai-security",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -1820,11 +1820,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/ai-red-team",
+      "slug": "kai-security/ai-red-team",
       "name": "AI Red Team",
       "description": "Automated adversarial testing of AI models - probe for prompt injection, jailbreaks, bias, and safety vulnerabilities",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "kai-security",
+      "author_url": "https://github.com/kai-security",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -1851,11 +1851,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/ma-due-diligence",
+      "slug": "priya-fintech/ma-due-diligence",
       "name": "M&A Due Diligence",
       "description": "Comprehensive due diligence analysis for mergers and acquisitions with parallel risk and terms extraction",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -1882,11 +1882,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/regulatory-change-analyzer",
+      "slug": "marcus-hr/regulatory-change-analyzer",
       "name": "Regulatory Change Analyzer",
       "description": "Monitor regulatory changes, assess compliance gaps, and generate remediation plans",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "marcus-hr",
+      "author_url": "https://github.com/marcus-hr",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -1915,11 +1915,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/contract-lifecycle",
+      "slug": "lawtech-ai/contract-lifecycle",
       "name": "Contract Lifecycle Manager",
       "description": "End-to-end contract lifecycle from drafting through approval to obligation tracking",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lawtech-ai",
+      "author_url": "https://github.com/lawtech-ai",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -1946,11 +1946,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/earnings-call-intelligence",
+      "slug": "priya-fintech/earnings-call-intelligence",
       "name": "Earnings Call Intelligence",
       "description": "Analyze earnings call transcripts for sentiment, key metrics, and investment insights",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -1977,11 +1977,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/content-factory",
+      "slug": "lena-content/content-factory",
       "name": "Content Factory",
       "description": "Generate a complete multi-platform content package from a single brief with SEO-optimized article and social posts",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2010,11 +2010,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/podcast-to-empire",
+      "slug": "content-queen/podcast-to-empire",
       "name": "Podcast to Empire",
       "description": "Transform a single podcast episode into a full content empire with blog, social, newsletter, and SEO landing page",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "content-queen",
+      "author_url": "https://github.com/content-queen",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2041,11 +2041,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/startup-growth-engine",
+      "slug": "lena-content/startup-growth-engine",
       "name": "Startup Growth Engine",
       "description": "Comprehensive growth audit with parallel strategy tracks for content, SEO, and conversion optimization",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2073,11 +2073,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/supplier-risk-intelligence",
+      "slug": "workflow-lab/supplier-risk-intelligence",
       "name": "Supplier Risk Intelligence",
       "description": "Assess supplier portfolio risks across financial, geopolitical, and ESG dimensions with alternative sourcing recommendations",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2104,11 +2104,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/demand-forecasting",
+      "slug": "workflow-lab/demand-forecasting",
       "name": "Demand Forecasting",
       "description": "Multi-signal demand forecasting combining statistical models, market intelligence, and social trends for inventory planning",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2135,11 +2135,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/dynamic-pricing",
+      "slug": "pricewatch/dynamic-pricing",
       "name": "Dynamic Pricing",
       "description": "Optimize product pricing using competitor intelligence, demand elasticity, and margin analysis with A/B test design",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "pricewatch",
+      "author_url": "https://github.com/pricewatch",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2168,11 +2168,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/recruiting-pipeline",
+      "slug": "workflow-lab/recruiting-pipeline",
       "name": "Recruiting Pipeline",
       "description": "End-to-end recruiting workflow from job description to offer preparation with candidate evaluation and interview coordination",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -2201,11 +2201,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/org-health-pulse",
+      "slug": "marcus-hr/org-health-pulse",
       "name": "Org Health Pulse",
       "description": "Analyze employee survey data to surface sentiment trends, flight risks, and targeted intervention recommendations",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "marcus-hr",
+      "author_url": "https://github.com/marcus-hr",
       "version": "1.0.0",
       "category": "hr_legal",
       "tags": [
@@ -2234,11 +2234,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/self-healing-pipeline",
+      "slug": "k8s-ops/self-healing-pipeline",
       "name": "Self-Healing Pipeline",
       "description": "Monitor data pipelines for schema drift and anomalies, auto-fix common issues, and report on data quality recovery",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "k8s-ops",
+      "author_url": "https://github.com/k8s-ops",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -2268,11 +2268,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/nl-to-dashboard",
+      "slug": "k8s-ops/nl-to-dashboard",
       "name": "NL to Dashboard",
       "description": "Transform natural language business questions into optimized SQL queries, visualizations, and narrative insights",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "k8s-ops",
+      "author_url": "https://github.com/k8s-ops",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -2301,11 +2301,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/model-evaluation-arena",
+      "slug": "datacraft-io/model-evaluation-arena",
       "name": "Model Evaluation Arena",
       "description": "Systematically benchmark and compare multiple AI models across safety, accuracy, cost, and latency with statistical rigor",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "datacraft-io",
+      "author_url": "https://github.com/datacraft-io",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -2333,11 +2333,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/product-feedback-prioritizer",
+      "slug": "datacraft-io/product-feedback-prioritizer",
       "name": "Product Feedback Prioritizer",
       "description": "Aggregate product feedback from multiple channels, deduplicate, cluster by theme, score by business impact, and produce a prioritized roadmap",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "datacraft-io",
+      "author_url": "https://github.com/datacraft-io",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2365,11 +2365,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/invoice-processor",
+      "slug": "priya-fintech/invoice-processor",
       "name": "Invoice Processor",
       "description": "Extract data from invoices using OCR patterns, validate against PO records, detect anomalies, route for approval, and generate accounting entries",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "priya-fintech",
+      "author_url": "https://github.com/priya-fintech",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2397,11 +2397,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/video-to-shorts",
+      "slug": "lena-content/video-to-shorts",
       "name": "Video to Shorts",
       "description": "Analyze long-form video content, identify viral-worthy segments, generate optimized short clips with captions and hooks for TikTok, Reels, and Shorts",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2430,11 +2430,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/rag-knowledge-base",
+      "slug": "datacraft-io/rag-knowledge-base",
       "name": "RAG Knowledge Base Builder",
       "description": "Build and optimize a RAG knowledge base from documents - chunk, embed, evaluate retrieval quality, and generate optimization recommendations",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "datacraft-io",
+      "author_url": "https://github.com/datacraft-io",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -2493,11 +2493,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/course-creator",
+      "slug": "lena-content/course-creator",
       "name": "Course Creator",
       "description": "Generate complete online course content from a topic - outline, lesson scripts, quizzes, assignments, and platform-ready export",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "lena-content",
+      "author_url": "https://github.com/lena-content",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2524,11 +2524,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/real-estate-listing",
+      "slug": "jmartinez/real-estate-listing",
       "name": "Real Estate Listing Optimizer",
       "description": "Optimize real estate listings with AI-enhanced descriptions, comparative market analysis, pricing recommendations, and multi-platform distribution strategy",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2556,11 +2556,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/social-media-calendar",
+      "slug": "content-queen/social-media-calendar",
       "name": "Social Media Content Calendar",
       "description": "Plan, create, and schedule a complete social media content calendar with platform-specific content, hashtag strategies, and performance predictions",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "content-queen",
+      "author_url": "https://github.com/content-queen",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2588,11 +2588,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/grant-proposal",
+      "slug": "jmartinez/grant-proposal",
       "name": "Grant Proposal Builder",
       "description": "Parse grant RFPs, check eligibility, draft comprehensive proposals with budgets, and generate compliance checklists",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "jmartinez",
+      "author_url": "https://github.com/jmartinez",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2620,11 +2620,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/agency-report-generator",
+      "slug": "elena-growth/agency-report-generator",
       "name": "Agency Report Generator",
       "description": "Generate comprehensive multi-client agency performance reports with cross-channel analytics, benchmarking, and strategic recommendations",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "elena-growth",
+      "author_url": "https://github.com/elena-growth",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2652,11 +2652,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/clinical-notes",
+      "slug": "workflow-lab/clinical-notes",
       "name": "Clinical Notes Processor",
       "description": "Process clinical encounter data into structured SOAP notes, extract diagnoses with ICD-10 codes, generate billing codes, and flag compliance issues",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "workflow-lab",
+      "author_url": "https://github.com/workflow-lab",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2684,11 +2684,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/ecommerce-catalog",
+      "slug": "elena-growth/ecommerce-catalog",
       "name": "E-Commerce Catalog Enrichment",
       "description": "Enrich e-commerce product catalogs with SEO-optimized descriptions, attribute extraction, cross-sell mapping, and A/B title variants",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "elena-growth",
+      "author_url": "https://github.com/elena-growth",
       "version": "1.0.0",
       "category": "marketing",
       "tags": [
@@ -2716,11 +2716,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/voice-agent-pipeline",
+      "slug": "nadia-cx/voice-agent-pipeline",
       "name": "Voice Agent Pipeline",
       "description": "Process call recordings with transcription, sentiment analysis, coaching insights, compliance checks, and agent performance scoring",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "nadia-cx",
+      "author_url": "https://github.com/nadia-cx",
       "version": "1.0.0",
       "category": "support",
       "tags": [
@@ -2748,11 +2748,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/freelancer-proposal",
+      "slug": "amira-dev/freelancer-proposal",
       "name": "Freelancer Proposal Generator",
       "description": "Generate winning freelancer proposals by analyzing project requirements, matching portfolio pieces, crafting personalized pitches, and optimizing pricing strategy",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "amira-dev",
+      "author_url": "https://github.com/amira-dev",
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
@@ -2780,11 +2780,11 @@
       "license": "MIT"
     },
     {
-      "slug": "gizmax/product-design-spec",
+      "slug": "tomr-eng/product-design-spec",
       "name": "Product Design Specification",
       "description": "Transform user stories and requirements into comprehensive product design specifications with wireframe descriptions, interaction patterns, and developer handoff documentation",
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "author": "tomr-eng",
+      "author_url": "https://github.com/tomr-eng",
       "version": "1.0.0",
       "category": "engineering",
       "tags": [
@@ -2846,7 +2846,7 @@
   ],
   "stats": {
     "total_templates": 88,
-    "total_authors": 9,
+    "total_authors": 22,
     "total_downloads": 17365,
     "last_updated": "2026-02-25T20:00:00Z"
   },
@@ -2857,12 +2857,12 @@
       "description": "End-to-end sales pipeline - from lead generation and scoring to deal management and meeting follow-ups",
       "icon": "target",
       "template_slugs": [
-        "gizmax/lead-scoring",
+        "jmartinez/lead-scoring",
         "gizmax/lead-enrichment",
-        "gizmax/crm-enrichment",
+        "jmartinez/crm-enrichment",
         "gizmax/customer-churn-predictor",
-        "gizmax/sales-pipeline-autopilot",
-        "gizmax/meeting-recap"
+        "jmartinez/sales-pipeline-autopilot",
+        "revops-sam/meeting-recap"
       ],
       "downloads": 892
     },
@@ -2872,11 +2872,11 @@
       "description": "Full content creation pipeline - research, write, optimize, and distribute across all channels",
       "icon": "pen-tool",
       "template_slugs": [
-        "gizmax/seo-content",
-        "gizmax/blog-to-social",
-        "gizmax/ad-copy-generator",
-        "gizmax/email-campaign",
-        "gizmax/competitor-analysis"
+        "lena-content/seo-content",
+        "elena-growth/blog-to-social",
+        "lena-content/ad-copy-generator",
+        "content-queen/email-campaign",
+        "content-queen/competitor-analysis"
       ],
       "downloads": 756
     },
@@ -2886,11 +2886,11 @@
       "description": "Developer productivity stack - sprint tracking, standups, release management, and documentation",
       "icon": "terminal",
       "template_slugs": [
-        "gizmax/jira-triage",
-        "gizmax/sprint-standup",
-        "gizmax/slack-standup",
-        "gizmax/release-notes",
-        "gizmax/api-docs-generator"
+        "tomr-eng/jira-triage",
+        "k8s-ops/sprint-standup",
+        "k8s-ops/slack-standup",
+        "ops-ninja/release-notes",
+        "tomr-eng/api-docs-generator"
       ],
       "downloads": 634
     },
@@ -2901,10 +2901,10 @@
       "icon": "headphones",
       "template_slugs": [
         "gizmax/support-ticket-triage",
-        "gizmax/ticket-classifier",
-        "gizmax/faq-generator",
-        "gizmax/customer-health-check",
-        "gizmax/sla-watchdog"
+        "nadia-cx/ticket-classifier",
+        "nadia-cx/faq-generator",
+        "supportflow/customer-health-check",
+        "supportflow/sla-watchdog"
       ],
       "downloads": 543
     },
@@ -2914,11 +2914,11 @@
       "description": "Streamline HR operations - hiring, onboarding, compliance, and contract management in one stack",
       "icon": "users",
       "template_slugs": [
-        "gizmax/job-description",
-        "gizmax/resume-screener",
-        "gizmax/onboarding-workflow",
+        "marcus-hr/job-description",
+        "lawtech-ai/resume-screener",
+        "lawtech-ai/onboarding-workflow",
         "gizmax/contract-review",
-        "gizmax/compliance-checker"
+        "marcus-hr/compliance-checker"
       ],
       "downloads": 421
     },
@@ -2929,11 +2929,11 @@
       "icon": "search",
       "template_slugs": [
         "gizmax/market-opportunity-scout",
-        "gizmax/competitive-intelligence-radar",
-        "gizmax/voice-of-market",
-        "gizmax/pricing-intelligence",
-        "gizmax/trend-radar",
-        "gizmax/market-entry-strategy"
+        "content-queen/competitive-intelligence-radar",
+        "social-sage/voice-of-market",
+        "pricewatch/pricing-intelligence",
+        "lena-content/trend-radar",
+        "lena-content/market-entry-strategy"
       ],
       "downloads": 312
     },
@@ -2944,9 +2944,9 @@
       "icon": "trending-up",
       "template_slugs": [
         "gizmax/account-intelligence",
-        "gizmax/deal-velocity-optimizer",
-        "gizmax/revenue-forecast-ensemble",
-        "gizmax/churn-prediction-pipeline",
+        "nadia-cx/deal-velocity-optimizer",
+        "priya-fintech/revenue-forecast-ensemble",
+        "revops-sam/churn-prediction-pipeline",
         "gizmax/win-loss-intelligence"
       ],
       "downloads": 267
@@ -2957,11 +2957,11 @@
       "description": "Automate incident response, deployment risk analysis, SOC triage, and AI safety testing",
       "icon": "shield",
       "template_slugs": [
-        "gizmax/incident-command-center",
-        "gizmax/deployment-risk-analyzer",
-        "gizmax/soc-triage-pipeline",
-        "gizmax/ai-red-team",
-        "gizmax/self-healing-pipeline"
+        "kai-security/incident-command-center",
+        "kai-security/deployment-risk-analyzer",
+        "kai-security/soc-triage-pipeline",
+        "kai-security/ai-red-team",
+        "k8s-ops/self-healing-pipeline"
       ],
       "downloads": 198
     },
@@ -2971,10 +2971,10 @@
       "description": "M&A due diligence, regulatory monitoring, contract lifecycle management, and compliance automation",
       "icon": "briefcase",
       "template_slugs": [
-        "gizmax/ma-due-diligence",
-        "gizmax/regulatory-change-analyzer",
-        "gizmax/contract-lifecycle",
-        "gizmax/earnings-call-intelligence"
+        "priya-fintech/ma-due-diligence",
+        "marcus-hr/regulatory-change-analyzer",
+        "lawtech-ai/contract-lifecycle",
+        "priya-fintech/earnings-call-intelligence"
       ],
       "downloads": 156
     },
@@ -2984,11 +2984,11 @@
       "description": "Create once, publish everywhere - from podcast to blog to social media to landing pages",
       "icon": "zap",
       "template_slugs": [
-        "gizmax/content-factory",
-        "gizmax/podcast-to-empire",
-        "gizmax/startup-growth-engine",
-        "gizmax/blog-to-social",
-        "gizmax/seo-content"
+        "lena-content/content-factory",
+        "content-queen/podcast-to-empire",
+        "lena-content/startup-growth-engine",
+        "elena-growth/blog-to-social",
+        "lena-content/seo-content"
       ],
       "downloads": 289
     },
@@ -2998,10 +2998,10 @@
       "description": "Agency reports, freelancer proposals, grant writing, and course creation for service businesses",
       "icon": "briefcase",
       "template_slugs": [
-        "gizmax/agency-report-generator",
-        "gizmax/freelancer-proposal",
-        "gizmax/grant-proposal",
-        "gizmax/course-creator"
+        "elena-growth/agency-report-generator",
+        "amira-dev/freelancer-proposal",
+        "jmartinez/grant-proposal",
+        "lena-content/course-creator"
       ],
       "downloads": 195
     },
@@ -3011,10 +3011,10 @@
       "description": "E-commerce catalog enrichment, real estate listings, invoice processing, and pricing optimization",
       "icon": "shopping-cart",
       "template_slugs": [
-        "gizmax/ecommerce-catalog",
-        "gizmax/real-estate-listing",
-        "gizmax/invoice-processor",
-        "gizmax/dynamic-pricing"
+        "elena-growth/ecommerce-catalog",
+        "jmartinez/real-estate-listing",
+        "priya-fintech/invoice-processor",
+        "pricewatch/dynamic-pricing"
       ],
       "downloads": 130
     },
@@ -3024,10 +3024,10 @@
       "description": "Video shorts, social media calendars, product feedback loops, and design specs",
       "icon": "film",
       "template_slugs": [
-        "gizmax/video-to-shorts",
-        "gizmax/social-media-calendar",
-        "gizmax/product-feedback-prioritizer",
-        "gizmax/product-design-spec"
+        "lena-content/video-to-shorts",
+        "content-queen/social-media-calendar",
+        "datacraft-io/product-feedback-prioritizer",
+        "tomr-eng/product-design-spec"
       ],
       "downloads": 125
     },
@@ -3037,9 +3037,9 @@
       "description": "RAG knowledge bases, clinical documentation, voice agent QA, and client onboarding",
       "icon": "database",
       "template_slugs": [
-        "gizmax/rag-knowledge-base",
-        "gizmax/clinical-notes",
-        "gizmax/voice-agent-pipeline",
+        "datacraft-io/rag-knowledge-base",
+        "workflow-lab/clinical-notes",
+        "nadia-cx/voice-agent-pipeline",
         "gizmax/client-onboarding-orchestrator"
       ],
       "downloads": 146
