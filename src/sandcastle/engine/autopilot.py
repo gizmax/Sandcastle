@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 import random
@@ -127,20 +128,14 @@ def apply_variant(
     variant: VariantConfig,
 ) -> StepDefinition:
     """Create a modified StepDefinition from a variant config."""
-    return StepDefinition(
-        id=step.id,
-        prompt=variant.prompt if variant.prompt else step.prompt,
-        depends_on=step.depends_on,
-        model=variant.model if variant.model else step.model,
-        max_turns=variant.max_turns if variant.max_turns else step.max_turns,
-        timeout=step.timeout,
-        parallel_over=step.parallel_over,
-        output_schema=step.output_schema,
-        retry=step.retry,
-        fallback=step.fallback,
-        type=step.type,
-        autopilot=None,  # Don't recurse
-    )
+    overrides: dict[str, Any] = {"autopilot": None}  # Don't recurse
+    if variant.prompt:
+        overrides["prompt"] = variant.prompt
+    if variant.model:
+        overrides["model"] = variant.model
+    if variant.max_turns:
+        overrides["max_turns"] = variant.max_turns
+    return dataclasses.replace(step, **overrides)
 
 
 async def evaluate_result(

@@ -1200,11 +1200,15 @@ async def _execute_step_once(
             and (context._memory_config.auto_inject or (step.memory and step.memory.read))
         )
 
+        # Resolve template variables first (cheap string interpolation) so the
+        # cache key reflects the actual inputs, not the raw template string.
+        prompt = resolve_templates(step.prompt, context, step.depends_on)
+
         # Step result cache - check before executing (skip for memory steps)
         cache_key = ""
         if not _step_reads_memory:
             cache_key = _compute_cache_key(
-                context.workflow_name, step.id, step.prompt, effective_model or step.model
+                context.workflow_name, step.id, prompt, effective_model or step.model
             )
             cached = await _get_cached_result(cache_key)
             if cached:
@@ -1219,8 +1223,6 @@ async def _execute_step_once(
                     status="completed",
                     attempt=attempt,
                 )
-
-        prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
 
         # Inject agent memories into the prompt (semantic search with step prompt)
@@ -4156,7 +4158,7 @@ async def _prepare_and_run_step(
             if result.status == "failed":
                 on_fail = step.retry.on_failure if step.retry else "abort"
                 if use_dead_letter:
-                    await _send_to_dead_letter(
+                    dlq_ok = await _send_to_dead_letter(
                         run_id=context.run_id,
                         step_id=step_id,
                         error=result.error,
@@ -4164,6 +4166,8 @@ async def _prepare_and_run_step(
                         attempts=result.attempt,
                         parallel_index=i,
                     )
+                    if not dlq_ok:
+                        logger.warning(f"DLQ persist failed for step '{step_id}' item {i}")
                     fan_out_items.append(None)
                 elif on_fail == "abort":
                     raise StepExecutionError(f"Step '{step_id}' item {i} failed: {result.error}")
@@ -4186,13 +4190,15 @@ async def _prepare_and_run_step(
     if result.status == "failed":
         on_fail = step.retry.on_failure if step.retry else "abort"
         if use_dead_letter:
-            await _send_to_dead_letter(
+            dlq_ok = await _send_to_dead_letter(
                 run_id=context.run_id,
                 step_id=step_id,
                 error=result.error,
                 input_data=context.input,
                 attempts=result.attempt,
             )
+            if not dlq_ok:
+                logger.warning(f"DLQ persist failed for step '{step_id}'")
             context.step_outputs[step_id] = None
         elif on_fail == "abort":
             raise StepExecutionError(f"Step '{step_id}' failed: {result.error}")
@@ -4692,8 +4698,11 @@ async def _send_to_dead_letter(
     input_data: dict | None,
     attempts: int,
     parallel_index: int | None = None,
-) -> None:
-    """Insert a failed step into the dead letter queue."""
+) -> bool:
+    """Insert a failed step into the dead letter queue.
+
+    Returns True if the item was persisted, False on failure.
+    """
     try:
         from sandcastle.models.db import DeadLetterItem, async_session
 
@@ -4720,8 +4729,10 @@ async def _send_to_dead_letter(
         )
 
         logger.info(f"Step '{step_id}' sent to dead letter queue")
+        return True
     except Exception as e:
         logger.error(f"Failed to insert into dead letter queue: {e}")
+        return False
 
 
 class StepExecutionError(Exception):
