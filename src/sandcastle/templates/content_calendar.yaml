@@ -1,0 +1,254 @@
+# name: Content Calendar Generator
+# description: Research trending topics in your niche, generate a month-long content calendar with SEO keywords, and draft outlines for each piece
+# tags: [Content, SEO, Planning, Marketing, Calendar]
+# category: marketing
+
+name: content-calendar
+description: Research trending topics in your niche, generate a month-long content calendar with SEO keywords, and draft outlines for each piece
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["niche", "target_audience"]
+  properties:
+    niche:
+      type: string
+      description: "Your content niche or industry (e.g. 'B2B SaaS marketing', 'personal finance', 'sustainable fashion')"
+    target_audience:
+      type: string
+      description: "Primary target audience for the content (e.g. 'startup founders', 'mid-career professionals', 'ecommerce store owners')"
+    content_types:
+      type: string
+      description: "Comma-separated content formats to include (default: 'blog post, social post, newsletter, video script')"
+      default: "blog post, social post, newsletter, video script"
+    posts_per_week:
+      type: number
+      description: "Number of content pieces to plan per week (default: 4)"
+      default: 4
+    brand_voice:
+      type: string
+      description: "Brand voice and tone guidelines (e.g. 'professional but approachable', 'bold and opinionated')"
+      default: "professional, helpful, and data-driven"
+
+steps:
+  - id: trend-research
+    prompt: |
+      Research current and emerging trends in the specified niche to inform
+      a month-long content strategy.
+
+      Niche: {input.niche}
+      Target audience: {input.target_audience}
+
+      Conduct thorough trend research across these dimensions:
+
+      1. **Industry trending topics** - Identify the top 15-20 topics currently
+         generating engagement in {input.niche}:
+         - What questions is the audience asking on forums, Reddit, Quora?
+         - What topics are competitors publishing about most frequently?
+         - What industry news or changes are driving conversation?
+         - What seasonal or timely angles exist for the coming month?
+
+      2. **SEO keyword research** - For each trending topic, identify:
+         - Primary keyword and estimated search volume (high/medium/low)
+         - 3-5 long-tail keyword variations
+         - Keyword difficulty estimate (easy/medium/hard)
+         - Search intent classification (informational, commercial, transactional)
+         - Content gap opportunities (topics with demand but weak existing content)
+
+      3. **Content format analysis** - For the audience {input.target_audience}:
+         - Which content formats get the most engagement in this niche?
+         - What content length performs best (short-form, mid-form, long-form)?
+         - Which platforms should each format target?
+         - What publishing times and days show highest engagement?
+
+      4. **Competitor content audit** - Review the top 5 content producers
+         in {input.niche}:
+         - What topics are they covering this month?
+         - What gaps exist in their coverage that we can fill?
+         - What content formats are they neglecting?
+         - What angles can we take that differentiate from their approach?
+
+      Output a prioritized list of 20+ content ideas with SEO data, ranked
+      by a composite score of search demand, competition level, and audience relevance.
+    model: sonnet
+    max_turns: 10
+
+  - id: calendar-structure
+    depends_on: [trend-research]
+    prompt: |
+      Build a structured month-long content calendar from the trend research.
+
+      Trend research: {steps.trend-research.output}
+      Posts per week: {input.posts_per_week}
+      Content types: {input.content_types}
+      Brand voice: {input.brand_voice}
+      Target audience: {input.target_audience}
+
+      Create a 4-week content calendar with {input.posts_per_week} pieces per week:
+
+      **Calendar structure for each entry:**
+      - Week number and day (e.g. Week 1 - Monday)
+      - Content type (from: {input.content_types})
+      - Title (compelling, SEO-optimized)
+      - Primary keyword and secondary keywords
+      - Content pillar/theme (group related pieces into 3-4 pillar themes)
+      - Target platform(s)
+      - Estimated word count / duration
+      - Content goal (awareness, engagement, conversion, retention)
+      - CTA (call to action for the piece)
+
+      **Calendar design principles:**
+      - Alternate content types throughout the week for variety
+      - Group content into 3-4 pillar themes for topical authority
+      - Include a mix of content goals (not all awareness or all conversion)
+      - Place higher-effort content (long-form, video) early in the week
+      - Include at least 2 "evergreen" pieces and 2 "timely" pieces per week
+      - Ensure keyword targeting does not cannibalize between pieces
+      - Plan internal linking opportunities between calendar entries
+
+      **Weekly rhythm example:**
+      - Monday: flagship content piece (blog/video)
+      - Tuesday-Wednesday: supporting/derivative content (social, newsletter)
+      - Thursday: engagement content (polls, questions, community)
+      - Friday: roundup or curated content
+
+      Output the complete 4-week calendar as a structured table/list.
+    model: sonnet
+    max_turns: 8
+
+  - id: content-outlines
+    depends_on: [calendar-structure]
+    prompt: |
+      Draft detailed content outlines for every piece in the calendar.
+
+      Calendar: {steps.calendar-structure.output}
+      Brand voice: {input.brand_voice}
+      Target audience: {input.target_audience}
+      Niche: {input.niche}
+
+      For each content piece in the calendar, generate a production-ready outline:
+
+      **For blog posts and long-form content:**
+      - SEO-optimized title (include primary keyword naturally)
+      - Meta description (150-160 characters, include keyword, compelling hook)
+      - Introduction hook (2-3 sentence opener that grabs attention)
+      - Section headers (H2/H3 structure, include secondary keywords)
+      - Key points under each section (3-5 bullet points)
+      - Data or examples to include (specific stats, case studies, quotes)
+      - Internal link targets (which other calendar pieces to link to)
+      - CTA placement and copy
+      - Estimated word count: 1200-2000 words
+
+      **For social media posts:**
+      - Platform-specific format (Twitter/X: thread outline, LinkedIn: post structure,
+        Instagram: caption + carousel slide topics)
+      - Hook line (first line that stops the scroll)
+      - Key message in 3-5 bullet points
+      - Hashtag suggestions (5-10 relevant, mix of broad and niche)
+      - Engagement prompt (question or CTA to drive comments)
+      - Best time to post recommendation
+
+      **For newsletters:**
+      - Subject line (A/B variant suggestions)
+      - Preview text
+      - Section breakdown (intro, main content, secondary content, CTA)
+      - Key takeaway for the reader
+      - Links to blog content from the same week
+
+      **For video scripts:**
+      - Hook (first 5 seconds to retain viewers)
+      - Key talking points in order
+      - B-roll or visual suggestions
+      - CTA and end screen strategy
+      - Thumbnail concept description
+
+      Ensure all outlines align with the {input.brand_voice} tone guidelines.
+    model: sonnet
+    max_turns: 10
+
+  - id: seo-optimization
+    depends_on: [content-outlines, trend-research]
+    type: code
+    prompt: |
+      Create an SEO optimization checklist and keyword mapping for the entire
+      content calendar.
+
+      Outlines: {steps.content-outlines.output}
+      Trend data: {steps.trend-research.output}
+
+      Generate a structured SEO strategy document:
+
+      1. **Keyword mapping table** - For every content piece:
+         | Content Title | Primary KW | Secondary KWs | Search Volume | Difficulty | Intent |
+         Map each piece to ensure no keyword cannibalization across the calendar.
+
+      2. **Pillar-cluster strategy** - Show how the content pieces form
+         topic clusters:
+         - Identify 3-4 pillar pages (comprehensive, high-value pieces)
+         - Map supporting cluster content that links back to each pillar
+         - Define the internal linking structure as a simple graph
+
+      3. **On-page SEO checklist** for each blog post:
+         - [ ] Title tag includes primary keyword (under 60 chars)
+         - [ ] Meta description includes keyword (150-160 chars)
+         - [ ] H1 matches title, H2s include secondary keywords
+         - [ ] First paragraph includes primary keyword naturally
+         - [ ] Image alt text opportunities identified
+         - [ ] Internal links to 2-3 other calendar pieces
+         - [ ] External links to 1-2 authoritative sources
+         - [ ] URL slug is short and keyword-rich
+
+      4. **Content distribution plan** - For each platform:
+         - Optimal posting time and frequency
+         - Cross-promotion strategy (how blog feeds social, social feeds newsletter)
+         - Repurposing map (which pieces can be adapted to other formats)
+
+      Output as a structured reference document the content team can use
+      alongside the calendar during production.
+    model: haiku
+    max_turns: 5
+
+  - id: final-calendar
+    depends_on: [calendar-structure, content-outlines, seo-optimization]
+    prompt: |
+      Compile the final content calendar package ready for team execution.
+
+      Calendar: {steps.calendar-structure.output}
+      Outlines: {steps.content-outlines.output}
+      SEO strategy: {steps.seo-optimization.output}
+
+      Produce the final deliverable with these sections:
+
+      **1. Executive Summary**
+      - Month's content theme and strategic goals
+      - Key metrics to track (traffic, engagement, conversions)
+      - Total pieces planned: count by type and platform
+      - Top 3 highest-priority pieces to produce first
+
+      **2. Master Calendar View**
+      - Week-by-week grid showing all content pieces
+      - Color-coded by content type and pillar theme
+      - Include all metadata: title, keywords, platform, owner, status
+
+      **3. Production Queue**
+      - Ordered list of content pieces by production deadline
+      - Each entry includes: title, type, outline reference, SEO checklist, due date
+      - Dependencies noted (e.g. "blog post must publish before social derivative")
+
+      **4. Performance Tracking Framework**
+      - KPIs per content type (blog: organic traffic, time on page; social: engagement rate, reach)
+      - Weekly review checkpoint questions
+      - Monthly retrospective template (what performed, what to adjust)
+
+      **5. Quick Reference Card**
+      - Brand voice reminder: {input.brand_voice}
+      - Target audience snapshot: {input.target_audience}
+      - Top 10 keywords for the month
+      - Hashtag sets by pillar theme
+
+      Format the entire package in clean, structured markdown ready for
+      import into a project management tool or shared document.
+    model: sonnet
+    max_turns: 8

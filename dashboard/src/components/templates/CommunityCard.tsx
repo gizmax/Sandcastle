@@ -251,7 +251,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
             onPreview();
           }}
           className={cn(
-            "flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5",
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5",
             "text-xs font-medium text-muted-foreground",
             "hover:text-foreground hover:bg-border/40 transition-colors"
           )}
