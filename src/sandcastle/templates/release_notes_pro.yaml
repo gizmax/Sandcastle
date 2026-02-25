@@ -1,0 +1,272 @@
+# name: Release Notes Pro
+# description: Pull merged PRs from GitHub, classify changes, generate user-facing release notes, create changelog entries, and post to Slack and docs site
+# tags: [DevRel, GitHub, Documentation, Release, Changelog]
+# category: engineering
+
+name: release-notes-pro
+description: Pull merged PRs from GitHub, classify changes, generate user-facing release notes, create changelog entries, and post to Slack and docs site
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [github, slack]
+
+input_schema:
+  required: ["repo", "version"]
+  properties:
+    repo:
+      type: string
+      description: "GitHub repository in owner/repo format - e.g. 'acme/platform'"
+    version:
+      type: string
+      description: "Release version tag - e.g. 'v2.4.0'"
+    since_tag:
+      type: string
+      description: "Previous version tag to compare against - e.g. 'v2.3.0'. If empty, uses the last tag before the current version."
+    slack_channel:
+      type: string
+      description: "Slack channel for release announcement (e.g. '#releases')"
+      default: "#releases"
+    audience:
+      type: string
+      description: "Target audience for the notes - 'developers', 'end-users', 'internal', or 'all' (default: 'all')"
+      default: "all"
+
+steps:
+  - id: fetch-prs
+    prompt: |
+      Fetch all merged pull requests from GitHub between the previous release
+      and the current version.
+
+      Use the GitHub tool:
+        node /home/user/tools/github.mjs list_merged_prs '{input.repo}' '{input.since_tag}' '{input.version}'
+
+      Repository: {input.repo}
+      Current version: {input.version}
+      Since tag: {input.since_tag}
+
+      For each merged PR, extract:
+      - PR number and title
+      - Author (username and display name)
+      - Labels (e.g., bug, feature, breaking-change, documentation, chore)
+      - Description/body (first 500 characters for context)
+      - Files changed (list of paths for categorization)
+      - Merge date
+      - Linked issues (if any)
+      - Review approvers
+
+      Also fetch:
+      - Total commit count between tags
+      - Contributors list (unique authors)
+      - Any commits not associated with a PR (direct pushes)
+
+      Sort PRs by merge date (oldest first) to show chronological progression.
+    model: haiku
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        pull_requests:
+          type: array
+          items:
+            type: object
+            properties:
+              number: { type: integer }
+              title: { type: string }
+              author: { type: string }
+              labels: { type: array }
+              merged_at: { type: string }
+        total_commits: { type: integer }
+        contributors: { type: array }
+
+  - id: classify-changes
+    depends_on: [fetch-prs]
+    prompt: |
+      Classify each PR into a change category and assess its user impact.
+
+      Pull requests: {steps.fetch-prs.output}
+
+      For each PR, determine:
+
+      **1. Change category (based on labels, title, and files changed):**
+      - breaking: backward-incompatible API or behavior changes
+      - feature: new functionality or capability
+      - improvement: enhancement to existing functionality
+      - fix: bug fix or error correction
+      - performance: speed, memory, or efficiency improvements
+      - security: vulnerability patches or security enhancements
+      - deprecation: deprecated features or APIs
+      - documentation: docs-only changes
+      - internal: refactoring, tests, CI/CD, dependencies (no user impact)
+
+      **2. User impact level:**
+      - high: changes user workflow, requires action, or fixes critical bug
+      - medium: noticeable improvement or non-critical fix
+      - low: minor change, cosmetic, or internal-only
+      - none: no direct user impact (tests, CI, refactoring)
+
+      **3. Audience relevance:**
+      - developers: API changes, SDK updates, developer tooling
+      - end-users: UI changes, new features, workflow improvements
+      - ops: infrastructure, deployment, configuration changes
+      - all: broadly relevant changes
+
+      **4. Migration required:**
+      - Does this change require user action? (config update, API migration, etc.)
+      - If yes, describe the required migration steps briefly
+
+      **5. Grouping:** cluster related PRs that address the same feature or fix.
+      Multiple PRs for the same feature should be presented as one entry in the
+      release notes.
+
+      Return classified and grouped changes, sorted by category priority:
+      breaking > security > feature > improvement > fix > performance > deprecation > documentation > internal
+    model: sonnet
+    max_turns: 8
+
+  - id: generate-notes
+    depends_on: [classify-changes, fetch-prs]
+    prompt: |
+      Generate polished, user-facing release notes for version {input.version}.
+
+      Classified changes: {steps.classify-changes.output}
+      PR data: {steps.fetch-prs.output}
+      Target audience: {input.audience}
+      Repository: {input.repo}
+
+      Write release notes in this structure:
+
+      **Header:**
+      # {input.version} Release Notes
+      Released: <date of latest merge>
+
+      **Highlights section (2-3 sentences):**
+      Summarize the most impactful changes in plain language. Lead with the
+      most exciting feature or most critical fix. Make it compelling enough
+      that someone skimming will want to read more.
+
+      **Breaking Changes (if any):**
+      For each breaking change:
+      - Clear description of what changed and why
+      - Migration guide: exact steps to update
+      - Code examples showing before/after
+      - Deprecation timeline if applicable
+
+      **New Features:**
+      For each feature:
+      - User-benefit-oriented description (not implementation details)
+      - Brief usage example or screenshot description
+      - Link to documentation (placeholder: `docs/{feature-name}`)
+      - PR reference: (#<number>)
+
+      **Improvements:**
+      Bulleted list with concise, benefit-focused descriptions.
+
+      **Bug Fixes:**
+      Bulleted list. For each fix, describe the symptom that was fixed
+      (not the code change). Users search for symptoms, not implementation.
+
+      **Performance:**
+      Include metrics where available (e.g., "40% faster API response times").
+
+      **Security:**
+      Brief, responsible descriptions. Reference CVE if applicable.
+      Do not expose exploitation details.
+
+      **Contributors:**
+      Thank all contributors by username with link to their PR(s).
+
+      Filter content based on audience:
+      - If audience is 'end-users': exclude internal, minimize technical details
+      - If audience is 'developers': include API details, code examples
+      - If audience is 'internal': include all changes, including refactoring
+      - If audience is 'all': balanced coverage for all readers
+
+      Use clear, jargon-free language. Every entry should answer "why should
+      I care?" from the reader's perspective.
+    model: sonnet
+    max_turns: 10
+
+  - id: generate-changelog
+    depends_on: [classify-changes]
+    prompt: |
+      Generate a structured changelog entry in Keep a Changelog format.
+
+      Classified changes: {steps.classify-changes.output}
+      Version: {input.version}
+
+      Generate a CHANGELOG.md entry following the Keep a Changelog convention
+      (https://keepachangelog.com):
+
+      ## [{input.version}] - <YYYY-MM-DD>
+
+      ### Added
+      - New features (one line each, PR reference in parentheses)
+
+      ### Changed
+      - Improvements and modifications to existing features
+
+      ### Deprecated
+      - Features that will be removed in future versions
+
+      ### Removed
+      - Features removed in this release
+
+      ### Fixed
+      - Bug fixes (describe the symptom that was resolved)
+
+      ### Security
+      - Security patches and vulnerability fixes
+
+      Rules:
+      - Each entry is one concise line (max 100 characters)
+      - Start each line with a verb: Add, Change, Fix, Remove, Deprecate
+      - Include PR number reference: (#123)
+      - Skip empty sections (don't include "### Added" if there are no additions)
+      - Keep it factual and scannable - no marketing language
+      - This format is for developers and maintainers, not end users
+
+      Also generate a one-line version summary suitable for a GitHub release title:
+      "{input.version}: <concise summary of the most notable change>"
+    model: haiku
+    max_turns: 5
+
+  - id: announce-slack
+    depends_on: [generate-notes, generate-changelog]
+    prompt: |
+      Post the release announcement to Slack.
+
+      Release notes: {steps.generate-notes.output}
+      Changelog: {steps.generate-changelog.output}
+      Version: {input.version}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Format the Slack announcement:
+
+      :rocket: *{input.version} Released!* - {input.repo}
+
+      *Highlights:*
+      <2-3 sentence summary from the release notes highlights section>
+
+      *What's new:*
+      - <top 3-5 most impactful changes as bullet points>
+
+      *Breaking changes:* <count> (see full notes for migration guide)
+      *Bug fixes:* <count>
+      *Contributors:* <count> (<list usernames>)
+
+      :page_facing_up: <link to full release notes>
+      :memo: <link to changelog>
+
+      If there are breaking changes, add a prominent warning:
+      :warning: *Breaking changes in this release* - review the migration guide
+      before upgrading.
+
+      Keep the Slack message concise (under 500 words). Link to the full
+      release notes for details. The goal is to inform and excite, not to
+      reproduce the entire changelog in Slack.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

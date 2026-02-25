@@ -1,0 +1,279 @@
+# name: Churn Predictor V2
+# description: Enhanced churn prediction with multi-signal analysis, Slack alerts, and automated retention campaigns via HubSpot sequences
+# tags: [ML, Churn, Retention, CRM, HubSpot]
+# category: sales_crm
+
+name: churn-predictor-v2
+description: Enhanced churn prediction with multi-signal analysis, Slack alerts, and automated retention campaigns via HubSpot sequences
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 360
+default_tools: [hubspot, slack]
+
+input_schema:
+  required: ["hubspot_list_id"]
+  properties:
+    hubspot_list_id:
+      type: string
+      description: "HubSpot contact list ID or segment name containing customers to analyze (e.g. 'active-customers', 'enterprise-tier')"
+    lookback_days:
+      type: number
+      description: "Number of days of historical activity data to analyze (default: 90)"
+      default: 90
+    risk_threshold:
+      type: number
+      description: "Minimum churn risk score (0-100) to trigger alerts and campaigns (default: 60)"
+      default: 60
+    slack_channel:
+      type: string
+      description: "Slack channel for churn risk alerts (e.g. '#cs-alerts')"
+      default: "#cs-alerts"
+    hubspot_sequence_id:
+      type: string
+      description: "HubSpot sequence ID for automated retention outreach (leave blank to skip enrollment)"
+
+steps:
+  - id: fetch-customer-signals
+    prompt: |
+      Fetch comprehensive customer activity data from HubSpot for churn analysis.
+
+      Use the HubSpot tool:
+        node /home/user/tools/hubspot.mjs get_contacts '{input.hubspot_list_id}' {input.lookback_days}
+
+      For each customer in the list {input.hubspot_list_id}, retrieve:
+
+      **Engagement signals:**
+      - Email open rate (last 30/60/90 days) and trend direction
+      - Email click rate and last click date
+      - Website visit frequency and pages viewed (last {input.lookback_days} days)
+      - Last meaningful interaction date (email reply, meeting, call)
+      - Support ticket count and resolution satisfaction ratings
+
+      **Product usage signals:**
+      - Login frequency trend (weekly averages over {input.lookback_days} days)
+      - Feature adoption breadth (features used / total available)
+      - API call volume trend (if applicable)
+      - Last product activity date
+
+      **Commercial signals:**
+      - Contract value (MRR/ARR) and contract end date
+      - Payment history (on-time, late, failed charges)
+      - Expansion/upsell history and last expansion date
+      - Discount level and pricing tier
+      - Deal stage of any open renewal opportunities
+
+      **Relationship signals:**
+      - Assigned owner and last owner touchpoint
+      - NPS/CSAT scores (latest and historical)
+      - Number of contacts at the account (multi-threading depth)
+      - Key contact job title changes or departures (LinkedIn signals if available)
+
+      Return structured JSON with all signals per customer. Flag any data gaps
+      where signals are unavailable (mark as null with reason).
+    model: haiku
+    max_turns: 5
+
+  - id: multi-signal-scoring
+    depends_on: [fetch-customer-signals]
+    prompt: |
+      Apply a multi-signal churn prediction model to score each customer.
+
+      Customer signals: {steps.fetch-customer-signals.output}
+      Lookback period: {input.lookback_days} days
+
+      **Scoring Model - 5 Weighted Dimensions (100 points total):**
+
+      DIMENSION 1 - ENGAGEMENT DECAY (0-25 points):
+      - Email engagement decline: compare last 30 days vs previous 60 days
+        * >50% decline in opens/clicks = 15pts, 25-50% = 10pts, 10-25% = 5pts, stable/growing = 0pts
+      - Meeting/call frequency: compare recent month vs average
+        * Zero meetings in 60+ days = 8pts, declining = 5pts, stable = 2pts
+      - Response time to outreach: average days to reply
+        * No response in 30+ days = 8pts, >7 days avg = 5pts, <7 days = 0pts
+
+      DIMENSION 2 - PRODUCT USAGE EROSION (0-25 points):
+      - Login frequency trend (current week vs 90-day weekly average)
+        * >40% drop = 12pts, 20-40% = 8pts, 10-20% = 4pts, stable = 0pts
+      - Feature breadth contraction (features used this month vs 3-month average)
+        * Using <30% of previously used features = 8pts, 30-60% = 5pts, >60% = 0pts
+      - Last active date recency
+        * >30 days ago = 8pts, 14-30 days = 5pts, 7-14 days = 2pts, <7 days = 0pts
+
+      DIMENSION 3 - SUPPORT FRICTION (0-20 points):
+      - Ticket volume acceleration: tickets this month vs 3-month monthly average
+        * >2x increase = 10pts, 1.5-2x = 6pts, normal = 0pts
+      - Unresolved escalations: any open Tier 2+ tickets
+        * Yes with >7 days open = 8pts, yes <7 days = 4pts, none = 0pts
+      - CSAT trend: last 3 survey scores
+        * Declining = 5pts, low but stable = 3pts, improving/good = 0pts
+
+      DIMENSION 4 - COMMERCIAL RISK (0-20 points):
+      - Renewal proximity without engagement
+        * <30 days to renewal + no renewal discussion = 10pts, 30-60 days = 6pts
+      - Payment issues: late or failed payments in last 90 days
+        * Multiple failures = 6pts, single late = 3pts, clean = 0pts
+      - No expansion in 12+ months while peers expanded = 4pts
+
+      DIMENSION 5 - RELATIONSHIP HEALTH (0-10 points):
+      - Champion departure or role change = 5pts
+      - Single-threaded (only 1 active contact) = 3pts
+      - Owner changed in last 30 days (transition risk) = 2pts
+
+      **Risk Classification:**
+      - Critical (80-100): Immediate intervention required
+      - High (60-79): Proactive rescue within 1 week
+      - Moderate (40-59): Enhanced monitoring
+      - Healthy (0-39): Standard engagement, focus on growth
+
+      For each customer output: name, company, total_score, dimension_scores,
+      classification, top_3_risk_factors, confidence_level, and ARR_at_risk.
+      Sort by total_score descending.
+    model: sonnet
+    max_turns: 8
+
+  - id: retention-playbooks
+    depends_on: [multi-signal-scoring]
+    prompt: |
+      Generate personalized retention action plans for at-risk customers.
+
+      Scored customers: {steps.multi-signal-scoring.output}
+      Risk threshold: {input.risk_threshold}
+
+      For each customer scoring >= {input.risk_threshold} (High and Critical risk),
+      create a tailored retention playbook based on their primary risk dimension:
+
+      **Engagement Decay Playbook:**
+      - Re-engagement campaign: personalized email sequence highlighting new features
+        relevant to their use case and ROI achieved by similar customers
+      - Executive check-in: schedule a call with their executive sponsor
+      - Content-based nurture: share case studies from their industry vertical
+      - Exclusive access: early access to upcoming features or beta programs
+
+      **Usage Erosion Playbook:**
+      - Adoption workshop: schedule a 1:1 training session on underutilized features
+      - Usage benchmarking report: show how top customers in their tier use the product
+      - Integration suggestions: recommend integrations that increase daily usage
+      - Success planning: co-create a 90-day adoption roadmap with measurable goals
+
+      **Support Friction Playbook:**
+      - Escalation resolution: fast-track all open tickets with a dedicated support engineer
+      - Root cause analysis: identify patterns in their ticket history and fix systemic issues
+      - Proactive health check: schedule a technical review to prevent future issues
+      - Direct Slack channel: offer premium support access for 30 days
+
+      **Commercial Risk Playbook:**
+      - Value realization report: compile ROI data and usage metrics for renewal discussion
+      - Flexible terms: prepare options for contract restructuring if needed
+      - Competitive defense: prepare comparison materials if competitor signals detected
+      - Multi-year incentive: offer 15-20% discount for multi-year commitment
+
+      For each customer, output:
+      - Primary playbook with 3-5 specific actions (with owner, timeline, and success metric)
+      - Personalized email draft for the first outreach touchpoint
+      - Internal briefing note for the CSM with talking points
+      - Escalation trigger: what happens if no improvement in 14 days
+    model: sonnet
+    max_turns: 10
+
+  - id: slack-alerts
+    depends_on: [multi-signal-scoring, retention-playbooks]
+    prompt: |
+      Post churn risk alerts to Slack with actionable summaries.
+
+      Scores: {steps.multi-signal-scoring.output}
+      Playbooks: {steps.retention-playbooks.output}
+      Risk threshold: {input.risk_threshold}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Post to {input.slack_channel} with this structure:
+
+      :rotating_light: *Churn Risk Alert - {input.hubspot_list_id}*
+
+      *Portfolio Summary:*
+      - Total customers analyzed: <count>
+      - Total ARR monitored: $<amount>
+      - Critical risk: <count> ($<ARR>) :red_circle:
+      - High risk: <count> ($<ARR>) :orange_circle:
+      - Moderate: <count> ($<ARR>) :yellow_circle:
+      - Healthy: <count> ($<ARR>) :green_circle:
+
+      *Immediate Action Required:*
+      For each Critical customer:
+      > :red_circle: *<Company>* - Score: <score>/100 | ARR: $<amount>
+      > Risk: <primary risk factor>
+      > Action: <first action from playbook>
+      > Owner: <assigned CSM>
+
+      *Watch List (High Risk):*
+      For each High risk customer (brief format):
+      > :orange_circle: *<Company>* - <score>/100 | $<ARR> | <primary risk>
+
+      If no customers meet the threshold, post a positive update instead.
+    model: haiku
+    max_turns: 5
+    tools: [slack]
+
+  - id: hubspot-campaigns
+    depends_on: [retention-playbooks, multi-signal-scoring]
+    type: condition
+    prompt: |
+      Enroll at-risk customers into HubSpot retention sequences if a sequence ID is configured.
+
+      Playbooks: {steps.retention-playbooks.output}
+      Scores: {steps.multi-signal-scoring.output}
+      HubSpot sequence ID: {input.hubspot_sequence_id}
+
+      If {input.hubspot_sequence_id} is provided and not empty:
+      - For each Critical and High risk customer, use the HubSpot tool to enroll
+        their primary contact into the retention sequence:
+          node /home/user/tools/hubspot.mjs enroll_sequence '{input.hubspot_sequence_id}' '<contact_id>'
+      - Customize the sequence tokens for each contact using data from the playbook:
+        * first_name, company_name, primary_risk_factor, personalized_value_prop
+      - Update the HubSpot contact properties:
+        * churn_risk_score = <score>
+        * churn_risk_level = <classification>
+        * last_churn_analysis_date = today
+        * retention_playbook_assigned = <playbook name>
+
+      If {input.hubspot_sequence_id} is blank or not provided:
+      - Skip sequence enrollment
+      - Still update contact properties with churn scores
+
+      Report: contacts enrolled, contacts updated, any errors encountered.
+    model: haiku
+    max_turns: 8
+    tools: [hubspot]
+
+  - id: executive-summary
+    depends_on: [multi-signal-scoring, slack-alerts, hubspot-campaigns]
+    prompt: |
+      Generate an executive summary of the churn analysis run.
+
+      Scores: {steps.multi-signal-scoring.output}
+      Alerts sent: {steps.slack-alerts.output}
+      Campaign enrollment: {steps.hubspot-campaigns.output}
+
+      Produce a concise executive report:
+
+      **Churn Risk Executive Summary**
+
+      1. *Portfolio Health Score:* ARR-weighted average health across all customers (0-100)
+      2. *Risk Distribution:* breakdown by tier with customer count and ARR
+      3. *Top 5 At-Risk Accounts:* name, ARR, score, primary risk, assigned action
+      4. *Trend vs Last Run:* if historical data available, note improvements/deteriorations
+      5. *Actions Taken:*
+         - Slack alerts sent: yes/no, channel, count of accounts flagged
+         - HubSpot sequences: contacts enrolled, sequence name
+         - Contact properties updated: count
+      6. *Recommended Follow-ups:*
+         - Accounts needing executive intervention (Critical with ARR > $50K)
+         - Accounts needing CSM re-assignment (owner inactive > 30 days)
+         - Cohort-level concerns (if entire segment trending poorly)
+
+      Keep the summary under 500 words. Focus on decisions the leadership
+      team needs to make, not operational details.
+    model: sonnet
+    max_turns: 5

@@ -1,0 +1,188 @@
+# name: Competitor Pricing Tracker
+# description: Monitor competitor pricing pages, detect changes, compare feature matrices, generate visual diff reports, and alert via Slack
+# tags: [Pricing, Competitors, Alerts, Monitoring]
+# category: sales_crm
+
+name: pricing-tracker
+description: Monitor competitor pricing pages, detect changes, compare feature matrices, generate visual diff reports, and alert via Slack
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack]
+
+input_schema:
+  required: ["competitors"]
+  properties:
+    competitors:
+      type: string
+      description: "Comma-separated list of competitor names and their pricing page URLs - e.g. 'Acme:https://acme.com/pricing, Globex:https://globex.io/plans'"
+    our_product:
+      type: string
+      description: "Your product name for comparison context"
+    our_pricing:
+      type: string
+      description: "Your current pricing tiers and features summary for side-by-side comparison"
+    slack_channel:
+      type: string
+      description: "Slack channel for pricing change alerts (e.g. '#competitive-intel')"
+      default: "#competitive-intel"
+    focus_areas:
+      type: string
+      description: "Specific areas to monitor - e.g. 'enterprise tier, API pricing, per-seat costs, usage limits'"
+
+steps:
+  - id: scrape-pricing
+    prompt: |
+      Extract structured pricing data from each competitor's pricing page.
+
+      Competitors: {input.competitors}
+      Focus areas: {input.focus_areas}
+
+      For each competitor, extract the following structured data:
+
+      1. **Plan tiers:** name, monthly price, annual price (if offered), billing model
+         (per-seat, per-usage, flat-rate, tiered, freemium)
+      2. **Feature matrix:** for each plan tier, list included features with any limits
+         (e.g., "5 users", "10GB storage", "100 API calls/month")
+      3. **Enterprise/custom pricing:** note if a "Contact Sales" tier exists and what
+         differentiating features it highlights
+      4. **Add-ons and extras:** any separately priced modules, overages, or premium features
+      5. **Free tier/trial:** details on free plan limits or trial duration
+      6. **Pricing page metadata:** any trust badges, customer logos, "most popular" indicators,
+         comparison tables, or promotional banners
+
+      If a pricing page is not accessible, note the error and move to the next competitor.
+
+      Return structured JSON with normalized pricing data across all competitors for
+      easy comparison.
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              plans:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    tier_name: { type: string }
+                    monthly_price: { type: number }
+                    annual_price: { type: number }
+              last_scraped: { type: string }
+
+  - id: detect-changes
+    depends_on: [scrape-pricing]
+    prompt: |
+      Compare the freshly scraped pricing data against known baselines and detect
+      any meaningful changes.
+
+      Current pricing data: {steps.scrape-pricing.output}
+      Our product: {input.our_product}
+      Our pricing: {input.our_pricing}
+
+      Analyze for changes across these dimensions:
+
+      1. **Price changes:** any increase or decrease in plan pricing. Calculate the
+         percentage change and categorize as minor (< 5%), moderate (5-15%), or
+         major (> 15%). Note whether the change affects monthly, annual, or both.
+
+      2. **Feature changes:** new features added to any tier, features removed,
+         feature limits adjusted (e.g., storage increased, user limits changed),
+         or features moved between tiers (e.g., feature downgraded from Pro to Free,
+         or upgraded from Free to paid-only).
+
+      3. **Structural changes:** new tiers added, tiers removed, tiers renamed,
+         billing model changes (e.g., moved from per-seat to per-usage).
+
+      4. **Competitive positioning shifts:** changes in "most popular" tier designation,
+         new comparison tables targeting specific competitors, new positioning language.
+
+      5. **Strategic implications for {input.our_product}:**
+         - Are competitors undercutting our pricing on comparable tiers?
+         - Are they bundling features we charge separately for?
+         - Are they moving upmarket or downmarket?
+         - Any signals of a price war or market consolidation?
+
+      Flag each change with severity: low (cosmetic), medium (competitive impact),
+      high (requires immediate strategic response).
+    model: sonnet
+    max_turns: 8
+
+  - id: build-comparison
+    depends_on: [scrape-pricing, detect-changes]
+    prompt: |
+      Generate a feature-by-feature comparison matrix and pricing intelligence report.
+
+      Pricing data: {steps.scrape-pricing.output}
+      Changes detected: {steps.detect-changes.output}
+      Our product: {input.our_product}
+      Our pricing: {input.our_pricing}
+      Focus areas: {input.focus_areas}
+
+      Create a comprehensive comparison report with:
+
+      1. **Side-by-side pricing table:** align all competitors' plans by comparable
+         tier (Free, Starter, Pro, Enterprise). Include {input.our_product} alongside
+         competitors for direct comparison. Show monthly and annual pricing.
+
+      2. **Feature comparison matrix:** rows = features, columns = competitors.
+         Mark each cell as: included, limited (with limit value), add-on (with price),
+         or not available. Highlight features where {input.our_product} has an advantage
+         or disadvantage.
+
+      3. **Value-per-dollar analysis:** for each tier, calculate a normalized
+         feature-to-price ratio. Identify which competitor offers the best perceived
+         value at each price point.
+
+      4. **Competitive gap analysis:** where does {input.our_product} lead, where does
+         it lag, and what are the biggest gaps to address? Rank gaps by customer impact.
+
+      5. **Recommendations:** 2-3 specific pricing or packaging actions based on
+         competitive intelligence. Each recommendation should reference specific
+         competitor moves and market data.
+
+      Format the comparison clearly with markdown tables for easy reading.
+    model: sonnet
+    max_turns: 8
+
+  - id: alert-slack
+    depends_on: [detect-changes, build-comparison]
+    prompt: |
+      Post competitive pricing intelligence to Slack.
+
+      Changes: {steps.detect-changes.output}
+      Comparison: {steps.build-comparison.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Format the Slack alert:
+
+      :bar_chart: *Competitor Pricing Intelligence Report*
+      Product: {input.our_product}
+
+      *Changes Detected:*
+      For each change (grouped by severity):
+      :red_circle: HIGH: <competitor> - <change description>
+      :large_orange_circle: MEDIUM: <competitor> - <change description>
+      :white_circle: LOW: <competitor> - <change description>
+
+      *Quick Comparison Summary:*
+      - Brief table of competitor prices vs ours at key tiers
+      - Top competitive advantages and gaps
+
+      *Strategic Recommendations:*
+      - Top 2-3 action items from the analysis
+
+      If no significant changes were detected, post a brief "No pricing changes
+      detected" confirmation with the date and competitors monitored.
+    model: sonnet
+    max_turns: 5
+    tools: [slack]

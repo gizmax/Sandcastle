@@ -1,0 +1,287 @@
+# name: Contract Reviewer Pro
+# description: Advanced contract review with clause-by-clause risk analysis, jurisdiction-specific compliance checks, and amendment draft generation
+# tags: [Legal, PDF, Compliance, Contract, Risk]
+# category: hr_legal
+
+name: contract-reviewer-pro
+description: Advanced contract review with clause-by-clause risk analysis, jurisdiction-specific compliance checks, and amendment draft generation
+
+default_model: opus
+default_max_turns: 12
+default_timeout: 420
+
+input_schema:
+  required: ["contract_text"]
+  properties:
+    contract_text:
+      type: string
+      description: "Full text of the contract to review (paste the contract content or key sections)"
+    contract_type:
+      type: string
+      description: "Type of contract (e.g. 'SaaS subscription', 'employment', 'NDA', 'MSA', 'SOW', 'vendor agreement')"
+      default: "general commercial"
+    jurisdiction:
+      type: string
+      description: "Governing law jurisdiction (e.g. 'Delaware, US', 'England & Wales', 'California, US', 'EU/GDPR')"
+      default: "United States (general)"
+    review_perspective:
+      type: string
+      description: "Whose interests to prioritize - 'buyer', 'seller', 'employee', or 'neutral'"
+      default: "buyer"
+    risk_tolerance:
+      type: string
+      description: "Risk tolerance level - 'conservative' (flag everything), 'moderate' (standard business), or 'aggressive' (maximum flexibility)"
+      default: "moderate"
+
+steps:
+  - id: clause-extraction
+    prompt: |
+      Parse the contract and extract every distinct clause with classification.
+
+      Contract text: {input.contract_text}
+      Contract type: {input.contract_type}
+
+      Perform a systematic clause-by-clause extraction:
+
+      1. **Clause identification** - Parse the contract into individual clauses.
+         For each clause, extract:
+         - Clause number/reference (as labeled in the contract)
+         - Clause title/heading
+         - Full clause text (verbatim)
+         - Clause category from this taxonomy:
+           * Definitions and interpretation
+           * Scope of services / deliverables
+           * Pricing, payment, and fees
+           * Term and renewal
+           * Termination and exit
+           * Intellectual property and ownership
+           * Confidentiality and data protection
+           * Representations and warranties
+           * Indemnification
+           * Limitation of liability
+           * Insurance requirements
+           * Force majeure
+           * Dispute resolution and governing law
+           * Assignment and subcontracting
+           * Compliance and regulatory
+           * Miscellaneous / boilerplate
+
+      2. **Missing clause detection** - For a {input.contract_type} contract,
+         identify standard clauses that are ABSENT from this contract:
+         - List each missing clause type
+         - Assess risk of omission (High/Medium/Low)
+         - Recommend whether to request addition
+
+      3. **Cross-reference mapping** - Note where clauses reference each other
+         (e.g. "as defined in Section 2.1") and verify all cross-references
+         are accurate and point to existing sections.
+
+      4. **Ambiguity flags** - Flag any clauses with:
+         - Undefined terms used without definition
+         - Vague language ("reasonable", "best efforts", "material") without quantification
+         - Contradictions with other clauses
+         - Circular references
+
+      Output structured JSON with all extracted clauses and their metadata.
+    model: opus
+    max_turns: 10
+
+  - id: risk-analysis
+    depends_on: [clause-extraction]
+    prompt: |
+      Perform deep risk analysis on every extracted clause from the perspective
+      of the {input.review_perspective}.
+
+      Extracted clauses: {steps.clause-extraction.output}
+      Review perspective: {input.review_perspective}
+      Risk tolerance: {input.risk_tolerance}
+      Contract type: {input.contract_type}
+
+      For each clause, assess risk across these dimensions:
+
+      **Financial Risk (score 1-10):**
+      - Uncapped liabilities or unlimited exposure
+      - Penalty clauses disproportionate to contract value
+      - Auto-renewal with price escalation mechanisms
+      - Hidden fees, pass-through costs, or ambiguous pricing
+      - Payment terms unfavorable to the {input.review_perspective}
+
+      **Operational Risk (score 1-10):**
+      - Service level commitments without meaningful remedies
+      - Change control procedures that are one-sided
+      - Audit rights that are too broad or too narrow
+      - Transition/exit obligations that create lock-in
+      - Resource or staffing commitments that are inflexible
+
+      **Legal Risk (score 1-10):**
+      - Indemnification obligations that are overly broad
+      - Warranty disclaimers that eliminate recourse
+      - Dispute resolution mechanisms unfavorable to {input.review_perspective}
+      - Assignment restrictions that prevent legitimate business changes
+      - Governing law in unfavorable jurisdiction
+
+      **IP and Data Risk (score 1-10):**
+      - Overly broad IP assignment or license grants
+      - Work product ownership ambiguity
+      - Data handling obligations misaligned with privacy laws
+      - Insufficient data return/deletion provisions on termination
+      - Background IP contamination risks
+
+      **Overall clause risk rating:**
+      - Critical (avg > 7): Requires immediate negotiation, potential deal-breaker
+      - High (avg 5-7): Strong recommendation to modify before signing
+      - Medium (avg 3-5): Acceptable with noted caveats
+      - Low (avg 1-3): Standard/favorable, no action needed
+
+      Apply {input.risk_tolerance} calibration:
+      - "conservative": lower thresholds, flag more aggressively
+      - "moderate": standard thresholds as defined above
+      - "aggressive": higher thresholds, only flag serious concerns
+
+      Output a risk matrix with all clauses scored and ranked by composite risk.
+    model: opus
+    max_turns: 10
+
+  - id: jurisdiction-compliance
+    depends_on: [clause-extraction]
+    prompt: |
+      Check each contract clause for compliance with jurisdiction-specific
+      legal requirements.
+
+      Extracted clauses: {steps.clause-extraction.output}
+      Jurisdiction: {input.jurisdiction}
+      Contract type: {input.contract_type}
+
+      **Jurisdiction-specific compliance checks for {input.jurisdiction}:**
+
+      1. **Mandatory provisions** - Identify clauses required by law in
+         {input.jurisdiction} for a {input.contract_type} contract:
+         - Are all required provisions present?
+         - Do existing provisions meet minimum legal requirements?
+         - Flag any provisions that would be unenforceable in this jurisdiction
+
+      2. **Data protection compliance:**
+         - GDPR requirements (if EU/EEA jurisdiction): DPA, data processing
+           terms, cross-border transfer mechanisms, DPIA obligations
+         - CCPA/CPRA (if California): consumer rights, opt-out, data sale restrictions
+         - Other applicable data protection laws based on jurisdiction
+         - Assess whether existing data clauses are sufficient or need enhancement
+
+      3. **Employment and labor law** (if applicable):
+         - Non-compete enforceability in {input.jurisdiction}
+         - Non-solicitation scope and reasonableness
+         - Restrictive covenant duration and geographic limits
+         - At-will vs. for-cause termination requirements
+
+      4. **Consumer protection** (if applicable):
+         - Unfair contract terms that may be void
+         - Required cooling-off periods
+         - Mandatory warranty protections
+         - Required dispute resolution options
+
+      5. **Industry-specific regulations:**
+         - Sector-specific compliance requirements for {input.contract_type}
+         - Required certifications, licenses, or registrations referenced
+         - Regulatory change clauses and their adequacy
+
+      6. **Enforceability assessment:**
+         - Clauses likely enforceable as written: list with confidence level
+         - Clauses of uncertain enforceability: list with explanation
+         - Clauses likely unenforceable or void: list with legal basis
+
+      Output a compliance report with COMPLIANT / NON-COMPLIANT / UNCERTAIN
+      rating per clause, with specific legal references where possible.
+    model: sonnet
+    max_turns: 8
+
+  - id: amendment-drafts
+    depends_on: [risk-analysis, jurisdiction-compliance]
+    prompt: |
+      Draft specific contract amendments to address identified risks and
+      compliance gaps.
+
+      Risk analysis: {steps.risk-analysis.output}
+      Compliance report: {steps.jurisdiction-compliance.output}
+      Original clauses: {steps.clause-extraction.output}
+      Perspective: {input.review_perspective}
+      Risk tolerance: {input.risk_tolerance}
+
+      For every clause rated Critical or High risk, and every Non-Compliant finding:
+
+      1. **Amendment drafts** - Write ready-to-use replacement language:
+         - Show the original clause text
+         - Show the proposed amended text (redline style: additions in brackets,
+           deletions in strikethrough notation)
+         - Explain what changed and why
+         - Rate negotiability: "must-have" vs "nice-to-have" vs "negotiating chip"
+
+      2. **Negotiation strategy per amendment:**
+         - Ideal outcome: the exact language we want
+         - Acceptable compromise: the minimum we would accept
+         - Walk-away position: at what point this becomes a deal-breaker
+         - Justification talking points for the counterparty
+
+      3. **New clause recommendations** - For any identified missing clauses:
+         - Draft complete clause text following the contract's existing style
+         - Explain why this clause should be added
+         - Suggest placement within the contract structure
+
+      4. **Priority ranking** - Order all amendments by:
+         - Tier 1: Must negotiate before signing (deal-breakers)
+         - Tier 2: Should negotiate, significant value (strong push)
+         - Tier 3: Nice to have, use as negotiating chips
+
+      Use formal legal drafting language consistent with {input.jurisdiction}
+      conventions. All amendments should be technically precise and avoid
+      introducing new ambiguities.
+    model: opus
+    max_turns: 10
+
+  - id: executive-summary
+    depends_on: [risk-analysis, jurisdiction-compliance, amendment-drafts]
+    prompt: |
+      Generate an executive summary of the contract review suitable for
+      business decision-makers.
+
+      Risk analysis: {steps.risk-analysis.output}
+      Compliance: {steps.jurisdiction-compliance.output}
+      Amendments: {steps.amendment-drafts.output}
+      Contract type: {input.contract_type}
+      Perspective: {input.review_perspective}
+
+      Produce a structured executive briefing:
+
+      **1. Overall Assessment**
+      - Contract favorability rating (1-10 from {input.review_perspective} perspective)
+      - Overall risk level: LOW / MODERATE / HIGH / CRITICAL
+      - Signing recommendation: APPROVE / APPROVE WITH CHANGES / REJECT
+      - One-paragraph plain-language summary of the contract's key terms
+
+      **2. Key Terms Summary Table**
+      | Term | Detail | Risk Level | Action |
+      Cover: price, term, termination, liability cap, IP ownership, data handling,
+      warranties, indemnification, and any unique provisions.
+
+      **3. Top 5 Risks** (ranked by impact)
+      For each: one-sentence description, financial exposure estimate,
+      and recommended mitigation.
+
+      **4. Compliance Status**
+      - Jurisdiction: {input.jurisdiction}
+      - Overall compliance: PASS / PASS WITH GAPS / FAIL
+      - Critical gaps requiring resolution before signing
+
+      **5. Negotiation Roadmap**
+      - Must-have amendments (Tier 1): count and brief description
+      - Recommended amendments (Tier 2): count and brief description
+      - Optional improvements (Tier 3): count
+      - Estimated negotiation effort: 1-2 rounds / 3-4 rounds / extensive
+
+      **6. Plain-Language Risk Summary**
+      In 5-7 bullet points, explain the key risks in non-legal language
+      that a business executive would understand. Avoid legal jargon.
+
+      Keep the entire executive summary under 800 words. Include a clear
+      GO / NO-GO / CONDITIONAL recommendation with specific conditions.
+    model: sonnet
+    max_turns: 8
