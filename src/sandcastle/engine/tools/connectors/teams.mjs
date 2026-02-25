@@ -40,18 +40,25 @@ export async function send_message(text, title = "") {
     wrap: true,
   });
 
-  const resp = await fetch(WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(card),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const resp = await fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(card),
+      signal: controller.signal,
+    });
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Teams webhook ${resp.status}: ${errText.slice(0, 500)}`);
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Teams webhook ${resp.status}: ${errText.slice(0, 500)}`);
+    }
+
+    return { ok: true, title, text_length: text.length };
+  } finally {
+    clearTimeout(timer);
   }
-
-  return { ok: true, title, text_length: text.length };
 }
 
 // CLI dispatch

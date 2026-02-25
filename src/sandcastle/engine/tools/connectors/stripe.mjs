@@ -24,11 +24,14 @@ function flattenParams(obj, prefix = "") {
 }
 
 async function api(path, method = "GET", params = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Basic ${Buffer.from(SECRET_KEY + ":").toString("base64")}`,
     },
+    signal: controller.signal,
   };
   if (params && method !== "GET") {
     opts.headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -37,12 +40,16 @@ async function api(path, method = "GET", params = null) {
   if (params && method === "GET") {
     path += "?" + new URLSearchParams(flattenParams(params)).toString();
   }
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Stripe API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Stripe API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function list_customers(email = "", limit = 20) {

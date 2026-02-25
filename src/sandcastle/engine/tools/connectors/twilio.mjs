@@ -11,11 +11,14 @@ const FROM_NUMBER = process.env.TOOL_TWILIO_FROM_NUMBER || "";
 const BASE = `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}`;
 
 async function api(path, method = "GET", params = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Basic ${Buffer.from(ACCOUNT_SID + ":" + AUTH_TOKEN).toString("base64")}`,
     },
+    signal: controller.signal,
   };
   if (params && method !== "GET") {
     opts.headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -25,12 +28,16 @@ async function api(path, method = "GET", params = null) {
   if (params && method === "GET") {
     url += (url.includes("?") ? "&" : "?") + new URLSearchParams(params).toString();
   }
-  const resp = await fetch(url, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Twilio API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(url, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Twilio API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function send_sms(to, body) {

@@ -10,23 +10,30 @@ const FROM_EMAIL = process.env.TOOL_SENDGRID_FROM_EMAIL || "";
 const BASE = "https://api.sendgrid.com/v3";
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Bearer ${API_KEY}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`SendGrid API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    // SendGrid returns 202 with empty body for some endpoints
     const text = await resp.text();
-    throw new Error(`SendGrid API ${resp.status}: ${text.slice(0, 500)}`);
+    if (!text) return null;
+    return JSON.parse(text);
+  } finally {
+    clearTimeout(timer);
   }
-  // SendGrid returns 202 with empty body for some endpoints
-  const text = await resp.text();
-  if (!text) return null;
-  return JSON.parse(text);
 }
 
 export async function send_email(to, subject, html_content = "", text_content = "") {
@@ -35,24 +42,31 @@ export async function send_email(to, subject, html_content = "", text_content = 
   if (html_content) content.push({ type: "text/html", value: html_content });
   if (!content.length) content.push({ type: "text/plain", value: subject });
 
-  const resp = await fetch(`${BASE}/mail/send`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: FROM_EMAIL },
-      subject,
-      content,
-    }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`SendGrid API ${resp.status}: ${text.slice(0, 500)}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const resp = await fetch(`${BASE}/mail/send`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: FROM_EMAIL },
+        subject,
+        content,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`SendGrid API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return { success: true, status: resp.status };
+  } finally {
+    clearTimeout(timer);
   }
-  return { success: true, status: resp.status };
 }
 
 export async function list_contacts(query = "", limit = 50) {

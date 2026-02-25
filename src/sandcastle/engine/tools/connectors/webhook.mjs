@@ -9,51 +9,65 @@ export async function post(url, body = null, headers = null) {
   const parsedBody = typeof body === "string" ? JSON.parse(body) : body;
   const parsedHeaders = typeof headers === "string" ? JSON.parse(headers) : headers;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(parsedHeaders || {}),
     },
+    signal: controller.signal,
   };
   if (parsedBody) opts.body = JSON.stringify(parsedBody);
 
-  const resp = await fetch(url, opts);
-  const contentType = resp.headers.get("content-type") || "";
-  let data;
-  if (contentType.includes("json")) {
-    data = await resp.json();
-  } else {
-    data = await resp.text();
-  }
+  try {
+    const resp = await fetch(url, opts);
+    const contentType = resp.headers.get("content-type") || "";
+    let data;
+    if (contentType.includes("json")) {
+      data = await resp.json();
+    } else {
+      data = await resp.text();
+    }
 
-  return {
-    status: resp.status,
-    ok: resp.ok,
-    data: typeof data === "string" ? data.slice(0, 50000) : data,
-  };
+    return {
+      status: resp.status,
+      ok: resp.ok,
+      data: typeof data === "string" ? data.slice(0, 50000) : data,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function get(url, headers = null) {
   const parsedHeaders = typeof headers === "string" ? JSON.parse(headers) : headers;
 
-  const resp = await fetch(url, {
-    method: "GET",
-    headers: parsedHeaders || {},
-  });
-  const contentType = resp.headers.get("content-type") || "";
-  let data;
-  if (contentType.includes("json")) {
-    data = await resp.json();
-  } else {
-    data = await resp.text();
-  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: parsedHeaders || {},
+      signal: controller.signal,
+    });
+    const contentType = resp.headers.get("content-type") || "";
+    let data;
+    if (contentType.includes("json")) {
+      data = await resp.json();
+    } else {
+      data = await resp.text();
+    }
 
-  return {
-    status: resp.status,
-    ok: resp.ok,
-    data: typeof data === "string" ? data.slice(0, 50000) : data,
-  };
+    return {
+      status: resp.status,
+      ok: resp.ok,
+      data: typeof data === "string" ? data.slice(0, 50000) : data,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // CLI dispatch

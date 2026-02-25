@@ -15,6 +15,8 @@ let accessToken = "";
 
 async function getAccessToken() {
   if (accessToken) return accessToken;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const resp = await fetch(`${INSTANCE_URL}/services/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -24,7 +26,9 @@ async function getAccessToken() {
       client_secret: CLIENT_SECRET,
       refresh_token: REFRESH_TOKEN,
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timer);
   if (!resp.ok) throw new Error(`Salesforce auth failed: ${resp.status}`);
   const data = await resp.json();
   accessToken = data.access_token;
@@ -33,15 +37,19 @@ async function getAccessToken() {
 
 async function api(path, method = "GET", body = null) {
   const token = await getAccessToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(`${INSTANCE_URL}/services/data/v59.0${path}`, opts);
+  clearTimeout(timer);
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`Salesforce API ${resp.status}: ${text.slice(0, 500)}`);

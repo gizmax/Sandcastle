@@ -9,15 +9,19 @@ const TOKEN = process.env.TOOL_HUBSPOT_API_KEY || "";
 const BASE = "https://api.hubapi.com";
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Bearer ${TOKEN}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(`${BASE}${path}`, opts);
+  clearTimeout(timer);
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`HubSpot API ${resp.status}: ${text.slice(0, 500)}`);

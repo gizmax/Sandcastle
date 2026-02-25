@@ -48,32 +48,46 @@ async function getAccessToken() {
 
   const jwt = `${sigInput}.${sig}`;
 
-  const resp = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  });
-  if (!resp.ok) throw new Error(`Google auth failed: ${resp.status}`);
-  const data = await resp.json();
-  return data.access_token;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const resp = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`Google auth failed: ${resp.status}`);
+    const data = await resp.json();
+    return data.access_token;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function api(path, method = "GET", body = null) {
   const token = await getAccessToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`https://www.googleapis.com/drive/v3${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Google Drive API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`https://www.googleapis.com/drive/v3${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Google Drive API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function list_files(query = "", limit = 20) {
@@ -90,19 +104,31 @@ export async function read_file(file_id) {
   // For Google Docs, export as plain text
   if (meta.mimeType?.startsWith("application/vnd.google-apps.")) {
     const exportMime = "text/plain";
-    const resp = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${file_id}/export?mimeType=${encodeURIComponent(exportMime)}`,
-      { headers: { "Authorization": `Bearer ${token}` } }
-    );
-    return { id: file_id, name: meta.name, content: await resp.text() };
+    const exportController = new AbortController();
+    const exportTimer = setTimeout(() => exportController.abort(), 30000);
+    try {
+      const resp = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${file_id}/export?mimeType=${encodeURIComponent(exportMime)}`,
+        { headers: { "Authorization": `Bearer ${token}` }, signal: exportController.signal }
+      );
+      return { id: file_id, name: meta.name, content: await resp.text() };
+    } finally {
+      clearTimeout(exportTimer);
+    }
   }
 
   // For regular files, download content
-  const resp = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${file_id}?alt=media`,
-    { headers: { "Authorization": `Bearer ${token}` } }
-  );
-  return { id: file_id, name: meta.name, content: (await resp.text()).slice(0, 100000) };
+  const dlController = new AbortController();
+  const dlTimer = setTimeout(() => dlController.abort(), 30000);
+  try {
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${file_id}?alt=media`,
+      { headers: { "Authorization": `Bearer ${token}` }, signal: dlController.signal }
+    );
+    return { id: file_id, name: meta.name, content: (await resp.text()).slice(0, 100000) };
+  } finally {
+    clearTimeout(dlTimer);
+  }
 }
 
 export async function create_file(name, content, mime_type = "text/plain", parent_id = "") {
@@ -124,20 +150,27 @@ export async function create_file(name, content, mime_type = "text/plain", paren
     `--${boundary}--`,
   ].join("\r\n");
 
-  const resp = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-    {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    }
-  );
-  if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
-  const data = await resp.json();
-  return { id: data.id, name: data.name };
+  const uploadController = new AbortController();
+  const uploadTimer = setTimeout(() => uploadController.abort(), 30000);
+  try {
+    const resp = await fetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+        },
+        body,
+        signal: uploadController.signal,
+      }
+    );
+    if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
+    const data = await resp.json();
+    return { id: data.id, name: data.name };
+  } finally {
+    clearTimeout(uploadTimer);
+  }
 }
 
 // CLI dispatch
