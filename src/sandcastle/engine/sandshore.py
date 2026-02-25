@@ -348,10 +348,12 @@ class SandshoreRuntime:
     # Backend delegation
     # ------------------------------------------------------------------
 
-    def _build_env(self, request: dict) -> tuple[dict[str, str], str, bool]:
+    def _build_env(
+        self, request: dict
+    ) -> tuple[dict[str, str], str, bool, dict[str, str]]:
         """Build environment variables and resolve runner info for request.
 
-        Returns (envs, runner_file, use_claude_runner).
+        Returns (envs, runner_file, use_claude_runner, tool_files).
         """
         from sandcastle.engine.providers import (
             get_api_key,
@@ -386,7 +388,18 @@ class SandshoreRuntime:
             if model_info.api_base_url:
                 envs["MODEL_BASE_URL"] = model_info.api_base_url
 
-        return envs, runner_file, use_claude_runner
+        # Inject tool credentials and bundle tool files
+        tool_files: dict[str, str] = {}
+        tools = request.get("tools", [])
+        if tools:
+            from sandcastle.engine.tools.credentials import get_tool_credentials
+            from sandcastle.engine.tools.loader import bundle_tool_files
+
+            tool_creds = get_tool_credentials(tools)
+            envs.update(tool_creds)
+            tool_files = bundle_tool_files(tools)
+
+        return envs, runner_file, use_claude_runner, tool_files
 
     @staticmethod
     def _is_retriable_provider_error(error_msg: str) -> bool:
@@ -421,7 +434,7 @@ class SandshoreRuntime:
                 f"'{self._backend.name}' - rejecting request"
             )
 
-        envs, runner_file, use_claude_runner = self._build_env(request)
+        envs, runner_file, use_claude_runner, tool_files = self._build_env(request)
 
         try:
             async with self._semaphore:
@@ -431,6 +444,7 @@ class SandshoreRuntime:
                     envs=envs,
                     use_claude_runner=use_claude_runner,
                     timeout=self.timeout,
+                    tool_files=tool_files or None,
                 ):
                     if cancel_event is not None and cancel_event.is_set():
                         logger.info(

@@ -488,11 +488,12 @@ class TestSandshoreRuntimeBackendIntegration:
             e2b_api_key="",
             sandbox_backend="local",
         )
-        envs, runner, is_claude = runtime._build_env({"prompt": "hi", "model": "sonnet"})
+        envs, runner, is_claude, tool_files = runtime._build_env({"prompt": "hi", "model": "sonnet"})
         assert is_claude is True
         assert runner == "runner.mjs"
         assert envs["ANTHROPIC_API_KEY"] == "ak-123"
         assert "SANDCASTLE_REQUEST" in envs
+        assert tool_files == {}
 
     def test_build_env_openai_model(self):
         from sandcastle.engine.sandshore import SandshoreRuntime
@@ -502,7 +503,7 @@ class TestSandshoreRuntimeBackendIntegration:
             e2b_api_key="",
             sandbox_backend="local",
         )
-        envs, runner, is_claude = runtime._build_env({"prompt": "hi", "model": "openai/codex-mini"})
+        envs, runner, is_claude, tool_files = runtime._build_env({"prompt": "hi", "model": "openai/codex-mini"})
         assert is_claude is False
         assert runner == "runner-openai.mjs"
         assert "MODEL_API_KEY" in envs
@@ -516,10 +517,25 @@ class TestSandshoreRuntimeBackendIntegration:
             e2b_api_key="",
             sandbox_backend="local",
         )
-        envs, runner, is_claude = runtime._build_env({"prompt": "hi", "model": "unknown-model"})
+        envs, runner, is_claude, tool_files = runtime._build_env({"prompt": "hi", "model": "unknown-model"})
         # Falls back to sonnet model_info but is_claude_model checks original string
         assert runner == "runner.mjs"
         assert "SANDCASTLE_REQUEST" in envs
+
+    def test_build_env_with_tools(self):
+        from sandcastle.engine.sandshore import SandshoreRuntime
+
+        runtime = SandshoreRuntime(
+            anthropic_api_key="ak-123",
+            e2b_api_key="",
+            sandbox_backend="local",
+        )
+        envs, runner, is_claude, tool_files = runtime._build_env(
+            {"prompt": "hi", "model": "sonnet", "tools": ["slack"]}
+        )
+        assert is_claude is True
+        assert "slack.mjs" in tool_files
+        assert len(tool_files["slack.mjs"]) > 0
 
 
 # ---------------------------------------------------------------------------
