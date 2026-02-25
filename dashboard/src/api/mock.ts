@@ -5155,7 +5155,14 @@ const MOCK_COMMUNITY_COLLECTIONS = [
     name: "Complete Sales Stack",
     description: "End-to-end sales pipeline - from lead generation to deal management",
     icon: "target",
-    template_slugs: ["customer-churn-predictor", "competitor-pricing-tracker"],
+    template_slugs: [
+      "gizmax/customer-churn-predictor",
+      "pricewatch/pricing-tracker",
+      "gizmax/lead-enrichment",
+      "jmartinez/lead-scoring",
+      "jmartinez/sales-pipeline-autopilot",
+      "gizmax/win-loss-intelligence",
+    ],
     downloads: 892,
   },
   {
@@ -5163,7 +5170,14 @@ const MOCK_COMMUNITY_COLLECTIONS = [
     name: "Content Machine",
     description: "Full content creation pipeline - research, write, optimize, distribute",
     icon: "pen-tool",
-    template_slugs: ["content-calendar-generator", "social-media-repurposer"],
+    template_slugs: [
+      "content-queen/content-calendar",
+      "social-sage/social-repurposer",
+      "elena-growth/blog-to-social",
+      "lena-content/seo-content",
+      "lena-content/ad-copy-generator",
+      "lena-content/trend-radar",
+    ],
     downloads: 756,
   },
   {
@@ -5171,7 +5185,13 @@ const MOCK_COMMUNITY_COLLECTIONS = [
     name: "DevOps Essentials",
     description: "Developer productivity - sprint tracking, standups, releases",
     icon: "terminal",
-    template_slugs: ["devops-incident-responder", "release-notes-generator"],
+    template_slugs: [
+      "k8s-ops/incident-responder",
+      "devrel-bot/release-notes-pro",
+      "k8s-ops/sprint-standup",
+      "k8s-ops/slack-standup",
+      "tomr-eng/api-docs-generator",
+    ],
     downloads: 634,
   },
   {
@@ -5179,7 +5199,14 @@ const MOCK_COMMUNITY_COLLECTIONS = [
     name: "Support Suite",
     description: "Customer support automation - triage, SLA, FAQ generation",
     icon: "headphones",
-    template_slugs: ["multi-channel-support-router"],
+    template_slugs: [
+      "supportflow/multi-channel-router",
+      "gizmax/support-ticket-triage",
+      "nadia-cx/ticket-classifier",
+      "supportflow/customer-health-check",
+      "nadia-cx/faq-generator",
+      "supportflow/sla-watchdog",
+    ],
     downloads: 543,
   },
   {
@@ -5187,7 +5214,13 @@ const MOCK_COMMUNITY_COLLECTIONS = [
     name: "HR Toolkit",
     description: "HR operations - hiring, onboarding, compliance, contracts",
     icon: "users",
-    template_slugs: ["onboarding-workflow-builder", "legal-contract-reviewer"],
+    template_slugs: [
+      "lawtech-ai/onboarding-workflow",
+      "lawtech-ai/contract-reviewer-pro",
+      "lawtech-ai/resume-screener",
+      "marcus-hr/job-description",
+      "marcus-hr/compliance-checker",
+    ],
     downloads: 421,
   },
 ];
@@ -5342,6 +5375,21 @@ const routes: MockRoute[] = [
       stats: MOCK_COMMUNITY_STATS,
       collections: MOCK_COMMUNITY_COLLECTIONS,
     }),
+  },
+  {
+    match: /^\/hub\/installed$/,
+    method: "GET",
+    handler: () => [],
+  },
+  {
+    match: /^\/hub\/install\/(.+)$/,
+    method: "POST",
+    handler: () => ({ ok: true }),
+  },
+  {
+    match: /^\/hub\/install\/(.+)$/,
+    method: "DELETE",
+    handler: () => ({ ok: true }),
   },
   {
     match: /^\/workflows\/([^/]+)\/export$/,
