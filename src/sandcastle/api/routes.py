@@ -2929,9 +2929,42 @@ async def reset_experiment(experiment_id: str) -> ApiResponse:
         experiment.status = ExperimentStatus.RUNNING
         experiment.deployed_variant_id = None
         experiment.completed_at = None
+        experiment.rollout_stage = None
         await session.commit()
 
     return ApiResponse(data={"reset": True, "experiment_id": experiment_id})
+
+
+@router.post("/autopilot/experiments/{experiment_id}/advance-rollout")
+async def advance_experiment_rollout(experiment_id: str) -> ApiResponse:
+    """Advance a deploying experiment to the next rollout stage."""
+    try:
+        exp_uuid = uuid.UUID(experiment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_ID", message="Invalid experiment ID"
+                )
+            ).model_dump(),
+        )
+
+    from sandcastle.engine.autopilot import advance_rollout
+
+    result = await advance_rollout(exp_uuid)
+    if result is None:
+        raise HTTPException(
+            status_code=409,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_STATE",
+                    message="Experiment is not in deploying state",
+                )
+            ).model_dump(),
+        )
+
+    return ApiResponse(data=result)
 
 
 @router.get("/autopilot/stats")
@@ -2944,6 +2977,12 @@ async def autopilot_stats() -> ApiResponse:
                 AutoPilotExperiment.status == ExperimentStatus.RUNNING
             )
         )
+        # Count deploying experiments separately
+        deploying = await session.scalar(
+            select(func.count(AutoPilotExperiment.id)).where(
+                AutoPilotExperiment.status == ExperimentStatus.DEPLOYING
+            )
+        )
         completed = await session.scalar(
             select(func.count(AutoPilotExperiment.id)).where(
                 AutoPilotExperiment.status == ExperimentStatus.COMPLETED
@@ -2951,12 +2990,68 @@ async def autopilot_stats() -> ApiResponse:
         )
         total_samples = await session.scalar(select(func.count(AutoPilotSample.id)))
 
+        # Calculate actual quality improvement and cost savings
+        avg_quality_improvement = 0.0
+        total_cost_savings = 0.0
+
+        completed_exps_q = select(AutoPilotExperiment).where(
+            AutoPilotExperiment.status == ExperimentStatus.COMPLETED,
+            AutoPilotExperiment.deployed_variant_id.is_not(None),
+        )
+        completed_exps = (await session.execute(completed_exps_q)).scalars().all()
+
+        improvements = []
+        for exp in completed_exps:
+            # Get per-variant stats for this experiment
+            variant_stats_q = (
+                select(
+                    AutoPilotSample.variant_id,
+                    func.avg(AutoPilotSample.quality_score).label("avg_quality"),
+                    func.avg(AutoPilotSample.cost_usd).label("avg_cost"),
+                )
+                .where(AutoPilotSample.experiment_id == exp.id)
+                .group_by(AutoPilotSample.variant_id)
+            )
+            rows = (await session.execute(variant_stats_q)).all()
+            stats_map = {r.variant_id: r for r in rows}
+
+            winner = stats_map.get(exp.deployed_variant_id)
+            if not winner:
+                continue
+
+            # Baseline = first non-winner variant
+            baseline_quality = 0.0
+            baseline_cost = 0.0
+            for vid, s in stats_map.items():
+                if vid != exp.deployed_variant_id:
+                    baseline_quality = float(s.avg_quality or 0)
+                    baseline_cost = float(s.avg_cost or 0)
+                    break
+
+            winner_quality = float(winner.avg_quality or 0)
+            winner_cost = float(winner.avg_cost or 0)
+
+            if baseline_quality > 0:
+                improvements.append(
+                    (winner_quality - baseline_quality) / baseline_quality
+                )
+            if baseline_cost > 0:
+                total_cost_savings += (baseline_cost - winner_cost) * (
+                    total_samples or 0
+                )
+
+        if improvements:
+            avg_quality_improvement = sum(improvements) / len(improvements)
+
     return ApiResponse(
         data=AutoPilotStatsResponse(
             total_experiments=total or 0,
-            active_experiments=active or 0,
+            active_experiments=(active or 0) + (deploying or 0),
+            deploying_experiments=deploying or 0,
             completed_experiments=completed or 0,
             total_samples=total_samples or 0,
+            avg_quality_improvement=round(avg_quality_improvement, 4),
+            total_cost_savings_usd=round(total_cost_savings, 2),
         )
     )
 
@@ -3707,6 +3802,8 @@ async def get_run_routing_decisions(run_id: str, request: Request) -> ApiRespons
 @router.get("/optimizer/stats")
 async def optimizer_stats(request: Request) -> ApiResponse:
     """Get optimizer overview statistics."""
+    from sandcastle.engine.optimizer import get_optimizer
+
     tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
     thirty_days_ago = now - timedelta(days=30)
@@ -3740,13 +3837,77 @@ async def optimizer_stats(request: Request) -> ApiResponse:
         conf_q = _base(select(func.avg(RoutingDecision.confidence)))
         avg_conf = await session.scalar(conf_q)
 
+        # Calculate actual savings: compare selected cost vs default (most expensive) model
+        estimated_savings = 0.0
+        decisions_q = _base(
+            select(RoutingDecision)
+        ).limit(1000)  # Cap at 1000 for performance
+        decisions_result = await session.execute(decisions_q)
+        for dec in decisions_result.scalars().all():
+            alts = dec.alternatives or []
+            if not alts:
+                continue
+            # Find the most expensive alternative (what would have been used without optimizer)
+            max_cost = 0.0
+            selected_cost = 0.0
+            for alt in alts:
+                cost = alt.get("avg_cost") or 0
+                if alt.get("id") == "thorough" or alt.get("model") == "opus":
+                    max_cost = max(max_cost, cost)
+                if alt.get("model") == dec.selected_model:
+                    selected_cost = cost
+            # Default baseline: most expensive model in pool
+            if max_cost == 0:
+                max_cost = max((a.get("avg_cost") or 0) for a in alts) if alts else 0
+            if max_cost > selected_cost:
+                estimated_savings += max_cost - selected_cost
+
+    optimizer = get_optimizer()
+    active_alerts = len(optimizer.get_recent_alerts())
+
     return ApiResponse(
         data=OptimizerStatsResponse(
             total_decisions_30d=total or 0,
             model_distribution=model_dist,
             avg_confidence=round(float(avg_conf or 0), 3),
+            estimated_savings_30d_usd=round(estimated_savings, 2),
+            active_alerts=active_alerts,
         )
     )
+
+
+@router.get("/optimizer/alerts")
+async def optimizer_alerts() -> ApiResponse:
+    """Get recent model degradation alerts."""
+    from sandcastle.engine.optimizer import get_optimizer
+
+    optimizer = get_optimizer()
+    alerts = optimizer.get_recent_alerts(limit=50)
+
+    return ApiResponse(data=[
+        {
+            "model": a.model,
+            "step_id": a.step_id,
+            "workflow_name": a.workflow_name,
+            "metric": a.metric,
+            "current_value": round(a.current_value, 4),
+            "threshold": round(a.threshold, 4),
+            "severity": a.severity,
+            "recommended_action": a.recommended_action,
+            "detected_at": a.detected_at,
+        }
+        for a in alerts
+    ])
+
+
+@router.delete("/optimizer/alerts")
+async def clear_optimizer_alerts() -> ApiResponse:
+    """Clear all degradation alerts."""
+    from sandcastle.engine.optimizer import get_optimizer
+
+    optimizer = get_optimizer()
+    count = optimizer.clear_alerts()
+    return ApiResponse(data={"cleared": count})
 
 
 # --- API Keys ---

@@ -211,6 +211,7 @@ class ExperimentStatus(str, enum.Enum):
     """Possible statuses for an AutoPilot experiment."""
 
     RUNNING = "running"
+    DEPLOYING = "deploying"  # Progressive rollout in progress
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
@@ -235,6 +236,8 @@ class AutoPilotExperiment(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rollout_stage: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # Stages: None -> "canary" (10%) -> "partial" (50%) -> "full" (100%)
 
     samples: Mapped[list[AutoPilotSample]] = relationship(
         back_populates="experiment", cascade="all, delete-orphan"

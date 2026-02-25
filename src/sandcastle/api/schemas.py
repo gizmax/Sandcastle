@@ -423,6 +423,7 @@ class AutoPilotStatsResponse(BaseModel):
 
     total_experiments: int = 0
     active_experiments: int = 0
+    deploying_experiments: int = 0
     completed_experiments: int = 0
     total_samples: int = 0
     avg_quality_improvement: float = 0.0
@@ -494,6 +495,7 @@ class OptimizerStatsResponse(BaseModel):
     model_distribution: dict[str, float] = Field(default_factory=dict)
     avg_confidence: float = 0.0
     estimated_savings_30d_usd: float = 0.0
+    active_alerts: int = 0
 
 
 class SettingsResponse(BaseModel):
