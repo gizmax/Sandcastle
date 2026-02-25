@@ -1311,7 +1311,7 @@
   <header class="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.12.0 - Hybrid Step Types + Flow Control
+        v0.13.0 - A2A + AG-UI Protocols + Full CLI
       </div>
       <h1>
         Stop babysitting<br>
@@ -1581,12 +1581,27 @@
         <div class="feature-card">
           <span class="feature-icon">🧩</span>
           <h3>Hybrid Step Types</h3>
-          <p>Mix AI agent steps with lightweight <code>http</code>, <code>code</code>, <code>condition</code>, <code>classify</code>, and <code>loop</code> steps. 10x cheaper, 5x faster for simple operations.</p>
+          <p>15 step types: <code>llm</code>, <code>http</code>, <code>code</code>, <code>condition</code>, <code>classify</code>, <code>loop</code>, <code>race</code>, <code>sensor</code>, <code>gate</code>, <code>transform</code>, <code>notify</code>, <code>delegate</code>. Mix AI with $0 deterministic steps.</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">📦</span>
           <h3>Pluggable Sandboxes</h3>
           <p>Four backends: E2B cloud microVMs, Docker containers, Cloudflare Workers edge, or local subprocess. Switch with one env var.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🤝</span>
+          <h3>A2A Protocol</h3>
+          <p>Google's Agent-to-Agent protocol built in. Agent card discovery at <code>/.well-known/agent.json</code>, JSON-RPC 2.0 task management. Your agents talk to other agents.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">📺</span>
+          <h3>AG-UI Streaming</h3>
+          <p>CopilotKit's Agent-User Interaction protocol. Real-time SSE streaming of agent state, tool calls, and text deltas to any frontend. Drop-in React integration.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">⌨️</span>
+          <h3>Full CLI Suite</h3>
+          <p>Complete CLI: <code>templates</code>, <code>runs</code>, <code>replay</code>, <code>fork</code>, <code>approve</code>, <code>reject</code>. Global <code>--json</code> flag for scripting. Pipe-friendly output.</p>
         </div>
       </div>
 
@@ -1696,12 +1711,13 @@
           <h3>Mix agent + lightweight steps. One file.</h3>
           <p>
             Not every step needs a full AI agent. Use <code>http</code> for API calls ($0), <code>code</code> for Python snippets,
-            <code>condition</code> and <code>classify</code> for branching, <code>loop</code> for iteration - and <code>llm</code> or full agent steps where you actually need AI.
+            <code>condition</code> and <code>classify</code> for branching, <code>loop</code> for iteration, <code>race</code> for parallel competition,
+            <code>sensor</code> for polling, <code>transform</code> for templates, <code>notify</code> for alerts - and <code>llm</code> or full agent steps where you actually need AI.
           </p>
           <ul class="yaml-features">
-            <li><span class="check">&#10003;</span><strong>9 step types</strong> - standard, llm, http, code, condition, classify, loop, approval, sub_workflow</li>
-            <li><span class="check">&#10003;</span><strong>Smart branching</strong> - <code>condition</code> and <code>classify</code> route to different paths</li>
-            <li><span class="check">&#10003;</span><strong>$0 steps</strong> - http, code, and condition cost nothing - no LLM call</li>
+            <li><span class="check">&#10003;</span><strong>15 step types</strong> - standard, llm, http, code, condition, classify, loop, race, sensor, gate, transform, notify, delegate, approval, sub_workflow</li>
+            <li><span class="check">&#10003;</span><strong>Smart branching</strong> - <code>condition</code>, <code>classify</code>, and <code>race</code> route to different paths</li>
+            <li><span class="check">&#10003;</span><strong>$0 steps</strong> - http, code, condition, transform, notify cost nothing - no LLM call</li>
             <li><span class="check">&#10003;</span><strong>Data passing</strong> - reference prior outputs with <code>{steps.id.output}</code></li>
             <li><span class="check">&#10003;</span><strong>Per-step models</strong> - Claude, OpenAI, MiniMax, Gemini - mix per step</li>
             <li><span class="check">&#10003;</span><strong>Automatic retries</strong> - exponential backoff on failure</li>
