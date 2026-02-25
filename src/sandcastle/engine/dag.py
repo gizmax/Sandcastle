@@ -225,17 +225,22 @@ class DelegateConfig:
 
 @dataclass
 class BrowserConfig:
-    """Configuration for browser automation steps."""
+    """Configuration for a browser automation step."""
 
-    mode: str = "playwright"  # "playwright" or "computer_use"
+    mode: str = "playwright"  # "playwright" | "computer_use" | "dom"
     start_url: str = ""
     viewport_width: int = 1280
     viewport_height: int = 720
     timeout_seconds: int = 120
-    wait_after_action: float = 1.0  # seconds to wait between actions
+    wait_after_action: float = 0.5
     screenshot_on_error: bool = True
     headless: bool = True
-    credentials_env: str | None = None  # env var name containing credentials JSON
+    credentials_env: str = ""
+    # New fields
+    max_actions: int = 100  # Safety limit for computer_use mode
+    capture_screenshots: bool = False  # Save screenshot after each action for replay
+    output_schema: dict | None = None  # JSON schema for structured data extraction
+    captcha_strategy: str = "pause"  # "pause" (HITL) | "skip" | "fail"
 
 
 @dataclass
@@ -783,10 +788,14 @@ def _parse_browser_config(data: dict | None) -> BrowserConfig | None:
         viewport_width=data.get("viewport_width", 1280),
         viewport_height=data.get("viewport_height", 720),
         timeout_seconds=data.get("timeout_seconds", 120),
-        wait_after_action=data.get("wait_after_action", 1.0),
+        wait_after_action=data.get("wait_after_action", 0.5),
         screenshot_on_error=data.get("screenshot_on_error", True),
         headless=data.get("headless", True),
-        credentials_env=data.get("credentials_env"),
+        credentials_env=data.get("credentials_env", ""),
+        max_actions=data.get("max_actions", 100),
+        capture_screenshots=data.get("capture_screenshots", False),
+        output_schema=data.get("output_schema"),
+        captcha_strategy=data.get("captcha_strategy", "pause"),
     )
 
 
@@ -1060,11 +1069,9 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Browser step '{step.id}' must have browser_config"
                 )
-            elif step.browser_config.mode not in ("playwright", "computer_use"):
+            elif step.browser_config.mode not in ("playwright", "computer_use", "dom"):
                 errors.append(
-                    f"Browser step '{step.id}' has invalid mode "
-                    f"'{step.browser_config.mode}'. "
-                    "Must be 'playwright' or 'computer_use'"
+                    f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
                 )
 
     # Check model names against provider registry

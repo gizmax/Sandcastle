@@ -58,7 +58,7 @@ const DEFAULT_GATE_CONFIG = { strategies: [] as GateStepConfig["strategies"] };
 const DEFAULT_TRANSFORM_CONFIG = { template: "" };
 const DEFAULT_NOTIFY_CONFIG = { service: "", channel: "", message: "" };
 const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 3600 };
-const DEFAULT_BROWSER_CONFIG: BrowserStepConfig = { mode: "playwright", startUrl: "", viewportWidth: 1280, viewportHeight: 720, timeout: 120, waitAfterAction: 1.0, headless: true, credentialsEnvVar: "", screenshotOnError: true };
+const DEFAULT_BROWSER_CONFIG: BrowserStepConfig = { mode: "playwright", startUrl: "", viewportWidth: 1280, viewportHeight: 720, timeout: 120, waitAfterAction: 1.0, headless: true, credentials_env: "", screenshotOnError: true, max_actions: 100, capture_screenshots: false, output_schema: null, captcha_strategy: "pause" };
 
 function generateYaml(
   workflowName: string,
@@ -283,11 +283,23 @@ function generateYaml(
       if (!step.browserConfig.headless) {
         yaml += `      headless: false\n`;
       }
-      if (step.browserConfig.credentialsEnvVar) {
-        yaml += `      credentials_env_var: "${step.browserConfig.credentialsEnvVar}"\n`;
+      if (step.browserConfig.credentials_env) {
+        yaml += `      credentials_env: "${step.browserConfig.credentials_env}"\n`;
       }
       if (!step.browserConfig.screenshotOnError) {
         yaml += `      screenshot_on_error: false\n`;
+      }
+      if (step.browserConfig.max_actions !== 100) {
+        yaml += `      max_actions: ${step.browserConfig.max_actions}\n`;
+      }
+      if (step.browserConfig.captcha_strategy !== "pause") {
+        yaml += `      captcha_strategy: ${step.browserConfig.captcha_strategy}\n`;
+      }
+      if (step.browserConfig.capture_screenshots) {
+        yaml += `      capture_screenshots: true\n`;
+      }
+      if (step.browserConfig.output_schema) {
+        yaml += `      output_schema: ${JSON.stringify(step.browserConfig.output_schema)}\n`;
       }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
