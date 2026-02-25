@@ -224,6 +224,21 @@ class DelegateConfig:
 
 
 @dataclass
+class BrowserConfig:
+    """Configuration for browser automation steps."""
+
+    mode: str = "playwright"  # "playwright" or "computer_use"
+    start_url: str = ""
+    viewport_width: int = 1280
+    viewport_height: int = 720
+    timeout_seconds: int = 120
+    wait_after_action: float = 1.0  # seconds to wait between actions
+    screenshot_on_error: bool = True
+    headless: bool = True
+    credentials_env: str | None = None  # env var name containing credentials JSON
+
+
+@dataclass
 class SLOConfig:
     """Service Level Objective for optimizer-driven model selection."""
 
@@ -304,7 +319,7 @@ VALID_STEP_TYPES = frozenset({
     "standard", "approval", "sub_workflow",
     "llm", "http", "code", "condition", "classify", "loop",
     "race", "sensor", "gate",
-    "transform", "notify", "delegate",
+    "transform", "notify", "delegate", "browser",
 })
 
 # Types that don't need a prompt
@@ -351,6 +366,7 @@ class StepDefinition:
     transform_config: TransformConfig | None = None
     notify_config: NotifyConfig | None = None
     delegate_config: DelegateConfig | None = None
+    browser_config: BrowserConfig | None = None
 
 
 @dataclass
@@ -757,6 +773,23 @@ def _parse_delegate_config(data: dict | None) -> DelegateConfig | None:
     )
 
 
+def _parse_browser_config(data: dict | None) -> BrowserConfig | None:
+    """Parse browser step configuration from YAML data."""
+    if data is None:
+        return None
+    return BrowserConfig(
+        mode=data.get("mode", "playwright"),
+        start_url=data.get("start_url", ""),
+        viewport_width=data.get("viewport_width", 1280),
+        viewport_height=data.get("viewport_height", 720),
+        timeout_seconds=data.get("timeout_seconds", 120),
+        wait_after_action=data.get("wait_after_action", 1.0),
+        screenshot_on_error=data.get("screenshot_on_error", True),
+        headless=data.get("headless", True),
+        credentials_env=data.get("credentials_env"),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -815,6 +848,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         transform_config=_parse_transform_config(data.get("transform_config")),
         notify_config=_parse_notify_config(data.get("notify_config")),
         delegate_config=_parse_delegate_config(data.get("delegate_config")),
+        browser_config=_parse_browser_config(data.get("browser_config")),
     )
 
 
@@ -1020,6 +1054,17 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
             if not step.delegate_config or not step.delegate_config.workflow:
                 errors.append(
                     f"Delegate step '{step.id}' must have delegate_config with a workflow"
+                )
+        elif step.type == "browser":
+            if not step.browser_config:
+                errors.append(
+                    f"Browser step '{step.id}' must have browser_config"
+                )
+            elif step.browser_config.mode not in ("playwright", "computer_use"):
+                errors.append(
+                    f"Browser step '{step.id}' has invalid mode "
+                    f"'{step.browser_config.mode}'. "
+                    "Must be 'playwright' or 'computer_use'"
                 )
 
     # Check model names against provider registry
