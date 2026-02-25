@@ -1094,20 +1094,55 @@
       color: #10B981;
     }
 
-    /* Input/Output placeholder */
+    /* Integrations section (replaces IO placeholder) */
     .modal-io-section {
       margin-bottom: 24px;
     }
 
-    .modal-io-placeholder {
-      padding: 16px;
+    .modal-integrations {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .integration-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      transition: border-color 0.2s;
+    }
+
+    .integration-chip:hover {
+      border-color: var(--accent);
+    }
+
+    .integration-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .modal-no-integrations {
+      padding: 12px 16px;
       background: var(--code-bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       font-size: 13px;
       color: var(--text-dim);
       text-align: center;
-      font-style: italic;
     }
 
     .modal-tags {
@@ -1672,9 +1707,9 @@
           <div class="modal-section-label">Model Breakdown</div>
           <div class="model-breakdown" id="model-breakdown"></div>
         </div>
-        <div class="modal-io-section">
-          <div class="modal-section-label">Input / Output Schema</div>
-          <div class="modal-io-placeholder">Install to see full schema</div>
+        <div class="modal-io-section" id="modal-integrations-section">
+          <div class="modal-section-label">Integrations</div>
+          <div class="modal-integrations" id="modal-integrations"></div>
         </div>
         <div class="modal-tags" id="modal-tags"></div>
         <div class="modal-meta-grid" id="modal-meta"></div>
@@ -1761,6 +1796,13 @@
       'google/gemini-2.5-pro': 0.005,
       'openai/gpt-4o': 0.005,
       'openai/gpt-4o-mini': 0.001
+    };
+
+    var MODEL_COLORS = {
+      'sonnet': '#8B5CF6', 'haiku': '#10B981', 'opus': '#EC4899',
+      'minimax/m2.5': '#F97316', 'openai/codex-mini': '#06B6D4',
+      'google/gemini-2.5-pro': '#4285F4', 'openai/gpt-4o': '#06B6D4',
+      'openai/gpt-4o-mini': '#06B6D4'
     };
 
     /* Playground sample outputs per category */
@@ -2108,8 +2150,11 @@
         remixInfo.style.display = 'none';
       }
 
-      // DAG visualization
-      renderDag(steps, models, color);
+      // DAG visualization (now with tools + parallel branches)
+      renderDag(steps, models, tools, color);
+
+      // Integrations section
+      renderIntegrations(tools, models);
 
       // Model breakdown
       renderModelBreakdown(models, cost, steps);
@@ -2176,56 +2221,225 @@
       '</div>';
     }
 
+    /* ========== Integration colors ========== */
+    var TOOL_COLORS = {
+      github: '#238636', slack: '#4A154B', gmail: '#EA4335', notion: '#fff',
+      salesforce: '#00A1E0', hubspot: '#FF7A59', jira: '#0052CC', stripe: '#635BFF',
+      postgres: '#336791', mysql: '#4479A1', redis: '#DC382D', s3: '#FF9900',
+      docker: '#2496ED', kubernetes: '#326CE5', 'o365': '#D83B01', outlook: '#0078D4',
+      sheets: '#0F9D58', drive: '#1FA463', trello: '#0079BF', asana: '#F06A6A',
+      zendesk: '#03363D', intercom: '#1F8DED', twilio: '#F22F46', sendgrid: '#1A82E2',
+      shopify: '#96BF48', bigquery: '#4285F4', snowflake: '#29B5E8', datadog: '#632CA6',
+      pagerduty: '#06AC38', sentry: '#362D59', linear: '#5E6AD2', figma: '#F24E1E',
+      vercel: '#fff', netlify: '#00C7B7', cloudflare: '#F38020', aws: '#FF9900',
+      gcp: '#4285F4', azure: '#0089D6'
+    };
+
+    function getToolColor(tool) {
+      return TOOL_COLORS[tool.toLowerCase()] || '#6B7280';
+    }
+
+    function getToolInitial(tool) {
+      var map = {
+        github: 'GH', slack: 'SL', gmail: 'GM', notion: 'N', salesforce: 'SF',
+        hubspot: 'HS', jira: 'JI', stripe: 'ST', postgres: 'PG', mysql: 'MY',
+        redis: 'RD', s3: 'S3', docker: 'DK', kubernetes: 'K8', 'o365': 'O3',
+        outlook: 'OL', sheets: 'GS', drive: 'GD', trello: 'TR', asana: 'AS',
+        zendesk: 'ZD', intercom: 'IC', twilio: 'TW', sendgrid: 'SG',
+        shopify: 'SH', bigquery: 'BQ', snowflake: 'SF', datadog: 'DD',
+        pagerduty: 'PD', sentry: 'SE', linear: 'LN', figma: 'FG',
+        vercel: 'VL', netlify: 'NF', cloudflare: 'CF', aws: 'AW', gcp: 'GC', azure: 'AZ'
+      };
+      return map[tool.toLowerCase()] || tool.substring(0, 2).toUpperCase();
+    }
+
     /* ========== DAG Visualization ========== */
-    function renderDag(stepCount, models, catColor) {
+    function renderDag(stepCount, models, tools, catColor) {
       var dagEl = document.getElementById('modal-dag');
       if (stepCount <= 0) {
         dagEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center">No steps data</div>';
         return;
       }
 
+      // Build step labels: mix tools and models for realistic feel
+      var stepLabels = [];
+      var allLabels = [];
+      tools.forEach(function(t) { allLabels.push({ text: t, type: 'tool' }); });
+      models.forEach(function(m) { allLabels.push({ text: m, type: 'model' }); });
+
+      for (var s = 0; s < stepCount; s++) {
+        if (s < allLabels.length) {
+          stepLabels.push(allLabels[s]);
+        } else if (allLabels.length > 0) {
+          stepLabels.push(allLabels[s % allLabels.length]);
+        } else {
+          stepLabels.push({ text: 'step ' + (s + 1), type: 'model' });
+        }
+      }
+
+      // Determine layout: parallel branches for 4+ steps
+      var useParallel = stepCount >= 4 && (tools.length >= 1 || models.length > 1);
+      if (useParallel) {
+        renderParallelDag(dagEl, stepCount, stepLabels, catColor);
+      } else {
+        renderSequentialDag(dagEl, stepCount, stepLabels, catColor);
+      }
+    }
+
+    function renderSequentialDag(dagEl, stepCount, labels, color) {
       var nodeR = 18;
-      var nodeSpacing = 80;
-      var labelOffset = 30;
-      var paddingX = 40;
-      var paddingY = 16;
+      var nodeSpacing = 90;
+      var paddingX = 50;
+      var paddingY = 20;
       var totalWidth = paddingX * 2 + (stepCount - 1) * nodeSpacing;
-      var svgHeight = nodeR * 2 + labelOffset + paddingY * 2 + 14;
+      var svgHeight = 100;
+      var cy = paddingY + nodeR;
 
-      // Clamp for many steps
-      var maxWidth = Math.max(totalWidth, 100);
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + totalWidth + '" height="' + svgHeight + '" viewBox="0 0 ' + totalWidth + ' ' + svgHeight + '">';
 
-      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + maxWidth + '" height="' + svgHeight + '" viewBox="0 0 ' + maxWidth + ' ' + svgHeight + '">';
-
-      // Connection lines
+      // Lines
       for (var i = 0; i < stepCount - 1; i++) {
         var x1 = paddingX + i * nodeSpacing + nodeR;
         var x2 = paddingX + (i + 1) * nodeSpacing - nodeR;
-        var cy = paddingY + nodeR;
-        svg += '<line x1="' + x1 + '" y1="' + cy + '" x2="' + x2 + '" y2="' + cy + '" stroke="' + catColor + '" stroke-width="2" stroke-opacity="0.4"/>';
-        // Arrow
-        var arrowX = x2 - 5;
-        svg += '<polygon points="' + x2 + ',' + cy + ' ' + arrowX + ',' + (cy - 4) + ' ' + arrowX + ',' + (cy + 4) + '" fill="' + catColor + '" fill-opacity="0.5"/>';
+        svg += '<line x1="' + x1 + '" y1="' + cy + '" x2="' + x2 + '" y2="' + cy + '" stroke="' + color + '" stroke-width="2" stroke-opacity="0.3"/>';
+        svg += '<polygon points="' + x2 + ',' + cy + ' ' + (x2 - 5) + ',' + (cy - 4) + ' ' + (x2 - 5) + ',' + (cy + 4) + '" fill="' + color + '" fill-opacity="0.4"/>';
       }
 
-      // Nodes and labels
+      // Nodes
       for (var j = 0; j < stepCount; j++) {
         var cx = paddingX + j * nodeSpacing;
-        var cy2 = paddingY + nodeR;
-        var modelLabel = models[j % models.length] || '';
+        var lbl = labels[j];
+        var nodeColor = lbl.type === 'tool' ? getToolColor(lbl.text) : color;
+        var fillOp = lbl.type === 'tool' ? '0.2' : '0.12';
 
-        // Circle
-        svg += '<circle cx="' + cx + '" cy="' + cy2 + '" r="' + nodeR + '" fill="' + catColor + '" fill-opacity="0.15" stroke="' + catColor + '" stroke-width="2"/>';
-        // Step number
-        svg += '<text x="' + cx + '" y="' + (cy2 + 5) + '" text-anchor="middle" fill="' + catColor + '" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">' + (j + 1) + '</text>';
-        // Model label below
-        if (modelLabel) {
-          svg += '<text x="' + cx + '" y="' + (cy2 + nodeR + labelOffset - 6) + '" text-anchor="middle" fill="#737373" font-family="IBM Plex Mono, monospace" font-size="10">' + escHtml(modelLabel) + '</text>';
-        }
+        svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + nodeR + '" fill="' + nodeColor + '" fill-opacity="' + fillOp + '" stroke="' + nodeColor + '" stroke-width="2"/>';
+        svg += '<text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" fill="' + nodeColor + '" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600">' + (j + 1) + '</text>';
+        svg += '<text x="' + cx + '" y="' + (cy + nodeR + 18) + '" text-anchor="middle" fill="' + (lbl.type === 'tool' ? '#d4d4d4' : '#737373') + '" font-family="IBM Plex Mono, monospace" font-size="10">' + escHtml(lbl.text) + '</text>';
       }
 
       svg += '</svg>';
       dagEl.innerHTML = svg;
+    }
+
+    function renderParallelDag(dagEl, stepCount, labels, color) {
+      // Layout: [start] -> fork -> [parallel branch A, branch B, ...] -> join -> [end]
+      var nodeR = 18;
+      var branchSpacing = 56;
+      var colSpacing = 100;
+      var paddingX = 50;
+      var paddingY = 20;
+
+      // Split: first step, last step, middle steps are parallel
+      var parallelCount = Math.min(stepCount - 2, 4); // max 4 parallel lanes
+      if (parallelCount < 2) parallelCount = 2;
+      // Recalculate: first + fork-gap + parallel-col + join-gap + last
+      var cols = 4; // start, parallel, join, end
+      var totalWidth = paddingX * 2 + (cols - 1) * colSpacing + 20;
+      var branchesHeight = parallelCount * branchSpacing;
+      var svgHeight = Math.max(branchesHeight + paddingY * 2 + 40, 120);
+      var midY = svgHeight / 2;
+
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + totalWidth + '" height="' + svgHeight + '" viewBox="0 0 ' + totalWidth + ' ' + svgHeight + '">';
+
+      // Positions
+      var startX = paddingX;
+      var forkX = paddingX + colSpacing;
+      var joinX = paddingX + colSpacing * 2;
+      var endX = paddingX + colSpacing * 3;
+
+      // Start node
+      var startLbl = labels[0];
+      var startColor = startLbl.type === 'tool' ? getToolColor(startLbl.text) : color;
+      svg += dagNode(startX, midY, nodeR, startColor, '1', startLbl, startLbl.type === 'tool');
+
+      // End node
+      var endLbl = labels[labels.length > 1 ? labels.length - 1 : 0];
+      var endColor = endLbl.type === 'tool' ? getToolColor(endLbl.text) : color;
+      svg += dagNode(endX, midY, nodeR, endColor, String(stepCount), endLbl, endLbl.type === 'tool');
+
+      // Parallel branches
+      var branchTopY = midY - (parallelCount - 1) * branchSpacing / 2;
+      for (var b = 0; b < parallelCount; b++) {
+        var by = branchTopY + b * branchSpacing;
+        var bi = 1 + b; // label index
+        var bLbl = labels[bi < labels.length ? bi : bi % labels.length];
+        var bColor = bLbl.type === 'tool' ? getToolColor(bLbl.text) : color;
+        var bNodeX = (forkX + joinX) / 2;
+
+        // Line: start -> branch node
+        svg += dagLine(startX + nodeR, midY, bNodeX - nodeR, by, color);
+        // Line: branch node -> end
+        svg += dagLine(bNodeX + nodeR, by, endX - nodeR, midY, color);
+        // Branch node
+        svg += dagNode(bNodeX, by, nodeR, bColor, String(bi + 1), bLbl, bLbl.type === 'tool');
+      }
+
+      // If there are leftover steps beyond the parallel display, show "+N" badge
+      var shownSteps = 2 + parallelCount;
+      if (stepCount > shownSteps) {
+        var extra = stepCount - shownSteps;
+        svg += '<rect x="' + (joinX - 16) + '" y="' + (midY + nodeR + 8) + '" width="32" height="18" rx="9" fill="' + color + '" fill-opacity="0.15" stroke="' + color + '" stroke-width="1"/>';
+        svg += '<text x="' + joinX + '" y="' + (midY + nodeR + 21) + '" text-anchor="middle" fill="' + color + '" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="600">+' + extra + '</text>';
+      }
+
+      svg += '</svg>';
+      dagEl.innerHTML = svg;
+    }
+
+    function dagNode(cx, cy, r, color, num, label, isTool) {
+      var fillOp = isTool ? '0.2' : '0.12';
+      var textColor = isTool ? '#d4d4d4' : '#737373';
+      var s = '';
+      s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + color + '" fill-opacity="' + fillOp + '" stroke="' + color + '" stroke-width="2"/>';
+      s += '<text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" fill="' + color + '" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600">' + num + '</text>';
+      s += '<text x="' + cx + '" y="' + (cy + r + 16) + '" text-anchor="middle" fill="' + textColor + '" font-family="IBM Plex Mono, monospace" font-size="10">' + escHtml(label.text) + '</text>';
+      return s;
+    }
+
+    function dagLine(x1, y1, x2, y2, color) {
+      return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + color + '" stroke-width="2" stroke-opacity="0.25"/>';
+    }
+
+    /* ========== Integrations ========== */
+    function renderIntegrations(tools, models) {
+      var container = document.getElementById('modal-integrations');
+      var section = document.getElementById('modal-integrations-section');
+      if (!tools || tools.length === 0) {
+        // No tools - show models as integrations instead
+        if (models && models.length > 0) {
+          var html = '';
+          var seen = {};
+          models.forEach(function(m) {
+            if (seen[m]) return;
+            seen[m] = true;
+            html += '<div class="integration-chip">' +
+              '<span class="integration-icon" style="background:' + (MODEL_COLORS[m] || '#6B7280') + '">' + m.substring(0, 2).toUpperCase() + '</span>' +
+              escHtml(m) + '</div>';
+          });
+          container.innerHTML = html;
+        } else {
+          container.innerHTML = '<div class="modal-no-integrations">No external integrations</div>';
+        }
+        return;
+      }
+
+      var html = '';
+      tools.forEach(function(t) {
+        var c = getToolColor(t);
+        html += '<div class="integration-chip">' +
+          '<span class="integration-icon" style="background:' + c + '">' + getToolInitial(t) + '</span>' +
+          escHtml(t) + '</div>';
+      });
+      // Also add models as secondary items
+      var seenModels = {};
+      models.forEach(function(m) {
+        if (seenModels[m]) return;
+        seenModels[m] = true;
+        html += '<div class="integration-chip" style="opacity:0.7">' +
+          '<span class="integration-icon" style="background:' + (MODEL_COLORS[m] || '#6B7280') + '">' + m.substring(0, 2).toUpperCase() + '</span>' +
+          escHtml(m) + '</div>';
+      });
+      container.innerHTML = html;
     }
 
     /* ========== Model Breakdown ========== */
