@@ -22,49 +22,213 @@ input_schema:
 
 steps:
   - id: parse-reviews
-    prompt: >
-      Parse and normalize the following batch of customer reviews. Extract
-      each individual review text, the rating if available, the date, and
-      any product or feature mentioned. Clean up formatting issues and
-      standardize the data for downstream analysis.
+    prompt: |
+      Parse and normalize the following batch of customer reviews into a structured,
+      analysis-ready format.
+
       Reviews data: {input.reviews}
       Product name: {input.product_name}
+
+      FOR EACH REVIEW, EXTRACT:
+      - review_id: sequential identifier (R001, R002, etc.)
+      - review_text: cleaned full text (fix encoding issues, normalize whitespace)
+      - rating: numeric rating if available (normalize to 1-5 scale regardless of source)
+      - review_date: ISO 8601 format (if date not available, mark as "unknown")
+      - reviewer_info: name/username, verified_purchase flag, reviewer_level (if platform provides)
+      - review_platform: detected source (G2, Capterra, App Store, Trustpilot, Amazon, etc.)
+      - review_length: word count (longer reviews tend to be more informative)
+      - language: detected language (flag non-English for separate handling)
+
+      FEATURE AND PRODUCT MENTION EXTRACTION:
+      - Tag every specific product feature, module, or capability mentioned.
+      - Use a consistent taxonomy: map variations to canonical names
+        (e.g., "reporting tool", "reports", "analytics dashboard" -> "reporting").
+      - Extract competitor mentions: any other product named in comparison.
+      - Extract integration mentions: third-party tools mentioned (Slack, Salesforce, etc.).
+
+      DATA QUALITY FLAGS:
+      - Flag suspicious reviews: very short (<10 words), overly generic, multiple reviews
+        from same reviewer, reviews that read like marketing copy.
+      - Flag reviews with specific and actionable feedback vs vague sentiment.
+      - Assign a usefulness_score (1-5): 5 = detailed with specific examples,
+        1 = vague or unhelpful ("great product!" or "terrible").
+
+      OUTPUT: JSON array of parsed reviews sorted by date (newest first).
+      Include a batch summary: total_reviews, date_range, platform_distribution,
+      average_rating, rating_distribution (count per star level).
     model: haiku
     max_turns: 5
 
   - id: sentiment-analysis
     depends_on: [parse-reviews]
-    prompt: >
-      Perform sentiment analysis on each parsed review. Score sentiment on
-      a scale from -1.0 (very negative) to 1.0 (very positive). Identify
-      recurring positive themes (e.g. ease of use, good support) and negative
-      themes (e.g. bugs, missing features, slow performance). Group reviews
-      by sentiment tier and highlight representative quotes.
+    prompt: |
+      Perform multi-dimensional sentiment analysis on each parsed review using
+      aspect-based sentiment decomposition.
+
       Parsed reviews: {steps.parse-reviews.output}
+
+      ASPECT-BASED SENTIMENT SCORING:
+      For each review, score sentiment (-1.0 to +1.0) across EACH of these aspects:
+
+      1. PRODUCT QUALITY: core functionality, reliability, bugs, performance
+      2. USER EXPERIENCE: ease of use, UI design, learning curve, onboarding
+      3. CUSTOMER SERVICE: support responsiveness, helpfulness, resolution quality
+      4. PRICING/VALUE: price fairness, value for money, billing experience
+      5. FEATURES: feature completeness, missing capabilities, feature requests
+      6. INTEGRATION: compatibility, API quality, third-party connections
+      7. DOCUMENTATION: help docs, tutorials, knowledge base quality
+
+      Only score aspects that are actually mentioned in the review. Mark unmentioned
+      aspects as null, not zero.
+
+      OVERALL SENTIMENT:
+      - Calculate weighted overall sentiment: product (0.25), UX (0.20), service (0.15),
+        value (0.15), features (0.15), integration (0.05), docs (0.05).
+      - Classify into tiers: Promoter (>0.5), Passive (0.0 to 0.5),
+        Detractor (-0.5 to 0.0), Hostile (<-0.5).
+
+      NPS CORRELATION:
+      - For reviews with ratings, calculate correlation between star rating and
+        sentiment score. Flag any mismatches (high rating but negative text = "silent risk",
+        low rating but constructive text = "recoverable detractor").
+      - Estimate NPS score from the review batch: %Promoters - %Detractors.
+
+      COMPETITIVE MENTION ANALYSIS:
+      - For each competitor mentioned, track:
+        * Context: favorable comparison, unfavorable comparison, or neutral mention
+        * Switching sentiment: "switched from X" (won), "thinking of switching to X" (risk),
+          "came from X" (migration story)
+        * Feature gaps relative to competitor (what competitor does that we don't)
+
+      FEATURE REQUEST MINING:
+      - Extract explicit feature requests ("I wish it had...", "would be great if...")
+      - Extract implicit feature requests (complaints about missing capabilities)
+      - Rank by frequency and sentiment intensity (strong negative = high priority)
+      - Group related requests into themes
+
+      REPRESENTATIVE QUOTES:
+      - For each aspect, select the most representative positive and negative quote.
+      - Select quotes that are specific and quotable (good for marketing or bug reports).
+
+      Output: per-review sentiment breakdown, aspect summary statistics,
+      competitive landscape, feature request list, NPS estimate, and representative quotes.
     model: sonnet
     max_turns: 10
 
   - id: trend-detection
     depends_on: [sentiment-analysis]
-    prompt: >
-      Analyze the sentiment results to detect trending topics and patterns.
-      Identify recurring complaints that may indicate systemic issues,
-      features receiving consistent praise, and any shifts in sentiment
-      over time. Flag urgent issues that appear in multiple negative reviews
-      and highlight opportunities from positive feedback patterns.
+    prompt: |
+      Analyze sentiment results to detect trends, patterns, and anomalies across
+      the review corpus.
+
       Sentiment results: {steps.sentiment-analysis.output}
+
+      TEMPORAL TREND ANALYSIS:
+      - Plot sentiment trajectory over time (if dates available):
+        * Overall sentiment trend: improving, stable, declining?
+        * Per-aspect trends: which aspects are improving, which are degrading?
+        * Identify inflection points: when did sentiment shift and what likely caused it
+          (product update, pricing change, competitor launch)?
+      - Calculate rolling 30-day average sentiment vs all-time average.
+      - Month-over-month change in NPS estimate.
+
+      RECURRING COMPLAINT PATTERNS (systemic issues):
+      - Group negative reviews by root cause theme.
+      - For each theme: frequency (% of negative reviews), severity (average negative score),
+        trend (growing, stable, shrinking), and estimated user impact.
+      - Prioritize by: frequency x severity x trend_direction.
+      - Identify "top 3 fire alarms" - issues that are both frequent AND getting worse.
+
+      PRAISE PATTERNS (competitive advantages):
+      - Group positive reviews by theme.
+      - Identify the "moat" - what consistently delights users that competitors don't match?
+      - Track praise consistency: are positive themes stable or fading?
+      - Marketing goldmine: which positive themes have the most quotable reviews?
+
+      SEGMENT ANALYSIS (if data allows):
+      - Compare sentiment by platform (G2 users vs App Store vs Capterra).
+      - Compare by reviewer type (verified purchase vs non-verified).
+      - Compare by review length (detailed reviewers often have different patterns).
+
+      ANOMALY DETECTION:
+      - Sudden sentiment drops: cluster of negative reviews in short timeframe.
+      - Review bombing indicators: unusual volume with similar language.
+      - Positive anomalies: what triggered a cluster of positive reviews?
+
+      COMPETITIVE INTELLIGENCE SYNTHESIS:
+      - Compile all competitor mentions into a competitive positioning map.
+      - Which competitors are gaining mind share (mentioned more recently)?
+      - Which competitor weaknesses are our users highlighting as our strengths?
+      - Which competitor strengths expose our gaps?
+
+      Output: trend analysis with direction indicators, ranked issue list,
+      ranked strength list, competitive map, and anomaly alerts.
     model: sonnet
     max_turns: 8
 
   - id: insights-report
     depends_on: [trend-detection]
-    prompt: >
-      Generate an executive insights report summarizing the review analysis.
-      Include an overall sentiment score, descriptions of key charts (sentiment
-      distribution, topic frequency, trend over time), the top 5 issues to
-      address, top 5 strengths to promote, and specific actionable
-      recommendations for the product and support teams.
+    prompt: |
+      Generate an executive insights report that turns review analysis into
+      business decisions. This report should be actionable for product, marketing,
+      support, and leadership teams.
+
       Trend analysis: {steps.trend-detection.output}
       Product name: {input.product_name}
+
+      REPORT STRUCTURE:
+
+      ## Executive Summary (30-second read)
+      - Overall sentiment score and NPS estimate with trend direction.
+      - Single most critical finding (the one thing leadership must know).
+      - Bottom line: is customer satisfaction improving, stable, or declining?
+
+      ## Sentiment Dashboard (data visualization descriptions)
+      Describe the data for these charts (to be generated by BI tools):
+      - **Sentiment Distribution**: histogram of overall sentiment scores
+      - **Aspect Radar Chart**: average sentiment per aspect (product, UX, service, etc.)
+      - **Trend Line**: sentiment over time with key events annotated
+      - **Rating vs Sentiment Scatter**: correlation plot identifying mismatches
+      - **Topic Frequency Bar Chart**: most discussed topics ranked by mention count
+
+      ## Top 5 Issues to Fix (Product/Engineering)
+      For each issue:
+      - Issue description with specific user quotes
+      - Frequency: X% of negative reviews mention this
+      - Trend: getting better/worse/stable
+      - Estimated impact: "fixing this could convert ~X detractors to passives"
+      - Suggested priority: P1 (fix now) / P2 (next sprint) / P3 (plan for)
+      - Related feature requests that address this issue
+
+      ## Top 5 Strengths to Amplify (Marketing)
+      For each strength:
+      - What users love and representative quotes (ready for marketing use)
+      - Frequency: X% of positive reviews mention this
+      - Competitive differentiation: do competitors match this?
+      - Marketing opportunity: how to leverage this in positioning
+
+      ## Competitive Intelligence Brief
+      - Competitor mention frequency and sentiment context
+      - Win/loss signals: where are we winning vs losing to competitors?
+      - Feature gap priorities based on competitive mentions
+
+      ## Customer Support Insights
+      - Support-related sentiment trends
+      - Common support issues that could be deflected with better docs or UX
+      - Response quality perception and improvement recommendations
+
+      ## Feature Request Priority List
+      - Ranked by: request_frequency x sentiment_intensity x strategic_alignment
+      - Include estimated impact on NPS if implemented
+      - Group into themes for product roadmap planning
+
+      ## Recommended Actions (cross-functional)
+      | Action | Owner | Priority | Expected Impact | Timeline |
+      |--------|-------|----------|-----------------|----------|
+      | ... | Product/Marketing/Support/Eng | P1-P3 | NPS +X | Sprint/Quarter |
+
+      ## Methodology Note
+      - Sample size, date range, platform sources, confidence level.
+      - Known limitations (sample bias, platform skew, seasonal effects).
     model: sonnet
     max_turns: 10

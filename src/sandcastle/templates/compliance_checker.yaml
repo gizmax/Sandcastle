@@ -33,26 +33,84 @@ steps:
       If the framework is a standard one (GDPR, SOC2, HIPAA, PCI-DSS), generate the
       comprehensive checklist of required provisions from your knowledge:
 
-      **GDPR checklist includes:** lawful basis for processing, data subject rights
-      (access, rectification, erasure, portability), data protection officer requirements,
-      breach notification (72h), privacy by design, data processing agreements,
-      cross-border transfer safeguards, consent mechanisms, data retention limits.
+      **GDPR checklist includes (Articles referenced):**
+      - Art. 5: Data processing principles (lawfulness, fairness, transparency, purpose limitation,
+        data minimization, accuracy, storage limitation, integrity/confidentiality, accountability)
+      - Art. 6-9: Lawful basis for processing (consent, contract, legal obligation, vital interest,
+        public task, legitimate interest) with special categories of data handling
+      - Art. 12-23: Data subject rights (access, rectification, erasure/right to be forgotten,
+        restriction, portability, objection, automated decision-making opt-out)
+      - Art. 25: Privacy by design and by default
+      - Art. 28: Data processing agreements with sub-processors
+      - Art. 30: Records of processing activities (ROPA)
+      - Art. 33-34: Breach notification (72h to authority, undue delay to data subjects)
+      - Art. 35-36: Data Protection Impact Assessments (DPIA) for high-risk processing
+      - Art. 37-39: Data Protection Officer appointment criteria
+      - Art. 44-49: Cross-border transfer safeguards (SCCs, BCRs, adequacy decisions)
+      - Art. 7: Consent mechanisms (freely given, specific, informed, unambiguous, withdrawable)
 
-      **SOC2 checklist includes:** security (access controls, encryption, monitoring),
-      availability (uptime SLAs, disaster recovery, backups), processing integrity
-      (quality assurance, error handling), confidentiality (data classification, NDA),
-      privacy (notice, consent, disclosure, retention).
+      **CCPA/CPRA checklist includes:**
+      - Right to know (categories and specific pieces of personal information collected)
+      - Right to delete with exceptions (transaction completion, security, legal obligation)
+      - Right to opt-out of sale/sharing of personal information
+      - Right to non-discrimination for exercising rights
+      - Financial incentive notice requirements
+      - Privacy policy requirements (categories collected, purposes, third-party sharing)
+      - "Do Not Sell or Share My Personal Information" link requirement
+      - Service provider contractual requirements
+      - Data retention disclosure by category
+      - Sensitive personal information: right to limit use and disclosure
 
-      **HIPAA checklist includes:** PHI safeguards, access controls, audit trails,
-      transmission security, BAA requirements, minimum necessary standard, breach notification.
+      **SOC2 checklist includes (Trust Service Criteria):**
+      - CC1-CC5 (Security - Common Criteria): logical/physical access controls, encryption at rest
+        and in transit, network monitoring, vulnerability management, change management
+      - A1 (Availability): uptime SLAs with measurement methodology, disaster recovery plan
+        with RTO/RPO, backup schedule and tested restoration, capacity planning
+      - PI1 (Processing Integrity): input validation, error handling, quality assurance,
+        output completeness verification, system processing monitoring
+      - C1 (Confidentiality): data classification scheme, NDA enforcement, confidential data
+        lifecycle (collection through disposal), access logging
+      - P1-P8 (Privacy): privacy notice, consent management, collection limitation, use/retention/
+        disposal policies, access rights, disclosure to third parties, quality maintenance
 
-      **PCI-DSS checklist includes:** cardholder data protection, encryption, access control,
-      network security, vulnerability management, monitoring and testing.
+      **SOX checklist includes (financial controls):**
+      - Section 302: CEO/CFO certification of financial reports accuracy
+      - Section 404: Internal control over financial reporting (ICFR) assessment
+      - IT General Controls: access management, change management, operations, SDLC
+      - Segregation of duties in financial systems
+      - Audit trail requirements for financial transactions
+      - Data integrity controls for financial reporting systems
+      - Whistleblower protection provisions
+      - Document retention policy (7 years for audit workpapers)
 
-      If the framework is custom text, parse it into a structured checklist.
+      **HIPAA checklist includes:**
+      - Administrative safeguards: security officer, workforce training, access authorization,
+        contingency plan, evaluation, BAA requirements
+      - Physical safeguards: facility access controls, workstation use/security, device controls
+      - Technical safeguards: access controls (unique user ID, emergency access, auto-logoff,
+        encryption), audit controls, integrity controls, transmission security
+      - PHI minimum necessary standard with role-based access
+      - Breach notification: 60 days to individuals, annual HHS report (< 500), immediate (>= 500)
 
-      Return a JSON array of checklist items with: requirement_id, category, description,
-      and criticality (required vs recommended).
+      **PCI-DSS checklist includes (v4.0):**
+      - Req 1-2: Network security controls, secure configurations
+      - Req 3-4: Cardholder data protection, strong cryptography in transit
+      - Req 5-6: Malware protection, secure system development
+      - Req 7-8: Access control (need-to-know, unique IDs, MFA)
+      - Req 9: Physical access restriction to cardholder data
+      - Req 10-11: Logging/monitoring, regular security testing
+      - Req 12: Information security policy, personnel awareness
+
+      If the framework is custom text, parse it into a structured checklist of specific
+      testable requirements, inferring criticality from the language used.
+
+      For each checklist item, specify:
+      - requirement_id: framework-specific ID (e.g., "GDPR-Art.33", "SOC2-CC6.1")
+      - category: logical grouping
+      - description: specific, testable requirement statement
+      - criticality: "required" (legal/regulatory mandate) vs "recommended" (best practice)
+      - evidence_type: what kind of evidence demonstrates compliance (policy document,
+        technical configuration, process log, training record, contract clause)
     model: sonnet
     max_turns: 8
     output_schema:
@@ -76,18 +134,34 @@ steps:
 
       Document: {input.document_text}
 
-      For each clause found, extract:
-      1. **Clause text** - the exact relevant passage
-      2. **Topic** - what area it addresses (data handling, security, access control, etc.)
-      3. **Strength** - how specific and enforceable the language is (strong, moderate, weak, vague)
-      4. **Location** - section/paragraph reference if identifiable
+      For each clause found, extract with precision:
+      1. **Clause text** - the exact relevant passage, quoted verbatim
+      2. **Topic** - what compliance area it addresses (data handling, security, access control,
+         consent, breach notification, data retention, cross-border transfers, encryption, audit,
+         training, incident response, vendor management, data classification)
+      3. **Strength** - how specific and enforceable the language is:
+         - strong: uses mandatory language ("shall", "must", specific timeframes, named controls)
+         - moderate: uses directive language ("should", "expected to") with some specificity
+         - weak: uses permissive language ("may", "where appropriate") with no measurable criteria
+         - vague: aspirational statements without actionable requirements
+      4. **Location** - section/paragraph/page reference for audit traceability
+      5. **Effective date** - when the clause takes effect (if stated)
+      6. **Responsible party** - who is accountable for compliance (if identified)
 
-      Also identify:
-      - Missing sections that a compliance document would typically include
-      - Ambiguous language that could be interpreted multiple ways
-      - Conflicting statements within the document
+      Also identify and catalog:
+      - **Missing sections** that a compliance document of this type would typically include,
+        with specific examples of what should be present
+      - **Ambiguous language** that could be interpreted multiple ways by a regulator or auditor,
+        with explanation of the ambiguity and potential interpretations
+      - **Conflicting statements** within the document (e.g., one section says 30-day retention,
+        another implies indefinite storage)
+      - **Undefined terms** that are used but never defined (e.g., "appropriate measures",
+        "reasonable efforts", "promptly" without timeframe)
+      - **Evidence gaps** - clauses that make claims but lack supporting artifacts reference
+        (e.g., "annual training is conducted" but no training log reference)
 
-      Return structured JSON with extracted clauses and observations.
+      Return structured JSON with extracted clauses, observations, and a document
+      maturity assessment (draft, developing, established, optimized).
     model: sonnet
     max_turns: 8
 
@@ -100,20 +174,44 @@ steps:
       Document clauses: {steps.extract-clauses.output}
       Severity threshold: {input.severity_threshold}
 
-      For each requirement in the checklist, determine:
+      For each requirement in the checklist, perform a thorough assessment:
+
       1. **Status**: compliant, partial, non_compliant, or not_addressed
-         - compliant: requirement fully covered by document clauses
-         - partial: requirement partially addressed but gaps remain
-         - non_compliant: document contradicts or insufficiently covers requirement
-         - not_addressed: no relevant clause found in document
-      2. **Evidence** - which document clause(s) support the finding
-      3. **Severity** - high (legal/regulatory risk), medium (operational risk), low (best practice)
-      4. **Gap description** - what specifically is missing or inadequate
-      5. **Remediation** - specific language or provisions to add
+         - compliant: requirement fully covered by specific, enforceable document clauses
+         - partial: requirement partially addressed but measurable gaps remain
+         - non_compliant: document contradicts, insufficiently covers, or uses language too
+           vague to satisfy the requirement under regulatory scrutiny
+         - not_addressed: no relevant clause found in document at all
+      2. **Evidence mapping** - which specific document clause(s) support the finding, with
+         exact section references. For "compliant" findings, cite the controlling language.
+         For "partial" findings, cite what exists AND describe what is missing.
+      3. **Severity** classification with regulatory context:
+         - high: direct legal/regulatory risk - could result in fines, enforcement action,
+           or data breach liability. Includes all "required" criticality items that are
+           non_compliant or not_addressed.
+         - medium: operational/reputational risk - could result in failed audit, customer
+           trust loss, or contractual breach.
+         - low: best practice gap - industry-standard provisions missing but not legally mandated
+      4. **Gap description** - precisely what is missing, inadequate, or contradictory.
+         Be specific: "Missing 72-hour breach notification timeline per GDPR Art. 33" not
+         "breach notification is incomplete."
+      5. **Remediation** - specific, actionable fix:
+         - Suggested clause language ready for insertion (draft text the legal team can review)
+         - Where in the document the clause should be added
+         - Any supporting processes or technical controls that need implementation
+      6. **Remediation timeline** - recommended fix urgency:
+         - immediate (0-7 days): critical regulatory gaps with active risk
+         - short-term (1-30 days): high-severity gaps requiring policy changes
+         - medium-term (30-90 days): gaps requiring process or technical implementation
+         - long-term (90+ days): best practice improvements, organizational changes
+      7. **Evidence collection note** - what artifacts the organization should gather to
+         demonstrate compliance (e.g., "Maintain signed DPA with each sub-processor in a
+         central register, reviewed annually")
 
       Filter results to only include findings at or above the {input.severity_threshold} level.
 
       Calculate overall compliance score as percentage of requirements met (compliant + partial*0.5).
+      Also calculate risk-weighted score (weighting high-severity items 3x, medium 2x, low 1x).
     model: sonnet
     max_turns: 10
     output_schema:
@@ -145,29 +243,47 @@ steps:
       Compliance findings: {steps.check-compliance.output}
       Framework: {input.framework}
 
-      Structure the report as:
+      Structure the report in formal audit-ready format:
 
       ## Executive Summary
-      - Overall compliance score and risk level
-      - Number of findings by severity (high/medium/low)
-      - Top 3 critical gaps requiring immediate attention
+      - Overall compliance score (percentage) and risk-weighted score
+      - Risk level classification: Critical / High / Moderate / Low
+      - Number of findings by severity (high/medium/low) and status
+      - Total requirements assessed vs requirements met
+      - Top 3 critical gaps requiring immediate attention with business impact statement
+      - Estimated regulatory exposure (qualitative: fines, enforcement, reputational damage)
 
       ## Detailed Findings
-      For each non-compliant or partially compliant requirement:
-      - Requirement description
-      - Current status with evidence
-      - Risk if left unaddressed
-      - Recommended remediation with suggested language
+      For each non-compliant or partially compliant requirement, present:
+      - Requirement ID and description (linked to specific regulation article/section)
+      - Current status with cited evidence from the document
+      - Gap analysis: precisely what is missing or inadequate
+      - Risk assessment: specific consequence if left unaddressed (e.g., "GDPR Art. 83(5)(a)
+        allows fines up to 4% of global annual revenue for violations of data processing principles")
+      - Recommended remediation with draft clause language ready for legal review
+      - Remediation timeline and effort estimate
+      - Required evidence artifacts to demonstrate future compliance
 
       ## Compliance Roadmap
-      - Priority 1 (immediate): high-severity gaps
-      - Priority 2 (30 days): medium-severity gaps
-      - Priority 3 (90 days): low-severity improvements
+      - **Immediate (0-7 days):** Critical regulatory gaps - specific actions, owners, deadlines
+      - **Short-term (1-30 days):** High-severity policy and process changes
+      - **Medium-term (30-90 days):** Technical controls and process implementation
+      - **Long-term (90+ days):** Best practice maturation and continuous improvement
+      Include estimated effort (hours/days) and suggested responsible role for each item.
+
+      ## Audit Trail Documentation
+      - What evidence should be collected and maintained going forward
+      - Recommended review cadence (quarterly for high-risk, annual for low-risk)
+      - Documentation retention requirements per framework
+      - Suggested audit preparation checklist for next assessment
 
       ## Appendix
-      - Full requirement-by-requirement status matrix
-      - Methodology notes
+      - Full requirement-by-requirement status matrix (sortable by status, severity, category)
+      - Methodology notes: assessment criteria, scoring methodology, limitations
+      - Framework version and effective date used for assessment
+      - Glossary of compliance terms used in the report
 
-      Write in a professional, audit-ready tone suitable for stakeholders and legal review.
+      Write in a professional, audit-ready tone suitable for board presentation, legal review,
+      and regulatory submission. Avoid hedging language - state findings definitively.
     model: sonnet
     max_turns: 10

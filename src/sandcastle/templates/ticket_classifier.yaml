@@ -25,14 +25,52 @@ input_schema:
 
 steps:
   - id: classify
-    prompt: >
-      Analyze the following support ticket and classify it into one of these
-      categories: bug, feature_request, billing, how_to, or account. Also
-      detect the customer sentiment (positive, neutral, frustrated, angry)
-      and identify the core topic or product area involved.
+    prompt: |
+      Perform multi-label classification on this support ticket across several
+      dimensions simultaneously.
+
       Ticket subject: {input.subject}
       Ticket body: {input.body}
       Customer tier: {input.customer_tier}
+
+      DIMENSION 1 - PRIMARY CATEGORY:
+      Classify into exactly one primary and up to two secondary categories:
+      - bug: software defect, error, crash, unexpected behavior, regression
+      - feature_request: new capability request, enhancement suggestion, integration ask
+      - billing: payment issue, invoice question, subscription change, refund request
+      - how_to: usage question, configuration help, best practices inquiry
+      - account: access issues, permission changes, user management, SSO/auth problems
+      - integration: API errors, webhook failures, third-party connection issues
+      - performance: slowness, timeout, scaling issues, resource limits
+      - data: data loss, export issues, migration questions, data integrity concerns
+
+      DIMENSION 2 - SENTIMENT ANALYSIS:
+      Score on a continuous scale and classify:
+      - sentiment_score: -1.0 (hostile) to +1.0 (delighted)
+      - sentiment_label: positive (>0.3), neutral (-0.3 to 0.3), frustrated (-0.7 to -0.3), angry (<-0.7)
+      - escalation_risk: probability (0.0-1.0) that this customer will escalate
+        if not handled well. Indicators: CAPS, exclamation marks, threats to leave,
+        mention of competitor, "last straw" language, executive CC'd.
+
+      DIMENSION 3 - COMPLEXITY ASSESSMENT:
+      - simple: can be resolved with a known answer or standard procedure (1-2 interactions)
+      - moderate: requires investigation or multiple steps (2-4 interactions)
+      - complex: requires engineering involvement, reproduction, or deep troubleshooting (4+ interactions)
+      - Estimate resolution time: minutes (simple how-to), hours (moderate bug), days (complex issue)
+
+      DIMENSION 4 - TOPIC EXTRACTION:
+      - product_area: which module/feature is affected (e.g., "Dashboard", "API", "Reports", "Auth")
+      - keywords: 3-5 keywords for search and pattern matching
+      - error_codes: extract any error codes, HTTP status codes, or reference numbers
+      - environment: detect OS, browser, API version, or platform if mentioned
+
+      DIMENSION 5 - KNOWN ISSUE MATCHING:
+      - Does this ticket describe symptoms matching common known issues?
+      - Check for patterns: "can't login" (auth issue), "slow loading" (performance),
+        "data missing" (sync issue), "error 500" (server error), "billing charged twice" (payment).
+      - If it matches a known pattern, flag it with the likely known_issue_id for fast resolution.
+
+      Output all dimensions as structured JSON.
     model: haiku
     max_turns: 5
     output_schema:
@@ -50,40 +88,180 @@ steps:
 
   - id: prioritize
     depends_on: [classify]
-    prompt: >
-      Assign a priority level (P1-P4) to this support ticket based on
-      the classification, customer sentiment, potential business impact,
-      and customer tier. P1 is critical and needs immediate attention,
-      P4 is low priority. Provide a brief justification for the priority.
+    prompt: |
+      Assign priority, SLA targets, and escalation criteria using a structured
+      priority matrix that accounts for classification, sentiment, business impact,
+      and customer tier.
+
       Classification: {steps.classify.output}
       Customer tier: {input.customer_tier}
+
+      PRIORITY MATRIX:
+
+      BASE PRIORITY (from category + complexity):
+      | Category      | Simple | Moderate | Complex |
+      |--------------|--------|----------|---------|
+      | bug          | P3     | P2       | P1      |
+      | performance  | P3     | P2       | P1      |
+      | data         | P2     | P1       | P1      |
+      | billing      | P2     | P2       | P1      |
+      | account      | P3     | P2       | P2      |
+      | integration  | P3     | P3       | P2      |
+      | how_to       | P4     | P3       | P3      |
+      | feature_req  | P4     | P4       | P3      |
+
+      TIER-BASED ESCALATION (override base priority):
+      - Enterprise tier: escalate one level (P3 -> P2, P2 -> P1). All P1s get
+        immediate dedicated agent assignment.
+      - Pro tier: escalate if sentiment is frustrated or angry (one level up).
+      - Free tier: no escalation, but still track sentiment for product insights.
+
+      SENTIMENT-BASED ESCALATION:
+      - angry sentiment: escalate one level regardless of category.
+      - escalation_risk > 0.7: escalate one level AND flag for manager review.
+      - If customer mentions "cancel", "leave", "switch to [competitor]": auto-P1.
+
+      SLA ASSIGNMENT:
+      | Priority | First Response | Resolution Target | Update Frequency |
+      |----------|---------------|-------------------|-----------------|
+      | P1       | 1 hour        | 4 hours           | Every 1 hour    |
+      | P2       | 4 hours       | 24 hours          | Every 4 hours   |
+      | P3       | 8 hours       | 72 hours          | Every 24 hours  |
+      | P4       | 24 hours      | 1 week            | On resolution   |
+
+      ESCALATION CRITERIA (auto-escalate if any are true):
+      - SLA breach imminent (>80% of response time elapsed)
+      - Customer sends 3+ follow-ups without resolution
+      - Ticket involves data loss, security concern, or service outage
+      - Multiple tickets from same customer in 24 hours (pattern = systemic issue)
+
+      Output: final_priority (P1-P4), base_priority, escalation_applied (boolean),
+      escalation_reason, sla_first_response, sla_resolution, sla_update_frequency,
+      auto_escalation_triggers, justification.
     model: haiku
     max_turns: 5
 
   - id: draft-response
     depends_on: [classify, prioritize]
-    prompt: >
-      Draft a helpful and empathetic support response addressing the
-      customer's issue. Match the tone to the detected sentiment - be
-      extra empathetic for frustrated or angry customers. Include specific
-      troubleshooting steps for bugs, clear explanations for how-to questions,
-      and appropriate escalation language for billing or account issues.
+    prompt: |
+      Draft a support response using the appropriate template strategy based on
+      classification, priority, and sentiment analysis.
+
       Original ticket: {input.body}
       Classification: {steps.classify.output}
       Priority: {steps.prioritize.output}
+
+      RESPONSE STRATEGY BY CATEGORY:
+
+      FOR BUG REPORTS:
+      - Acknowledge the issue specifically (reference their exact symptom).
+      - If known_issue match: provide the known workaround and ETA for fix.
+      - If new issue: ask for diagnostic information structured as:
+        * Steps to reproduce (numbered list format)
+        * Expected vs actual behavior
+        * Environment details (browser, OS, API version)
+        * Error messages or screenshots
+      - Set expectation: "Our engineering team will investigate within [SLA timeframe]."
+      - Include relevant documentation links if applicable.
+
+      FOR HOW-TO QUESTIONS:
+      - Provide a clear, step-by-step answer (numbered steps).
+      - Include relevant documentation links and video tutorial references.
+      - Anticipate follow-up questions and proactively address them.
+      - Offer to schedule a walkthrough call for complex configurations.
+
+      FOR BILLING ISSUES:
+      - Reference the specific billing concern (amount, date, plan).
+      - For refund requests: acknowledge and explain the review process.
+      - For payment failures: provide self-service billing portal link.
+      - Never make financial commitments in automated response - note human review.
+
+      FOR ACCOUNT/ACCESS ISSUES:
+      - Provide immediate self-service steps (password reset, SSO troubleshooting).
+      - If admin action needed, set clear expectation on timeline.
+      - For security-sensitive requests, note verification requirements.
+
+      FOR FEATURE REQUESTS:
+      - Thank them for the suggestion with genuine enthusiasm.
+      - Acknowledge the underlying need (not just the proposed solution).
+      - If similar feature exists, point to it. If on roadmap, mention timeline vaguely.
+      - Invite them to the feedback board or community forum.
+
+      TONE CALIBRATION:
+      - positive sentiment: Match their enthusiasm, reinforce their success.
+      - neutral sentiment: Professional, efficient, clear.
+      - frustrated sentiment: Lead with empathy ("I understand this is frustrating"),
+        acknowledge the impact on their work, be specific about resolution steps.
+      - angry sentiment: Strong empathy ("I sincerely apologize for this experience"),
+        take ownership, provide immediate escalation path, offer direct contact.
+
+      RESPONSE FORMAT:
+      - Opening: acknowledgment + empathy (1-2 sentences)
+      - Body: solution or next steps (3-5 sentences or numbered steps)
+      - Closing: expectation setting + offer of further help (1-2 sentences)
+      - Keep total response under 200 words for simple issues, under 350 for complex.
+
+      Output: draft_response, response_template_used, personalization_notes,
+      confidence_level (how confident the response fully addresses the issue),
+      needs_human_review (boolean with reason).
     model: sonnet
     max_turns: 8
 
   - id: suggest-routing
     depends_on: [classify, prioritize]
-    prompt: >
-      Based on the ticket classification and priority, suggest the best
-      internal team to route this ticket to. Choose from: engineering
-      (for bugs and technical issues), billing (for payment and subscription),
-      success (for account management and feature requests), or support
-      (for how-to and general inquiries). Include a brief handoff note
-      for the receiving team.
+    prompt: |
+      Determine optimal ticket routing using skill-based assignment and workload
+      awareness.
+
       Classification: {steps.classify.output}
       Priority: {steps.prioritize.output}
+
+      ROUTING MATRIX:
+
+      PRIMARY TEAM ASSIGNMENT:
+      | Category + Complexity | Primary Team      | Secondary Team    |
+      |----------------------|-------------------|-------------------|
+      | bug (simple)         | support-tier-1    | -                 |
+      | bug (moderate)       | support-tier-2    | engineering       |
+      | bug (complex)        | engineering       | support-tier-2    |
+      | performance          | engineering-infra | support-tier-2    |
+      | data                 | engineering-data  | support-tier-2    |
+      | billing (any)        | billing-ops       | support-tier-1    |
+      | account (simple)     | support-tier-1    | -                 |
+      | account (complex)    | support-tier-2    | security          |
+      | how_to (any)         | support-tier-1    | success           |
+      | feature_request      | success           | product           |
+      | integration          | support-tier-2    | engineering-api   |
+
+      SKILL-BASED REFINEMENT:
+      - If the ticket mentions specific product areas (API, mobile, dashboard, reporting),
+        route to the agent with that domain expertise.
+      - For integration issues, route to the agent familiar with the specific third-party tool.
+      - For enterprise tier + complex: assign senior agent or team lead.
+
+      ESCALATION PATH:
+      Define the escalation chain if the assigned team cannot resolve:
+      - Level 1 -> Level 2 -> Engineering -> Engineering Manager -> VP Engineering
+      - For billing: Billing Ops -> Finance Manager -> CFO
+      - For churn risk: Support -> CSM -> VP Customer Success
+
+      HANDOFF NOTE:
+      Write a concise internal handoff note for the receiving team containing:
+      - One-line issue summary
+      - Customer tier and sentiment (e.g., "Enterprise - frustrated")
+      - Classification summary with confidence
+      - Priority and SLA deadlines
+      - Relevant context from the ticket
+      - Known issue match (if any)
+      - Suggested resolution approach
+      - "Watch out for" notes (e.g., "Customer mentioned competitor X")
+
+      AUTO-RESPONSE RECOMMENDATION:
+      - Should an auto-response be sent? (yes for P3/P4 with known_issue match, no for P1/P2 angry)
+      - If yes, which template? Reference the draft from the previous step.
+      - If no, why? (e.g., "Angry enterprise customer - needs personal touch within 1 hour")
+
+      Output: primary_team, secondary_team, escalation_path, handoff_note,
+      auto_response_recommended (boolean), routing_confidence, special_handling_flags.
     model: haiku
     max_turns: 5

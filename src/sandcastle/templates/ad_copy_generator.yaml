@@ -16,51 +16,216 @@ input_schema:
     product_brief:
       type: string
       description: "Product brief describing features, target audience, and differentiators"
+    brand_voice:
+      type: string
+      description: "Brand voice guidelines (e.g. professional, playful, authoritative). Optional - will be inferred from brief if not provided."
+    landing_page_url:
+      type: string
+      description: "Landing page URL for display path generation and CTA alignment"
 
 steps:
   - id: analyze-product
-    prompt: >
-      Analyze the following product brief and extract the unique selling
-      propositions, target audience segments, key benefits, and competitive
-      differentiators. Identify the primary emotional triggers and rational
-      arguments that would drive conversions.
+    prompt: |
+      You are a senior performance marketing strategist. Analyze the following
+      product brief using established copywriting frameworks to build a
+      comprehensive creative foundation for ad generation.
+
       Product brief: {input.product_brief}
+      Brand voice (if provided): {input.brand_voice}
+
+      Perform each of the following analyses and output them as labeled sections:
+
+      1. AIDA FRAMEWORK MAPPING: Map the product to the Attention-Interest-
+         Desire-Action framework. What grabs attention? What sustains interest?
+         What creates desire? What drives the click/conversion action?
+
+      2. PAS FRAMEWORK MAPPING: Identify the core Problem the audience faces,
+         Agitate it by describing the emotional and practical consequences of
+         inaction, then position the product as the Solution.
+
+      3. UNIQUE SELLING PROPOSITIONS: List 3-5 USPs ranked by differentiation
+         strength. For each USP, note whether it is feature-based, benefit-based,
+         or emotion-based, and rate its defensibility (easy/hard to copy).
+
+      4. AUDIENCE SEGMENTS: Define 2-3 distinct audience micro-segments with
+         their demographics, psychographics, primary pain points, objection
+         patterns, and preferred messaging tone.
+
+      5. EMOTIONAL TRIGGERS: Identify the top 5 emotional triggers (e.g. fear
+         of missing out, aspiration, trust, curiosity, belonging) and map each
+         to a specific product benefit or proof point.
+
+      6. COMPETITIVE POSITIONING: Summarize what makes this product different
+         from likely alternatives. Note any claims that need substantiation
+         (statistics, certifications, awards).
     model: sonnet
     max_turns: 5
 
   - id: google-ads
     depends_on: [analyze-product]
-    prompt: >
-      Generate 5 Google Ads variants based on the product analysis. Each
-      variant must include 3 headlines (max 30 characters each), 2
-      descriptions (max 90 characters each), and display URL paths. Use
-      different angles for each variant - feature-focused, benefit-focused,
-      urgency, social proof, and competitive comparison.
+    prompt: |
+      You are a Google Ads specialist with 10+ years of experience optimizing
+      responsive search ads. Generate high-converting Google Ads variants
+      using the product analysis below.
+
       Product analysis: {steps.analyze-product.output}
+      Landing page URL (if provided): {input.landing_page_url}
+
+      STRICT PLATFORM CONSTRAINTS - Google Responsive Search Ads:
+      - Headlines: exactly 15 headlines, each MAX 30 characters (including spaces)
+      - Descriptions: exactly 4 descriptions, each MAX 90 characters (including spaces)
+      - Display URL paths: 2 path fields, each MAX 15 characters
+      - Pin at least 1 headline to Position 1 and 1 to Position 2
+
+      Generate 5 COMPLETE AD GROUPS, each with a different strategic angle:
+
+      1. FEATURE-FOCUSED: Lead with the strongest product capability.
+         Use specific numbers, specs, or quantifiable claims.
+      2. BENEFIT-FOCUSED (AIDA): Hook with the transformation or end-result.
+         Follow Attention > Interest > Desire > Action in headline sequence.
+      3. URGENCY/SCARCITY: Use time-sensitive or limited-availability framing.
+         Include power words: "Now", "Today", "Limited", "Last Chance".
+      4. SOCIAL PROOF: Lead with customer count, ratings, awards, or
+         endorsements. Use "Trusted by X+", "Rated #1", "Award-Winning".
+      5. COMPETITIVE COMPARISON: Position against alternatives without naming
+         competitors directly. Use "Unlike Others", "Switch & Save", "Why Settle".
+
+      For EACH ad group, provide:
+      - All 15 headlines with character count annotation [XX chars]
+      - All 4 descriptions with character count annotation [XX chars]
+      - 2 display URL path suggestions
+      - Pin recommendations (which headlines to pin to Position 1, 2, 3)
+      - Negative keyword suggestions (5-10 per group) to prevent wasted spend
+      - Quality Score prediction rationale (relevance, landing page, CTR)
     model: sonnet
     max_turns: 5
 
   - id: meta-ads
     depends_on: [analyze-product]
-    prompt: >
-      Generate 5 Meta/Facebook ad variants based on the product analysis.
-      Each variant must include primary text (up to 125 characters for
-      optimal display), a headline (max 40 characters), a link description,
-      and a suggested CTA button type. Vary the creative approach across
-      variants - storytelling, testimonial-style, direct response, question
-      hook, and listicle format.
+    prompt: |
+      You are a Meta/Facebook Ads creative strategist specializing in
+      direct-response and brand-awareness campaigns. Generate scroll-stopping
+      Meta ad variants using the product analysis below.
+
       Product analysis: {steps.analyze-product.output}
+
+      STRICT PLATFORM CONSTRAINTS - Meta Ads:
+      - Primary text: up to 125 characters visible above "See More" (total can
+        be longer but the first 125 chars MUST hook the reader)
+      - Headline: MAX 40 characters (appears below the image/video)
+      - Link description: MAX 30 characters
+      - CTA button: choose from [Shop Now, Learn More, Sign Up, Download,
+        Get Offer, Book Now, Contact Us, Get Quote, Subscribe, Apply Now]
+
+      Generate 5 COMPLETE AD VARIANTS, each with a different creative approach:
+
+      1. STORYTELLING: Open with a mini-narrative (before/after, day-in-the-life,
+         or transformation story). Use first-person or second-person perspective.
+         Primary text should be 3-5 short paragraphs with line breaks.
+      2. TESTIMONIAL-STYLE: Write as if a real customer is sharing their
+         experience. Use quotation marks, specific details, and authentic
+         language. Include a specific metric or result ("saved 12 hours/week").
+      3. DIRECT RESPONSE: Lead with the strongest offer or value proposition.
+         Use bullet points or numbered lists. Include a clear deadline or
+         urgency element. Optimize for immediate click-through.
+      4. QUESTION HOOK: Open with a provocative or relatable question that
+         the target audience would instinctively answer "yes" to. Build
+         curiosity gap that can only be resolved by clicking through.
+      5. LISTICLE/EDUCATIONAL: Use "X reasons why..." or "X things you didn't
+         know about..." format. Provide genuine value in the ad itself to
+         build trust, then transition to the CTA naturally.
+
+      For EACH variant, provide:
+      - Primary text (full version + note which part is above the fold)
+      - Headline with character count [XX chars]
+      - Link description with character count [XX chars]
+      - Recommended CTA button
+      - Creative direction notes: describe the ideal image/video to pair with
+        this copy (composition, color mood, subject, text overlay suggestions)
+      - Audience targeting suggestion: which Custom/Lookalike/Interest audiences
+        would perform best with this variant
+      - Placement recommendation: Feed, Stories, Reels, or Audience Network
+    model: sonnet
+    max_turns: 5
+
+  - id: ab-test-plan
+    depends_on: [google-ads, meta-ads]
+    prompt: |
+      You are a growth marketing analyst specializing in ad experimentation
+      and statistical testing methodology. Create a detailed A/B testing
+      plan for the generated ad variants.
+
+      Google Ads variants: {steps.google-ads.output}
+      Meta Ads variants: {steps.meta-ads.output}
+
+      Build a structured A/B TESTING PLAN with these sections:
+
+      1. TEST PRIORITY MATRIX: Rank all 10 variants (5 Google + 5 Meta)
+         by predicted impact and ease of testing. Use a 2x2 matrix:
+         High Impact/Easy to Test (do first) through Low Impact/Hard to Test.
+
+      2. GOOGLE ADS TEST SEQUENCE:
+         - Phase 1 (Week 1-2): Which 2 ad groups to test head-to-head?
+         - Phase 2 (Week 3-4): Winner vs. next challenger
+         - Minimum sample size per variant (assume 2% baseline CTR)
+         - Statistical significance threshold (recommend 95% confidence)
+         - Primary KPI: CTR. Secondary KPIs: conversion rate, CPA, ROAS
+
+      3. META ADS TEST SEQUENCE:
+         - Phase 1 (Week 1-2): Which 2 creative approaches to test?
+         - Phase 2 (Week 3-4): Winning copy x 3 different visual creatives
+         - Recommended daily budget per variant ($X minimum for significance)
+         - Campaign Budget Optimization (CBO) vs. Ad Set Budget recommendations
+         - Primary KPI: Thumb-stop rate + CTR. Secondary: CPM, CPA
+
+      4. BUDGET ALLOCATION: Recommend initial budget split across platforms
+         and variants. Include a reallocation trigger (e.g. "shift 70% budget
+         to winner after 1000 impressions per variant with >95% confidence").
+
+      5. PERFORMANCE PREDICTION: For each variant, predict expected CTR
+         range (low/mid/high) with reasoning. Flag any variants that may
+         face policy review issues on either platform.
+
+      6. ITERATION ROADMAP: Based on likely test outcomes, suggest the next
+         3 rounds of creative iterations (e.g. headline swaps, CTA tests,
+         audience expansion tests).
     model: sonnet
     max_turns: 5
 
   - id: compile-report
-    depends_on: [google-ads, meta-ads]
-    prompt: >
-      Compile all ad variants into a structured report. For each variant,
-      add a recommendation score (1-10) based on predicted click-through
-      rate potential. Suggest which variants to A/B test first and provide
-      a recommended budget split across the top-performing variants.
+    depends_on: [google-ads, meta-ads, ab-test-plan]
+    prompt: |
+      Compile all ad variants and the testing plan into a single executive
+      deliverable formatted for a marketing team handoff.
+
       Google Ads: {steps.google-ads.output}
       Meta Ads: {steps.meta-ads.output}
+      A/B Test Plan: {steps.ab-test-plan.output}
+
+      Structure the final report as follows:
+
+      1. EXECUTIVE SUMMARY (3-4 sentences): Campaign thesis, number of
+         variants produced, recommended launch sequence, and expected timeline.
+
+      2. GOOGLE ADS SECTION: All 5 ad groups formatted in a clean table
+         with headlines, descriptions, display paths, and pin recommendations.
+         Add a "Top Pick" badge to the variant with highest predicted CTR.
+
+      3. META ADS SECTION: All 5 variants with copy, creative direction,
+         targeting, and placement notes. Add a "Top Pick" badge similarly.
+
+      4. A/B TEST PLAN: Condensed testing roadmap with phases, budgets,
+         and success criteria.
+
+      5. IMPLEMENTATION CHECKLIST:
+         - [ ] Upload Google Ads variants to Google Ads Editor
+         - [ ] Create Meta ad sets in Ads Manager
+         - [ ] Set up conversion tracking pixels
+         - [ ] Configure UTM parameters for each variant
+         - [ ] Schedule Phase 1 launch date
+         - [ ] Set calendar reminders for Phase 1 evaluation
+
+      6. APPENDIX: Negative keyword lists, audience targeting specs,
+         and any compliance notes (claims requiring substantiation).
     model: haiku
     max_turns: 3

@@ -19,21 +19,97 @@ input_schema:
 
 steps:
   - id: analyze-document
-    prompt: >
-      Analyze the following document to detect its type (invoice, receipt, report, form,
-      letter, etc.) and structure. Identify all extractable fields, their expected data
-      types, and any repeating sections or tables. Note the document quality and any
-      areas that may be difficult to extract accurately. Document: {input.document_text}
+    prompt: |
+      Analyze the following document to determine its type, structure, and extraction strategy.
+
+      DOCUMENT TYPE DETECTION:
+      Classify the document into one of these categories with sub-type:
+      - FINANCIAL: invoice, receipt, purchase_order, bank_statement, tax_form
+      - LEGAL: contract, NDA, terms_of_service, compliance_report
+      - BUSINESS: report, proposal, meeting_minutes, memo, business_plan
+      - FORM: application, registration, survey, questionnaire
+      - CORRESPONDENCE: letter, email, notice, announcement
+      - TECHNICAL: specification, API_documentation, data_sheet, manual
+      Assign a type_confidence score (0.0-1.0) for the classification.
+
+      FORMAT ANALYSIS:
+      - Detect the source format characteristics: is this from PDF extraction (may have
+        OCR artifacts), HTML (may have tag remnants), plain text, or structured data (JSON/CSV)?
+      - Note any encoding issues, garbled characters, or OCR misreads.
+      - Identify the document language and any multi-language sections.
+
+      STRUCTURAL MAPPING:
+      - Map out the document's logical sections (header, body, footer, appendices).
+      - Identify all extractable fields with their expected data types:
+        * String fields (names, addresses, descriptions)
+        * Numeric fields (amounts, quantities, percentages) - note decimal separators and thousands formatting
+        * Date fields - note the format used (MM/DD/YYYY, DD.MM.YYYY, ISO 8601, written-out)
+        * Currency fields - note currency symbol/code and formatting convention
+        * Enum/categorical fields (status values, categories, types)
+        * Boolean/flag fields (yes/no, checked/unchecked, true/false)
+      - Identify repeating sections (line items, table rows, list entries).
+      - Map key-value pair patterns and their delimiters (colon, tab, fixed-width).
+
+      EXTRACTION DIFFICULTY ASSESSMENT:
+      - Rate overall extraction difficulty: EASY (structured, clean data), MODERATE
+        (semi-structured, some ambiguity), HARD (unstructured, significant interpretation needed).
+      - Flag specific areas that may be difficult: merged table cells, multi-line values,
+        implicit fields (values present but unlabeled), conditional sections.
+      - Note any data that appears redacted, truncated, or corrupted.
+
+      Document: {input.document_text}
     model: sonnet
     max_turns: 5
 
   - id: extract-data
     depends_on: [analyze-document]
-    prompt: >
+    prompt: |
       Extract all identified fields from the document into a structured JSON format.
-      For each field, include the extracted value, the source location in the document,
-      and a confidence score (0.0-1.0). Handle missing or ambiguous fields gracefully
-      by marking them as null with an explanation.
+      Follow the structural map from the analysis step precisely.
+
+      EXTRACTION RULES BY DATA TYPE:
+
+      STRING FIELDS:
+      - Preserve original casing unless clearly erroneous (all-caps OCR artifacts).
+      - Trim whitespace but preserve intentional formatting (e.g., address line breaks).
+      - For names, extract into structured components where possible: first_name, last_name, title.
+      - For addresses, parse into: street, city, state/province, postal_code, country.
+
+      NUMERIC FIELDS:
+      - Normalize to standard decimal notation (remove thousands separators, standardize decimal point).
+      - Preserve original precision (do not round).
+      - For percentages, store as decimal (e.g., "15%" -> 0.15) with a note of original format.
+
+      DATE FIELDS:
+      - Normalize all dates to ISO 8601 format (YYYY-MM-DD).
+      - If only month/year given, use first of month and set confidence lower.
+      - Flag ambiguous dates where day/month could be swapped (e.g., 03/04/2025).
+
+      CURRENCY FIELDS:
+      - Extract amount as numeric and currency code separately.
+      - Detect currency from symbol ($, EUR, GBP) or context and map to ISO 4217 code.
+      - For amounts written in words, convert to numeric with a verification note.
+
+      TABLE EXTRACTION:
+      - Preserve column alignment and row associations even if formatting is irregular.
+      - Handle merged cells by repeating the merged value in each logical row.
+      - For tables with subtotals, extract them as separate summary fields.
+      - Number rows sequentially for reference in validation.
+
+      HANDLING AMBIGUOUS OR MISSING FIELDS:
+      - If a field is expected but not found, set value to null with reason: "not_present",
+        "illegible", "redacted", or "ambiguous".
+      - If multiple interpretations exist, provide the most likely value and list alternatives
+        in an "alternatives" array with their confidence scores.
+      - For fields extracted from poor-quality regions, lower confidence proportionally.
+
+      CONFIDENCE SCORING GUIDELINES:
+      - 0.95-1.0: Clear, unambiguous, machine-readable value.
+      - 0.80-0.94: High confidence, minor formatting interpretation needed.
+      - 0.60-0.79: Moderate confidence, some ambiguity or quality issues.
+      - 0.40-0.59: Low confidence, significant interpretation required.
+      - Below 0.40: Very low confidence, flag for mandatory human review.
+
       Document analysis: {steps.analyze-document.output}
       Original document: {input.document_text}
     model: sonnet
@@ -76,22 +152,87 @@ steps:
 
   - id: validate
     depends_on: [extract-data]
-    prompt: >
-      Validate the extracted data for completeness and correctness. Check that all required
-      fields are present, verify data format consistency (dates, numbers, currencies),
-      cross-reference related fields for logical consistency (e.g., line items sum to total),
-      and flag any values that appear anomalous or potentially incorrect.
+    prompt: |
+      Validate the extracted data using a multi-layer validation framework.
+
+      LAYER 1 - COMPLETENESS CHECK:
+      - Compare extracted fields against the expected field list from document analysis.
+      - Flag any "required" fields that are missing (required fields depend on document type:
+        invoices MUST have: vendor, invoice_number, date, total; receipts MUST have: merchant,
+        date, total; contracts MUST have: parties, effective_date, governing_law).
+      - Calculate completeness percentage: (fields_extracted / fields_expected) x 100.
+
+      LAYER 2 - FORMAT VALIDATION:
+      - Dates: verify valid calendar dates (no Feb 30, no month 13), check logical order
+        (start_date before end_date, invoice_date before due_date).
+      - Numbers: verify non-negative where expected, check reasonable ranges (e.g., tax rate
+        0-100%, quantity > 0, unit_price > 0).
+      - Emails: validate format (contains @, valid domain structure).
+      - Phone numbers: validate against expected format for the detected country.
+      - Postal codes: validate format against detected country.
+      - Currency: verify consistency (all amounts in same currency unless multi-currency noted).
+
+      LAYER 3 - CROSS-FIELD CONSISTENCY:
+      - Arithmetic checks: line_item_quantities x unit_prices = line_totals,
+        sum(line_totals) = subtotal, subtotal + tax = total.
+      - Tolerance: allow 0.01 rounding difference for financial calculations.
+      - Logical consistency: shipping_date >= order_date, end_date >= start_date.
+      - Reference consistency: IDs mentioned in different sections match.
+      - Party consistency: names and addresses are consistent across document sections.
+
+      LAYER 4 - ANOMALY DETECTION:
+      - Statistical outliers: values that are >3 standard deviations from expected ranges
+        for this document type (e.g., invoice total $1M when typical is $1K-$10K).
+      - Duplicate detection: identical line items, repeated reference numbers.
+      - Suspicious patterns: sequential invoice numbers with large gaps, dates far in the
+        future or past, amounts that are exact round numbers when decimals expected.
+
+      For each validation finding, output:
+      - field_name, validation_layer, check_type, status (pass/warn/fail),
+        message, suggested_correction (if applicable).
+
       Extracted data: {steps.extract-data.output}
     model: sonnet
     max_turns: 5
 
   - id: format-output
     depends_on: [validate]
-    prompt: >
-      Format the validated data into the final output structure. Include per-field confidence
-      scores, validation status for each field, a summary of any issues found during
-      validation, and an overall extraction quality score. Present the data in a clean,
-      machine-readable JSON format ready for downstream processing.
+    prompt: |
+      Format the validated data into the final output structure optimized for
+      downstream machine consumption (API ingestion, database import, ETL pipelines).
+
+      OUTPUT STRUCTURE:
+
+      1. METADATA ENVELOPE:
+         - extraction_id: generate a unique reference ID
+         - document_type and sub_type with classification confidence
+         - source_format: detected input format (PDF, HTML, text, JSON)
+         - extraction_timestamp: current ISO 8601 datetime
+         - overall_quality_score: weighted average of all field confidences (0.0-1.0)
+         - quality_grade: A (>0.9), B (0.8-0.9), C (0.7-0.8), D (0.6-0.7), F (<0.6)
+         - requires_human_review: true if any field has confidence < 0.6 or validation failures
+
+      2. EXTRACTED DATA:
+         - Present each field with: field_name, value, data_type, confidence,
+           validation_status (passed/warning/failed), source_location.
+         - Group fields logically by section (header_fields, line_items, summary_fields, etc.).
+         - Tables formatted with consistent column types and row numbering.
+         - Null values use explicit null (not empty string) with a reason code.
+
+      3. VALIDATION SUMMARY:
+         - Total checks run, passed, warned, failed.
+         - List of all warnings and failures with field references.
+         - Suggested corrections for each failed validation.
+
+      4. PROCESSING NOTES:
+         - Fields that required significant interpretation (confidence < 0.8).
+         - Alternative values that were considered but not selected.
+         - Areas of the document that could not be processed and why.
+         - Recommendations for improving extraction quality on similar documents.
+
+      Ensure the JSON is valid, properly escaped, and uses consistent key naming (snake_case).
+      All string values must be properly escaped for JSON compatibility.
+
       Validated data: {steps.validate.output}
       Original extraction: {steps.extract-data.output}
     model: haiku

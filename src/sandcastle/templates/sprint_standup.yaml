@@ -28,71 +28,190 @@ input_schema:
 steps:
   - id: fetch-sprint
     prompt: |
-      Fetch the active sprint data for Jira project {input.jira_project}.
+      Fetch comprehensive active sprint data for Jira project {input.jira_project}.
 
       Use the Jira tool:
         node /home/user/tools/jira.mjs get_sprint '{input.jira_project}'
 
-      Return:
-      - Sprint name and days remaining
-      - Issues completed since yesterday
-      - Issues in progress (with assignees)
-      - Issues blocked or flagged
-      - Sprint burndown status (ahead/on-track/behind)
+      GATHER THE FOLLOWING DATA:
+
+      SPRINT OVERVIEW:
+      - Sprint name, goal statement, start date, end date, days remaining
+      - Total story points committed at sprint start vs current committed (detect scope changes)
+      - Story points completed, in progress, and remaining
+      - Number of issues by status: To Do, In Progress, In Review, Done, Blocked
+
+      COMPLETED SINCE YESTERDAY:
+      - Issues moved to Done in the last 24 hours
+      - For each: key, summary, assignee, story points, time in "In Progress" (cycle time)
+      - Total story points completed yesterday
+
+      IN PROGRESS:
+      - Issues currently being worked on
+      - For each: key, summary, assignee, story points, days in current status
+      - Flag any issue in progress for >3 days (potential problem)
+      - Flag any issue with no assignee
+
+      BLOCKED AND FLAGGED:
+      - Issues marked as blocked or flagged
+      - For each: key, summary, blocker description, who is blocking, days blocked
+      - Issues with unresolved dependencies (linked blockers)
+
+      CARRY-OVER ITEMS:
+      - Issues that were in the previous sprint and carried over to this one
+      - For each: key, summary, original sprint, number of sprints carried (pattern of delay)
+      - Total carry-over story points as % of sprint commitment
+
+      SCOPE CHANGES (since sprint start):
+      - Issues added after sprint started (scope creep)
+      - Issues removed from sprint after start
+      - Net scope change in story points
+      - Who added the scope (product, engineering, customer escalation?)
+
+      Return all data in structured format for synthesis.
     model: haiku
     max_turns: 5
 
   - id: fetch-prs
     prompt: |
-      Fetch recent pull request activity for {input.github_repo} from the last 24 hours.
+      Fetch detailed pull request activity for {input.github_repo} from the last 24 hours,
+      plus any aging PRs that need attention.
 
       Use the GitHub tool:
         node /home/user/tools/github.mjs list_prs '{input.github_repo}' 24
 
-      Return:
-      - PRs merged yesterday (title, author, linked issues)
-      - PRs currently in review (title, author, reviewers, age)
-      - PRs with requested changes or stale reviews (>48h)
+      MERGED YESTERDAY:
+      - PRs merged in the last 24 hours
+      - For each: title, author, merged_by, linked Jira issues, lines added/removed,
+        number of review comments, time from PR creation to merge (lead time)
+      - Highlight any large PRs (>500 lines changed) that might need extra verification
+
+      CURRENTLY IN REVIEW:
+      - Open PRs awaiting review or approval
+      - For each: title, author, requested reviewers, age (hours since opened),
+        number of comments, CI/CD status (passing/failing), draft vs ready
+      - Flag PRs where requested reviewers haven't responded in >24 hours
+      - Flag PRs with failing CI checks
+
+      STALE AND AGING PRs:
+      - PRs open for >48 hours with no review activity
+      - PRs with "changes requested" that haven't been updated in >24 hours
+      - PRs that are draft and >3 days old (might be abandoned)
+      - For each: title, author, age, last activity
+
+      PR REVIEW LOAD:
+      - Count of pending reviews per team member (who is overloaded?)
+      - Average review turnaround time for the team this sprint
+
+      Return structured data grouped by category (merged, in review, stale).
     model: haiku
     max_turns: 5
 
   - id: synthesize
     depends_on: [fetch-sprint, fetch-prs]
     prompt: |
-      Create a daily standup summary combining sprint and PR data:
+      Create an insightful daily standup summary that goes beyond status updates to
+      surface velocity anomalies, risks, and actionable intelligence.
 
       Sprint data: {steps.fetch-sprint.output}
       PR activity: {steps.fetch-prs.output}
 
-      Synthesize into:
-      1. **Yesterday's Progress** - What got done (merged PRs, completed issues)
-      2. **Today's Focus** - What's in progress, key PRs in review
-      3. **Blockers** - Blocked issues, stale PRs, any risks
-      4. **Sprint Health** - Burndown status, days remaining, velocity trend
+      SYNTHESIZE INTO THESE SECTIONS:
 
-      Keep it concise - each section 2-4 bullet points max.
-      Flag anything that needs immediate attention.
+      1. YESTERDAY'S PROGRESS:
+      - Merged PRs linked to completed Jira issues (connect the dots).
+      - Story points delivered yesterday vs daily target needed to finish sprint on time.
+      - Cycle time observations: any issues that moved unusually fast or slow?
+      - Highlight: biggest accomplishment or milestone reached.
+
+      2. TODAY'S FOCUS:
+      - Issues in progress with expected completion today (based on age and complexity).
+      - PRs that need review attention (prioritized by age and sprint relevance).
+      - Meetings or dependencies that will affect today's output.
+      - Recommended focus: what should the team prioritize TODAY to stay on track?
+
+      3. BLOCKERS AND RISKS:
+      - Active blockers with suggested resolution owners and escalation paths.
+      - Stale PRs that are bottlenecking progress.
+      - External dependencies (other teams, third parties) holding up work.
+      - Risk items: issues that MIGHT become blockers if not addressed today.
+
+      4. SPRINT HEALTH DASHBOARD:
+      - Burndown position: ahead/on-track/behind (by how many points?)
+      - Velocity anomaly detection: compare daily burn rate to team's rolling 3-sprint average.
+        Flag if today's rate would result in missing the sprint commitment.
+      - Scope creep alert: items added after sprint start (count, points, source).
+        Calculate scope change as % of original commitment.
+      - Carry-over burden: how many items were carried from previous sprints?
+        If >20% of commitment is carry-over, flag as systematic planning issue.
+      - Team capacity utilization: story points in progress / team capacity estimate.
+        Flag if any team member has >150% of average load or <50% (imbalanced).
+
+      5. RETROSPECTIVE INSIGHTS (weekly pattern detection):
+      - Are the same types of issues repeatedly blocking (infrastructure, dependencies, reviews)?
+      - Is the team's actual velocity converging with or diverging from committed velocity?
+      - Are carry-over items a pattern? If so, suggest planning adjustment.
+      - Review bottleneck: is PR review turnaround slowing down?
+
+      ATTENTION FLAGS (top of summary, if any):
+      - SPRINT AT RISK: if burndown shows >20% gap to completion
+      - SCOPE CREEP: if >15% of points were added after sprint start
+      - REVIEW BOTTLENECK: if >3 PRs are stale (>48h no review)
+      - BLOCKED: if any issue has been blocked >2 days
+      - CARRY-OVER PATTERN: if >30% of sprint is carry-over items
+
+      Keep each section concise (2-5 bullet points). Use data-driven observations,
+      not generic status updates. Every bullet should either inform a decision or prompt an action.
     model: sonnet
     max_turns: 8
 
   - id: post-to-slack
     depends_on: [synthesize]
     prompt: |
-      Post the standup summary to Slack channel {input.slack_channel}.
+      Post the standup summary to Slack channel {input.slack_channel}, formatted for
+      maximum readability and actionability.
 
       Summary: {steps.synthesize.output}
 
       Use the Slack tool:
         node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
 
-      Format with Slack markdown:
-      *Daily Standup - {input.jira_project}*
+      FORMAT WITH SLACK MARKDOWN:
 
-      Include all sections with emoji prefixes:
-      - :white_check_mark: Yesterday's Progress
-      - :dart: Today's Focus
-      - :warning: Blockers
-      - :chart_with_upwards_trend: Sprint Health
+      *Daily Standup - {input.jira_project}* | Sprint: <sprint_name> | Day <X> of <Y>
+
+      If ANY attention flags were raised, put them at the very top in a prominent block:
+      > :rotating_light: *ATTENTION*
+      > <flag 1>
+      > <flag 2>
+
+      Then the main sections with emoji prefixes:
+
+      :white_check_mark: *Yesterday's Progress*
+      - <bullet points>
+      - Story points delivered: <X> (target: <Y>/day)
+
+      :dart: *Today's Focus*
+      - <bullet points>
+      - Top priority: <single most important thing>
+
+      :warning: *Blockers & Risks* (skip if none)
+      - <blocker with @mention of owner who can unblock>
+
+      :chart_with_upwards_trend: *Sprint Health*
+      Burndown: <ahead/on-track/behind> | Points remaining: <X> | Days left: <Y>
+      Velocity: <current rate> vs <needed rate> to finish
+      Scope: <original commitment> pts | Added: <X> pts | Removed: <Y> pts
+
+      :arrows_counterclockwise: *PR Review Queue* (skip if empty)
+      - <PR title> by @<author> - waiting <hours>h for @<reviewer>
+
+      Use @mentions for:
+      - Blocked issue owners (to prompt unblocking action)
+      - Stale PR reviewers (to prompt review action)
+      - Team members with items at risk
+
+      End with a one-line insight or encouragement based on sprint health.
 
       Report whether the message was posted successfully.
     model: haiku

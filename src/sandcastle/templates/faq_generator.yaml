@@ -29,16 +29,37 @@ input_schema:
 steps:
   - id: fetch-resolved
     prompt: |
-      Fetch resolved/closed Zendesk tickets from the last {input.days_lookback} days.
+      Fetch resolved/closed Zendesk tickets from the last {input.days_lookback} days
+      that have actionable resolutions suitable for FAQ generation.
 
       Use the Zendesk tool:
         node /home/user/tools/zendesk.mjs list_tickets 'solved,closed' {input.days_lookback}
 
-      For each ticket, return: ticket_id, subject, description (first 500 chars),
-      resolution_summary, tags, category, and satisfaction_rating if available.
+      For each ticket, extract and return:
+      - ticket_id: unique identifier for traceability
+      - subject: original ticket subject line
+      - description: first 500 chars of the customer's initial message
+      - resolution_summary: the final resolution provided by the agent
+      - tags: all ticket tags (used for categorization and clustering)
+      - category: ticket category or form type
+      - satisfaction_rating: CSAT score if the customer rated the interaction
+      - number_of_replies: total back-and-forth count (indicates complexity)
+      - resolution_time_hours: time from creation to resolution
+      - channel: how the ticket was submitted (email, chat, phone, web form)
 
-      Focus on tickets that had a clear resolution - skip tickets closed as spam,
-      duplicates, or without a resolution.
+      **Filtering criteria - INCLUDE tickets that:**
+      - Have a clear, actionable resolution (not just "will investigate")
+      - Were resolved by an agent (not auto-closed or self-service)
+      - Represent questions other customers might also ask
+
+      **EXCLUDE tickets that are:**
+      - Closed as spam, duplicate, or "no response needed"
+      - Account-specific issues unlikely to recur (billing errors, one-off bugs)
+      - Internal tickets or agent-to-agent communications
+      - Tickets without any resolution summary or agent reply
+
+      Sort by satisfaction_rating (highest first) to prioritize well-resolved tickets
+      as the basis for FAQ content.
     model: haiku
     max_turns: 5
     output_schema:
@@ -64,16 +85,30 @@ steps:
       Resolved tickets: {steps.fetch-resolved.output}
       Minimum cluster size: {input.min_cluster_size}
 
-      Group tickets that ask about the same underlying question or issue. For each cluster:
+      Group tickets that ask about the same underlying question or issue using semantic
+      similarity - not just keyword matching. Tickets asking "how do I cancel" and
+      "I want to stop my subscription" belong in the same cluster.
+
+      For each cluster, provide:
       1. **Topic label** - short descriptive name (e.g. "Password Reset", "Billing Cycle")
-      2. **Canonical question** - the most common way this question is asked
+      2. **Canonical question** - the most common phrasing of this question
       3. **Ticket count** - number of tickets in the cluster
       4. **Ticket IDs** - list of ticket IDs in this cluster
-      5. **Key variations** - different ways customers phrase this question
+      5. **Key variations** - 3-5 different ways customers phrase this question (important for
+         SEO keyword coverage and search discoverability within the help center)
       6. **Category** - getting-started, billing, technical, account, integrations, troubleshooting
+      7. **Difficulty tier** - classify each cluster:
+         - basic: simple how-to, one-step answers, new user questions
+         - intermediate: multi-step processes, configuration, requires some product knowledge
+         - advanced: complex troubleshooting, integrations, edge cases, power-user features
+      8. **Related clusters** - identify 1-3 other clusters that are topically adjacent
+         (e.g. "Password Reset" relates to "Account Lockout" and "Two-Factor Authentication")
+      9. **Customer sentiment** - average satisfaction rating for tickets in this cluster
+         (indicates pain points vs routine questions)
+      10. **Resolution complexity** - average number of agent replies needed to resolve
 
       Only include clusters with at least {input.min_cluster_size} tickets.
-      Rank clusters by ticket count (most frequent first).
+      Rank clusters by ticket count (most frequent first) within each category.
 
       Return JSON array of topic clusters.
     model: sonnet
@@ -87,20 +122,40 @@ steps:
       Topic clusters: {steps.cluster-topics.output}
       Original tickets: {steps.fetch-resolved.output}
 
-      For each topic cluster, create a FAQ entry:
-      1. **Question** - clear, concise question in the customer's voice
-      2. **Answer** - comprehensive answer that:
-         - Directly answers the question in the first sentence
-         - Provides step-by-step instructions where applicable
-         - Includes common variations or edge cases
-         - Links to relevant docs/settings where helpful (use placeholder URLs)
-         - Keeps a friendly, helpful tone
-      3. **Category** - from the cluster analysis
-      4. **Related questions** - 1-2 related FAQ topics if applicable
-      5. **Keywords** - search keywords for discoverability
+      For each topic cluster, create a polished FAQ entry optimized for both human readability
+      and search engine discovery:
 
-      Keep answers between 50-200 words. Avoid jargon.
-      Return JSON array of FAQ entries ordered by category, then by frequency.
+      1. **Question** - clear, concise question in the customer's natural voice. Use the exact
+         phrasing customers actually use (from ticket data), not internal jargon. Start with
+         "How do I...", "Why is...", "Can I...", "What happens when..." for natural language match.
+      2. **Short answer** - a single sentence (under 60 words) that directly and completely
+         answers the question. This serves as the FAQ schema snippet for search engines and
+         should stand alone without needing the full answer.
+      3. **Full answer** - comprehensive answer (100-250 words) that:
+         - Opens with the direct answer restated clearly
+         - Provides numbered step-by-step instructions where applicable
+         - Addresses the top 2-3 edge cases or "but what if..." variations from ticket data
+         - References specific UI locations ("Go to Settings > Billing > Payment Methods")
+         - Includes placeholder links to relevant docs: [Learn more](/docs/topic)
+         - Ends with a clear next step or CTA ("If this doesn't resolve your issue, contact support")
+         - Uses a friendly, confident tone - never apologetic or hedging
+      4. **Category** - from the cluster analysis
+      5. **Difficulty tier** - basic / intermediate / advanced (from cluster analysis)
+      6. **Related questions** - 2-3 related FAQ entry titles that should be cross-linked,
+         with brief context on why they are related
+      7. **Keywords** - 5-8 search keywords including synonyms and common misspellings
+         that customers use (e.g., "cancel" / "cancellation" / "unsubscribe" / "stop billing")
+      8. **FAQ schema markup** - generate JSON-LD structured data (schema.org/FAQPage) for
+         each entry so SEO teams can embed it directly:
+         ```json
+         {"@type": "Question", "name": "...", "acceptedAnswer": {"@type": "Answer", "text": "..."}}
+         ```
+      9. **Internal notes** - brief note for support agents about edge cases or known issues
+         related to this topic that should NOT be in the public FAQ
+
+      Order FAQ entries: first by category, then by difficulty tier (basic first), then by frequency.
+      Ensure no two FAQ entries have substantially overlapping answers - if they do, merge them
+      and add the alternate question as a redirect/alias.
     model: sonnet
     max_turns: 10
     output_schema:
@@ -128,18 +183,41 @@ steps:
       Use the Notion tool:
         node /home/user/tools/notion.mjs append_blocks '{input.notion_page_id}' '<content>'
 
-      For each FAQ entry:
-      1. Create a toggle heading (H3) with the question text
-      2. Inside the toggle, add the answer as paragraph blocks
-      3. Add a divider between entries
-      4. Group entries under category headings (H2)
+      Organize and write the content with clear information architecture:
 
-      At the top of the page, add:
+      **Page header:**
+      - Title: "Frequently Asked Questions"
       - Last updated timestamp
-      - Total number of FAQ entries
-      - Auto-generated notice with date range analyzed
+      - Total number of FAQ entries and categories covered
+      - Auto-generated notice: "Generated from {steps.fetch-resolved.output.total_count} resolved
+        tickets over the last {input.days_lookback} days"
 
-      Report how many entries were written and any errors encountered.
+      **Table of contents:**
+      - Linked list of all categories with entry count per category
+      - Quick-jump anchors to each section
+
+      **For each category (H2 heading):**
+      - Brief category description (1 sentence)
+      - Entries organized by difficulty tier with visual indicators:
+        - Basic entries first (for new users)
+        - Intermediate entries next
+        - Advanced entries last (for power users)
+
+      **For each FAQ entry:**
+      1. Create a toggle heading (H3) with the question text and difficulty badge
+      2. Inside the toggle:
+         - Short answer (bold, first line)
+         - Full answer as paragraph blocks with numbered steps where applicable
+         - "Related questions" section with links to other FAQ entries
+         - "Still need help?" callout with support contact link
+      3. Add a divider between entries
+
+      **Page footer:**
+      - "Didn't find what you're looking for?" with support contact link
+      - Feedback mechanism: "Was this helpful? Yes / No"
+      - Date range of tickets analyzed
+
+      Report how many entries were written, entries per category, and any errors encountered.
     model: haiku
     max_turns: 10
     tools: [notion]
