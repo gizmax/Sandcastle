@@ -30,7 +30,9 @@
       "downloads": 407,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 62
     },
     {
       "slug": "tomr-eng/api-docs-generator",
@@ -62,7 +64,9 @@
       "downloads": 92,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 17
     },
     {
       "slug": "elena-growth/blog-to-social",
@@ -92,7 +96,9 @@
       "downloads": 205,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 33
     },
     {
       "slug": "workflow-lab/chain-of-thought",
@@ -121,7 +127,9 @@
       "downloads": 151,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 23
     },
     {
       "slug": "content-queen/competitor-analysis",
@@ -150,7 +158,9 @@
       "downloads": 426,
       "remix_count": 8,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 71
     },
     {
       "slug": "marcus-hr/compliance-checker",
@@ -183,7 +193,9 @@
       "downloads": 124,
       "remix_count": 6,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.8,
+      "review_count": 24
     },
     {
       "slug": "gizmax/contract-review",
@@ -212,7 +224,9 @@
       "downloads": 96,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 14
     },
     {
       "slug": "jmartinez/crm-enrichment",
@@ -245,7 +259,9 @@
       "downloads": 127,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 22
     },
     {
       "slug": "gizmax/customer-churn-predictor",
@@ -280,7 +296,9 @@
       "downloads": 199,
       "remix_count": 8,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 37
     },
     {
       "slug": "supportflow/customer-health-check",
@@ -314,7 +332,9 @@
       "downloads": 388,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.8,
+      "review_count": 58
     },
     {
       "slug": "tomr-eng/data-extractor",
@@ -344,7 +364,9 @@
       "downloads": 367,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 58
     },
     {
       "slug": "content-queen/email-campaign",
@@ -373,7 +395,9 @@
       "downloads": 446,
       "remix_count": 8,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 74
     },
     {
       "slug": "nadia-cx/faq-generator",
@@ -407,7 +431,9 @@
       "downloads": 294,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.9,
+      "review_count": 47
     },
     {
       "slug": "tomr-eng/jira-triage",
@@ -439,7 +465,9 @@
       "downloads": 309,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 50
     },
     {
       "slug": "marcus-hr/job-description",
@@ -468,7 +496,9 @@
       "downloads": 494,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 74
     },
     {
       "slug": "gizmax/lead-enrichment",
@@ -498,7 +528,9 @@
       "downloads": 468,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 72
     },
     {
       "slug": "jmartinez/lead-scoring",
@@ -531,7 +563,9 @@
       "downloads": 437,
       "remix_count": 6,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 71
     },
     {
       "slug": "revops-sam/meeting-recap",
@@ -561,7 +595,9 @@
       "downloads": 254,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.9,
+      "review_count": 42
     },
     {
       "slug": "lawtech-ai/onboarding-workflow",
@@ -597,7 +633,9 @@
       "downloads": 159,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.5,
+      "review_count": 26
     },
     {
       "slug": "datacraft-io/pdf-summary",
@@ -627,7 +665,9 @@
       "downloads": 470,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 75
     },
     {
       "slug": "revops-sam/proposal-generator",
@@ -656,7 +696,9 @@
       "downloads": 132,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 20
     },
     {
       "slug": "ops-ninja/release-notes",
@@ -686,7 +728,9 @@
       "downloads": 274,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 42
     },
     {
       "slug": "priya-fintech/research-agent",
@@ -716,7 +760,9 @@
       "downloads": 263,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 44
     },
     {
       "slug": "lawtech-ai/resume-screener",
@@ -746,7 +792,9 @@
       "downloads": 389,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 62
     },
     {
       "slug": "amira-dev/review-and-approve",
@@ -777,7 +825,9 @@
       "downloads": 493,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 73
     },
     {
       "slug": "gizmax/review-sentiment",
@@ -807,7 +857,9 @@
       "downloads": 453,
       "remix_count": 7,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 74
     },
     {
       "slug": "jmartinez/sales-pipeline-autopilot",
@@ -841,7 +893,9 @@
       "downloads": 354,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.8,
+      "review_count": 54
     },
     {
       "slug": "lena-content/seo-content",
@@ -871,7 +925,9 @@
       "downloads": 273,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 41
     },
     {
       "slug": "supportflow/sla-watchdog",
@@ -905,7 +961,9 @@
       "downloads": 362,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 58
     },
     {
       "slug": "k8s-ops/slack-standup",
@@ -937,7 +995,9 @@
       "downloads": 504,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 80
     },
     {
       "slug": "k8s-ops/sprint-standup",
@@ -972,7 +1032,9 @@
       "downloads": 375,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 59
     },
     {
       "slug": "priya-fintech/summarize",
@@ -1002,7 +1064,9 @@
       "downloads": 440,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 67
     },
     {
       "slug": "gizmax/support-ticket-triage",
@@ -1036,7 +1100,9 @@
       "downloads": 103,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 18
     },
     {
       "slug": "nadia-cx/ticket-classifier",
@@ -1066,7 +1132,9 @@
       "downloads": 475,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 75
     },
     {
       "slug": "priya-fintech/translate",
@@ -1096,7 +1164,9 @@
       "downloads": 120,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 21
     },
     {
       "slug": "sarah-ml/churn-predictor-v2",
@@ -1131,7 +1201,9 @@
       "downloads": 234,
       "remix_count": 3,
       "forked_from": "gizmax/customer-churn-predictor",
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.7,
+      "review_count": 38
     },
     {
       "slug": "k8s-ops/incident-responder",
@@ -1166,7 +1238,9 @@
       "downloads": 456,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 73
     },
     {
       "slug": "content-queen/content-calendar",
@@ -1198,7 +1272,9 @@
       "downloads": 312,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.8,
+      "review_count": 48
     },
     {
       "slug": "lawtech-ai/contract-reviewer-pro",
@@ -1230,7 +1306,9 @@
       "downloads": 189,
       "remix_count": 1,
       "forked_from": "gizmax/contract-review",
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 29
     },
     {
       "slug": "devrel-bot/release-notes-pro",
@@ -1264,8 +1342,10 @@
       "avg_execution_time": "~8s",
       "downloads": 287,
       "remix_count": 4,
-      "forked_from": "gizmax/release-notes",
-      "license": "MIT"
+      "forked_from": "ops-ninja/release-notes",
+      "license": "MIT",
+      "rating": 5.0,
+      "review_count": 47
     },
     {
       "slug": "social-sage/social-repurposer",
@@ -1296,7 +1376,9 @@
       "downloads": 198,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.5,
+      "review_count": 31
     },
     {
       "slug": "pricewatch/pricing-tracker",
@@ -1328,7 +1410,9 @@
       "downloads": 167,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 26
     },
     {
       "slug": "supportflow/multi-channel-router",
@@ -1362,7 +1446,9 @@
       "downloads": 223,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.7,
+      "review_count": 36
     },
     {
       "slug": "gizmax/market-opportunity-scout",
@@ -1393,7 +1479,9 @@
       "downloads": 135,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 23
     },
     {
       "slug": "content-queen/competitive-intelligence-radar",
@@ -1426,7 +1514,9 @@
       "downloads": 125,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 21
     },
     {
       "slug": "social-sage/voice-of-market",
@@ -1456,7 +1546,9 @@
       "downloads": 153,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.8,
+      "review_count": 27
     },
     {
       "slug": "pricewatch/pricing-intelligence",
@@ -1487,7 +1579,9 @@
       "downloads": 96,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 15
     },
     {
       "slug": "lena-content/trend-radar",
@@ -1518,7 +1612,9 @@
       "downloads": 30,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.9,
+      "review_count": 6
     },
     {
       "slug": "gizmax/win-loss-intelligence",
@@ -1551,7 +1647,9 @@
       "downloads": 91,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 14
     },
     {
       "slug": "lena-content/market-entry-strategy",
@@ -1583,7 +1681,9 @@
       "downloads": 40,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.9,
+      "review_count": 8
     },
     {
       "slug": "gizmax/account-intelligence",
@@ -1617,7 +1717,9 @@
       "downloads": 93,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 13
     },
     {
       "slug": "nadia-cx/deal-velocity-optimizer",
@@ -1649,7 +1751,9 @@
       "downloads": 162,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 26
     },
     {
       "slug": "priya-fintech/revenue-forecast-ensemble",
@@ -1681,7 +1785,9 @@
       "downloads": 62,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 12
     },
     {
       "slug": "revops-sam/churn-prediction-pipeline",
@@ -1715,7 +1821,9 @@
       "downloads": 39,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 5
     },
     {
       "slug": "kai-security/incident-command-center",
@@ -1749,7 +1857,9 @@
       "downloads": 36,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 9
     },
     {
       "slug": "kai-security/deployment-risk-analyzer",
@@ -1782,7 +1892,9 @@
       "downloads": 115,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 20
     },
     {
       "slug": "kai-security/soc-triage-pipeline",
@@ -1817,7 +1929,9 @@
       "downloads": 132,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 20
     },
     {
       "slug": "kai-security/ai-red-team",
@@ -1848,7 +1962,9 @@
       "downloads": 95,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 19
     },
     {
       "slug": "priya-fintech/ma-due-diligence",
@@ -1879,7 +1995,9 @@
       "downloads": 39,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 10
     },
     {
       "slug": "marcus-hr/regulatory-change-analyzer",
@@ -1912,7 +2030,9 @@
       "downloads": 113,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 18
     },
     {
       "slug": "lawtech-ai/contract-lifecycle",
@@ -1943,7 +2063,9 @@
       "downloads": 103,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 15
     },
     {
       "slug": "priya-fintech/earnings-call-intelligence",
@@ -1974,7 +2096,9 @@
       "downloads": 53,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 8
     },
     {
       "slug": "lena-content/content-factory",
@@ -2007,7 +2131,9 @@
       "downloads": 96,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 15
     },
     {
       "slug": "content-queen/podcast-to-empire",
@@ -2038,7 +2164,9 @@
       "downloads": 146,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 21
     },
     {
       "slug": "lena-content/startup-growth-engine",
@@ -2070,7 +2198,9 @@
       "downloads": 81,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.2,
+      "review_count": 15
     },
     {
       "slug": "workflow-lab/supplier-risk-intelligence",
@@ -2101,7 +2231,9 @@
       "downloads": 47,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 9
     },
     {
       "slug": "workflow-lab/demand-forecasting",
@@ -2132,7 +2264,9 @@
       "downloads": 107,
       "remix_count": 3,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 19
     },
     {
       "slug": "pricewatch/dynamic-pricing",
@@ -2165,7 +2299,9 @@
       "downloads": 100,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 17
     },
     {
       "slug": "workflow-lab/recruiting-pipeline",
@@ -2198,7 +2334,9 @@
       "downloads": 68,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.3,
+      "review_count": 14
     },
     {
       "slug": "marcus-hr/org-health-pulse",
@@ -2231,7 +2369,9 @@
       "downloads": 95,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 16
     },
     {
       "slug": "k8s-ops/self-healing-pipeline",
@@ -2265,7 +2405,9 @@
       "downloads": 172,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 27
     },
     {
       "slug": "k8s-ops/nl-to-dashboard",
@@ -2298,7 +2440,9 @@
       "downloads": 105,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 16
     },
     {
       "slug": "datacraft-io/model-evaluation-arena",
@@ -2330,7 +2474,9 @@
       "downloads": 138,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 24
     },
     {
       "slug": "datacraft-io/product-feedback-prioritizer",
@@ -2362,7 +2508,9 @@
       "downloads": 30,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 4
     },
     {
       "slug": "priya-fintech/invoice-processor",
@@ -2394,7 +2542,9 @@
       "downloads": 36,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 6
     },
     {
       "slug": "lena-content/video-to-shorts",
@@ -2427,7 +2577,9 @@
       "downloads": 53,
       "remix_count": 2,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 9
     },
     {
       "slug": "datacraft-io/rag-knowledge-base",
@@ -2459,7 +2611,9 @@
       "downloads": 180,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.1,
+      "review_count": 27
     },
     {
       "slug": "gizmax/client-onboarding-orchestrator",
@@ -2490,7 +2644,9 @@
       "downloads": 34,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.4,
+      "review_count": 10
     },
     {
       "slug": "lena-content/course-creator",
@@ -2521,7 +2677,9 @@
       "downloads": 103,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 16
     },
     {
       "slug": "jmartinez/real-estate-listing",
@@ -2553,7 +2711,9 @@
       "downloads": 122,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.7,
+      "review_count": 23
     },
     {
       "slug": "content-queen/social-media-calendar",
@@ -2585,7 +2745,9 @@
       "downloads": 120,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 23
     },
     {
       "slug": "jmartinez/grant-proposal",
@@ -2617,7 +2779,9 @@
       "downloads": 125,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.5,
+      "review_count": 22
     },
     {
       "slug": "elena-growth/agency-report-generator",
@@ -2649,7 +2813,9 @@
       "downloads": 123,
       "remix_count": 5,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.7,
+      "review_count": 23
     },
     {
       "slug": "workflow-lab/clinical-notes",
@@ -2681,7 +2847,9 @@
       "downloads": 145,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 25
     },
     {
       "slug": "elena-growth/ecommerce-catalog",
@@ -2713,7 +2881,9 @@
       "downloads": 108,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.9,
+      "review_count": 16
     },
     {
       "slug": "nadia-cx/voice-agent-pipeline",
@@ -2745,7 +2915,9 @@
       "downloads": 144,
       "remix_count": 4,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.6,
+      "review_count": 25
     },
     {
       "slug": "amira-dev/freelancer-proposal",
@@ -2777,7 +2949,9 @@
       "downloads": 70,
       "remix_count": 0,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 3.8,
+      "review_count": 10
     },
     {
       "slug": "tomr-eng/product-design-spec",
@@ -2809,7 +2983,9 @@
       "downloads": 116,
       "remix_count": 1,
       "forked_from": null,
-      "license": "MIT"
+      "license": "MIT",
+      "rating": 4.0,
+      "review_count": 18
     }
   ],
   "categories": [
