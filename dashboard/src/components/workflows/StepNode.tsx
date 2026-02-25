@@ -1,10 +1,10 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Code, Cpu, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Radio, RefreshCw, Repeat, ShieldCheck, Tag, Wrench, Zap } from "lucide-react";
+import { Bell, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
-type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate";
+type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate";
 
 type StepNodeData = {
   label: string;
@@ -35,6 +35,9 @@ const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
   race: Zap,
   sensor: Radio,
   gate: ShieldCheck,
+  transform: Shuffle,
+  notify: Bell,
+  delegate: ExternalLink,
 };
 
 const STEP_TYPE_COLORS: Record<string, string> = {
@@ -49,6 +52,9 @@ const STEP_TYPE_COLORS: Record<string, string> = {
   race: "text-purple-400",
   sensor: "text-teal-400",
   gate: "text-red-400",
+  transform: "text-cyan-400",
+  notify: "text-pink-400",
+  delegate: "text-indigo-400",
 };
 
 const STEP_TYPE_BORDER: Record<string, string> = {
@@ -61,6 +67,9 @@ const STEP_TYPE_BORDER: Record<string, string> = {
   race: "border-l-purple-400/50",
   sensor: "border-l-teal-400/50",
   gate: "border-l-red-400/50",
+  transform: "border-l-cyan-400/50",
+  notify: "border-l-pink-400/50",
+  delegate: "border-l-indigo-400/50",
 };
 
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
@@ -100,7 +109,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             {stepType}
           </span>
         )}
-        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && stepType !== "race" && stepType !== "sensor" && (
+        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && stepType !== "race" && stepType !== "sensor" && stepType !== "transform" && stepType !== "notify" && (
           <span className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
             {data.model}
           </span>

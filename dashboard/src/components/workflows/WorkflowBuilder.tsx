@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck } from "lucide-react";
+import { Bell, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -24,8 +24,6 @@ import {
   type ApprovalConfig,
   type SloConfig,
   type AutoPilotConfig,
-  type RaceStepConfig,
-  type SensorStepConfig,
   type GateStepConfig,
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
@@ -56,6 +54,9 @@ const DEFAULT_LOOP_CONFIG = { over: "", stepIds: [] as string[], maxIterations: 
 const DEFAULT_RACE_CONFIG = { branches: "", validator: "" };
 const DEFAULT_SENSOR_CONFIG = { url: "", method: "GET", headers: "", checkInterval: 30, timeout: 1800, condition: "" };
 const DEFAULT_GATE_CONFIG = { strategies: [] as GateStepConfig["strategies"] };
+const DEFAULT_TRANSFORM_CONFIG = { template: "" };
+const DEFAULT_NOTIFY_CONFIG = { service: "", channel: "", message: "" };
+const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 3600 };
 
 function generateYaml(
   workflowName: string,
@@ -225,6 +226,40 @@ function generateYaml(
           yaml += `            seconds: ${strategy.seconds}\n`;
           yaml += `            action: ${strategy.action}\n`;
         }
+      }
+    } else if (sType === "transform") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: transform\n`;
+      yaml += `    transform_config:\n`;
+      yaml += `      template: |\n`;
+      step.transformConfig.template.split("\n").forEach((line) => {
+        yaml += `        ${line}\n`;
+      });
+    } else if (sType === "notify") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: notify\n`;
+      yaml += `    notify_config:\n`;
+      yaml += `      service: ${step.notifyConfig.service}\n`;
+      if (step.notifyConfig.channel) {
+        yaml += `      channel: "${step.notifyConfig.channel}"\n`;
+      }
+      yaml += `      message: |\n`;
+      step.notifyConfig.message.split("\n").forEach((line) => {
+        yaml += `        ${line}\n`;
+      });
+    } else if (sType === "delegate") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: delegate\n`;
+      yaml += `    delegate_config:\n`;
+      yaml += `      workflow: "${step.delegateConfig.workflow}"\n`;
+      if (step.delegateConfig.taskDescription) {
+        yaml += `      task_description: |\n`;
+        step.delegateConfig.taskDescription.split("\n").forEach((line) => {
+          yaml += `        ${line}\n`;
+        });
+      }
+      if (step.delegateConfig.timeout !== 3600) {
+        yaml += `      timeout: ${step.delegateConfig.timeout}\n`;
       }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
@@ -503,6 +538,9 @@ function buildInitialState(wf: InitialWorkflow) {
       raceConfig: { ...DEFAULT_RACE_CONFIG },
       sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
       gateConfig: { ...DEFAULT_GATE_CONFIG },
+      transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
+      notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
+      delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
     };
   });
 
@@ -563,6 +601,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       standard: "step", llm: "llm", http: "http", code: "code",
       condition: "check", classify: "route", loop: "loop",
       race: "race", sensor: "sensor", gate: "gate",
+      transform: "transform", notify: "notify", delegate: "delegate",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -595,6 +634,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       raceConfig: { ...DEFAULT_RACE_CONFIG },
       sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
       gateConfig: { ...DEFAULT_GATE_CONFIG },
+      transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
+      notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
+      delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
     };
 
     const newNode: Node = {
@@ -814,6 +856,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             { type: "race" as const, icon: Zap, label: "Race", color: "text-purple-400" },
             { type: "sensor" as const, icon: Radio, label: "Sensor", color: "text-teal-400" },
             { type: "gate" as const, icon: ShieldCheck, label: "Gate", color: "text-red-400" },
+            { type: "transform" as const, icon: Shuffle, label: "Transform", color: "text-cyan-400" },
+            { type: "notify" as const, icon: Bell, label: "Notify", color: "text-pink-400" },
+            { type: "delegate" as const, icon: ExternalLink, label: "Delegate", color: "text-indigo-400" },
           ] as const).map(({ type, icon: Icon, label, color }) => (
             <button
               key={type}
