@@ -1,0 +1,72 @@
+name: Supabase Data Sync
+description: Sync data from Google Sheets to Supabase, validate records, and notify on Slack.
+category: data
+tags: [Supabase, Google Sheets, Data Sync, Slack]
+default_model: haiku
+input_schema:
+  type: object
+  required: [spreadsheet_id, sheet_name, table_name]
+  properties:
+    spreadsheet_id:
+      type: string
+      description: Google Sheets spreadsheet ID
+    sheet_name:
+      type: string
+      description: Sheet/tab name to read from
+    table_name:
+      type: string
+      description: Supabase table name to sync into
+
+steps:
+  - id: read_sheet
+    prompt: |
+      Read all rows from Google Sheets spreadsheet {input.spreadsheet_id}, sheet "{input.sheet_name}".
+      Return the data as a JSON array of objects where keys are column headers.
+    tools: [google-sheets]
+    output_schema:
+      type: object
+      properties:
+        rows:
+          type: array
+
+  - id: validate
+    prompt: |
+      Validate the data from Google Sheets:
+      {steps.read_sheet.output}
+
+      Check for:
+      1. Missing required fields (non-empty)
+      2. Data type consistency
+      3. Duplicate entries
+
+      Return JSON with "valid_rows" array and "errors" array.
+    output_schema:
+      type: object
+      properties:
+        valid_rows:
+          type: array
+        errors:
+          type: array
+
+  - id: upsert
+    prompt: |
+      Insert or update the validated rows into Supabase table "{input.table_name}".
+
+      Valid rows to sync:
+      {steps.validate.output.valid_rows}
+
+      Use upsert to handle both new and existing records.
+      Return the count of inserted and updated rows.
+    tools: [supabase]
+
+  - id: notify
+    prompt: |
+      Send a Slack notification summarizing the data sync results.
+
+      - Source: Google Sheets {input.spreadsheet_id} / {input.sheet_name}
+      - Target: Supabase table {input.table_name}
+      - Synced rows: {steps.upsert.output}
+      - Validation errors: {steps.validate.output.errors}
+
+      Post to #data-ops channel.
+    tools: [slack]

@@ -192,7 +192,7 @@ def resolve_templates(
             return json.dumps(value)
         return str(value)
 
-    resolved = re.sub(r"\{([^}]+)\}", _replace, template)
+    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date)\}", _replace, template)
 
     # Auto-inject unreferenced dependency outputs
     if depends_on:

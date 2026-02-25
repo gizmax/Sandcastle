@@ -1,0 +1,72 @@
+name: Deployment Monitor
+description: Monitor Vercel deployments, check Datadog metrics, and alert via PagerDuty if anomalies detected.
+category: devops
+tags: [Vercel, Datadog, PagerDuty, Monitoring, DevOps]
+default_model: haiku
+input_schema:
+  type: object
+  required: [project_name]
+  properties:
+    project_name:
+      type: string
+      description: Vercel project name to monitor
+    metric_query:
+      type: string
+      description: Datadog metric query to check
+      default: "avg:system.cpu.user{*}"
+    threshold:
+      type: number
+      description: Alert threshold for the metric
+      default: 80
+
+steps:
+  - id: check_deployments
+    prompt: |
+      List the latest deployments for Vercel project "{input.project_name}".
+      Check if the most recent deployment succeeded.
+      Return the deployment status, URL, and creation time.
+    tools: [vercel]
+    output_schema:
+      type: object
+      properties:
+        latest_deployment:
+          type: object
+        status:
+          type: string
+
+  - id: check_metrics
+    prompt: |
+      Query Datadog metrics: {input.metric_query}
+      Get the last 15 minutes of data.
+      Check if any values exceed the threshold of {input.threshold}.
+      Return the current value and whether it's above threshold.
+    tools: [datadog]
+    output_schema:
+      type: object
+      properties:
+        current_value:
+          type: number
+        above_threshold:
+          type: boolean
+
+  - id: alert
+    type: condition
+    condition: "{steps.check_metrics.output.above_threshold} == true"
+    if_true:
+      - id: create_alert
+        prompt: |
+          Create a PagerDuty incident for metric anomaly:
+          - Project: {input.project_name}
+          - Metric: {input.metric_query}
+          - Current value: {steps.check_metrics.output.current_value}
+          - Threshold: {input.threshold}
+          - Latest deployment: {steps.check_deployments.output}
+
+          Create a high-urgency incident with these details.
+        tools: [pagerduty]
+    if_false:
+      - id: log_ok
+        prompt: |
+          All metrics are within normal range for {input.project_name}.
+          Current value: {steps.check_metrics.output.current_value} (threshold: {input.threshold})
+          Latest deployment status: {steps.check_deployments.output.status}

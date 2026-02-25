@@ -1,0 +1,61 @@
+name: AI Content Pipeline
+description: Generate blog content with OpenAI, create audio version with ElevenLabs, and store assets in AWS S3.
+category: marketing
+tags: [AI, Content, Text-to-Speech, S3]
+default_model: sonnet
+input_schema:
+  type: object
+  required: [topic]
+  properties:
+    topic:
+      type: string
+      description: Blog post topic
+    tone:
+      type: string
+      description: Writing tone (professional, casual, technical)
+      default: professional
+    s3_prefix:
+      type: string
+      description: S3 key prefix for storing assets
+      default: content/blog
+
+steps:
+  - id: research
+    prompt: |
+      Research the topic "{input.topic}" using web search.
+      Find 3-5 key points, statistics, and expert opinions.
+      Return structured research notes.
+    tools: [tavily]
+
+  - id: write
+    prompt: |
+      Write a 800-word blog post about "{input.topic}" in a {input.tone} tone.
+
+      Use these research notes:
+      {steps.research.output}
+
+      Include an engaging title, introduction, 3-4 sections with headers, and a conclusion.
+      Return as JSON with "title" and "content" fields.
+    output_schema:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+
+  - id: generate_audio
+    prompt: |
+      Convert this blog post to speech audio using ElevenLabs.
+      Use a professional narrator voice.
+
+      Title: {steps.write.output.title}
+      Content: {steps.write.output.content}
+    tools: [elevenlabs]
+
+  - id: store_assets
+    prompt: |
+      Upload the generated blog content and audio to S3.
+      Store the text content at {input.s3_prefix}/post.md
+      Store the audio at {input.s3_prefix}/narration.mp3
+    tools: [aws-s3]

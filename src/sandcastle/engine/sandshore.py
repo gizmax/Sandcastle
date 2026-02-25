@@ -34,6 +34,8 @@ class SandshoreResult:
     structured_output: dict | None = None
     total_cost_usd: float = 0.0
     num_turns: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
