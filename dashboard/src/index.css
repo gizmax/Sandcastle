@@ -139,3 +139,206 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ──── Onboarding wizard animations ──── */
+
+@keyframes wizard-step-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in-bounce {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.15); }
+  80%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+@keyframes fade-in-left {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes connector-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes stroke-draw {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes step-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.25); }
+  50%      { box-shadow: 0 0 8px 3px rgba(245, 158, 11, 0.3); }
+}
+
+@keyframes shimmer-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes terminal-glow {
+  0%, 100% { box-shadow: inset 0 0 20px rgba(245, 158, 11, 0.03), 0 0 8px rgba(245, 158, 11, 0.05); }
+  50%      { box-shadow: inset 0 0 20px rgba(245, 158, 11, 0.06), 0 0 12px rgba(245, 158, 11, 0.1); }
+}
+
+@keyframes terminal-success-flash {
+  0%   { box-shadow: inset 0 0 30px rgba(34, 197, 94, 0.08); }
+  100% { box-shadow: inset 0 0 0px rgba(34, 197, 94, 0); }
+}
+
+@keyframes terminal-error-flash {
+  0%   { box-shadow: inset 0 0 30px rgba(239, 68, 68, 0.08); }
+  100% { box-shadow: inset 0 0 0px rgba(239, 68, 68, 0); }
+}
+
+@keyframes log-line-enter {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes confetti-fall {
+  0%   { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0; scale: 0.5; }
+}
+
+@keyframes ambient-glow {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%      { opacity: 0.8; transform: scale(1.05); }
+}
+
+@keyframes ring-appear {
+  from { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  to   { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }
+}
+
+/* Step entrance */
+.wizard-step-enter {
+  animation: wizard-step-enter 0.35s ease-out both;
+}
+
+/* Stagger children (top-to-bottom) */
+.stagger-children > *:nth-child(1) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 360ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 420ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 480ms; }
+.stagger-children > * {
+  animation: fade-in-up 0.35s ease-out both;
+}
+
+/* Stagger children (left-to-right) */
+.stagger-left > *:nth-child(1) { animation-delay: 100ms; }
+.stagger-left > *:nth-child(2) { animation-delay: 200ms; }
+.stagger-left > *:nth-child(3) { animation-delay: 300ms; }
+.stagger-left > * {
+  animation: fade-in-left 0.35s ease-out both;
+}
+
+/* Button shimmer sweep */
+.btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.btn-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+  animation: shimmer-sweep 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Terminal border states */
+.terminal-running {
+  animation: terminal-glow 2s ease-in-out infinite;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+.terminal-success {
+  animation: terminal-success-flash 0.8s ease-out both;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.terminal-error {
+  animation: terminal-error-flash 0.8s ease-out both;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* SVG checkmark stroke draw */
+.checkmark-draw {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: stroke-draw 0.4s ease-out 0.15s both;
+}
+
+/* Elastic scale entrance */
+.scale-in-bounce {
+  animation: scale-in-bounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Background glow pulse */
+.ambient-glow {
+  animation: ambient-glow 3s ease-in-out infinite;
+}
+
+/* Progress bar current step pulse */
+.step-indicator-pulse {
+  animation: step-pulse 2s ease-in-out infinite;
+}
+
+/* Card hover lift */
+.card-hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+/* Card selected ring */
+.card-selected {
+  animation: ring-appear 0.3s ease-out both;
+  transform: scale(1.02);
+}
+
+/* Accessibility: disable animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .wizard-step-enter,
+  .stagger-children > *,
+  .stagger-left > *,
+  .scale-in-bounce,
+  .checkmark-draw,
+  .ambient-glow,
+  .step-indicator-pulse,
+  .card-selected,
+  .terminal-running,
+  .terminal-success,
+  .terminal-error {
+    animation: none !important;
+  }
+  .btn-shimmer::after {
+    animation: none !important;
+  }
+  .card-hover-lift:hover {
+    transform: none;
+  }
+}
+
+/* Mobile: disable resource-heavy effects */
+@media (max-width: 640px) {
+  .ambient-glow {
+    animation: none !important;
+  }
+  .btn-shimmer::after {
+    animation: none !important;
+  }
+}

@@ -75,8 +75,11 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [stepKey, setStepKey] = useState(0);
+
   const goTo = useCallback((step: number) => {
     setCurrentStep(Math.max(0, Math.min(5, step)));
+    setStepKey((k) => k + 1);
   }, []);
 
   const handleSkipToDashboard = useCallback(() => {
@@ -107,6 +110,7 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
 
       {/* Step content */}
       <div className="mx-auto w-full max-w-xl rounded-xl border border-border bg-surface p-6 sm:p-8 shadow-sm">
+        <div key={stepKey} className="wizard-step-enter">
         {currentStep === 0 && (
           <StepWelcome
             onNext={() => goTo(1)}
@@ -158,6 +162,7 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
             onGoTo={handleGoTo}
           />
         )}
+        </div>
       </div>
     </div>
   );
