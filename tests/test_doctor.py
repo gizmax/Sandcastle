@@ -40,13 +40,20 @@ class TestDoctorCommand:
     def test_passes_with_anthropic_key(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Doctor should pass critical checks when ANTHROPIC_API_KEY is set."""
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key-1234"}):
-            with pytest.raises(SystemExit) as exc_info:
-                _cmd_doctor(None)
-            output = capsys.readouterr().out
-            assert "[PASS]" in output
-            assert "ANTHROPIC_API_KEY configured" in output
-            # Exit code 0 (all critical pass)
-            assert exc_info.value.code == 0
+            with patch("sandcastle.config.Settings") as MockSettings:
+                mock_cfg = MockSettings.return_value
+                mock_cfg.anthropic_api_key = "sk-test-key-1234"
+                mock_cfg.e2b_api_key = ""
+                mock_cfg.sandbox_backend = "local"
+                mock_cfg.cloudflare_worker_url = ""
+                mock_cfg.telemetry_enabled = False
+                mock_cfg.sentry_dsn = ""
+                with pytest.raises(SystemExit) as exc_info:
+                    _cmd_doctor(None)
+                output = capsys.readouterr().out
+                assert "[PASS]" in output
+                assert "ANTHROPIC_API_KEY configured" in output
+                assert exc_info.value.code == 0
 
     def test_fails_without_anthropic_key(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Doctor should fail when ANTHROPIC_API_KEY is missing."""

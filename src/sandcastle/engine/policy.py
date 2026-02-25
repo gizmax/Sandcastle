@@ -339,13 +339,52 @@ def _resolve_policy_template(template: str, output: Any, context: dict[str, Any]
 
 # Common credential patterns for tool connectors
 _CREDENTIAL_PATTERNS: dict[str, list[str]] = {
+    # Communication
     "slack": [r"xoxb-[0-9A-Za-z\-]+", r"xoxp-[0-9A-Za-z\-]+"],
+    "discord": [r"[A-Za-z0-9_\-]{24}\.[A-Za-z0-9_\-]{6}\.[A-Za-z0-9_\-]{27,}"],
+    "twilio": [r"SK[0-9a-f]{32}"],
+    "sendgrid": [r"SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}"],
+    "resend": [r"re_[A-Za-z0-9]{20,}"],
+    "whatsapp": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "intercom": [r"dG9r[A-Za-z0-9=]+"],
+    # Project management
     "github": [r"ghp_[A-Za-z0-9]{20,40}", r"gho_[A-Za-z0-9]{20,40}"],
-    "hubspot": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "jira": [r"[A-Za-z0-9+/]{24,}={0,2}"],
+    "linear": [r"lin_api_[A-Za-z0-9]+"],
+    # CRM
+    "hubspot": [r"pat-[a-z]{2}\d+-[a-f0-9\-]+"],
     "salesforce": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "zendesk": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    # Data
+    "supabase": [r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"],
+    "pinecone": [r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"],
+    "airtable": [r"pat[A-Za-z0-9]{14}\.[a-f0-9]{64}"],
+    "snowflake": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "redis": [r"redis://[^@\s]+@"],
+    # Payments / ERP
     "stripe": [r"sk_live_[A-Za-z0-9]+", r"sk_test_[A-Za-z0-9]+"],
+    "shopify": [r"shpat_[A-Za-z0-9]+", r"shppa_[A-Za-z0-9]+"],
+    "plaid": [r"access-sandbox-[a-f0-9\-]+", r"access-production-[a-f0-9\-]+"],
+    "quickbooks": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "docusign": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    # AI
+    "openai": [r"sk-[A-Za-z0-9]{48}", r"sk-proj-[A-Za-z0-9\-_]+"],
+    "anthropic": [r"sk-ant-[A-Za-z0-9\-_]+"],
+    "elevenlabs": [r"[a-f0-9]{32}"],
+    "tavily": [r"tvly-[A-Za-z0-9]+"],
+    # DevOps / Cloud
     "aws": [r"AKIA[0-9A-Z]{16}"],
-    "openai": [r"sk-[A-Za-z0-9]{48}"],
+    "vercel": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "datadog": [r"[a-f0-9]{32}"],
+    "pagerduty": [r"[A-Za-z0-9_\-]{20}"],
+    "cloudflare-workers": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    # Design / Scheduling
+    "figma": [r"figd_[A-Za-z0-9_\-]+"],
+    "calendly": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    # Services
+    "firecrawl": [r"fc-[A-Za-z0-9]+"],
+    "servicenow": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
+    "sap": [r"Bearer\s+[A-Za-z0-9_\-\.]+"],
 }
 
 
