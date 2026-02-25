@@ -2667,6 +2667,568 @@ async def _execute_delegate_step(
         )
 
 
+async def _execute_browser_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+) -> StepResult:
+    """Execute a browser automation step.
+
+    Supports two modes:
+    - playwright: Agent writes and executes Playwright scripts inside the
+      sandbox via the standard agent loop. The step prompt is augmented with
+      browser tool instructions, viewport config, and start URL context.
+    - computer_use: Screenshot-action loop via the Anthropic computer_use
+      beta API. Takes screenshots of a headless browser running inside the
+      sandbox, sends them to Claude, and executes returned mouse/keyboard
+      actions. Loops until the task is complete or the timeout is reached.
+    """
+    import base64
+    import os
+    import time
+
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_model
+
+    started_at = time.monotonic()
+    cfg = step.browser_config
+    if not cfg:
+        return StepResult(
+            step_id=step.id, status="failed", error="Missing browser_config",
+        )
+
+    prompt = resolve_templates(step.prompt, context, step.depends_on)
+    prompt = await resolve_storage_refs(prompt, storage)
+
+    # Resolve credentials from environment if configured
+    credentials_json = None
+    if cfg.credentials_env:
+        credentials_json = os.environ.get(cfg.credentials_env)
+
+    try:
+        if cfg.mode == "playwright":
+            return await _browser_playwright_mode(
+                step, cfg, prompt, credentials_json, context, sandbox,
+                storage, started_at,
+            )
+        elif cfg.mode == "computer_use":
+            return await _browser_computer_use_mode(
+                step, cfg, prompt, credentials_json, context, sandbox,
+                storage, started_at,
+            )
+        else:
+            return StepResult(
+                step_id=step.id, status="failed",
+                error=f"Unknown browser mode: {cfg.mode}",
+                duration_seconds=time.monotonic() - started_at,
+            )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        logger.error(f"Browser step '{step.id}' failed: {e}")
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _browser_playwright_mode(
+    step: StepDefinition,
+    cfg: Any,
+    prompt: str,
+    credentials_json: str | None,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    started_at: float,
+) -> StepResult:
+    """Playwright mode: augment the step prompt with browser tool instructions
+    and delegate to the standard sandbox agent execution.
+    """
+    # Build augmented prompt with browser context
+    browser_instructions = (
+        "You have access to a headless Chromium browser via Playwright.\n"
+        "Playwright and Chromium are pre-installed in the sandbox.\n\n"
+        "## Browser Tools\n"
+        "Write and execute Node.js scripts using Playwright to automate "
+        "the browser. Use the Bash tool to run scripts like:\n\n"
+        "```bash\n"
+        "node -e \"\n"
+        "const { chromium } = require('playwright');\n"
+        "(async () => {\n"
+        f"  const browser = await chromium.launch("
+        f"{{ headless: {'true' if cfg.headless else 'false'} }});\n"
+        f"  const page = await browser.newPage("
+        f"{{ viewport: {{ width: {cfg.viewport_width}, "
+        f"height: {cfg.viewport_height} }} }});\n"
+    )
+
+    if cfg.start_url:
+        start_url = resolve_templates(
+            cfg.start_url, context, step.depends_on,
+        )
+        browser_instructions += f"  await page.goto('{start_url}');\n"
+
+    browser_instructions += (
+        "  // ... your automation code here ...\n"
+        "  await browser.close();\n"
+        "})();\n"
+        "\"\n"
+        "```\n\n"
+        "## Available Playwright Actions\n"
+        "- **Navigate:** `await page.goto(url)`\n"
+        "- **Click:** `await page.click(selector)` or "
+        "`await page.locator(text).click()`\n"
+        "- **Type:** `await page.fill(selector, text)` or "
+        "`await page.type(selector, text)`\n"
+        "- **Screenshot:** "
+        "`await page.screenshot({ path: 'screenshot.png' })`\n"
+        "- **Wait:** `await page.waitForSelector(selector)` or "
+        "`await page.waitForTimeout(ms)`\n"
+        "- **Get text:** `await page.textContent(selector)` or "
+        "`await page.innerText(selector)`\n"
+        "- **Evaluate:** "
+        "`await page.evaluate(() => document.title)`\n"
+        "- **Select:** `await page.selectOption(selector, value)`\n"
+        "- **Check/Uncheck:** `await page.check(selector)` / "
+        "`await page.uncheck(selector)`\n"
+        "- **Press key:** `await page.keyboard.press('Enter')`\n\n"
+        f"Wait {cfg.wait_after_action}s between major actions for page "
+        "stability.\n"
+    )
+
+    if credentials_json:
+        browser_instructions += (
+            "\n## Credentials\n"
+            f"Credentials JSON is available: {credentials_json}\n"
+            "Use these for any login forms or authentication.\n"
+        )
+
+    if cfg.screenshot_on_error:
+        browser_instructions += (
+            "\n## Error Handling\n"
+            "If an action fails, take a screenshot for debugging:\n"
+            "`await page.screenshot({ path: 'error-screenshot.png' })`\n"
+        )
+
+    augmented_prompt = (
+        f"{browser_instructions}\n"
+        f"## Task\n{prompt}\n"
+    )
+
+    # Install playwright in sandbox (idempotent)
+    try:
+        runtime = get_sandshore_runtime()
+        await runtime.sandbox_exec(
+            sandbox,
+            "bash",
+            [
+                "-c",
+                "command -v npx && "
+                "npx playwright install chromium 2>/dev/null || "
+                "(npm install -g playwright && "
+                "npx playwright install chromium)",
+            ],
+            timeout=60,
+        )
+    except Exception as install_err:
+        logger.warning(
+            "Playwright install warning (may already be present): "
+            f"{install_err}"
+        )
+
+    # Create a modified step with the browser-augmented prompt and
+    # delegate to the standard agent execution path.
+    from sandcastle.engine.dag import StepDefinition as _StepDef
+
+    browser_step = _StepDef(
+        id=step.id,
+        prompt=augmented_prompt,
+        depends_on=step.depends_on,
+        model=step.model,
+        max_turns=step.max_turns,
+        timeout=max(step.timeout, cfg.timeout_seconds),
+        output_schema=step.output_schema,
+        retry=step.retry,
+        fallback=step.fallback,
+        type="standard",
+        tools=step.tools,
+    )
+
+    result = await execute_step_with_retry(
+        browser_step, context, sandbox, storage,
+    )
+    result.step_id = step.id
+    return result
+
+
+async def _browser_computer_use_mode(
+    step: StepDefinition,
+    cfg: Any,
+    prompt: str,
+    credentials_json: str | None,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    started_at: float,
+) -> StepResult:
+    """Computer use mode: screenshot-action loop via Anthropic API.
+
+    Launches a headless browser in the sandbox, takes screenshots, sends
+    them to Claude with the computer_use tool, and executes returned
+    mouse/keyboard actions until task completion or timeout.
+    """
+    import base64
+    import os
+    import time
+
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_model
+
+    model_info = resolve_model(step.model)
+    api_key = get_api_key(model_info)
+
+    runtime = get_sandshore_runtime()
+    deadline = time.monotonic() + cfg.timeout_seconds
+    total_cost = 0.0
+    action_count = 0
+    max_actions = 200  # Safety limit
+
+    # Resolve start URL
+    start_url = cfg.start_url
+    if start_url:
+        start_url = resolve_templates(start_url, context, step.depends_on)
+
+    # Build and run browser launch script in sandbox
+    launch_script = (
+        "const { chromium } = require('playwright');\n"
+        "const fs = require('fs');\n"
+        "(async () => {\n"
+        "  const browser = await chromium.launch({ headless: true });\n"
+        f"  const page = await browser.newPage({{ viewport: "
+        f"{{ width: {cfg.viewport_width}, "
+        f"height: {cfg.viewport_height} }} }});\n"
+    )
+    if start_url:
+        launch_script += f"  await page.goto('{start_url}');\n"
+    launch_script += (
+        "  await page.screenshot({ path: '/tmp/screenshot.png' });\n"
+        "  console.log('BROWSER_READY');\n"
+        "  // Keep browser alive for actions\n"
+        "  global._page = page;\n"
+        "  global._browser = browser;\n"
+        "})();\n"
+    )
+
+    # Install playwright and launch browser
+    await runtime.sandbox_exec(
+        sandbox, "bash",
+        [
+            "-c",
+            "command -v npx && "
+            "npx playwright install chromium 2>/dev/null || "
+            "(npm install -g playwright && "
+            "npx playwright install chromium)",
+        ],
+        timeout=60,
+    )
+
+    await runtime.sandbox_exec(
+        sandbox, "bash",
+        ["-c", f"cat > /tmp/browser_launch.js << 'SCRIPT_EOF'\n"
+         f"{launch_script}\nSCRIPT_EOF\nnode /tmp/browser_launch.js"],
+        timeout=30,
+    )
+
+    # Build conversation for computer_use loop
+    task_prompt = (
+        "You are controlling a browser to complete a task.\n\n"
+        f"Task: {prompt}"
+    )
+    if credentials_json:
+        task_prompt += f"\n\nCredentials available: {credentials_json}"
+
+    messages: list[dict] = [{"role": "user", "content": [
+        {"type": "text", "text": task_prompt},
+    ]}]
+
+    # Take initial screenshot
+    screenshot_data = await _take_sandbox_screenshot(runtime, sandbox)
+    if screenshot_data:
+        messages[0]["content"].append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": screenshot_data,
+            },
+        })
+
+    last_result = None
+
+    while time.monotonic() < deadline and action_count < max_actions:
+        # Call Claude with computer_use tool
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "anthropic-beta": "computer-use-2025-01-24",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 4096,
+                        "system": (
+                            "You are a browser automation agent. Use the "
+                            "computer tool to interact with the browser. "
+                            "When the task is complete, respond with a "
+                            "text block containing ONLY the result."
+                        ),
+                        "tools": [{
+                            "type": "computer_20250124",
+                            "name": "computer",
+                            "display_width_px": cfg.viewport_width,
+                            "display_height_px": cfg.viewport_height,
+                            "display_number": 1,
+                        }],
+                        "messages": messages,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as api_err:
+            logger.error(f"Computer use API call failed: {api_err}")
+            break
+
+        # Track cost
+        usage = data.get("usage", {})
+        in_tok = usage.get("input_tokens", 0)
+        out_tok = usage.get("output_tokens", 0)
+        total_cost += (
+            in_tok * model_info.input_price_per_m / 1_000_000
+            + out_tok * model_info.output_price_per_m / 1_000_000
+        )
+
+        # Process response
+        content_blocks = data.get("content", [])
+        stop_reason = data.get("stop_reason", "")
+
+        has_tool_use = any(
+            b.get("type") == "tool_use" for b in content_blocks
+        )
+        if stop_reason == "end_turn" and not has_tool_use:
+            text_parts = [
+                b["text"] for b in content_blocks
+                if b.get("type") == "text"
+            ]
+            last_result = (
+                "\n".join(text_parts) if text_parts else "Task completed"
+            )
+            break
+
+        # Process tool calls
+        assistant_content = content_blocks
+        tool_results = []
+
+        for block in content_blocks:
+            if block.get("type") != "tool_use":
+                continue
+
+            tool_input = block.get("input", {})
+            action = tool_input.get("action", "")
+            action_count += 1
+
+            action_script = _build_computer_use_action_script(
+                action, tool_input, cfg,
+            )
+
+            try:
+                exec_result = await runtime.sandbox_exec(
+                    sandbox, "bash",
+                    ["-c", f"node -e '{action_script}'"],
+                    timeout=15,
+                )
+                action_output = (
+                    exec_result.get("stdout", "")
+                    if isinstance(exec_result, dict) else str(exec_result)
+                )
+            except Exception as exec_err:
+                action_output = f"Action failed: {exec_err}"
+
+            await asyncio.sleep(cfg.wait_after_action)
+
+            # Take screenshot after action
+            screenshot_data = await _take_sandbox_screenshot(
+                runtime, sandbox,
+            )
+
+            tool_result_content: list[dict] = []
+            if action_output:
+                tool_result_content.append({
+                    "type": "text", "text": action_output[:2000],
+                })
+            if screenshot_data:
+                tool_result_content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": screenshot_data,
+                    },
+                })
+            if not tool_result_content:
+                tool_result_content.append({
+                    "type": "text", "text": "Action executed",
+                })
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block["id"],
+                "content": tool_result_content,
+            })
+
+        messages.append({
+            "role": "assistant", "content": assistant_content,
+        })
+        messages.append({"role": "user", "content": tool_results})
+
+    duration = time.monotonic() - started_at
+
+    if last_result is None:
+        if action_count >= max_actions:
+            last_result = (
+                f"Browser automation stopped after {max_actions} "
+                "actions (safety limit)"
+            )
+        else:
+            last_result = (
+                f"Browser automation timed out after "
+                f"{cfg.timeout_seconds}s"
+            )
+
+    # Try to parse result as JSON
+    output: Any = last_result
+    try:
+        parsed = json.loads(last_result)
+        if isinstance(parsed, (dict, list)):
+            output = parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return StepResult(
+        step_id=step.id, output=output, cost_usd=total_cost,
+        duration_seconds=duration, status="completed",
+    )
+
+
+def _build_computer_use_action_script(
+    action: str,
+    tool_input: dict,
+    cfg: Any,
+) -> str:
+    """Build a Node.js script to execute a computer_use action in the
+    sandbox browser.
+    """
+    coordinate = tool_input.get("coordinate", [0, 0])
+    x = coordinate[0] if len(coordinate) > 0 else 0
+    y = coordinate[1] if len(coordinate) > 1 else 0
+    text = (
+        tool_input.get("text", "")
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+    )
+
+    if action == "screenshot":
+        return (
+            "const fs = require('fs'); "
+            "console.log('screenshot_taken');"
+        )
+    elif action in ("click", "left_click"):
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.click({x}, {y}); "
+            f"console.log('clicked {x},{y}'); }})();"
+        )
+    elif action == "right_click":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.click("
+            f"{x}, {y}, {{button: 'right'}}); "
+            f"console.log('right_clicked {x},{y}'); }})();"
+        )
+    elif action == "double_click":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.dblclick({x}, {y}); "
+            f"console.log('double_clicked {x},{y}'); }})();"
+        )
+    elif action == "type":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.keyboard.type('{text}'); "
+            "console.log('typed text'); }})();"
+        )
+    elif action == "key":
+        key = tool_input.get("text", "Enter").replace("'", "\\'")
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.keyboard.press('{key}'); "
+            f"console.log('pressed {key}'); }})();"
+        )
+    elif action == "scroll":
+        scroll_dir = tool_input.get("coordinate", [0, 0])
+        scroll_y = scroll_dir[1] if len(scroll_dir) > 1 else -100
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.wheel(0, {scroll_y}); "
+            f"console.log('scrolled {scroll_y}'); }})();"
+        )
+    elif action == "mouse_move":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.move({x}, {y}); "
+            f"console.log('moved to {x},{y}'); }})();"
+        )
+    else:
+        return f"console.log('Unknown action: {action}');"
+
+
+async def _take_sandbox_screenshot(
+    runtime: Any,
+    sandbox: Any,
+) -> str | None:
+    """Take a screenshot in the sandbox and return base64-encoded PNG."""
+    try:
+        script = (
+            "const page = global._page; "
+            "(async () => { "
+            "  await page.screenshot({ path: '/tmp/screenshot.png' }); "
+            "  const fs = require('fs'); "
+            "  const data = fs.readFileSync('/tmp/screenshot.png'); "
+            "  console.log(data.toString('base64')); "
+            "})();"
+        )
+        result = await runtime.sandbox_exec(
+            sandbox, "bash",
+            ["-c", f"node -e '{script}'"],
+            timeout=10,
+        )
+        output = (
+            result.get("stdout", "").strip()
+            if isinstance(result, dict) else str(result).strip()
+        )
+        if output and len(output) > 100:
+            return output
+    except Exception as e:
+        logger.debug(f"Screenshot failed: {e}")
+    return None
+
+
 async def _prepare_and_run_step(
     step_id: str,
     workflow: WorkflowDefinition,
@@ -2937,6 +3499,24 @@ async def _prepare_and_run_step(
         else:
             raise StepExecutionError(
                 f"Delegate step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "browser":
+        result = await _execute_browser_step(step, context, sandbox, storage)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                model=step.model,
+            )
+        else:
+            raise StepExecutionError(
+                f"Browser step '{step_id}' failed: {result.error}"
             )
         return
 

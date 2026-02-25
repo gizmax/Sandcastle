@@ -50,13 +50,13 @@ def _load_example_templates() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step types documentation (all 15 types)
+# Step types documentation (all 16 types)
 # ---------------------------------------------------------------------------
 
 _STEP_TYPES_DOC = """\
 ## Step Types
 
-Each step has a `type` field (default: "standard"). Here are all 15 supported types:
+Each step has a `type` field (default: "standard"). Here are all 16 supported types:
 
 ### standard (default)
 Default LLM agent step - runs an agent in a sandbox with tools.
@@ -123,6 +123,12 @@ workflow is the name of the workflow to invoke.
 ### approval (legacy)
 Human-in-the-loop approval gate.
 Fields: approval_config: {message, show_data, timeout_hours, on_timeout, allow_edit}
+
+### browser
+Browser automation step - runs a headless browser in the sandbox for web scraping, form filling, or UI testing.
+Supports two modes: "playwright" (agent writes Playwright scripts) and "computer_use" (Claude controls the browser via screenshots).
+Fields: prompt (task description), browser_config: {mode, start_url, viewport_width, viewport_height, timeout_seconds, wait_after_action, screenshot_on_error, headless, credentials_env}
+mode defaults to "playwright". Requires a prompt describing the browser task.
 
 ### sub_workflow (legacy)
 Run another workflow as a sub-step with input/output mapping.
@@ -213,13 +219,17 @@ Workflows run inside sandboxed environments (E2B cloud sandbox, Docker, or local
 The agent has access to ONLY these tools: Bash (with curl), Read, Write, Edit, Glob, Grep.
 Steps can also use external tool connectors (see Available Tool Connectors above).
 
-CRITICAL LIMITATIONS - the agent CANNOT:
-- Browse the web or render JavaScript - no browser is available
+CRITICAL LIMITATIONS for standard steps - the agent CANNOT:
+- Browse the web or render JavaScript - no browser is available in standard steps
 - Use WebSearch or WebFetch - these tools do NOT exist in the sandbox
 - Access social media platforms (Twitter/X, LinkedIn, Reddit, Instagram) - they require OAuth/API keys
 - Access review platforms (G2, Trustpilot, Capterra, App Store) - they require JavaScript rendering
 - Crawl multiple pages of a website - only simple single-page curl requests work
 - Use Google/Bing search - search engines block automated curl requests
+
+NOTE: For tasks that require a real browser (JavaScript rendering, form filling, multi-page
+navigation, scraping dynamic sites), use the `browser` step type instead of `standard`.
+Browser steps run a headless Playwright browser in the sandbox.
 
 WHAT WORKS:
 - Fetching simple HTML pages via curl (news sites, company homepages, documentation)
@@ -228,12 +238,14 @@ WHAT WORKS:
 - Using the agent's built-in knowledge for analysis, writing, reasoning, and planning
 - File operations (reading, writing, creating reports, generating code)
 - Using tool connectors (Slack, Jira, GitHub, etc.) when configured on the step
+- Browser automation via `type: browser` steps (Playwright or computer_use mode)
 
 RULES FOR WEB-DEPENDENT WORKFLOWS:
 1. If a workflow needs social media data, review data, or search results - require the data as INPUT (text or JSON), not as something the agent fetches
 2. For data that requires external collection, add a note in the description: "Provide pre-collected data from [source]. Use external tools like Brandwatch, Mention, Google Alerts, or social listening APIs to collect data."
 3. For simple URL fetching (single page), instruct the agent: "Use curl -s -L <url> to fetch the page content"
-4. NEVER write prompts that ask the agent to "search the web", "browse social media", "check review sites", or "crawl a website"
+4. For tasks needing JavaScript rendering or multi-page navigation, use `type: browser` with appropriate browser_config
+5. NEVER write prompts for standard steps that ask the agent to "search the web", "browse social media", "check review sites", or "crawl a website"
 5. Prefer workflows where the user provides all data as input and the agent does analysis, transformation, and writing
 
 ## Rules
@@ -435,13 +447,15 @@ Workflows run inside sandboxed environments (E2B cloud sandbox, Docker, or local
 The agent has access to ONLY these tools: Bash (with curl), Read, Write, Edit, Glob, Grep.
 Steps can also use external tool connectors (see Available Tool Connectors above).
 
-CRITICAL LIMITATIONS - the agent CANNOT:
-- Browse the web or render JavaScript - no browser is available
+CRITICAL LIMITATIONS for standard steps - the agent CANNOT:
+- Browse the web or render JavaScript - no browser is available in standard steps
 - Use WebSearch or WebFetch - these tools do NOT exist in the sandbox
 - Access social media platforms (Twitter/X, LinkedIn, Reddit, Instagram) - they require OAuth/API keys
 - Access review platforms (G2, Trustpilot, Capterra, App Store) - they require JavaScript rendering
 - Crawl multiple pages of a website - only simple single-page curl requests work
 - Use Google/Bing search - search engines block automated curl requests
+
+NOTE: For tasks requiring a real browser, use the `browser` step type instead.
 
 WHAT WORKS:
 - Fetching simple HTML pages via curl (news sites, company homepages, documentation)
@@ -450,11 +464,13 @@ WHAT WORKS:
 - Using the agent's built-in knowledge for analysis, writing, reasoning, and planning
 - File operations (reading, writing, creating reports, generating code)
 - Using tool connectors (Slack, Jira, GitHub, etc.) when configured on the step
+- Browser automation via `type: browser` steps (Playwright or computer_use mode)
 
 RULES FOR WEB-DEPENDENT WORKFLOWS:
 1. If a workflow needs social media data, review data, or search results - require the data as INPUT
-2. NEVER write prompts that ask the agent to "search the web", "browse social media", or "crawl a website"
-3. Prefer workflows where the user provides all data as input and the agent does analysis
+2. For tasks needing JavaScript rendering or multi-page navigation, use `type: browser`
+3. NEVER write prompts for standard steps that ask the agent to "search the web", "browse social media", or "crawl a website"
+4. Prefer workflows where the user provides all data as input and the agent does analysis
 
 ## Rules
 1. Every workflow MUST have input_schema with required and properties
