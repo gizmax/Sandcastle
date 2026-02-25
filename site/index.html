@@ -1675,11 +1675,11 @@
     <div class="container fade-in">
       <div class="stats-row">
         <div class="stat-item">
-          <div class="stat-number">731</div>
+          <div class="stat-number">833</div>
           <div class="stat-label">Tests Passing</div>
         </div>
         <div class="stat-item">
-          <div class="stat-number">28</div>
+          <div class="stat-number">88</div>
           <div class="stat-label">Templates</div>
         </div>
         <div class="stat-item">
@@ -1861,7 +1861,12 @@
             <div class="feature-card">
               <span class="feature-icon">🎯</span>
               <h3>Cost-Latency Optimizer</h3>
-              <p>SLO-based model routing. Define quality, cost, and latency constraints - let the optimizer pick the model.</p>
+              <p>SLO-based model routing with feedback loop, model degradation alerts, and automatic severity-based recommendations.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🧬</span>
+              <h3>AutoPilot v2</h3>
+              <p>Thompson Sampling variant selection, Welch's t-test significance testing, and progressive rollout (canary 10% -> partial 50% -> full 100%).</p>
             </div>
           </div>
         </div>
@@ -1888,6 +1893,11 @@
               <span class="feature-icon">⚡</span>
               <h3>Circuit Breaker</h3>
               <p>Automatic failure detection with CLOSED/OPEN/HALF_OPEN states. Prevents cascading failures across your pipeline.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🚦</span>
+              <h3>Progressive Rollout</h3>
+              <p>Deploy experiment winners safely: canary (10%) to partial (50%) to full (100%). Statistical significance required before each stage advance.</p>
             </div>
           </div>
         </div>
@@ -1920,6 +1930,16 @@
               <h3>Webhooks + SSE</h3>
               <p>Real-time event streaming via SSE. Webhook dispatcher for external integrations. Live updates, no polling.</p>
             </div>
+            <div class="feature-card">
+              <span class="feature-icon">🔗</span>
+              <h3>Named Connections</h3>
+              <p>Multiple credential instances per tool. <code>slack:engineering</code>, <code>postgresql:analytics</code> - named connections resolve to the right credentials automatically.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🌐</span>
+              <h3>Browser RPA</h3>
+              <p>Three modes: Playwright (selector-based), Computer Use (vision AI), DOM Extract (accessibility tree). Action caching, CAPTCHA escalation, execution replay.</p>
+            </div>
           </div>
         </div>
 
@@ -1938,8 +1958,8 @@
             </div>
             <div class="feature-card">
               <span class="feature-icon">📋</span>
-              <h3>28 Templates</h3>
-              <p>Marketing, sales, support, HR, legal, product, and operations templates. Blog to Social, Lead Enrichment, Contract Review, and more.</p>
+              <h3>88 Templates</h3>
+              <p>Marketing, sales, engineering, support, HR, legal, and general AI templates. Full Community Hub with one-click install and uninstall.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🧪</span>
@@ -1950,6 +1970,11 @@
               <span class="feature-icon">🚀</span>
               <h3>REST API + Docs</h3>
               <p>Full OpenAPI spec. Interactive docs at <code>/api/docs</code>. Zero-config local mode - <code>sandcastle init</code> + <code>sandcastle serve</code>.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🏪</span>
+              <h3>Community Hub</h3>
+              <p>Browse, install, and share workflow templates. One-click install from the dashboard or <code>sandcastle hub install author/name</code> from CLI.</p>
             </div>
           </div>
         </div>
@@ -2160,49 +2185,42 @@
   <section class="templates-section">
     <div class="container fade-in">
       <span class="section-label">Templates</span>
-      <h2 class="section-title">28 workflow templates, ready to deploy</h2>
-      <p class="section-subtitle">Skip the blank page. Pick a template, tweak the prompts, and ship. Every category covers real production use cases.</p>
+      <h2 class="section-title">88 workflow templates, ready to deploy</h2>
+      <p class="section-subtitle">Skip the blank page. Pick a template, tweak the prompts, and ship. Browse the Community Hub or install via CLI.</p>
       <div class="templates-grid">
         <div class="template-category">
-          <span class="template-count">5</span>
-          <span class="template-name">Core</span>
-          <span class="template-examples">Hello World, Fan-out, Approval Gate, Retry Chain, Scheduled Digest</span>
+          <span class="template-count">20</span>
+          <span class="template-name">Marketing</span>
+          <span class="template-examples">Blog to Social, SEO Content, Ad Copy, Email Campaign, Content Calendar, Competitor Analysis...</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">17</span>
+          <span class="template-name">Engineering</span>
+          <span class="template-examples">API Docs, Data Extractor, Jira Triage, Release Notes, Slack Standup, Incident Responder...</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">17</span>
+          <span class="template-name">General AI</span>
+          <span class="template-examples">Research Agent, PDF Summary, Chain of Thought, Invoice Processor, Course Creator...</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">15</span>
+          <span class="template-name">Sales & CRM</span>
+          <span class="template-examples">Lead Enrichment, Lead Scoring, CRM Sync, Meeting Recap, Churn Predictor, Pipeline Autopilot...</span>
+        </div>
+        <div class="template-category">
+          <span class="template-count">11</span>
+          <span class="template-name">HR & Legal</span>
+          <span class="template-examples">Resume Screener, Contract Review, Compliance Checker, Onboarding, Job Description, Recruiting Pipeline...</span>
         </div>
         <div class="template-category">
           <span class="template-count">8</span>
-          <span class="template-name">Marketing</span>
-          <span class="template-examples">Blog to Social, SEO Audit, Newsletter, Content Repurposer, Competitor Watch, Competitive Radar, Content Atomizer, Brand Reputation Scanner</span>
-        </div>
-        <div class="template-category">
-          <span class="template-count">4</span>
-          <span class="template-name">Sales</span>
-          <span class="template-examples">Lead Enrichment, Outbound Sequence, CRM Sync, Lead Outreach</span>
-        </div>
-        <div class="template-category">
-          <span class="template-count">2</span>
           <span class="template-name">Support</span>
-          <span class="template-examples">Ticket Triage, Knowledge Base Updater</span>
+          <span class="template-examples">Ticket Triage, FAQ Generator, SLA Watchdog, Customer Health Check, Multi-Channel Router, Voice Agent...</span>
         </div>
-        <div class="template-category">
-          <span class="template-count">3</span>
-          <span class="template-name">HR</span>
-          <span class="template-examples">Resume Screener, Onboarding Checklist, Talent Pipeline Builder</span>
-        </div>
-        <div class="template-category">
-          <span class="template-count">1</span>
-          <span class="template-name">Legal</span>
-          <span class="template-examples">Contract Review</span>
-        </div>
-        <div class="template-category">
-          <span class="template-count">2</span>
-          <span class="template-name">Product</span>
-          <span class="template-examples">Feedback Analyzer, Release Notes Generator</span>
-        </div>
-        <div class="template-category">
-          <span class="template-count">3</span>
-          <span class="template-name">Operations</span>
-          <span class="template-examples">Technical Debt Auditor, Incident Postmortem Generator, Market Entry Analyzer</span>
-        </div>
+      </div>
+      <div style="text-align:center;margin-top:32px;">
+        <a href="hub/" class="btn btn-secondary">Browse Community Hub</a>
       </div>
     </div>
   </section>
