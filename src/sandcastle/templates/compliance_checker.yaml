@@ -1,0 +1,173 @@
+# name: Compliance Checker
+# description: Review documents for regulatory compliance against GDPR, SOC2, HIPAA, or custom frameworks
+# tags: [Legal, Compliance, GDPR, SOC2, Audit]
+# category: hr_legal
+
+name: compliance-checker
+description: Review documents for regulatory compliance against GDPR, SOC2, HIPAA, or custom frameworks
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [notion]
+
+input_schema:
+  required: ["document_text", "framework"]
+  properties:
+    document_text:
+      type: string
+      description: "The document text to review for compliance (policy, contract, or process description)"
+    framework:
+      type: string
+      description: "Compliance framework to check against: 'GDPR', 'SOC2', 'HIPAA', 'PCI-DSS', or custom requirements text"
+    severity_threshold:
+      type: string
+      description: "Minimum severity to report: 'low', 'medium', or 'high' (default: 'low')"
+      default: "low"
+
+steps:
+  - id: fetch-framework
+    prompt: |
+      Prepare the compliance checklist for the specified framework: {input.framework}
+
+      If the framework is a standard one (GDPR, SOC2, HIPAA, PCI-DSS), generate the
+      comprehensive checklist of required provisions from your knowledge:
+
+      **GDPR checklist includes:** lawful basis for processing, data subject rights
+      (access, rectification, erasure, portability), data protection officer requirements,
+      breach notification (72h), privacy by design, data processing agreements,
+      cross-border transfer safeguards, consent mechanisms, data retention limits.
+
+      **SOC2 checklist includes:** security (access controls, encryption, monitoring),
+      availability (uptime SLAs, disaster recovery, backups), processing integrity
+      (quality assurance, error handling), confidentiality (data classification, NDA),
+      privacy (notice, consent, disclosure, retention).
+
+      **HIPAA checklist includes:** PHI safeguards, access controls, audit trails,
+      transmission security, BAA requirements, minimum necessary standard, breach notification.
+
+      **PCI-DSS checklist includes:** cardholder data protection, encryption, access control,
+      network security, vulnerability management, monitoring and testing.
+
+      If the framework is custom text, parse it into a structured checklist.
+
+      Return a JSON array of checklist items with: requirement_id, category, description,
+      and criticality (required vs recommended).
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        framework_name: { type: string }
+        checklist:
+          type: array
+          items:
+            type: object
+            properties:
+              requirement_id: { type: string }
+              category: { type: string }
+              description: { type: string }
+              criticality: { type: string }
+        total_requirements: { type: integer }
+
+  - id: extract-clauses
+    prompt: |
+      Extract and catalog all relevant clauses, provisions, and statements from the document.
+
+      Document: {input.document_text}
+
+      For each clause found, extract:
+      1. **Clause text** - the exact relevant passage
+      2. **Topic** - what area it addresses (data handling, security, access control, etc.)
+      3. **Strength** - how specific and enforceable the language is (strong, moderate, weak, vague)
+      4. **Location** - section/paragraph reference if identifiable
+
+      Also identify:
+      - Missing sections that a compliance document would typically include
+      - Ambiguous language that could be interpreted multiple ways
+      - Conflicting statements within the document
+
+      Return structured JSON with extracted clauses and observations.
+    model: sonnet
+    max_turns: 8
+
+  - id: check-compliance
+    depends_on: [fetch-framework, extract-clauses]
+    prompt: |
+      Map the extracted document clauses against the compliance framework requirements.
+
+      Framework checklist: {steps.fetch-framework.output}
+      Document clauses: {steps.extract-clauses.output}
+      Severity threshold: {input.severity_threshold}
+
+      For each requirement in the checklist, determine:
+      1. **Status**: compliant, partial, non_compliant, or not_addressed
+         - compliant: requirement fully covered by document clauses
+         - partial: requirement partially addressed but gaps remain
+         - non_compliant: document contradicts or insufficiently covers requirement
+         - not_addressed: no relevant clause found in document
+      2. **Evidence** - which document clause(s) support the finding
+      3. **Severity** - high (legal/regulatory risk), medium (operational risk), low (best practice)
+      4. **Gap description** - what specifically is missing or inadequate
+      5. **Remediation** - specific language or provisions to add
+
+      Filter results to only include findings at or above the {input.severity_threshold} level.
+
+      Calculate overall compliance score as percentage of requirements met (compliant + partial*0.5).
+    model: sonnet
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        compliance_score: { type: number }
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              requirement_id: { type: string }
+              status: { type: string }
+              severity: { type: string }
+              gap_description: { type: string }
+        summary:
+          type: object
+          properties:
+            compliant: { type: integer }
+            partial: { type: integer }
+            non_compliant: { type: integer }
+            not_addressed: { type: integer }
+
+  - id: generate-report
+    depends_on: [check-compliance]
+    prompt: |
+      Generate a comprehensive compliance audit report.
+
+      Compliance findings: {steps.check-compliance.output}
+      Framework: {input.framework}
+
+      Structure the report as:
+
+      ## Executive Summary
+      - Overall compliance score and risk level
+      - Number of findings by severity (high/medium/low)
+      - Top 3 critical gaps requiring immediate attention
+
+      ## Detailed Findings
+      For each non-compliant or partially compliant requirement:
+      - Requirement description
+      - Current status with evidence
+      - Risk if left unaddressed
+      - Recommended remediation with suggested language
+
+      ## Compliance Roadmap
+      - Priority 1 (immediate): high-severity gaps
+      - Priority 2 (30 days): medium-severity gaps
+      - Priority 3 (90 days): low-severity improvements
+
+      ## Appendix
+      - Full requirement-by-requirement status matrix
+      - Methodology notes
+
+      Write in a professional, audit-ready tone suitable for stakeholders and legal review.
+    model: sonnet
+    max_turns: 10

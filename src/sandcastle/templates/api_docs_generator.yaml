@@ -1,0 +1,215 @@
+# name: API Docs Generator
+# description: Generate comprehensive API documentation from code repositories or OpenAPI specs
+# tags: [Engineering, GitHub, Documentation, API]
+# category: engineering
+
+name: api-docs-generator
+description: Generate comprehensive API documentation from code repositories or OpenAPI specs
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [github]
+
+input_schema:
+  required: ["repo"]
+  properties:
+    repo:
+      type: string
+      description: "GitHub repository in 'owner/repo' format (e.g. 'acme/payments-api')"
+    branch:
+      type: string
+      description: "Branch to generate docs from (default: 'main')"
+      default: "main"
+    path_filter:
+      type: string
+      description: "Path filter for API source files (e.g. 'src/api/', 'routes/')"
+    doc_style:
+      type: string
+      description: "Documentation style: 'reference', 'tutorial', or 'both' (default: 'reference')"
+      default: "reference"
+
+steps:
+  - id: fetch-specs
+    prompt: |
+      Fetch API source files and specs from the GitHub repository.
+
+      Use the GitHub tool:
+        node /home/user/tools/github.mjs get_contents '{input.repo}' '{input.branch}' '{input.path_filter}'
+
+      Repository: {input.repo}
+      Branch: {input.branch}
+      Path filter: {input.path_filter}
+
+      Look for and retrieve:
+      1. **OpenAPI/Swagger specs** - any .yaml/.json files matching openapi*, swagger*, api-spec*
+      2. **Route definitions** - files containing API route/endpoint definitions:
+         - Python: FastAPI routers, Flask blueprints, Django urls.py
+         - Node.js: Express routes, Fastify routes, NestJS controllers
+         - Go: HTTP handlers, gin/echo routes
+         - Ruby: Rails routes.rb, controllers
+      3. **Data models/schemas** - request/response type definitions, Pydantic models, TypeScript interfaces
+      4. **Middleware** - auth, rate limiting, validation middleware
+      5. **README or existing docs** - any existing documentation for context
+
+      Return structured data with file paths and contents for each category found.
+      If an OpenAPI spec exists, prioritize it as the source of truth.
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        has_openapi_spec: { type: boolean }
+        source_files:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              category: { type: string }
+              content: { type: string }
+        framework: { type: string }
+        language: { type: string }
+
+  - id: parse-endpoints
+    depends_on: [fetch-specs]
+    prompt: |
+      Parse all API endpoints from the source files into a structured catalog.
+
+      Source files: {steps.fetch-specs.output}
+
+      For each endpoint discovered, extract:
+      1. **Method** - GET, POST, PUT, PATCH, DELETE
+      2. **Path** - URL path with parameter placeholders (e.g. /users/{id})
+      3. **Summary** - one-line description of what the endpoint does
+      4. **Description** - detailed explanation from comments/docstrings
+      5. **Parameters:**
+         - Path parameters (name, type, required, description)
+         - Query parameters (name, type, required, default, description)
+         - Header parameters (authentication, content-type, etc.)
+      6. **Request body** - schema with field names, types, required flags, examples
+      7. **Response schemas** - for each status code (200, 201, 400, 401, 404, 500):
+         - Status code and description
+         - Response body schema
+         - Example response
+      8. **Authentication** - required auth method (Bearer, API key, OAuth, none)
+      9. **Rate limiting** - if specified in middleware
+      10. **Tags/Groups** - logical grouping (users, billing, admin, etc.)
+
+      Organize endpoints by group/tag.
+      Flag any endpoints with incomplete documentation (missing descriptions, no response schema).
+
+      Return a comprehensive JSON catalog of all endpoints.
+    model: sonnet
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              method: { type: string }
+              path: { type: string }
+              summary: { type: string }
+              group: { type: string }
+              auth_required: { type: boolean }
+        groups:
+          type: array
+          items: { type: string }
+        total_endpoints: { type: integer }
+
+  - id: generate-docs
+    depends_on: [parse-endpoints]
+    prompt: |
+      Generate comprehensive API documentation from the parsed endpoint catalog.
+
+      Endpoint catalog: {steps.parse-endpoints.output}
+      Documentation style: {input.doc_style}
+      Repository: {input.repo}
+
+      Generate documentation in Markdown format:
+
+      **For 'reference' style, include:**
+
+      # API Reference - <repo name>
+
+      ## Overview
+      - Base URL and versioning info
+      - Authentication methods and how to obtain credentials
+      - Rate limiting policies
+      - Common error response format
+      - Pagination conventions (if applicable)
+
+      ## Endpoints
+      For each endpoint group, create a section with:
+
+      ### <Group Name>
+
+      #### <METHOD> <path>
+      <summary>
+
+      **Parameters:**
+      | Name | In | Type | Required | Description |
+      |------|-----|------|----------|-------------|
+
+      **Request Body:**
+      ```json
+      <example with realistic data>
+      ```
+
+      **Responses:**
+      | Status | Description |
+      |--------|-------------|
+
+      ```json
+      <example response>
+      ```
+
+      **For 'tutorial' style, also include:**
+      - Getting started guide with authentication setup
+      - Common workflow examples (create, read, update, delete)
+      - Code examples in curl, Python, and JavaScript
+      - Error handling best practices
+
+      **For 'both', include all of the above.**
+
+      Use realistic example data (not lorem ipsum). Generate coherent examples
+      that tell a story across related endpoints.
+    model: sonnet
+    max_turns: 10
+
+  - id: format-output
+    depends_on: [generate-docs, parse-endpoints]
+    prompt: |
+      Finalize and format the API documentation for delivery.
+
+      Generated docs: {steps.generate-docs.output}
+      Endpoint catalog: {steps.parse-endpoints.output}
+      Repository: {input.repo}
+
+      Polish the documentation:
+
+      1. **Table of Contents** - add a linked TOC at the top
+      2. **Consistency check:**
+         - Ensure all endpoints from the catalog are documented
+         - Verify example request/response pairs are valid JSON
+         - Check that parameter tables are complete
+         - Ensure consistent formatting throughout
+      3. **Changelog placeholder** - add a versioned changelog section
+      4. **Coverage report:**
+         - Total endpoints documented
+         - Endpoints with complete examples
+         - Endpoints with missing descriptions (list them)
+         - Authentication coverage
+      5. **Metadata header:**
+         - Generated from: <repo>/<branch>
+         - Generated at: <timestamp>
+         - Endpoints: <count>
+         - Auto-generated notice
+
+      Output the final documentation as a single well-formatted Markdown document.
+      Also output a brief summary of documentation coverage and any gaps found.
+    model: sonnet
+    max_turns: 8

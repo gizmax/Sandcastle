@@ -1,0 +1,222 @@
+# name: Customer Churn Predictor
+# description: Analyze customer signals to predict churn risk, generate retention actions, and alert sales team
+# tags: [Sales, Salesforce, Churn, Analytics, Retention]
+# category: sales_crm
+
+name: customer-churn-predictor
+description: Analyze customer signals to predict churn risk, generate retention actions, and alert sales team
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [salesforce, slack]
+
+input_schema:
+  required: ["segment"]
+  properties:
+    segment:
+      type: string
+      description: "Customer segment to analyze - e.g. 'Enterprise', 'Mid-Market', 'SMB', or 'All'"
+    renewal_window_days:
+      type: number
+      description: "Flag accounts renewing within this many days (default: 90)"
+      default: 90
+    slack_channel:
+      type: string
+      description: "Slack channel for churn alerts (e.g. '#customer-success')"
+      default: "#customer-success"
+
+steps:
+  - id: fetch-accounts
+    prompt: |
+      Fetch customer account data from Salesforce for the specified segment.
+
+      Use the Salesforce tool:
+        node /home/user/tools/salesforce.mjs query_accounts '{input.segment}' {input.renewal_window_days}
+
+      Retrieve accounts in the {input.segment} segment with contract renewal within
+      {input.renewal_window_days} days. For each account, return:
+
+      - account_id, account_name, segment/tier
+      - ARR (annual recurring revenue)
+      - Contract start date, renewal date, contract length
+      - Number of seats/licenses (current vs contracted)
+      - Last login date, monthly active users (if tracked)
+      - Support ticket count (last 90 days)
+      - NPS/CSAT score (if available)
+      - CSM owner, last CSM touchpoint date
+      - Expansion/upsell history
+      - Any existing risk flags or notes
+
+      Sort by renewal date (soonest first).
+    model: haiku
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              account_id: { type: string }
+              account_name: { type: string }
+              arr: { type: number }
+              renewal_date: { type: string }
+              monthly_active_users: { type: number }
+        total_count: { type: integer }
+        total_arr_at_risk: { type: number }
+
+  - id: analyze-signals
+    depends_on: [fetch-accounts]
+    prompt: |
+      Analyze behavioral and engagement signals for each account to identify churn indicators.
+
+      Account data: {steps.fetch-accounts.output}
+
+      For each account, evaluate these churn signal categories:
+
+      **Usage Decline (0-25 points):**
+      - Drop in monthly active users vs 3 months ago
+      - Decrease in seat utilization (active/contracted)
+      - Reduced feature adoption or login frequency
+
+      **Support Friction (0-25 points):**
+      - High ticket volume relative to account size
+      - Unresolved or escalated tickets
+      - Negative CSAT/NPS trend
+      - Repeated issues in the same area
+
+      **Engagement Gap (0-25 points):**
+      - No CSM touchpoint in 30+ days
+      - Missed QBRs or check-in meetings
+      - No response to outreach attempts
+      - Champion/sponsor departure
+
+      **Contract Signals (0-25 points):**
+      - Approaching renewal without expansion discussion
+      - Previous downgrades or credit requests
+      - Competitor mentions in support tickets
+      - Short remaining contract term
+
+      For each signal, note the specific data point that triggered it.
+      Return JSON with per-account signal analysis.
+    model: sonnet
+    max_turns: 10
+
+  - id: score-churn-risk
+    depends_on: [analyze-signals]
+    prompt: |
+      Calculate a composite churn risk score for each account and classify risk level.
+
+      Signal analysis: {steps.analyze-signals.output}
+      Account data: {steps.fetch-accounts.output}
+
+      For each account:
+      1. **Churn Risk Score** (0-100): sum of signal category scores
+      2. **Risk Classification:**
+         - Critical (75-100): High probability of churn, immediate intervention needed
+         - High (50-74): Significant risk signals, proactive engagement required
+         - Moderate (25-49): Some concerning signals, monitor closely
+         - Low (0-24): Healthy account, maintain current engagement
+      3. **Primary Risk Factor** - the single biggest driver of risk
+      4. **Trend** - improving, stable, or deteriorating (based on signal trajectory)
+      5. **Revenue Impact** - ARR at risk if account churns
+      6. **Confidence** - how reliable the prediction is (high/medium/low) based on data completeness
+
+      Rank accounts by risk score (highest first).
+      Calculate portfolio-level metrics: total ARR at risk, average risk score, risk distribution.
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              account_name: { type: string }
+              churn_risk_score: { type: number }
+              risk_classification: { type: string }
+              primary_risk_factor: { type: string }
+              arr: { type: number }
+        total_arr_at_risk: { type: number }
+        critical_count: { type: integer }
+        high_count: { type: integer }
+
+  - id: generate-retention
+    depends_on: [score-churn-risk, analyze-signals]
+    prompt: |
+      Generate specific, actionable retention plays for each at-risk account.
+
+      Churn risk scores: {steps.score-churn-risk.output}
+      Signal analysis: {steps.analyze-signals.output}
+
+      For each account classified as Critical or High risk, create a retention plan:
+
+      1. **Immediate Actions (this week):**
+         - Specific outreach strategy (who should contact whom)
+         - Talking points tailored to their risk factors
+         - Quick wins to demonstrate value
+
+      2. **30-Day Plan:**
+         - Executive sponsor engagement (for Critical accounts)
+         - Success planning session agenda
+         - Feature adoption or training recommendations
+         - Support issue resolution plan
+
+      3. **Incentive Options** (if applicable):
+         - Early renewal discount range
+         - Added value (extra seats, premium support, training)
+         - Contract flexibility (shorter term, usage-based)
+
+      4. **Success Metrics:**
+         - What signals would indicate improving health
+         - Check-in milestones and dates
+
+      For Moderate risk accounts, provide a brief monitoring plan with trigger conditions
+      for escalation.
+
+      Be specific - reference actual data points from the analysis, not generic advice.
+    model: sonnet
+    max_turns: 10
+
+  - id: alert-sales
+    depends_on: [score-churn-risk, generate-retention]
+    prompt: |
+      Alert the customer success team via Slack with churn risk findings and retention plays.
+
+      Churn scores: {steps.score-churn-risk.output}
+      Retention plans: {steps.generate-retention.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Post a structured alert to {input.slack_channel}:
+
+      :warning: *Churn Risk Report - {input.segment} Segment*
+
+      *Portfolio Summary:*
+      - Accounts analyzed: <count>
+      - Total ARR at risk: $<amount>
+      - Critical: <count> accounts ($<ARR>)
+      - High: <count> accounts ($<ARR>)
+
+      *Critical Accounts (Immediate Action):*
+      For each Critical account:
+      > *<Account Name>* - Risk Score: <score>/100
+      > ARR: $<amount> | Renewal: <date>
+      > Primary risk: <factor>
+      > Action: <immediate action from retention plan>
+      > Owner: @<CSM name>
+
+      *High Risk Accounts:*
+      Similar format, briefer.
+
+      End with a link or note about where to find detailed retention plans.
+
+      If no accounts are Critical or High risk, post a positive health summary instead.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

@@ -12,9 +12,13 @@ export interface TemplatePack {
   id: string;
   name: string;
   description: string;
+  tagline: string;
   icon: LucideIcon;
   color: { bg: string; text: string; border: string };
   tools: string[];
+  templates: string[];
+  featured: boolean;
+  setupHint: string;
 }
 
 export const TEMPLATE_PACKS: TemplatePack[] = [
@@ -22,49 +26,114 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
     id: "sales_crm",
     name: "Sales & CRM",
     description: "Lead scoring, pipeline management, proposals, and CRM enrichment workflows",
+    tagline: "Everything your revenue team needs, from lead capture to closed-won.",
     icon: TrendingUp,
     color: { bg: "bg-amber-500/15", text: "text-amber-500", border: "border-amber-500/30" },
     tools: ["salesforce", "hubspot", "mail", "slack"],
+    templates: [
+      "lead_scoring",
+      "lead_enrichment",
+      "crm_enrichment",
+      "sales_pipeline_autopilot",
+      "proposal_generator",
+      "meeting_recap",
+      "customer_churn_predictor",
+    ],
+    featured: true,
+    setupHint: "Connect your Salesforce or HubSpot account in Settings > Integrations to unlock CRM workflows.",
   },
   {
     id: "marketing",
     name: "Marketing",
     description: "Content creation, SEO, email campaigns, and competitor analysis",
+    tagline: "Turn content into campaigns and insights into action.",
     icon: Megaphone,
     color: { bg: "bg-violet-500/15", text: "text-violet-500", border: "border-violet-500/30" },
     tools: ["mail", "slack", "notion"],
+    templates: [
+      "blog_to_social",
+      "seo_content",
+      "email_campaign",
+      "ad_copy_generator",
+      "competitor_analysis",
+    ],
+    featured: false,
+    setupHint: "Set up your email and Slack integrations for automated content distribution.",
   },
   {
     id: "support",
     name: "Customer Support",
     description: "Ticket triage, sentiment analysis, and customer health monitoring",
+    tagline: "Triage faster, respond smarter, keep customers happy.",
     icon: Headphones,
     color: { bg: "bg-rose-500/15", text: "text-rose-500", border: "border-rose-500/30" },
     tools: ["zendesk", "slack"],
+    templates: [
+      "support_ticket_triage",
+      "ticket_classifier",
+      "customer_health_check",
+      "review_sentiment",
+      "sla_watchdog",
+      "faq_generator",
+    ],
+    featured: false,
+    setupHint: "Connect Zendesk in Settings > Integrations to enable automated ticket handling.",
   },
   {
     id: "engineering",
     name: "Engineering",
     description: "Release notes, sprint standups, Jira triage, and code workflows",
+    tagline: "Automate the toil so your team ships faster.",
     icon: Code2,
     color: { bg: "bg-blue-500/15", text: "text-blue-500", border: "border-blue-500/30" },
     tools: ["github", "jira", "slack"],
+    templates: [
+      "sprint_standup",
+      "slack_standup",
+      "release_notes",
+      "jira_triage",
+      "data_extractor",
+      "api_docs_generator",
+    ],
+    featured: false,
+    setupHint: "Connect GitHub and Jira in Settings > Integrations to power engineering workflows.",
   },
   {
     id: "hr_legal",
     name: "HR & Legal",
     description: "Job descriptions, resume screening, and contract review",
+    tagline: "From hiring to compliance, handled by AI.",
     icon: FileText,
     color: { bg: "bg-emerald-500/15", text: "text-emerald-500", border: "border-emerald-500/30" },
     tools: ["mail", "notion"],
+    templates: [
+      "job_description",
+      "resume_screener",
+      "contract_review",
+      "compliance_checker",
+      "onboarding_workflow",
+    ],
+    featured: false,
+    setupHint: "Set up Notion and email integrations for document and communication workflows.",
   },
   {
     id: "general_ai",
     name: "General AI",
     description: "Summarization, translation, research, and reasoning workflows",
+    tagline: "General-purpose AI building blocks for any workflow.",
     icon: Brain,
     color: { bg: "bg-gray-500/15", text: "text-gray-400", border: "border-gray-500/30" },
     tools: [],
+    templates: [
+      "research_agent",
+      "summarize",
+      "translate",
+      "chain_of_thought",
+      "review_and_approve",
+      "pdf_summary",
+    ],
+    featured: false,
+    setupHint: "These templates work out of the box - no external integrations required.",
   },
 ];
 
@@ -121,4 +190,9 @@ export function resolveCategory(category?: string | null, tags?: string[]): stri
 /** Look up a pack by its ID. */
 export function getPackById(id: string): TemplatePack | undefined {
   return TEMPLATE_PACKS.find((p) => p.id === id);
+}
+
+/** Get the featured pack. */
+export function getFeaturedPack(): TemplatePack {
+  return TEMPLATE_PACKS.find((p) => p.featured) || TEMPLATE_PACKS[0];
 }
