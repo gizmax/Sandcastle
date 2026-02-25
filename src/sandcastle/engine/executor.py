@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -694,38 +695,14 @@ async def execute_step_with_retry(
     step_overrides: dict | None = None,
 ) -> StepResult:
     """Execute a step with retry logic and exponential backoff."""
-    # Apply step overrides for fork
+    # Apply step overrides for fork (use dataclasses.replace to preserve all fields)
     if step_overrides:
-        if "prompt" in step_overrides:
-            step = StepDefinition(
-                id=step.id,
-                prompt=step_overrides["prompt"],
-                depends_on=step.depends_on,
-                model=step_overrides.get("model", step.model),
-                max_turns=step_overrides.get("max_turns", step.max_turns),
-                timeout=step_overrides.get("timeout", step.timeout),
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-            )
-        elif "model" in step_overrides:
-            step = StepDefinition(
-                id=step.id,
-                prompt=step.prompt,
-                depends_on=step.depends_on,
-                model=step_overrides["model"],
-                max_turns=step_overrides.get("max_turns", step.max_turns),
-                timeout=step_overrides.get("timeout", step.timeout),
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-            )
+        override_fields = {}
+        for key in ("prompt", "model", "max_turns", "timeout"):
+            if key in step_overrides:
+                override_fields[key] = step_overrides[key]
+        if override_fields:
+            step = dataclasses.replace(step, **override_fields)
 
     # AutoPilot: pick variant if configured
     autopilot_experiment = None
@@ -3793,51 +3770,15 @@ async def _prepare_and_run_step(
     overrides = (step_overrides or {}).get(step_id)
     use_dead_letter = workflow.on_failure and workflow.on_failure.dead_letter
 
-    # Resolve policies
+    # Resolve policies (use dataclasses.replace to preserve all fields)
     if global_policies and step.policies is None:
-        step = StepDefinition(
-            id=step.id,
-            prompt=step.prompt,
-            depends_on=step.depends_on,
-            model=step.model,
-            max_turns=step.max_turns,
-            timeout=step.timeout,
-            parallel_over=step.parallel_over,
-            output_schema=step.output_schema,
-            retry=step.retry,
-            fallback=step.fallback,
-            type=step.type,
-            approval_config=step.approval_config,
-            autopilot=step.autopilot,
-            sub_workflow=step.sub_workflow,
-            csv_output=step.csv_output,
-            pdf_report=step.pdf_report,
-            policies=global_policies,
-        )
+        step = dataclasses.replace(step, policies=global_policies)
     elif global_policies and step.policies:
         try:
             from sandcastle.engine.policy import resolve_step_policies
 
             resolved = resolve_step_policies(step.policies, global_policies)
-            step = StepDefinition(
-                id=step.id,
-                prompt=step.prompt,
-                depends_on=step.depends_on,
-                model=step.model,
-                max_turns=step.max_turns,
-                timeout=step.timeout,
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                type=step.type,
-                approval_config=step.approval_config,
-                autopilot=step.autopilot,
-                sub_workflow=step.sub_workflow,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-                policies=resolved,
-            )
+            step = dataclasses.replace(step, policies=resolved)
         except Exception as e:
             logger.warning(f"Could not resolve step policies: {e}")
 
