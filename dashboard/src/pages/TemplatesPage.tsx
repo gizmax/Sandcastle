@@ -16,6 +16,7 @@ import {
   Globe,
   X,
   ArrowRight,
+  ChevronLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import jsYaml from "js-yaml";
@@ -69,6 +70,15 @@ type ViewMode = "packs" | "all" | "integrations" | "community";
 
 // ---- Community types ----
 
+interface CommunityCollection {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  template_slugs: string[];
+  downloads: number;
+}
+
 interface CommunityRegistryResponse {
   templates: CommunityTemplate[];
   stats: {
@@ -76,6 +86,7 @@ interface CommunityRegistryResponse {
     total_authors: number;
     categories: { id: string; count: number }[];
   };
+  collections?: CommunityCollection[];
 }
 
 // ---- Constants ----
@@ -136,6 +147,8 @@ export default function TemplatesPage() {
   const [communityPreviewTarget, setCommunityPreviewTarget] = useState<CommunityTemplate | null>(null);
   const [communityInstallYaml, setCommunityInstallYaml] = useState<string | null>(null);
   const [communityInstallLoading, setCommunityInstallLoading] = useState(false);
+  const [communityCollections, setCommunityCollections] = useState<CommunityCollection[]>([]);
+  const [communityCollection, setCommunityCollection] = useState<string | null>(null);
 
   // ---- Fetch templates ----
 
@@ -161,6 +174,7 @@ export default function TemplatesPage() {
         if (res.data) {
           setCommunityTemplates(res.data.templates || []);
           setCommunityStats(res.data.stats || null);
+          setCommunityCollections(res.data.collections || []);
         } else {
           setCommunityError(true);
         }
@@ -232,16 +246,30 @@ export default function TemplatesPage() {
 
   // Community view: filtered templates
   const communityFiltered = useMemo(() => {
-    if (!communitySearch) return communityTemplates;
-    const q = communitySearch.toLowerCase();
-    return communityTemplates.filter(
-      (t) =>
-        t.name.toLowerCase().includes(q) ||
-        t.description.toLowerCase().includes(q) ||
-        t.author.toLowerCase().includes(q) ||
-        t.tags.some((tag) => tag.toLowerCase().includes(q))
-    );
-  }, [communityTemplates, communitySearch]);
+    let result = communityTemplates;
+
+    // Filter by active collection
+    if (communityCollection) {
+      const col = communityCollections.find((c) => c.id === communityCollection);
+      if (col) {
+        result = result.filter((t) => col.template_slugs.includes(t.slug));
+      }
+    }
+
+    // Filter by search
+    if (communitySearch) {
+      const q = communitySearch.toLowerCase();
+      result = result.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q) ||
+          t.author.toLowerCase().includes(q) ||
+          t.tags.some((tag) => tag.toLowerCase().includes(q))
+      );
+    }
+
+    return result;
+  }, [communityTemplates, communitySearch, communityCollection, communityCollections]);
 
   // Integrations view: group templates by tool
   const integrationGroups = useMemo(() => {
@@ -524,12 +552,14 @@ export default function TemplatesPage() {
     setCommunityError(false);
     setCommunityLoading(true);
     setCommunityTemplates([]);
+    setCommunityCollection(null);
     api
       .get<CommunityRegistryResponse>("/hub/registry")
       .then((res) => {
         if (res.data) {
           setCommunityTemplates(res.data.templates || []);
           setCommunityStats(res.data.stats || null);
+          setCommunityCollections(res.data.collections || []);
         } else {
           setCommunityError(true);
         }
@@ -714,6 +744,59 @@ export default function TemplatesPage() {
               Submit Workflow
             </a>
           </div>
+
+          {/* Collections row */}
+          {communityCollections.length > 0 && !communityCollection && (
+            <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
+              {communityCollections.map((col) => (
+                <button
+                  key={col.id}
+                  type="button"
+                  onClick={() => setCommunityCollection(col.id)}
+                  className={cn(
+                    "flex-shrink-0 w-48 rounded-xl border border-border bg-surface p-4 text-left",
+                    "transition-all duration-200 hover:shadow-md hover:border-accent/30"
+                  )}
+                >
+                  <span className="text-lg leading-none">{col.icon === "target" ? "\uD83C\uDFAF" : col.icon === "pen-tool" ? "\u270D\uFE0F" : col.icon === "terminal" ? "\uD83D\uDCBB" : col.icon === "headphones" ? "\uD83C\uDFA7" : col.icon === "users" ? "\uD83D\uDC65" : "\uD83D\uDCE6"}</span>
+                  <h3 className="text-sm font-semibold text-foreground mt-2 line-clamp-1">{col.name}</h3>
+                  <p className="text-xs text-muted line-clamp-2 mt-0.5 leading-relaxed">{col.description}</p>
+                  <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
+                    <span className="font-data">{col.template_slugs.length} workflows</span>
+                    <span className="flex items-center gap-0.5 font-data">
+                      <Download className="h-2.5 w-2.5" />
+                      {col.downloads}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Collection breadcrumb */}
+          {communityCollection && (
+            <div className="flex items-center gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setCommunityCollection(null)}
+                className="flex items-center gap-1 text-accent hover:text-accent-hover transition-colors"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Community
+              </button>
+              <ChevronRight className="h-3.5 w-3.5 text-muted" />
+              <span className="font-semibold text-foreground">
+                {communityCollections.find((c) => c.id === communityCollection)?.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCommunityCollection(null)}
+                className="ml-1 rounded-md p-0.5 text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Community search */}
           <div className="relative">

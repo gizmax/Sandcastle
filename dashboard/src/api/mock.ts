@@ -2835,6 +2835,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["hubspot", "slack"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/customer-churn-predictor.yaml",
     created_at: h(48),
+    estimated_cost_per_run: 0.011,
+    avg_execution_time: "~8s",
+    downloads: 234,
+    remix_count: 3,
+    forked_from: "gizmax/customer-churn-predictor",
+    source: "community",
   },
   {
     slug: "devops-incident-responder",
@@ -2849,6 +2855,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["github", "slack"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/devops-incident-responder.yaml",
     created_at: h(72),
+    estimated_cost_per_run: 0.043,
+    avg_execution_time: "~15s",
+    downloads: 412,
+    remix_count: 7,
+    forked_from: null,
+    source: "community",
   },
   {
     slug: "content-calendar-generator",
@@ -2863,6 +2875,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["google_search"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/content-calendar-generator.yaml",
     created_at: h(120),
+    estimated_cost_per_run: 0.008,
+    avg_execution_time: "~6s",
+    downloads: 189,
+    remix_count: 1,
+    forked_from: null,
+    source: "community",
   },
   {
     slug: "legal-contract-reviewer",
@@ -2877,6 +2895,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: [],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/legal-contract-reviewer.yaml",
     created_at: h(168),
+    estimated_cost_per_run: 0.062,
+    avg_execution_time: "~22s",
+    downloads: 97,
+    remix_count: 0,
+    forked_from: null,
+    source: "community",
   },
   {
     slug: "multi-channel-support-router",
@@ -2891,6 +2915,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["zendesk", "slack"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/multi-channel-support-router.yaml",
     created_at: h(200),
+    estimated_cost_per_run: 0.015,
+    avg_execution_time: "~10s",
+    downloads: 321,
+    remix_count: 5,
+    forked_from: "supportflow/basic-router",
+    source: "community",
   },
   {
     slug: "competitor-pricing-tracker",
@@ -2905,6 +2935,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["slack"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/competitor-pricing-tracker.yaml",
     created_at: h(240),
+    estimated_cost_per_run: 0.019,
+    avg_execution_time: "~12s",
+    downloads: 156,
+    remix_count: 2,
+    forked_from: null,
+    source: "community",
   },
   {
     slug: "onboarding-workflow-builder",
@@ -2919,6 +2955,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["slack"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/onboarding-workflow-builder.yaml",
     created_at: h(300),
+    estimated_cost_per_run: 0.006,
+    avg_execution_time: "~5s",
+    downloads: 278,
+    remix_count: 4,
+    forked_from: null,
+    source: "community",
   },
   {
     slug: "release-notes-generator",
@@ -2933,6 +2975,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: ["github", "slack"],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/release-notes-generator.yaml",
     created_at: h(360),
+    estimated_cost_per_run: 0.009,
+    avg_execution_time: "~7s",
+    downloads: 345,
+    remix_count: 6,
+    forked_from: null,
+    source: "community",
   },
   {
     slug: "social-media-repurposer",
@@ -2947,6 +2995,12 @@ const MOCK_COMMUNITY_TEMPLATES = [
     tools: [],
     download_url: "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/social-media-repurposer.yaml",
     created_at: h(400),
+    estimated_cost_per_run: 0.013,
+    avg_execution_time: "~9s",
+    downloads: 198,
+    remix_count: 2,
+    forked_from: "content-queen/content-calendar-generator",
+    source: "community",
   },
 ];
 
@@ -2960,6 +3014,49 @@ const MOCK_COMMUNITY_STATS = {
     }, {})
   ).map(([id, count]) => ({ id, count })),
 };
+
+const MOCK_COMMUNITY_COLLECTIONS = [
+  {
+    id: "sales-automation-stack",
+    name: "Complete Sales Stack",
+    description: "End-to-end sales pipeline - from lead generation to deal management",
+    icon: "target",
+    template_slugs: ["customer-churn-predictor", "competitor-pricing-tracker"],
+    downloads: 892,
+  },
+  {
+    id: "content-machine",
+    name: "Content Machine",
+    description: "Full content creation pipeline - research, write, optimize, distribute",
+    icon: "pen-tool",
+    template_slugs: ["content-calendar-generator", "social-media-repurposer"],
+    downloads: 756,
+  },
+  {
+    id: "devops-essentials",
+    name: "DevOps Essentials",
+    description: "Developer productivity - sprint tracking, standups, releases",
+    icon: "terminal",
+    template_slugs: ["devops-incident-responder", "release-notes-generator"],
+    downloads: 634,
+  },
+  {
+    id: "support-suite",
+    name: "Support Suite",
+    description: "Customer support automation - triage, SLA, FAQ generation",
+    icon: "headphones",
+    template_slugs: ["multi-channel-support-router"],
+    downloads: 543,
+  },
+  {
+    id: "hr-toolkit",
+    name: "HR Toolkit",
+    description: "HR operations - hiring, onboarding, compliance, contracts",
+    icon: "users",
+    template_slugs: ["onboarding-workflow-builder", "legal-contract-reviewer"],
+    downloads: 421,
+  },
+];
 
 // Route matcher
 type MockRoute = {
@@ -3109,6 +3206,7 @@ const routes: MockRoute[] = [
     handler: () => ({
       templates: MOCK_COMMUNITY_TEMPLATES,
       stats: MOCK_COMMUNITY_STATS,
+      collections: MOCK_COMMUNITY_COLLECTIONS,
     }),
   },
   {

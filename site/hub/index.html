@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Community Hub - Sandcastle</title>
-  <meta name="description" content="Browse, discover, and install AI workflows shared by the Sandcastle community. 35+ ready-to-use templates for sales, marketing, support, engineering, and more.">
+  <meta name="description" content="Browse, discover, and install AI workflows shared by the Sandcastle community. 43+ ready-to-use templates for sales, marketing, support, engineering, and more.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
@@ -40,6 +40,7 @@
       --bg: #0a0a0a;
       --surface: #141414;
       --surface-hover: #1a1a1a;
+      --surface-raised: #1e1e1e;
       --border: #262626;
       --border-light: #333;
       --text: #f5f5f5;
@@ -48,9 +49,11 @@
       --accent: #f59e0b;
       --accent-hover: #fbbf24;
       --accent-dim: rgba(245, 158, 11, 0.15);
+      --accent-glow: rgba(245, 158, 11, 0.08);
       --code-bg: #0d0d0d;
       --radius: 8px;
       --radius-sm: 4px;
+      --radius-lg: 12px;
       --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
 
@@ -301,6 +304,167 @@
       box-shadow: 0 0 0 3px var(--accent-dim);
     }
 
+    /* ---- COLLECTIONS ---- */
+    .collections-section {
+      padding: 0 0 32px;
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+
+    .collections-scroll {
+      display: flex;
+      gap: 14px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .collections-scroll::-webkit-scrollbar {
+      height: 4px;
+    }
+
+    .collections-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .collections-scroll::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    .collection-card {
+      flex: 0 0 220px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      cursor: pointer;
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      scroll-snap-align: start;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .collection-card:hover {
+      border-color: var(--border-light);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+    }
+
+    .collection-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 6px 24px rgba(245, 158, 11, 0.1);
+    }
+
+    .collection-icon {
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .collection-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    .collection-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .collection-stats {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      margin-top: auto;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ---- AUTHOR PROFILE BAR ---- */
+    .author-bar {
+      display: none;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 20px;
+      margin-bottom: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .author-bar.visible {
+      display: flex;
+    }
+
+    .author-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--accent-dim);
+      border: 2px solid var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      flex-shrink: 0;
+    }
+
+    .author-info {
+      flex: 1;
+    }
+
+    .author-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .author-meta {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      display: flex;
+      gap: 16px;
+    }
+
+    .author-bar-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 4px;
+      line-height: 1;
+      transition: color 0.2s;
+    }
+
+    .author-bar-close:hover {
+      color: var(--text);
+    }
+
     /* ---- FILTER BAR ---- */
     .filter-bar {
       padding: 0 0 32px;
@@ -405,7 +569,7 @@
       padding: 24px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
       cursor: pointer;
       transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
       position: relative;
@@ -440,6 +604,13 @@
     .card[data-cat="hr_legal"]::before { background: var(--cat-hr_legal); }
     .card[data-cat="general_ai"]::before { background: var(--cat-general_ai); }
 
+    .card-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .card-category {
       display: inline-flex;
       align-items: center;
@@ -454,6 +625,23 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
+    }
+
+    .card-source-badge {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 7px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    .card-source-badge.community {
+      color: var(--accent);
+      border-color: var(--accent-dim);
+      background: var(--accent-dim);
     }
 
     .card-title {
@@ -490,6 +678,19 @@
       border-radius: var(--radius-sm);
     }
 
+    .card-remix-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--accent);
+      cursor: pointer;
+    }
+
+    .card-remix-badge:hover {
+      text-decoration: underline;
+    }
+
     .card-footer {
       display: flex;
       align-items: center;
@@ -504,7 +705,8 @@
     .card-meta {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     .card-meta .mono {
@@ -512,20 +714,51 @@
       font-size: 12px;
     }
 
-    .card-install-btn {
-      padding: 5px 12px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #000;
-      background: var(--accent);
-      border: none;
-      border-radius: var(--radius-sm);
+    .card-author-link {
+      color: var(--text-dim);
       cursor: pointer;
-      transition: background 0.2s;
+      transition: color 0.2s;
     }
 
-    .card-install-btn:hover {
-      background: var(--accent-hover);
+    .card-author-link:hover {
+      color: var(--accent);
+    }
+
+    .card-cost-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      color: #10B981;
+      background: rgba(16, 185, 129, 0.1);
+      border-radius: var(--radius-sm);
+      white-space: nowrap;
+    }
+
+    .card-downloads {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+    }
+
+    .card-downloads svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .card-remixes {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
     }
 
     /* CTA card */
@@ -674,12 +907,27 @@
     .modal {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      max-width: 600px;
+      border-radius: var(--radius-lg);
+      max-width: 680px;
       width: 100%;
-      max-height: 85vh;
+      max-height: 90vh;
       overflow-y: auto;
       position: relative;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .modal::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .modal::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .modal::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
     }
 
     .modal-header {
@@ -741,6 +989,134 @@
       margin-bottom: 20px;
     }
 
+    /* Modal highlights bar */
+    .modal-highlights {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .modal-highlight {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+
+    .modal-highlight .hl-label {
+      font-family: var(--font-sans);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-dim);
+    }
+
+    .modal-highlight .hl-value {
+      color: var(--text);
+    }
+
+    .modal-highlight .hl-value.cost {
+      color: #10B981;
+    }
+
+    .modal-highlight .hl-value.time {
+      color: var(--accent);
+    }
+
+    .modal-highlight .hl-value.downloads {
+      color: #3B82F6;
+    }
+
+    /* DAG Visualization */
+    .modal-dag-section {
+      margin-bottom: 24px;
+    }
+
+    .modal-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .modal-dag {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      overflow-x: auto;
+    }
+
+    .modal-dag svg {
+      display: block;
+      margin: 0 auto;
+    }
+
+    /* Model breakdown */
+    .modal-models-section {
+      margin-bottom: 24px;
+    }
+
+    .model-breakdown {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .model-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+
+    .model-name {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .model-cost {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #10B981;
+    }
+
+    /* Input/Output placeholder */
+    .modal-io-section {
+      margin-bottom: 24px;
+    }
+
+    .modal-io-placeholder {
+      padding: 16px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      color: var(--text-dim);
+      text-align: center;
+      font-style: italic;
+    }
+
+    .modal-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+
     .modal-meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -771,11 +1147,17 @@
       color: var(--accent);
     }
 
-    .modal-tags {
+    .modal-remix-info {
       display: flex;
-      flex-wrap: wrap;
+      align-items: center;
       gap: 6px;
-      margin-bottom: 24px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--accent);
     }
 
     .modal-install-section {
@@ -830,6 +1212,7 @@
     .modal-actions {
       display: flex;
       gap: 12px;
+      flex-wrap: wrap;
     }
 
     .modal-btn {
@@ -866,6 +1249,143 @@
     .modal-btn--secondary:hover {
       color: var(--text);
       border-color: var(--border-light);
+    }
+
+    .modal-btn--playground {
+      color: #10B981;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .modal-btn--playground:hover {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    /* ---- PLAYGROUND ---- */
+    .playground-section {
+      display: none;
+      margin-top: 24px;
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+    }
+
+    .playground-section.visible {
+      display: block;
+    }
+
+    .playground-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .playground-field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    .playground-field input,
+    .playground-field textarea {
+      width: 100%;
+      padding: 10px 14px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      color: var(--text);
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .playground-field textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .playground-field input:focus,
+    .playground-field textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .playground-run-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 24px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 600;
+      color: #000;
+      background: #10B981;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.2s;
+      align-self: flex-start;
+    }
+
+    .playground-run-btn:hover {
+      background: #34D399;
+    }
+
+    .playground-output {
+      display: none;
+      margin-top: 16px;
+    }
+
+    .playground-output.visible {
+      display: block;
+    }
+
+    .playground-output-box {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 80px;
+    }
+
+    .playground-output-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #10B981;
+      margin-bottom: 8px;
+    }
+
+    .typing-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 14px;
+      background: var(--accent);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink-cursor 0.8s step-end infinite;
+    }
+
+    @keyframes blink-cursor {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .playground-note {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-style: italic;
+      margin-top: 12px;
     }
 
     /* ---- FOOTER ---- */
@@ -918,11 +1438,15 @@
       }
 
       .stats-bar {
-        gap: 32px;
+        gap: 24px;
       }
 
       .modal-meta-grid {
         grid-template-columns: 1fr;
+      }
+
+      .collection-card {
+        flex: 0 0 200px;
       }
     }
 
@@ -936,7 +1460,8 @@
       }
 
       .stats-bar {
-        gap: 24px;
+        gap: 16px;
+        flex-wrap: wrap;
       }
 
       .stat-number {
@@ -973,7 +1498,7 @@
       }
 
       .modal {
-        max-height: 90vh;
+        max-height: 95vh;
       }
 
       .modal-actions {
@@ -982,6 +1507,23 @@
 
       .modal-btn {
         justify-content: center;
+      }
+
+      .modal-highlights {
+        flex-direction: column;
+      }
+
+      .collection-card {
+        flex: 0 0 180px;
+      }
+
+      .author-bar {
+        flex-wrap: wrap;
+      }
+
+      .author-meta {
+        flex-wrap: wrap;
+        gap: 8px;
       }
     }
   </style>
@@ -1018,16 +1560,20 @@
       <p>Browse, discover, and install AI workflows shared by the community</p>
       <div class="stats-bar">
         <div class="stat">
-          <span class="stat-number" data-target="0" id="stat-templates">0</span>
+          <span class="stat-number" id="stat-templates">0</span>
           <span class="stat-label">Templates</span>
         </div>
         <div class="stat">
-          <span class="stat-number" data-target="0" id="stat-authors">0</span>
+          <span class="stat-number" id="stat-authors">0</span>
           <span class="stat-label">Authors</span>
         </div>
         <div class="stat">
-          <span class="stat-number" data-target="0" id="stat-categories">0</span>
+          <span class="stat-number" id="stat-categories">0</span>
           <span class="stat-label">Categories</span>
+        </div>
+        <div class="stat">
+          <span class="stat-number" id="stat-downloads">0</span>
+          <span class="stat-label">Downloads</span>
         </div>
       </div>
       <div class="search-wrapper">
@@ -1036,6 +1582,14 @@
         </div>
         <input type="text" id="search-input" placeholder="Search workflows by name, tag, or description...">
       </div>
+    </div>
+  </section>
+
+  <!-- Collections -->
+  <section class="collections-section" id="collections-section">
+    <div class="container">
+      <div class="section-label">Collections</div>
+      <div class="collections-scroll" id="collections-scroll"></div>
     </div>
   </section>
 
@@ -1068,6 +1622,8 @@
           <option value="name">Sort: A-Z</option>
           <option value="newest">Sort: Newest</option>
           <option value="steps">Sort: Step count</option>
+          <option value="downloads">Sort: Most Downloads</option>
+          <option value="cost-low">Sort: Cost Low-High</option>
         </select>
       </div>
     </div>
@@ -1076,6 +1632,14 @@
   <!-- Template Grid -->
   <section class="templates-section">
     <div class="container">
+      <div class="author-bar" id="author-bar">
+        <div class="author-avatar" id="author-avatar"></div>
+        <div class="author-info">
+          <div class="author-name" id="author-name"></div>
+          <div class="author-meta" id="author-meta"></div>
+        </div>
+        <button class="author-bar-close" id="author-bar-close" aria-label="Clear author filter">&times;</button>
+      </div>
       <div class="results-info" id="results-info"></div>
       <div class="grid" id="template-grid">
         <div class="loading">
@@ -1098,6 +1662,20 @@
       </div>
       <div class="modal-body">
         <p class="modal-desc" id="modal-desc"></p>
+        <div class="modal-highlights" id="modal-highlights"></div>
+        <div class="modal-remix-info" id="modal-remix-info" style="display:none"></div>
+        <div class="modal-dag-section" id="modal-dag-section">
+          <div class="modal-section-label">Workflow Steps</div>
+          <div class="modal-dag" id="modal-dag"></div>
+        </div>
+        <div class="modal-models-section" id="modal-models-section">
+          <div class="modal-section-label">Model Breakdown</div>
+          <div class="model-breakdown" id="model-breakdown"></div>
+        </div>
+        <div class="modal-io-section">
+          <div class="modal-section-label">Input / Output Schema</div>
+          <div class="modal-io-placeholder">Install to see full schema</div>
+        </div>
         <div class="modal-tags" id="modal-tags"></div>
         <div class="modal-meta-grid" id="modal-meta"></div>
         <div class="modal-install-section">
@@ -1108,6 +1686,16 @@
           <div class="modal-install-cmd" id="modal-install-cmd"></div>
         </div>
         <div class="modal-actions" id="modal-actions"></div>
+        <div class="playground-section" id="playground-section">
+          <div class="modal-section-label">Try It - Live Playground</div>
+          <div class="playground-form" id="playground-form"></div>
+          <button class="playground-run-btn" id="playground-run-btn" onclick="runPlayground()">Run</button>
+          <div class="playground-output" id="playground-output">
+            <div class="playground-output-label">Output</div>
+            <div class="playground-output-box" id="playground-output-box"></div>
+          </div>
+          <div class="playground-note">This is a simulated demo - install the workflow for real execution.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1127,15 +1715,17 @@
   </footer>
 
   <script>
-    /* ---------- State ---------- */
-    let registry = null;
-    let activeCategory = 'all';
-    let searchQuery = '';
-    let sortBy = 'name';
-    let debounceTimer = null;
+    /* ========== State ========== */
+    var registry = null;
+    var activeCategory = 'all';
+    var activeCollection = null;
+    var activeAuthor = null;
+    var searchQuery = '';
+    var sortBy = 'name';
+    var debounceTimer = null;
 
-    /* ---------- Category metadata ---------- */
-    const CAT_COLORS = {
+    /* ========== Constants ========== */
+    var CAT_COLORS = {
       sales_crm: '#F59E0B',
       marketing: '#8B5CF6',
       support: '#F43F5E',
@@ -1144,7 +1734,7 @@
       general_ai: '#9CA3AF'
     };
 
-    const CAT_LABELS = {
+    var CAT_LABELS = {
       sales_crm: 'Sales & CRM',
       marketing: 'Marketing',
       support: 'Support',
@@ -1153,13 +1743,44 @@
       general_ai: 'General AI'
     };
 
-    /* ---------- Fetch ---------- */
+    var COLLECTION_ICONS = {
+      'target': '\uD83C\uDFAF',
+      'pen-tool': '\u270F\uFE0F',
+      'terminal': '\uD83D\uDCBB',
+      'headphones': '\uD83C\uDFA7',
+      'users': '\uD83D\uDC65'
+    };
+
+    /* Model cost approximations per 1 run (split across steps) */
+    var MODEL_COSTS = {
+      'sonnet': 0.003,
+      'haiku': 0.001,
+      'opus': 0.015,
+      'minimax/m2.5': 0.002,
+      'openai/codex-mini': 0.002,
+      'google/gemini-2.5-pro': 0.005,
+      'openai/gpt-4o': 0.005,
+      'openai/gpt-4o-mini': 0.001
+    };
+
+    /* Playground sample outputs per category */
+    var PLAYGROUND_OUTPUTS = {
+      sales_crm: 'Lead Score: 87/100\nSegment: High-Intent Enterprise\nRecommended Action: Schedule discovery call within 24h\nKey Signals: Visited pricing page 3x, downloaded whitepaper, matches ICP criteria\nNext Steps: Route to enterprise AE, prepare custom ROI deck',
+      marketing: 'Content Performance Summary:\n- Engagement Rate: 4.2% (above 3.1% benchmark)\n- Top Performing Channel: LinkedIn (+67% vs avg)\n- Recommended: Double down on case study format\n- A/B Winner: Variant B headline (+23% CTR)\n- Next publish window: Tuesday 9am EST',
+      support: 'Ticket Analysis Complete:\nSeverity: P2 - High\nCategory: Integration Issue\nSentiment: Frustrated\nSuggested Response: Acknowledge delay, provide workaround steps\nEscalation: Not needed - known issue with fix in v2.4.1\nETA: 48h for permanent resolution',
+      engineering: 'Sprint Summary:\n- Velocity: 34 pts (vs 31 avg)\n- Completed: 8/10 stories\n- Blockers: 1 (API rate limit - resolved)\n- Tech Debt: 2 items addressed\n- Release candidate: v2.4.0-rc.1 ready\n- CI/CD: All 247 tests passing',
+      hr_legal: 'Resume Analysis:\nMatch Score: 82/100\nKey Strengths: 5+ years relevant experience, technical leadership\nGaps: No direct industry experience\nRisk Flags: None\nInterview Recommendation: Proceed to technical round\nSuggested Focus: System design, team management scenarios',
+      general_ai: 'Analysis Complete:\n\nStep 1: Problem decomposition - identified 3 sub-problems\nStep 2: Research phase - synthesized 12 relevant sources\nStep 3: Solution generation - produced 4 candidate approaches\nStep 4: Evaluation - ranked by feasibility and impact\n\nRecommended approach: Option B (highest ROI, moderate effort)\nConfidence: 89%'
+    };
+
+    /* ========== Fetch ========== */
     async function fetchRegistry() {
       try {
-        const res = await fetch('./registry.json');
+        var res = await fetch('./registry.json');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         registry = await res.json();
         animateStats(registry.stats);
+        renderCollections();
         renderTemplates();
       } catch (err) {
         document.getElementById('template-grid').innerHTML =
@@ -1170,102 +1791,251 @@
       }
     }
 
-    /* ---------- Animate count-up ---------- */
+    /* ========== Animate count-up ========== */
     function animateStats(stats) {
+      var catCount = registry.categories ? registry.categories.length : (stats.categories || 6);
       animateNumber('stat-templates', stats.total_templates);
       animateNumber('stat-authors', stats.total_authors);
-      animateNumber('stat-categories', stats.categories);
+      animateNumber('stat-categories', catCount);
+      animateNumber('stat-downloads', stats.total_downloads);
     }
 
     function animateNumber(id, target) {
-      const el = document.getElementById(id);
+      var el = document.getElementById(id);
       if (!el) return;
-      const duration = 800;
-      const start = performance.now();
+      var duration = 900;
+      var start = performance.now();
       function tick(now) {
-        const elapsed = now - start;
-        const progress = Math.min(elapsed / duration, 1);
-        const eased = 1 - Math.pow(1 - progress, 3);
-        el.textContent = Math.round(eased * target);
+        var elapsed = now - start;
+        var progress = Math.min(elapsed / duration, 1);
+        var eased = 1 - Math.pow(1 - progress, 3);
+        var val = Math.round(eased * target);
+        el.textContent = target >= 1000 ? formatNumber(val) : val;
         if (progress < 1) requestAnimationFrame(tick);
       }
       requestAnimationFrame(tick);
     }
 
-    /* ---------- Filter + Sort ---------- */
+    function formatNumber(n) {
+      if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+      return n.toString();
+    }
+
+    /* ========== Collections ========== */
+    function renderCollections() {
+      var container = document.getElementById('collections-scroll');
+      if (!registry || !registry.collections || registry.collections.length === 0) {
+        document.getElementById('collections-section').style.display = 'none';
+        return;
+      }
+
+      var html = '';
+      registry.collections.forEach(function(col) {
+        var icon = COLLECTION_ICONS[col.icon] || '\uD83D\uDCE6';
+        var count = col.template_slugs ? col.template_slugs.length : 0;
+        html +=
+          '<div class="collection-card" data-collection="' + escAttr(col.id) + '" onclick="toggleCollection(\'' + escAttr(col.id) + '\')">' +
+            '<div class="collection-icon">' + icon + '</div>' +
+            '<div class="collection-name">' + escHtml(col.name) + '</div>' +
+            '<div class="collection-desc">' + escHtml(col.description) + '</div>' +
+            '<div class="collection-stats">' +
+              '<span>' + count + ' templates</span>' +
+              '<span>' + formatNumber(col.downloads || 0) + ' downloads</span>' +
+            '</div>' +
+          '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function toggleCollection(colId) {
+      if (activeCollection === colId) {
+        activeCollection = null;
+      } else {
+        activeCollection = colId;
+        activeCategory = 'all';
+        activeAuthor = null;
+        updateCategoryPills();
+        hideAuthorBar();
+      }
+      updateCollectionHighlight();
+      renderTemplates();
+    }
+
+    function updateCollectionHighlight() {
+      document.querySelectorAll('.collection-card').forEach(function(card) {
+        card.classList.toggle('active', card.dataset.collection === activeCollection);
+      });
+    }
+
+    /* ========== Author filtering ========== */
+    function filterByAuthor(author) {
+      activeAuthor = author;
+      activeCollection = null;
+      updateCollectionHighlight();
+      showAuthorBar(author);
+      renderTemplates();
+    }
+
+    function showAuthorBar(author) {
+      if (!registry) return;
+      var bar = document.getElementById('author-bar');
+      var templates = registry.templates.filter(function(t) { return t.author === author; });
+      var totalDownloads = templates.reduce(function(sum, t) { return sum + (t.downloads || 0); }, 0);
+
+      document.getElementById('author-avatar').textContent = author.charAt(0).toUpperCase();
+      document.getElementById('author-name').textContent = '@' + author;
+      document.getElementById('author-meta').innerHTML =
+        '<span>' + templates.length + ' template' + (templates.length !== 1 ? 's' : '') + '</span>' +
+        '<span>' + formatNumber(totalDownloads) + ' downloads</span>' +
+        '<span>' + (templates[0] && templates[0].source === 'community' ? 'Community' : 'Built-in') + '</span>';
+      bar.classList.add('visible');
+    }
+
+    function hideAuthorBar() {
+      activeAuthor = null;
+      document.getElementById('author-bar').classList.remove('visible');
+      renderTemplates();
+    }
+
+    function updateCategoryPills() {
+      document.querySelectorAll('.pill').forEach(function(p) {
+        p.classList.toggle('active', p.dataset.cat === activeCategory);
+      });
+    }
+
+    /* ========== Filter + Sort ========== */
     function getFiltered() {
       if (!registry) return [];
-      let items = registry.templates.slice();
+      var items = registry.templates.slice();
 
+      // Collection filter
+      if (activeCollection && registry.collections) {
+        var col = registry.collections.find(function(c) { return c.id === activeCollection; });
+        if (col && col.template_slugs) {
+          var slugSet = {};
+          col.template_slugs.forEach(function(s) { slugSet[s] = true; });
+          items = items.filter(function(t) { return slugSet[t.slug]; });
+        }
+      }
+
+      // Category filter
       if (activeCategory !== 'all') {
-        items = items.filter(t => t.category === activeCategory);
+        items = items.filter(function(t) { return t.category === activeCategory; });
       }
 
+      // Author filter
+      if (activeAuthor) {
+        items = items.filter(function(t) { return t.author === activeAuthor; });
+      }
+
+      // Search
       if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        items = items.filter(t =>
-          t.name.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q) ||
-          t.tags.some(tag => tag.toLowerCase().includes(q))
-        );
+        var q = searchQuery.toLowerCase();
+        items = items.filter(function(t) {
+          return t.name.toLowerCase().indexOf(q) !== -1 ||
+            t.description.toLowerCase().indexOf(q) !== -1 ||
+            t.tags.some(function(tag) { return tag.toLowerCase().indexOf(q) !== -1; });
+        });
       }
 
+      // Sort
       if (sortBy === 'name') {
-        items.sort((a, b) => a.name.localeCompare(b.name));
+        items.sort(function(a, b) { return a.name.localeCompare(b.name); });
       } else if (sortBy === 'newest') {
-        items.sort((a, b) => b.created.localeCompare(a.created));
+        items.sort(function(a, b) { return (b.created_at || b.created || '').localeCompare(a.created_at || a.created || ''); });
       } else if (sortBy === 'steps') {
-        items.sort((a, b) => b.steps - a.steps);
+        items.sort(function(a, b) { return (b.step_count || b.steps || 0) - (a.step_count || a.steps || 0); });
+      } else if (sortBy === 'downloads') {
+        items.sort(function(a, b) { return (b.downloads || 0) - (a.downloads || 0); });
+      } else if (sortBy === 'cost-low') {
+        items.sort(function(a, b) { return (a.estimated_cost_per_run || 0) - (b.estimated_cost_per_run || 0); });
       }
 
       return items;
     }
 
-    /* ---------- Render ---------- */
+    /* ========== Render grid ========== */
     function renderTemplates() {
-      const grid = document.getElementById('template-grid');
-      const info = document.getElementById('results-info');
-      const filtered = getFiltered();
+      var grid = document.getElementById('template-grid');
+      var info = document.getElementById('results-info');
+      var filtered = getFiltered();
 
       if (filtered.length === 0) {
         info.textContent = '';
         grid.innerHTML =
           '<div class="empty-state">' +
-            '<div class="empty-state-icon">🔍</div>' +
+            '<div class="empty-state-icon">\uD83D\uDD0D</div>' +
             '<h3>No workflows found</h3>' +
-            '<p>Try a different search term or reset the category filter</p>' +
+            '<p>Try a different search term or reset the filters</p>' +
             '<button onclick="resetFilters()">Reset filters</button>' +
           '</div>';
         return;
       }
 
-      const catLabel = activeCategory === 'all' ? '' : ' in ' + (CAT_LABELS[activeCategory] || activeCategory);
-      info.textContent = filtered.length + ' workflow' + (filtered.length !== 1 ? 's' : '') + catLabel;
+      var context = [];
+      if (activeCollection && registry.collections) {
+        var col = registry.collections.find(function(c) { return c.id === activeCollection; });
+        if (col) context.push('in ' + col.name);
+      }
+      if (activeCategory !== 'all') {
+        context.push('in ' + (CAT_LABELS[activeCategory] || activeCategory));
+      }
+      if (activeAuthor) {
+        context.push('by @' + activeAuthor);
+      }
+      var contextStr = context.length > 0 ? ' ' + context.join(', ') : '';
+      info.textContent = filtered.length + ' workflow' + (filtered.length !== 1 ? 's' : '') + contextStr;
 
-      let html = '';
+      var html = '';
       filtered.forEach(function(t) {
-        const color = CAT_COLORS[t.category] || '#9CA3AF';
-        const label = CAT_LABELS[t.category] || t.category;
-        const tagsHtml = t.tags.slice(0, 4).map(function(tag) {
+        var color = CAT_COLORS[t.category] || '#9CA3AF';
+        var label = CAT_LABELS[t.category] || t.category;
+        var steps = t.step_count || t.steps || 0;
+        var models = t.models_used || t.models || [];
+        var tags = t.tags || [];
+        var cost = t.estimated_cost_per_run;
+        var downloads = t.downloads || 0;
+        var remixCount = t.remix_count || 0;
+        var forkedFrom = t.forked_from || null;
+        var source = t.source || 'built-in';
+
+        var tagsHtml = tags.slice(0, 4).map(function(tag) {
           return '<span class="tag">' + escHtml(tag) + '</span>';
         }).join('');
-        const modelsStr = t.models.join(', ');
+
+        var remixBadgeHtml = '';
+        if (forkedFrom) {
+          remixBadgeHtml =
+            '<div class="card-remix-badge" onclick="event.stopPropagation();showDetail(\'' + escAttr(forkedFrom) + '\')" title="Remixed from ' + escAttr(forkedFrom) + '">' +
+              '\u21AA Remixed from ' + escHtml(forkedFrom.split('/').pop()) +
+            '</div>';
+        }
+
+        var sourceBadgeHtml = '';
+        if (source === 'community') {
+          sourceBadgeHtml = '<span class="card-source-badge community">Community</span>';
+        }
 
         html +=
           '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
-            '<div class="card-category" style="color:' + color + '">' +
-              '<span class="dot" style="background:' + color + '"></span>' + escHtml(label) +
+            '<div class="card-header-row">' +
+              '<div class="card-category" style="color:' + color + '">' +
+                '<span class="dot" style="background:' + color + '"></span>' + escHtml(label) +
+              '</div>' +
+              sourceBadgeHtml +
             '</div>' +
             '<div class="card-title">' + escHtml(t.name) + '</div>' +
             '<div class="card-desc">' + escHtml(t.description) + '</div>' +
             '<div class="card-tags">' + tagsHtml + '</div>' +
+            remixBadgeHtml +
             '<div class="card-footer">' +
               '<div class="card-meta">' +
-                '<span class="mono">' + t.steps + ' steps</span>' +
-                '<span>' + escHtml(t.author) + '</span>' +
-                (modelsStr ? '<span class="mono">' + escHtml(modelsStr) + '</span>' : '') +
+                '<span class="mono">' + steps + ' steps</span>' +
+                '<span class="card-author-link" onclick="event.stopPropagation();filterByAuthor(\'' + escAttr(t.author) + '\')">' + escHtml(t.author) + '</span>' +
+                (downloads > 0 ? '<span class="card-downloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' + formatNumber(downloads) + '</span>' : '') +
+                (remixCount > 0 ? '<span class="card-remixes">\u21AA ' + remixCount + '</span>' : '') +
               '</div>' +
-              '<button class="card-install-btn" onclick="event.stopPropagation();showDetail(\'' + escAttr(t.slug) + '\')">Install</button>' +
+              (cost != null ? '<span class="card-cost-badge">~$' + formatCost(cost) + '</span>' : '') +
             '</div>' +
           '</div>';
       });
@@ -1281,7 +2051,13 @@
       grid.innerHTML = html;
     }
 
-    /* ---------- Modal ---------- */
+    function formatCost(cost) {
+      if (cost < 0.01) return cost.toFixed(3);
+      if (cost < 0.1) return cost.toFixed(3);
+      return cost.toFixed(2);
+    }
+
+    /* ========== Modal ========== */
     function showDetail(slug) {
       if (!registry) return;
       var t = registry.templates.find(function(item) { return item.slug === slug; });
@@ -1289,13 +2065,54 @@
 
       var color = CAT_COLORS[t.category] || '#9CA3AF';
       var label = CAT_LABELS[t.category] || t.category;
+      var steps = t.step_count || t.steps || 0;
+      var models = t.models_used || t.models || [];
+      var tools = t.tools_used || t.tools || [];
+      var cost = t.estimated_cost_per_run;
+      var execTime = t.avg_execution_time || '';
+      var downloads = t.downloads || 0;
+      var remixCount = t.remix_count || 0;
+      var forkedFrom = t.forked_from || null;
+      var license = t.license || 'MIT';
+      var source = t.source || 'built-in';
+      var created = t.created_at || t.created || '';
 
+      // Category
       document.getElementById('modal-category').innerHTML =
         '<span class="dot" style="background:' + color + '"></span>' +
         '<span style="color:' + color + '">' + escHtml(label) + '</span>';
 
       document.getElementById('modal-title').textContent = t.name;
       document.getElementById('modal-desc').textContent = t.description;
+
+      // Highlights bar
+      var hlHtml = '';
+      if (cost != null) {
+        hlHtml += '<div class="modal-highlight"><span class="hl-label">Cost</span><span class="hl-value cost">~$' + formatCost(cost) + '</span></div>';
+      }
+      if (execTime) {
+        hlHtml += '<div class="modal-highlight"><span class="hl-label">Time</span><span class="hl-value time">' + escHtml(execTime) + '</span></div>';
+      }
+      hlHtml += '<div class="modal-highlight"><span class="hl-label">Downloads</span><span class="hl-value downloads">' + formatNumber(downloads) + '</span></div>';
+      if (remixCount > 0) {
+        hlHtml += '<div class="modal-highlight"><span class="hl-label">Remixes</span><span class="hl-value">' + remixCount + '</span></div>';
+      }
+      document.getElementById('modal-highlights').innerHTML = hlHtml;
+
+      // Remix info
+      var remixInfo = document.getElementById('modal-remix-info');
+      if (forkedFrom) {
+        remixInfo.innerHTML = '\u21AA Remixed from <a href="#" onclick="event.preventDefault();hideDetail();setTimeout(function(){showDetail(\'' + escAttr(forkedFrom) + '\')},300)" style="color:var(--accent);font-weight:600">' + escHtml(forkedFrom) + '</a>';
+        remixInfo.style.display = 'flex';
+      } else {
+        remixInfo.style.display = 'none';
+      }
+
+      // DAG visualization
+      renderDag(steps, models, color);
+
+      // Model breakdown
+      renderModelBreakdown(models, cost, steps);
 
       // Tags
       var tagsHtml = t.tags.map(function(tag) {
@@ -1305,12 +2122,14 @@
 
       // Meta grid
       var metaHtml =
-        metaItem('Author', '<a href="' + escAttr(t.author_url) + '" target="_blank" rel="noopener">@' + escHtml(t.author) + '</a>') +
-        metaItem('Steps', '<span class="mono">' + t.steps + '</span>') +
-        metaItem('Models', '<span class="mono">' + escHtml(t.models.join(', ')) + '</span>') +
-        metaItem('Tools', t.tools.length > 0 ? '<span class="mono">' + escHtml(t.tools.join(', ')) + '</span>' : '<span style="color:var(--text-dim)">None</span>') +
+        metaItem('Author', '<a href="' + escAttr(t.author_url) + '" target="_blank" rel="noopener" style="cursor:pointer">@' + escHtml(t.author) + '</a>') +
+        metaItem('Steps', '<span class="mono">' + steps + '</span>') +
+        metaItem('Models', '<span class="mono">' + escHtml(models.join(', ')) + '</span>') +
+        metaItem('Tools', tools.length > 0 ? '<span class="mono">' + escHtml(tools.join(', ')) + '</span>' : '<span style="color:var(--text-dim)">None</span>') +
+        metaItem('License', escHtml(license)) +
+        metaItem('Source', source === 'community' ? '<span style="color:var(--accent)">Community</span>' : 'Built-in') +
         metaItem('Category', '<span style="color:' + color + '">' + escHtml(label) + '</span>') +
-        metaItem('Created', escHtml(t.created));
+        metaItem('Created', escHtml(created));
       document.getElementById('modal-meta').innerHTML = metaHtml;
 
       // Install command
@@ -1330,7 +2149,11 @@
       // Action buttons
       document.getElementById('modal-actions').innerHTML =
         '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--primary">Download YAML</a>' +
-        '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--secondary">View Source</a>';
+        '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--secondary">View Source</a>' +
+        '<button class="modal-btn modal-btn--playground" onclick="togglePlayground()">Try It</button>';
+
+      // Playground setup
+      setupPlayground(t);
 
       document.getElementById('modal-overlay').classList.add('open');
       document.body.style.overflow = 'hidden';
@@ -1339,6 +2162,11 @@
     function hideDetail() {
       document.getElementById('modal-overlay').classList.remove('open');
       document.body.style.overflow = '';
+      // Reset playground
+      var pg = document.getElementById('playground-section');
+      pg.classList.remove('visible');
+      var out = document.getElementById('playground-output');
+      out.classList.remove('visible');
     }
 
     function metaItem(label, value) {
@@ -1348,29 +2176,242 @@
       '</div>';
     }
 
-    /* ---------- Reset ---------- */
+    /* ========== DAG Visualization ========== */
+    function renderDag(stepCount, models, catColor) {
+      var dagEl = document.getElementById('modal-dag');
+      if (stepCount <= 0) {
+        dagEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center">No steps data</div>';
+        return;
+      }
+
+      var nodeR = 18;
+      var nodeSpacing = 80;
+      var labelOffset = 30;
+      var paddingX = 40;
+      var paddingY = 16;
+      var totalWidth = paddingX * 2 + (stepCount - 1) * nodeSpacing;
+      var svgHeight = nodeR * 2 + labelOffset + paddingY * 2 + 14;
+
+      // Clamp for many steps
+      var maxWidth = Math.max(totalWidth, 100);
+
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + maxWidth + '" height="' + svgHeight + '" viewBox="0 0 ' + maxWidth + ' ' + svgHeight + '">';
+
+      // Connection lines
+      for (var i = 0; i < stepCount - 1; i++) {
+        var x1 = paddingX + i * nodeSpacing + nodeR;
+        var x2 = paddingX + (i + 1) * nodeSpacing - nodeR;
+        var cy = paddingY + nodeR;
+        svg += '<line x1="' + x1 + '" y1="' + cy + '" x2="' + x2 + '" y2="' + cy + '" stroke="' + catColor + '" stroke-width="2" stroke-opacity="0.4"/>';
+        // Arrow
+        var arrowX = x2 - 5;
+        svg += '<polygon points="' + x2 + ',' + cy + ' ' + arrowX + ',' + (cy - 4) + ' ' + arrowX + ',' + (cy + 4) + '" fill="' + catColor + '" fill-opacity="0.5"/>';
+      }
+
+      // Nodes and labels
+      for (var j = 0; j < stepCount; j++) {
+        var cx = paddingX + j * nodeSpacing;
+        var cy2 = paddingY + nodeR;
+        var modelLabel = models[j % models.length] || '';
+
+        // Circle
+        svg += '<circle cx="' + cx + '" cy="' + cy2 + '" r="' + nodeR + '" fill="' + catColor + '" fill-opacity="0.15" stroke="' + catColor + '" stroke-width="2"/>';
+        // Step number
+        svg += '<text x="' + cx + '" y="' + (cy2 + 5) + '" text-anchor="middle" fill="' + catColor + '" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">' + (j + 1) + '</text>';
+        // Model label below
+        if (modelLabel) {
+          svg += '<text x="' + cx + '" y="' + (cy2 + nodeR + labelOffset - 6) + '" text-anchor="middle" fill="#737373" font-family="IBM Plex Mono, monospace" font-size="10">' + escHtml(modelLabel) + '</text>';
+        }
+      }
+
+      svg += '</svg>';
+      dagEl.innerHTML = svg;
+    }
+
+    /* ========== Model Breakdown ========== */
+    function renderModelBreakdown(models, totalCost, stepCount) {
+      var container = document.getElementById('model-breakdown');
+      if (!models || models.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-dim);font-size:13px">No model data available</div>';
+        return;
+      }
+
+      // Count model usage
+      var modelCounts = {};
+      models.forEach(function(m) {
+        modelCounts[m] = (modelCounts[m] || 0) + 1;
+      });
+
+      // Calculate cost per model proportionally
+      var totalModelWeight = 0;
+      var modelWeights = {};
+      Object.keys(modelCounts).forEach(function(m) {
+        var baseCost = MODEL_COSTS[m] || 0.003;
+        var w = baseCost * modelCounts[m];
+        modelWeights[m] = w;
+        totalModelWeight += w;
+      });
+
+      var html = '';
+      Object.keys(modelCounts).forEach(function(m) {
+        var proportion = totalModelWeight > 0 ? modelWeights[m] / totalModelWeight : 0;
+        var costShare = totalCost ? (totalCost * proportion) : (MODEL_COSTS[m] || 0.003);
+        html +=
+          '<div class="model-row">' +
+            '<div class="model-name">' + escHtml(m) + ' <span style="color:var(--text-dim);font-size:11px">x' + modelCounts[m] + ' step' + (modelCounts[m] > 1 ? 's' : '') + '</span></div>' +
+            '<div class="model-cost">~$' + formatCost(costShare) + '</div>' +
+          '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    /* ========== Playground ========== */
+    function setupPlayground(template) {
+      var form = document.getElementById('playground-form');
+      var section = document.getElementById('playground-section');
+      section.classList.remove('visible');
+      document.getElementById('playground-output').classList.remove('visible');
+
+      // Generate sample fields based on template category/name
+      var fields = getPlaygroundFields(template);
+      var html = '';
+      fields.forEach(function(f) {
+        if (f.type === 'textarea') {
+          html +=
+            '<div class="playground-field">' +
+              '<label>' + escHtml(f.label) + '</label>' +
+              '<textarea placeholder="' + escAttr(f.placeholder) + '">' + escHtml(f.default || '') + '</textarea>' +
+            '</div>';
+        } else {
+          html +=
+            '<div class="playground-field">' +
+              '<label>' + escHtml(f.label) + '</label>' +
+              '<input type="text" placeholder="' + escAttr(f.placeholder) + '" value="' + escAttr(f.default || '') + '">' +
+            '</div>';
+        }
+      });
+      form.innerHTML = html;
+
+      // Store current template for output
+      form.dataset.category = template.category;
+      form.dataset.name = template.name;
+    }
+
+    function getPlaygroundFields(template) {
+      var cat = template.category;
+      if (cat === 'sales_crm') {
+        return [
+          { label: 'Company Name', type: 'text', placeholder: 'e.g. Acme Corp', default: 'Acme Corp' },
+          { label: 'Lead Info', type: 'textarea', placeholder: 'Paste lead details...', default: 'VP Engineering, visited pricing page 3x, 500+ employees' }
+        ];
+      } else if (cat === 'marketing') {
+        return [
+          { label: 'Topic / URL', type: 'text', placeholder: 'Blog post URL or topic', default: 'How to scale your team with automation' },
+          { label: 'Target Audience', type: 'text', placeholder: 'e.g. SaaS founders', default: 'SaaS founders and CTOs' }
+        ];
+      } else if (cat === 'support') {
+        return [
+          { label: 'Ticket Content', type: 'textarea', placeholder: 'Paste ticket text...', default: 'The API integration stopped working after the latest update. Getting 500 errors on webhook endpoint.' },
+          { label: 'Customer Tier', type: 'text', placeholder: 'e.g. Enterprise', default: 'Enterprise' }
+        ];
+      } else if (cat === 'engineering') {
+        return [
+          { label: 'Repository / Context', type: 'text', placeholder: 'e.g. github.com/org/repo', default: 'github.com/acme/platform' },
+          { label: 'Sprint / Task Info', type: 'textarea', placeholder: 'Describe the context...', default: 'Sprint 24 - 10 stories planned, 2 carry-overs from Sprint 23' }
+        ];
+      } else if (cat === 'hr_legal') {
+        return [
+          { label: 'Document / Input', type: 'textarea', placeholder: 'Paste content...', default: 'Senior Software Engineer, 5 years experience, led team of 8, Python/Go expert' },
+          { label: 'Role / Context', type: 'text', placeholder: 'e.g. Senior Engineer', default: 'Senior Software Engineer' }
+        ];
+      } else {
+        return [
+          { label: 'Input', type: 'textarea', placeholder: 'Describe your input...', default: 'Analyze the pros and cons of microservices vs monolith for a Series A startup' },
+          { label: 'Additional Context', type: 'text', placeholder: 'Optional context', default: '15-person engineering team' }
+        ];
+      }
+    }
+
+    function togglePlayground() {
+      var section = document.getElementById('playground-section');
+      section.classList.toggle('visible');
+      if (section.classList.contains('visible')) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function runPlayground() {
+      var form = document.getElementById('playground-form');
+      var outputSection = document.getElementById('playground-output');
+      var outputBox = document.getElementById('playground-output-box');
+      var btn = document.getElementById('playground-run-btn');
+
+      // Disable button
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+      btn.style.opacity = '0.6';
+
+      // Show output
+      outputSection.classList.add('visible');
+      outputBox.innerHTML = '<span class="typing-cursor"></span>';
+
+      var cat = form.dataset.category || 'general_ai';
+      var outputText = PLAYGROUND_OUTPUTS[cat] || PLAYGROUND_OUTPUTS.general_ai;
+
+      // Typing animation
+      var charIndex = 0;
+      var speed = 15;
+      function typeChar() {
+        if (charIndex < outputText.length) {
+          var ch = outputText.charAt(charIndex);
+          if (ch === '\n') {
+            outputBox.innerHTML = escHtml(outputText.substring(0, charIndex + 1)) + '<span class="typing-cursor"></span>';
+          } else {
+            outputBox.innerHTML = escHtml(outputText.substring(0, charIndex + 1)) + '<span class="typing-cursor"></span>';
+          }
+          charIndex++;
+          setTimeout(typeChar, speed + Math.random() * 10);
+        } else {
+          // Done typing
+          outputBox.innerHTML = escHtml(outputText).replace(/\n/g, '<br>');
+          btn.disabled = false;
+          btn.textContent = 'Run';
+          btn.style.opacity = '1';
+        }
+      }
+
+      // Simulate 1.2s "processing" before typing
+      setTimeout(typeChar, 1200);
+    }
+
+    /* ========== Reset ========== */
     function resetFilters() {
       activeCategory = 'all';
+      activeCollection = null;
+      activeAuthor = null;
       searchQuery = '';
       document.getElementById('search-input').value = '';
-      document.querySelectorAll('.pill').forEach(function(p) {
-        p.classList.toggle('active', p.dataset.cat === 'all');
-      });
+      updateCategoryPills();
+      updateCollectionHighlight();
+      hideAuthorBar();
       renderTemplates();
     }
 
-    /* ---------- Escape helpers ---------- */
+    /* ========== Escape helpers ========== */
     function escHtml(str) {
+      if (!str) return '';
       var div = document.createElement('div');
       div.textContent = str;
       return div.innerHTML;
     }
 
     function escAttr(str) {
+      if (!str) return '';
       return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    /* ---------- Event listeners ---------- */
+    /* ========== Event listeners ========== */
+
     // Search with debounce
     document.getElementById('search-input').addEventListener('input', function(e) {
       clearTimeout(debounceTimer);
@@ -1385,8 +2426,9 @@
       var pill = e.target.closest('.pill');
       if (!pill) return;
       activeCategory = pill.dataset.cat;
-      document.querySelectorAll('.pill').forEach(function(p) { p.classList.remove('active'); });
-      pill.classList.add('active');
+      activeCollection = null;
+      updateCollectionHighlight();
+      updateCategoryPills();
       renderTemplates();
     });
 
@@ -1394,6 +2436,11 @@
     document.getElementById('sort-select').addEventListener('change', function(e) {
       sortBy = e.target.value;
       renderTemplates();
+    });
+
+    // Author bar close
+    document.getElementById('author-bar-close').addEventListener('click', function() {
+      hideAuthorBar();
     });
 
     // Modal close
@@ -1405,7 +2452,7 @@
       if (e.key === 'Escape') hideDetail();
     });
 
-    /* ---------- Init ---------- */
+    /* ========== Init ========== */
     fetchRegistry();
   </script>
 </body>
