@@ -33,12 +33,12 @@ export interface CommunityTemplate {
   name: string;
   description: string;
   author: string;
-  author_url: string;
+  author_url?: string;
   category: string;
-  tags: string[];
+  tags?: string[];
   step_count: number;
-  models: string[];
-  tools: string[];
+  models_used?: string[];
+  tools_used?: string[];
   download_url: string;
   created_at: string;
   estimated_cost_per_run?: number;
@@ -103,16 +103,20 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
       {/* Author */}
       <div className="flex items-center gap-1.5 mb-1">
         <User className="h-3 w-3 text-muted-foreground" />
-        <a
-          href={template.author_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-[11px] text-accent hover:text-accent-hover transition-colors flex items-center gap-0.5"
-        >
-          @{template.author}
-          <ExternalLink className="h-2.5 w-2.5" />
-        </a>
+        {template.author_url ? (
+          <a
+            href={template.author_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-[11px] text-accent hover:text-accent-hover transition-colors flex items-center gap-0.5"
+          >
+            @{template.author}
+            <ExternalLink className="h-2.5 w-2.5" />
+          </a>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">@{template.author}</span>
+        )}
       </div>
 
       {/* Remixed from */}
@@ -130,7 +134,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
 
       {/* Tags */}
       <div className="flex flex-wrap gap-1 mb-3">
-        {template.tags.slice(0, 4).map((tag) => (
+        {(template.tags || []).slice(0, 4).map((tag) => (
           <span
             key={tag}
             className={cn(
@@ -141,9 +145,9 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
             {tag}
           </span>
         ))}
-        {template.tags.length > 4 && (
+        {(template.tags || []).length > 4 && (
           <span className="rounded-full bg-border/40 px-2 py-0.5 text-[10px] text-muted">
-            +{template.tags.length - 4}
+            +{(template.tags || []).length - 4}
           </span>
         )}
       </div>
@@ -151,7 +155,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
       {/* Models/tools pills + step count */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex flex-wrap gap-1">
-          {template.models.map((m) => (
+          {(template.models_used || []).map((m) => (
             <span
               key={m}
               className="rounded-md bg-border/40 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono"
@@ -159,7 +163,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
               {m}
             </span>
           ))}
-          {template.tools.map((t) => (
+          {(template.tools_used || []).map((t) => (
             <span
               key={t}
               className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent font-mono"
