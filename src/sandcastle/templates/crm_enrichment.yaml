@@ -35,46 +35,120 @@ steps:
       Use the HubSpot tool:
         node /home/user/tools/hubspot.mjs get_contacts '{input.search_query}' 20
 
-      Return the list of contacts found with their details.
+      For each contact returned, capture ALL available properties:
+      - Core identity: full name, email, phone, job title, company name
+      - CRM metadata: lifecycle stage, lead status, HubSpot owner, create date, last activity date
+      - Engagement history: number of form submissions, page views, email opens, meetings booked
+      - Source info: original source, first conversion, referring URL
+
+      Flag any contacts with incomplete core fields (missing email, no company, no title)
+      as these will need special handling in the enrichment step.
+
+      Return the full list with completeness percentage per contact (fields filled / total fields).
     model: haiku
     max_turns: 5
 
   - id: research-contacts
     depends_on: [fetch-contacts]
     prompt: |
-      Research and enrich these HubSpot contacts:
+      Research and enrich these HubSpot contacts with deep firmographic and technographic data:
 
       {steps.fetch-contacts.output}
 
       Focus on: {input.enrichment_focus}
 
-      For each contact, research:
-      1. Company information (size, industry, funding)
-      2. Professional background and role
-      3. Recent company news or events
-      4. Potential business fit and engagement opportunities
+      DUPLICATE DETECTION (run first):
+      - Check for potential duplicates by matching on: email domain, company name variants,
+        phone number normalization, LinkedIn profile URLs.
+      - If duplicates found, flag them with a merge recommendation (which record to keep as primary).
+      - Assign a data_quality_score (1-10) per contact: 10 = all fields complete and verified,
+        1 = minimal data, likely stale.
 
-      Return structured enrichment data for each contact as JSON.
+      FIRMOGRAPHIC ENRICHMENT (per company):
+      - Company size: exact employee count and range bracket (1-10, 11-50, 51-200, 201-1000, 1000+)
+      - Revenue estimate: ARR or annual revenue range
+      - Industry vertical and sub-vertical (e.g., "SaaS > DevTools" not just "Technology")
+      - Headquarters location, office count, and geographic footprint
+      - Founded year and company stage (startup/scaleup/enterprise/public)
+      - Recent funding rounds: amount, series, lead investor, date
+      - Key executives and board members
+
+      TECHNOGRAPHIC PROFILING:
+      - Known technology stack (languages, frameworks, cloud providers, CI/CD tools)
+      - SaaS products in use (from job postings, case studies, tech review sites)
+      - Competitor products they use that we could displace
+      - Technology hiring patterns (what roles are they hiring for?)
+
+      SOCIAL MEDIA AND WEB PRESENCE:
+      - LinkedIn company page: follower count, recent posts, employee growth rate
+      - Twitter/X presence: follower count, posting frequency, sentiment of recent posts
+      - G2/Capterra/TrustRadius reviews: overall rating, review count, recent sentiment
+      - Blog/content marketing activity level
+      - Glassdoor rating and recent employee sentiment
+
+      CONTACT-LEVEL ENRICHMENT:
+      - Professional background: career history, education, certifications
+      - Decision-making authority: likely budget holder, influencer, or end user
+      - Public speaking, podcast appearances, published articles (thought leadership signals)
+      - Mutual connections or shared affiliations
+
+      Return structured enrichment data as JSON with clear source attribution for each data point.
     model: sonnet
     max_turns: 10
 
   - id: score-and-summarize
     depends_on: [research-contacts]
     prompt: |
-      Score and summarize the enriched contacts:
+      Score and summarize the enriched contacts using a multi-dimensional scoring framework:
 
       Enrichment data: {steps.research-contacts.output}
 
-      For each contact:
-      1. Assign a lead score (1-100) based on:
-         - Company fit
-         - Role relevance
-         - Engagement potential
-         - Timing signals
-      2. Write a 2-3 sentence summary of why this contact is valuable
-      3. Suggest a personalized outreach angle
+      SCORING MODEL (total 1-100):
 
-      Return as structured JSON with contact_id, score, summary, outreach_angle.
+      1. COMPANY FIT SCORE (0-30 points):
+         - Employee count in target range: +10
+         - Revenue in target range: +8
+         - Industry vertical match: +7
+         - Geographic fit: +5
+         - Deduct points for: company too small (-5), wrong industry (-10), no revenue data (-3)
+
+      2. ROLE RELEVANCE SCORE (0-25 points):
+         - C-level or VP with budget authority: +25
+         - Director-level decision maker: +20
+         - Manager-level influencer: +15
+         - Individual contributor / end user: +8
+         - Unknown title or irrelevant role: +3
+
+      3. ENGAGEMENT POTENTIAL (0-25 points):
+         - Previous website visits or content downloads: +10
+         - Form submissions or demo requests: +15
+         - Email engagement (opens/clicks) in last 30 days: +8
+         - No prior engagement but strong fit: +5
+         - Unsubscribed or bounced email: -10
+
+      4. TIMING SIGNALS (0-20 points):
+         - Recent funding round (last 6 months): +10
+         - Active hiring in relevant roles: +8
+         - Technology migration or evaluation signals: +10
+         - Contract renewal season for competitor products: +8
+         - Company in growth mode (revenue/headcount up >20% YoY): +7
+         - No timing signals detected: +2
+
+      DATA QUALITY OVERLAY:
+      - Apply a confidence multiplier based on data_quality_score:
+        score >= 8: 1.0x, score 5-7: 0.9x, score < 5: 0.75x
+      - Flag contacts where score is heavily influenced by unverified data.
+
+      For each contact, provide:
+      - Composite score with breakdown by dimension
+      - Tier classification: A (80+), B (60-79), C (40-59), D (<40)
+      - 2-3 sentence summary explaining why this contact is valuable or not
+      - Personalized outreach angle referencing specific enrichment findings
+      - Recommended outreach channel (email, LinkedIn, phone, event) with reasoning
+      - Suggested CRM lifecycle stage update
+
+      Return as structured JSON with contact_id, composite_score, dimension_scores,
+      tier, data_quality_score, summary, outreach_angle, recommended_channel, lifecycle_update.
     model: sonnet
     max_turns: 8
 
@@ -82,17 +156,39 @@ steps:
     depends_on: [score-and-summarize]
     tools: [hubspot]
     prompt: |
-      Based on the scored contacts, create HubSpot deals for contacts with a score >= 70.
+      Based on the scored contacts, create HubSpot deals and update contact records.
 
       Scored contacts: {steps.score-and-summarize.output}
 
       Only create deals if enabled: {input.create_deals}
       Pipeline: {input.deal_pipeline}
 
+      CONTACT RECORD UPDATES (for ALL contacts regardless of deal creation):
+      - Update enriched firmographic fields (company size, industry, revenue range)
+      - Set or update lead score property with the composite score
+      - Update lifecycle stage based on scoring recommendation
+      - Add a CRM note summarizing the enrichment findings and outreach angle
+      - Tag duplicate contacts with "needs-merge-review" if duplicates were detected
+
+      DEAL CREATION (only for Tier A and B contacts, score >= 60):
       For qualified contacts, use the HubSpot tool:
         node /home/user/tools/hubspot.mjs create_deal '<dealname>' '<amount>' '<pipeline>'
 
-      If deal creation is not enabled, just report which contacts would qualify.
-      Report the results of all deal creations or qualifications.
+      Deal naming convention: "[Company Name] - [Outreach Angle Summary]"
+      Set deal properties:
+      - Stage: first stage of the pipeline
+      - Amount: estimated based on company size and typical deal value
+      - Close date: 90 days out for Tier A, 120 days for Tier B
+      - Deal description: include the outreach angle and key enrichment highlights
+      - Associate the deal with the contact record
+
+      If deal creation is not enabled, report which contacts would qualify and why,
+      formatted as a recommendation for the sales team to review.
+
+      SUMMARY REPORT:
+      - Total contacts processed, duplicates found, records updated
+      - Deals created (or recommended) with estimated pipeline value
+      - Data quality issues requiring manual attention
+      - Contacts recommended for removal or archival (Tier D with low data quality)
     model: haiku
     max_turns: 15

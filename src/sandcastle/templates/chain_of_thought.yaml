@@ -1,14 +1,14 @@
 # name: Chain of Thought Solver
-# description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer
+# description: Advanced problem solver using structured decomposition, parallel research and reasoning tracks, synthesis, and solution validation
 # tags: [reasoning, chain-of-thought, problem-solving]
 # category: general_ai
 
 name: chain-of-thought-solver
-description: Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer
+description: Advanced problem solver using structured decomposition, parallel research and reasoning tracks, synthesis, and solution validation
 
 default_model: sonnet
-default_max_turns: 10
-default_timeout: 300
+default_max_turns: 12
+default_timeout: 360
 
 input_schema:
   required: ["problem"]
@@ -16,19 +16,71 @@ input_schema:
     problem:
       type: string
       description: "The problem to decompose and solve"
+    constraints:
+      type: string
+      description: "Known constraints, requirements, or boundary conditions that the solution must satisfy"
+      default: ""
+    depth:
+      type: string
+      description: "Analysis depth - quick (surface-level), standard (balanced), or deep (exhaustive)"
+      default: "standard"
 
 steps:
-  - id: decompose
-    prompt: >
-      Analyze the following problem and break it down into smaller,
-      manageable sub-problems. List each sub-problem with a clear
-      description of what needs to be solved.
+  - id: problem-decomposition
+    prompt: |
+      Perform a rigorous decomposition of the following problem into
+      a structured reasoning plan.
+
       Problem: {input.problem}
+      Constraints: {input.constraints}
+      Analysis depth: {input.depth}
+
+      Apply this decomposition methodology:
+
+      1. **Problem restatement** - Restate the problem in your own words
+         to verify understanding. Identify the core question being asked.
+         Distinguish between what is explicitly stated and what is implied.
+         If the problem is ambiguous, state all reasonable interpretations
+         and which one you will pursue (and briefly why).
+
+      2. **Problem classification** - Categorize the problem type:
+         - Analytical (requires data interpretation or calculation)
+         - Creative (requires generating novel ideas or solutions)
+         - Diagnostic (requires identifying root causes)
+         - Optimization (requires finding the best among alternatives)
+         - Predictive (requires forecasting outcomes)
+         - Ethical/value-based (requires weighing competing values)
+         This classification drives which reasoning strategies to apply.
+
+      3. **Assumption inventory** - List every assumption you are making,
+         both from information given and information not given. Mark each as:
+         - STATED (explicitly in the problem)
+         - INFERRED (reasonable to assume)
+         - CRITICAL (if wrong, invalidates the entire approach)
+
+      4. **Sub-problem decomposition** - Break the problem into 3-6
+         independent or semi-independent sub-problems. For each:
+         - ID and clear description
+         - Why solving this sub-problem is necessary for the overall solution
+         - Dependencies on other sub-problems (if any)
+         - Estimated difficulty (LOW / MEDIUM / HIGH)
+
+      5. **Reasoning strategy selection** - For each sub-problem, select
+         the best reasoning approach: deductive, inductive, analogical,
+         abductive, first-principles, or computational. Justify the choice.
+
+      6. **Success criteria** - Define what a correct, complete answer
+         looks like. What properties must the final solution have?
+         How will we know if the solution is valid?
+
+      Output the complete decomposition plan.
     model: sonnet
-    max_turns: 5
+    max_turns: 8
     output_schema:
       type: object
       properties:
+        problem_type:
+          type: string
         sub_problems:
           type: array
           items:
@@ -38,22 +90,198 @@ steps:
                 type: string
               description:
                 type: string
+              difficulty:
+                type: string
+              strategy:
+                type: string
+        assumptions:
+          type: array
+          items:
+            type: string
+        success_criteria:
+          type: array
+          items:
+            type: string
 
-  - id: solve
-    depends_on: [decompose]
-    prompt: >
-      Solve each of the following sub-problems step by step.
-      Show your reasoning for each solution.
-      Sub-problems: {steps.decompose.output}
+  - id: research-track
+    depends_on: [problem-decomposition]
+    prompt: |
+      Gather all relevant knowledge, precedents, and frameworks needed
+      to solve the identified sub-problems.
+
+      Original problem: {input.problem}
+      Decomposition: {steps.problem-decomposition.output}
+
+      For each sub-problem identified in the decomposition:
+
+      1. **Domain knowledge assembly** - What established knowledge,
+         theories, formulas, or frameworks apply to this sub-problem?
+         Be specific - cite the actual principle or method, not just
+         the field. For example, not just "use statistics" but "apply
+         Bayes' theorem because we have prior probabilities and
+         new evidence."
+
+      2. **Precedent analysis** - Are there known solutions to similar
+         problems? What approaches have worked before? What approaches
+         have failed and why? If this is a well-studied problem type,
+         identify the standard solution approach and its limitations.
+
+      3. **Edge case identification** - What boundary conditions, special
+         cases, or degenerate cases could affect the solution? List at
+         least 2-3 edge cases per sub-problem that might trip up a
+         naive solution.
+
+      4. **Data and evidence gathering** - What facts, data points,
+         or evidence are needed? Distinguish between what is provided
+         in the problem statement, what can be derived, and what would
+         need external sources.
+
+      5. **Constraint implications** - For each constraint "{input.constraints}",
+         trace through how it affects each sub-problem. Some constraints
+         may make certain sub-problems trivial while making others harder.
+
+      Organize findings by sub-problem, clearly mapping each piece
+      of knowledge to where it will be used in the reasoning step.
+    model: sonnet
+    max_turns: 10
+
+  - id: reasoning-track
+    depends_on: [problem-decomposition]
+    prompt: |
+      Solve each sub-problem step by step using explicit chain-of-thought
+      reasoning. Show ALL intermediate steps.
+
+      Original problem: {input.problem}
+      Decomposition: {steps.problem-decomposition.output}
+      Constraints: {input.constraints}
+
+      For EACH sub-problem, follow this reasoning protocol:
+
+      1. **State the sub-problem clearly** - One sentence describing
+         exactly what you need to determine.
+
+      2. **Select and apply reasoning strategy** - Use the strategy
+         assigned in the decomposition plan. Show your work explicitly:
+         - For deductive reasoning: state premises, show each logical step
+         - For inductive reasoning: present examples, identify pattern, generalize
+         - For analogical reasoning: describe the analogy, map components, identify limits
+         - For first-principles: identify foundational truths, build up step by step
+         - For computational: show the formula, plug in values, compute
+
+      3. **Intermediate checkpoints** - After every 2-3 reasoning steps,
+         pause and verify:
+         - "Does this intermediate result make sense?"
+         - "Am I still on track to answer the sub-problem?"
+         - "Have I violated any constraints?"
+         If something seems wrong, backtrack and try an alternative path.
+
+      4. **Sub-problem conclusion** - State the answer to each sub-problem
+         clearly. Rate your confidence: HIGH (logic is airtight), MEDIUM
+         (likely correct but some uncertainty), LOW (best guess, could be wrong).
+
+      5. **Dependency resolution** - When a sub-problem depends on another's
+         result, explicitly state: "Using the result from sub-problem X
+         that Y = Z, I can now..."
+
+      CRITICAL: If you reach a dead end or contradiction, do NOT skip it.
+      Document the dead end, explain why the approach failed, and try
+      an alternative approach. Failed reasoning paths are valuable.
+
+      Output the complete reasoning chain for all sub-problems.
     model: sonnet
     max_turns: 15
 
-  - id: synthesize
-    depends_on: [solve]
-    prompt: >
-      Combine the solutions to all sub-problems into a coherent final answer.
-      Verify that the combined solution addresses the original problem completely.
+  - id: synthesis
+    depends_on: [research-track, reasoning-track]
+    prompt: |
+      Synthesize the research findings and reasoning results into a
+      coherent, unified solution.
+
       Original problem: {input.problem}
-      Sub-problem solutions: {steps.solve.output}
+      Research findings: {steps.research-track.output}
+      Reasoning results: {steps.reasoning-track.output}
+      Decomposition plan: {steps.problem-decomposition.output}
+
+      Synthesis process:
+
+      1. **Cross-validation** - Compare the reasoning track results
+         against the research track knowledge. Do the solutions align
+         with known principles and precedents? Flag any contradictions.
+         If research suggests a different answer than pure reasoning,
+         investigate why and determine which is more reliable.
+
+      2. **Integration** - Combine sub-problem solutions into the
+         complete answer. Show explicitly how each sub-solution
+         contributes to the overall answer. Verify that no sub-problem
+         was left unresolved.
+
+      3. **Constraint verification** - Check the integrated solution
+         against every constraint from "{input.constraints}". For each:
+         - Constraint: [state it]
+         - Status: SATISFIED / VIOLATED / NOT APPLICABLE
+         - Evidence: [how the solution meets or violates it]
+
+      4. **Completeness check** - Compare against the success criteria
+         defined in the decomposition step. Does the solution fully
+         answer the original question? Are there aspects that remain
+         partially addressed?
+
+      5. **Confidence assessment** - Overall confidence in the solution:
+         - What strengthens confidence (multiple lines of reasoning converge,
+           consistent with known principles, passes all constraint checks)
+         - What weakens confidence (assumptions that could be wrong,
+           areas of uncertainty, lack of validation data)
+
+      6. **Alternative solutions** - If there are plausible alternative
+         answers, briefly state them and explain why the primary solution
+         is preferred. This shows robustness of the reasoning.
+
+      Output the synthesized solution with confidence assessment.
     model: sonnet
     max_turns: 10
+
+  - id: solution-validation
+    depends_on: [synthesis]
+    prompt: |
+      Perform final validation of the proposed solution using adversarial
+      thinking and sanity checks.
+
+      Original problem: {input.problem}
+      Proposed solution: {steps.synthesis.output}
+      Constraints: {input.constraints}
+
+      Apply these validation techniques:
+
+      1. **Adversarial challenge** - Adopt the mindset of a skeptical
+         critic. What are the strongest objections to this solution?
+         For each objection:
+         - State the objection clearly
+         - Assess: is it valid or can it be refuted?
+         - If valid, how does it change the solution?
+
+      2. **Sanity checks** - Apply common-sense verification:
+         - Does the answer have the right units/magnitude/format?
+         - Is it consistent with simple back-of-envelope estimates?
+         - Would an expert in this domain find it reasonable?
+         - Does it pass the "smell test" - does anything feel off?
+
+      3. **Boundary testing** - What happens to the solution at extremes?
+         Test with very large values, very small values, zero values,
+         negative values (where applicable). A robust solution should
+         degrade gracefully at boundaries.
+
+      4. **Sensitivity analysis** - Which assumptions, if changed slightly,
+         would most affect the answer? Identify the 2-3 most sensitive
+         parameters and describe how the answer changes with them.
+
+      5. **Final answer formulation** - Present the validated solution in
+         a clear, direct format:
+         - **Answer**: The direct answer to the problem in 1-3 sentences
+         - **Confidence**: HIGH / MEDIUM / LOW with brief justification
+         - **Key reasoning**: The 3-5 most important reasoning steps
+         - **Caveats**: Any important limitations or conditions
+         - **Full explanation**: Complete reasoning available above
+
+      Output the validated final answer in this structured format.
+    model: sonnet
+    max_turns: 8

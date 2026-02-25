@@ -16,50 +16,235 @@ input_schema:
     competitor:
       type: string
       description: "Name of the competitor to analyze"
+    our_company:
+      type: string
+      description: "Your own company name and brief description for comparative positioning"
+    industry:
+      type: string
+      description: "Industry or market vertical for context (e.g. 'B2B SaaS', 'e-commerce', 'fintech')"
 
 steps:
   - id: gather-info
-    prompt: >
-      Research the following competitor thoroughly. Gather information about
-      their product offerings, pricing model, key messaging and positioning,
-      target market segments, and overall market share. Identify their
-      marketing channels and recent strategic moves.
+    prompt: |
+      You are a competitive intelligence analyst. Conduct a thorough research
+      dossier on the following competitor. Be systematic and cite specific
+      data points wherever possible.
+
       Competitor: {input.competitor}
+      Industry context: {input.industry}
+
+      Research and document the following categories in detail:
+
+      1. COMPANY OVERVIEW: Founding year, headquarters, employee count (or
+         estimated range), funding history and total raised, key leadership
+         team (CEO, CTO, CPO), recent executive hires or departures.
+
+      2. PRODUCT & SERVICE PORTFOLIO: List every product/service offered.
+         For each, note the target buyer persona, deployment model (cloud,
+         on-prem, hybrid), key feature differentiators, and technology stack
+         if publicly known. Note any recent product launches or deprecations.
+
+      3. PRICING & PACKAGING: Document all publicly available pricing tiers
+         including free/freemium, entry-level, mid-market, and enterprise.
+         Note pricing model (per-seat, usage-based, flat-rate, hybrid).
+         Flag any discounting patterns visible in review sites or case studies.
+
+      4. GO-TO-MARKET STRATEGY: Identify primary marketing channels (content
+         marketing, paid ads, events, partnerships, PLG, sales-led). Note
+         estimated organic traffic (SimilarWeb/SEMrush range), social media
+         following across platforms, and notable content or campaigns.
+
+      5. CUSTOMER BASE: Identify publicly known customers (logos on website,
+         case studies, G2/Capterra reviews). Estimate market segment focus
+         (SMB, mid-market, enterprise). Note any vertical specializations.
+
+      6. RECENT STRATEGIC MOVES: Acquisitions, partnerships, geographic
+         expansion, major feature launches, pricing changes, or pivots
+         in the last 12-18 months. Include any notable press coverage.
+
+      7. REVIEW SENTIMENT: Summarize recurring themes from G2, Capterra,
+         TrustRadius, and Reddit/HackerNews discussions. Note average
+         ratings and total review counts per platform.
+
+      Format each section with clear headers and bullet points. Distinguish
+      between confirmed facts and estimated/inferred data points.
     model: sonnet
     max_turns: 10
 
   - id: analyze-strengths
     depends_on: [gather-info]
-    prompt: >
-      Based on the competitor research below, identify and analyze their key
-      strengths. Focus on what they do well in product quality, brand
-      perception, customer experience, market positioning, and technical
-      capabilities. Rank each strength by impact on their market position.
-      Research: {steps.gather-info.output}
+    prompt: |
+      You are a strategy consultant applying rigorous analytical frameworks
+      to assess competitive strengths. Using the research dossier below,
+      perform a deep strengths analysis.
+
+      Research dossier: {steps.gather-info.output}
+
+      Structure your analysis as follows:
+
+      1. PORTER'S FIVE FORCES ASSESSMENT (for this competitor):
+         - Bargaining power of their suppliers: How dependent are they on
+           key technology vendors, cloud providers, or data sources?
+         - Bargaining power of their buyers: How sticky is their product?
+           What are switching costs for their customers?
+         - Threat of substitutes: What alternative approaches could replace
+           their core offering entirely?
+         - Threat of new entrants: How defensible is their market position?
+           What moats do they have (network effects, data, brand, patents)?
+         - Competitive rivalry: How intense is direct competition in their
+           primary segment?
+
+      2. CORE COMPETENCY ANALYSIS: Identify 3-5 core competencies that are
+         genuinely difficult to replicate. For each, rate on three dimensions:
+         - Provides access to a wide variety of markets (1-5)
+         - Makes a significant contribution to customer value (1-5)
+         - Difficult for competitors to imitate (1-5)
+
+      3. BRAND & PERCEPTION STRENGTH: Analyze brand awareness, thought
+         leadership positioning, community engagement, and developer/user
+         advocacy. Quantify where possible (social followers, community
+         size, content engagement metrics).
+
+      4. TECHNICAL MOAT ASSESSMENT: Evaluate proprietary technology, data
+         advantages, integration ecosystem depth, and platform lock-in
+         effects. Rate overall technical moat as Weak/Moderate/Strong.
+
+      5. FINANCIAL STRENGTH INDICATORS: Revenue trajectory (if known),
+         funding runway, profitability signals, and ability to sustain
+         competitive pricing or aggressive growth spending.
+
+      Rank all identified strengths by impact score (1-10) on their
+      overall market position. Highlight the top 3 most dangerous
+      strengths from a competitive standpoint.
     model: sonnet
     max_turns: 5
 
   - id: analyze-weaknesses
     depends_on: [gather-info]
-    prompt: >
-      Based on the competitor research below, identify gaps, weaknesses,
-      and areas of customer dissatisfaction. Look for common complaints,
-      missing features, pricing concerns, poor support experiences, and
-      strategic blind spots. Highlight areas that represent opportunities
-      for differentiation.
+    prompt: |
+      You are a competitive intelligence analyst specializing in identifying
+      exploitable gaps and vulnerabilities. Using the research dossier below,
+      perform a deep weaknesses and vulnerability analysis.
+
+      Research dossier: {steps.gather-info.output}
+
+      Structure your analysis as follows:
+
+      1. PRODUCT GAPS & LIMITATIONS: Identify specific features or
+         capabilities that are missing, underdeveloped, or consistently
+         criticized in user reviews. For each gap, assess:
+         - Severity: How much does this hurt their customers? (1-10)
+         - Frequency: How often is this mentioned in reviews? (rare/common)
+         - Our opportunity: Can we credibly solve this? (yes/partial/no)
+
+      2. CUSTOMER PAIN POINTS: Compile the top 10 recurring complaints
+         from review sites, support forums, and social media. Categorize
+         them as: product quality, customer support, pricing/value,
+         onboarding/UX, reliability/performance, or integration issues.
+
+      3. STRATEGIC BLIND SPOTS: Identify market segments, geographies,
+         or use cases they are neglecting. Look for signals like:
+         - Underserved customer segments with active workarounds
+         - Geographic markets with no localization or local support
+         - Adjacent use cases their product almost serves but doesn't
+         - Emerging technology trends they appear to be ignoring
+
+      4. ORGANIZATIONAL VULNERABILITIES: Assess potential risks from
+         key-person dependencies, high employee turnover (Glassdoor
+         signals), cultural issues, slow decision-making, or technical
+         debt indicators (frequent outages, slow feature velocity).
+
+      5. PRICING VULNERABILITIES: Identify where their pricing creates
+         friction - hidden costs, confusing tier structures, poor
+         price-to-value perception at specific segments, or pricing
+         that creates natural upgrade resistance.
+
+      6. DEPENDENCY RISKS: Note critical third-party dependencies
+         (cloud providers, API partners, channel partners) that could
+         become liabilities if relationships change.
+
+      Rank all weaknesses by exploitability score (1-10) considering
+      both severity and our ability to differentiate against them.
+    model: sonnet
+    max_turns: 5
+
+  - id: positioning-map
+    depends_on: [gather-info, analyze-strengths, analyze-weaknesses]
+    prompt: |
+      You are a brand strategist creating a competitive positioning analysis.
+      Using all prior research, build a comprehensive positioning map and
+      differentiation strategy.
+
       Research: {steps.gather-info.output}
+      Strengths: {steps.analyze-strengths.output}
+      Weaknesses: {steps.analyze-weaknesses.output}
+      Our company: {input.our_company}
+
+      Deliver the following:
+
+      1. PERCEPTUAL POSITIONING MAP: Define two key dimensions that matter
+         most to buyers in this market (e.g. "Ease of Use vs. Feature Depth"
+         or "Price vs. Enterprise Readiness"). Plot the competitor and 3-4
+         other likely competitors on this 2D map. Describe the map in text
+         format with quadrant labels and relative positions.
+
+      2. VALUE PROPOSITION COMPARISON: Create a feature-by-feature comparison
+         table with ratings (Strong/Adequate/Weak/Absent) across 10-15 key
+         evaluation criteria that matter to buyers.
+
+      3. MESSAGING GAPS: Identify 3-5 positioning angles or messages that
+         the competitor is NOT using effectively, which represent open
+         territory for differentiation. For each, explain why it is
+         available and how to credibly claim it.
+
+      4. WIN/LOSS PATTERN ANALYSIS: Based on review sentiment and product
+         gaps, hypothesize the top 3 scenarios where prospects choose this
+         competitor, and top 3 scenarios where prospects choose against them.
+         What are the decision triggers in each direction?
     model: sonnet
     max_turns: 5
 
   - id: swot-report
-    depends_on: [analyze-strengths, analyze-weaknesses]
-    prompt: >
-      Compile a comprehensive SWOT analysis report combining the strengths
-      and weaknesses analysis. Add an Opportunities section identifying how
-      to capitalize on competitor weaknesses, and a Threats section covering
-      risks from their strengths. End with 3-5 actionable recommendations
-      for competitive positioning.
-      Strengths: {steps.analyze-strengths.output}
-      Weaknesses: {steps.analyze-weaknesses.output}
+    depends_on: [analyze-strengths, analyze-weaknesses, positioning-map]
+    prompt: |
+      You are a management consultant delivering a final competitive
+      intelligence briefing. Synthesize all analyses into an executive-ready
+      SWOT report with actionable strategic recommendations.
+
+      Strengths analysis: {steps.analyze-strengths.output}
+      Weaknesses analysis: {steps.analyze-weaknesses.output}
+      Positioning analysis: {steps.positioning-map.output}
+      Our company: {input.our_company}
+
+      Deliver the following sections:
+
+      1. EXECUTIVE SUMMARY (4-5 sentences): Overall competitive threat level
+         (Low/Medium/High/Critical), key takeaway, and recommended posture
+         (attack, defend, differentiate, or avoid).
+
+      2. SWOT MATRIX: Present a clean 2x2 grid:
+         - Strengths: Top 5, ranked by threat level to us
+         - Weaknesses: Top 5, ranked by exploitability
+         - Opportunities: Top 5 actionable opportunities arising from their
+           weaknesses and market gaps
+         - Threats: Top 5 risks from their strengths, roadmap, and momentum
+
+      3. STRATEGIC RECOMMENDATIONS (5-7 items): Each must be specific,
+         actionable, and time-bound. Format each as:
+         - Action: What to do
+         - Rationale: Why this exploits a weakness or defends against a strength
+         - Timeline: When to execute (immediate/30 days/90 days)
+         - Expected impact: What competitive advantage this creates
+         - Resource requirement: Low/Medium/High effort
+
+      4. BATTLECARD SUMMARY: Create a one-page competitive battlecard with:
+         - "When they say X, we say Y" objection handlers (5 scenarios)
+         - Quick-hit differentiators (3-5 bullet points)
+         - Land mines to plant in prospect conversations
+         - Trap questions that expose their weaknesses
+
+      5. MONITORING PLAN: List 5-7 signals to track on an ongoing basis
+         (job postings, product changelog, pricing page changes, executive
+         moves, funding announcements) with recommended check frequency.
     model: sonnet
     max_turns: 10

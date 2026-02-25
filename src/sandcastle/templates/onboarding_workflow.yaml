@@ -36,6 +36,13 @@ input_schema:
       type: string
       description: "Office location or 'Remote' (default: 'Remote')"
       default: "Remote"
+    seniority_level:
+      type: string
+      description: "Seniority level: 'junior', 'mid', 'senior', 'lead', 'director', 'vp' (default: 'mid')"
+      default: "mid"
+    buddy_email:
+      type: string
+      description: "Assigned onboarding buddy/mentor email (optional - will suggest if not provided)"
 
 steps:
   - id: create-checklist
@@ -51,34 +58,72 @@ steps:
       Use the Notion tool to create a new page:
         node /home/user/tools/notion.mjs create_page 'Onboarding' '<content>'
 
-      Generate a department-appropriate checklist organized by timeline:
+      Generate a comprehensive, role-aware checklist organized by timeline. Customize based
+      on department ({input.department}), role ({input.role}), seniority ({input.seniority_level}),
+      and location ({input.location}).
 
-      **Before Day 1 (IT/Admin):**
-      - [ ] Provision email and SSO accounts
-      - [ ] Set up laptop/equipment order
-      - [ ] Create accounts: Slack, GitHub/Jira, relevant SaaS tools
-      - [ ] Add to department Slack channels
-      - [ ] Prepare welcome package
+      **Before Day 1 (IT/Admin - complete 2+ business days before start):**
+      - [ ] Provision email and SSO accounts (Google Workspace / Microsoft 365)
+      - [ ] Set up laptop/equipment order (specify: Mac vs PC based on department standard)
+      - [ ] Create accounts based on department tool provisioning matrix:
+        - All departments: Slack, email, SSO, VPN, 1Password/LastPass, HR system
+        - Engineering: GitHub, Jira, AWS/GCP console, CI/CD (CircleCI/GitHub Actions), IDE licenses, Datadog/PagerDuty
+        - Marketing: HubSpot, Google Analytics, CMS, Figma, social media tools
+        - Sales: Salesforce, LinkedIn Sales Navigator, Outreach/Salesloft, Gong, Clari
+        - Support: Zendesk, knowledge base admin, screen recording tool
+        - Finance: NetSuite/QuickBooks, Expensify, procurement system
+        - Product: Jira, Figma, Amplitude/Mixpanel, Productboard
+      - [ ] Add to department Slack channels and relevant cross-functional channels
+      - [ ] Set up security group/permissions based on role (principle of least privilege)
+      - [ ] Prepare welcome package (company swag, handbook, org chart)
+      - [ ] If remote: ship equipment with setup guide and return label
 
       **Day 1:**
-      - [ ] Welcome meeting with manager
-      - [ ] IT setup and tool access verification
-      - [ ] HR paperwork and benefits enrollment
-      - [ ] Office tour / remote setup guide
-      - [ ] Team introduction
+      - [ ] Welcome meeting with manager (30 min) - cover: team context, first-week plan, Q&A
+      - [ ] IT setup and tool access verification (all provisioned tools working)
+      - [ ] HR paperwork: I-9 verification, tax forms, benefits enrollment, direct deposit
+      - [ ] Office tour / remote workspace setup guide + IT support contact
+      - [ ] Team introduction: brief team standup appearance or virtual coffee
+      - [ ] Buddy/mentor introduction: {input.buddy_email} (if provided, otherwise assign one)
+      - [ ] **Compliance training - Day 1 mandatory:** Security awareness basics, acceptable use policy,
+            data handling policy acknowledgment, anti-harassment training enrollment
 
-      **Week 1:**
-      - [ ] Department-specific onboarding sessions
-      - [ ] 1:1 with key stakeholders
-      - [ ] First small task/project assignment
-      - [ ] Security and compliance training
+      **Week 1 (Days 2-5):**
+      - [ ] Company overview session: mission, values, org structure, product overview
+      - [ ] Department-specific onboarding sessions (schedule based on role)
+      - [ ] 1:1 meetings with key stakeholders (identify 3-5 based on role/seniority)
+      - [ ] First small task/project assignment (buddy-assisted, low-stakes)
+      - [ ] Security and compliance training completion (due by end of week 1):
+        - Information security fundamentals
+        - Phishing awareness
+        - Data classification and handling
+        - Industry-specific: HIPAA (if healthcare data), SOC2 (if SaaS), PCI (if payment data)
+      - [ ] If senior/lead+: skip basic training, schedule architecture review and roadmap briefing
 
-      **First 30 Days:**
+      **30-Day Milestone (adjust based on seniority: {input.seniority_level}):**
       - [ ] Complete all required training modules
-      - [ ] 30-day check-in with manager
-      - [ ] Feedback survey
+      - [ ] **Junior/Mid:** Successfully complete 2-3 independent tasks, demonstrate tool proficiency
+      - [ ] **Senior:** Own a workstream, deliver first meaningful contribution, provide process feedback
+      - [ ] **Lead/Director:** Present initial observations and 90-day vision to team, begin stakeholder relationship building
+      - [ ] 30-day check-in with manager: formal review of progress, blockers, feedback (both directions)
+      - [ ] Onboarding experience survey (anonymous, submitted to HR)
+      - [ ] Buddy/mentor check-in: is the relationship working, adjust if needed
 
-      Customize items based on department and role. Return the Notion page URL and checklist.
+      **60-Day Milestone:**
+      - [ ] Fully independent in day-to-day responsibilities
+      - [ ] Cross-team collaboration initiated (at least 1 cross-functional project/interaction)
+      - [ ] **Senior+:** Leading or co-leading a project, mentoring others
+      - [ ] 60-day check-in: performance trajectory discussion, goal refinement
+
+      **90-Day Milestone:**
+      - [ ] Formal 90-day performance review with manager
+      - [ ] Probation period completion (if applicable)
+      - [ ] Career development conversation: growth goals, learning plan, promotion criteria
+      - [ ] **Lead/Director+:** Present strategic recommendations or team improvement proposals
+      - [ ] Final onboarding survey: what worked, what to improve for future hires
+
+      Return the Notion page URL and the full checklist. Tag items with responsible party
+      (IT, HR, Manager, Buddy, Employee) and due dates relative to start date.
     model: sonnet
     max_turns: 8
     tools: [notion]
@@ -98,17 +143,30 @@ steps:
       Use the Mail tool:
         node /home/user/tools/mail.mjs send '{input.employee_email}' '<subject>' '<body>'
 
-      Compose a welcome email that includes:
-      - Warm, personal greeting
-      - Excitement about them joining the team
-      - Their start date and first-day logistics
-      - Link to onboarding checklist in Notion
-      - Who to contact for questions (manager + IT support)
-      - What to expect in the first week
-      - Any pre-start tasks (paperwork, reading materials)
+      Compose a welcome email customized by seniority level ({input.seniority_level}) that includes:
 
-      Keep the tone friendly and professional. Avoid information overload.
-      If employee_email is not provided, draft the email and note it needs to be sent manually.
+      - Warm, personal greeting using their first name
+      - Genuine excitement about them joining the {input.department} team in the {input.role} role
+      - Start date, time, and first-day logistics:
+        - If in-office: building address, parking/transit info, where to check in, dress code
+        - If remote: video call link for Day 1 kickoff, timezone expectations
+      - Link to onboarding checklist in Notion (from previous step)
+      - Key contacts with names and roles:
+        - Direct manager: {input.manager_email}
+        - Onboarding buddy/mentor: {input.buddy_email} (introduce them briefly if available)
+        - IT support: helpdesk email/channel for equipment issues
+        - HR contact: for benefits and paperwork questions
+      - What to expect in Week 1 (high-level, not overwhelming - 3-4 bullet points)
+      - Pre-start tasks (if any):
+        - Required paperwork links (I-9, tax forms, NDA)
+        - Suggested reading: company handbook, product overview, team wiki
+        - Equipment setup: any software to pre-install on personal device
+      - For senior/lead+ hires: mention upcoming architecture review or strategy session
+        to signal that their expertise is valued from day one
+
+      Keep the tone friendly, confident, and professional. Limit to 300-400 words - this is
+      a welcome, not an information dump. Save details for the onboarding checklist.
+      If employee_email is not provided, draft the email and clearly note it needs manual sending.
     model: sonnet
     max_turns: 5
     tools: [mail]
@@ -126,20 +184,50 @@ steps:
       Use the Slack tool to post to #it-requests:
         node /home/user/tools/slack.mjs post_message '#it-requests' '<message>'
 
-      Post a structured IT request with:
-      - Employee name and start date
-      - Required accounts based on department:
-        - All: Email, Slack, SSO, VPN
-        - Engineering: GitHub, Jira, AWS/GCP console, CI/CD
-        - Marketing: HubSpot, Analytics, CMS
-        - Sales: Salesforce, LinkedIn Sales Nav, Outreach
-        - Support: Zendesk, knowledge base admin
-      - Equipment needs based on role and location
-      - Security group/permissions level
-      - Deadline: 2 business days before start date
+      Post a structured IT provisioning request with clear categorization:
 
-      Also post to the department Slack channel introducing the incoming team member
-      (without sharing private details - just name, role, and start date).
+      **Employee details:**
+      - Name: {input.employee_name}
+      - Role: {input.role} (seniority: {input.seniority_level})
+      - Department: {input.department}
+      - Start date: {input.start_date}
+      - Location: {input.location}
+      - Deadline: all accounts MUST be provisioned 2 business days before start date
+
+      **Tool provisioning checklist (department-based):**
+      - Core (ALL departments): Email (Google Workspace/M365), Slack, SSO (Okta/Azure AD),
+        VPN, password manager (1Password/LastPass), HR system access, expense tool
+      - Engineering: GitHub (with correct team/repo access), Jira, AWS/GCP console
+        (read-only initially, escalate as needed), CI/CD pipeline access, IDE licenses,
+        Datadog/monitoring, PagerDuty (if on-call eligible)
+      - Marketing: HubSpot, Google Analytics, CMS admin, Figma (viewer or editor based on role),
+        social media management tools, ad platform access
+      - Sales: Salesforce (with correct profile/role), LinkedIn Sales Navigator, Outreach/Salesloft,
+        Gong/call recording, Clari/forecasting, CPQ tool
+      - Support: Zendesk (agent license), knowledge base admin, screen recording tool,
+        phone system/softphone
+      - Finance: NetSuite/QuickBooks (role-appropriate access), procurement system
+      - Product: Jira (different permissions than eng), Figma, analytics (Amplitude/Mixpanel),
+        Productboard, user research tools
+
+      **Equipment provisioning:**
+      - Laptop: specify Mac vs PC per department standard, RAM/storage requirements for role
+      - If remote ({input.location}): shipping address needed, include monitor/peripherals if standard
+      - If in-office: desk assignment, badge/keycard, parking pass
+      - For senior/lead+: check if additional tools or premium licenses are standard
+
+      **Security and access levels:**
+      - Security group assignment based on department and seniority
+      - Principle of least privilege: start with minimum required access
+      - Admin access: only if role explicitly requires it (flag for security team review)
+      - MFA enrollment: mandatory for all accounts on first login
+
+      **Department channel introduction:**
+      Also post to the #{input.department} Slack channel with a brief, warm introduction:
+      - Name, role, start date
+      - One line about their background (if publicly available)
+      - Encourage the team to say hello
+      Do NOT share personal details (email, phone, location, salary).
     model: haiku
     max_turns: 5
     tools: [slack]
@@ -157,35 +245,68 @@ steps:
       Use the Notion tool to create a training plan page:
         node /home/user/tools/notion.mjs create_page 'Training Plans' '<content>'
 
-      Design a structured training plan:
+      Design a structured 30/60/90-day training plan personalized by role, department,
+      and seniority level ({input.seniority_level}). Adjust depth and pace accordingly -
+      senior hires need less hand-holding on basics but more strategic context.
 
-      **Week 1 - Foundation:**
-      - Company overview, mission, and values
-      - Product deep-dive and customer personas
-      - Tools and systems training
-      - Security awareness and compliance basics
-      - Meet key team members (schedule 1:1s)
+      **Week 1 - Foundation (all seniority levels):**
+      - Company overview, mission, values, and strategic priorities (2h)
+      - Product deep-dive: architecture, key features, customer personas, competitive landscape (3h)
+      - Tools and systems training: hands-on setup of all provisioned tools (2h)
+      - Security awareness and compliance training completion (2h) - mandatory:
+        * Information security fundamentals and acceptable use policy
+        * Data handling and classification (what is PII, what is confidential)
+        * Industry-specific compliance: HIPAA/SOC2/PCI as applicable to role
+        * Incident reporting procedures
+      - Meet key team members: schedule 1:1s with 5+ stakeholders (buddy helps identify who) (5h)
+      - Buddy check-in: daily 15-min sync for questions and orientation (1.25h total)
+      Estimated total: ~15h of structured activities
 
-      **Week 2 - Role-Specific:**
-      - Department processes and workflows
-      - Role-specific tool training
-      - Shadow experienced team member
-      - First small assignment with mentor guidance
+      **Week 2 - Role-Specific Deep Dive:**
+      - Department processes, workflows, and rituals (standups, retros, planning) (3h)
+      - Role-specific tool training - advanced features relevant to their work (3h)
+      - Department-specific training tracks:
+        * Engineering: codebase walkthrough, dev environment, PR process, on-call expectations
+        * Marketing: campaign playbook, brand guidelines, analytics dashboards, content calendar
+        * Sales: sales methodology, CRM workflow, territory/account assignment, quota framework
+        * Support: ticket workflow, escalation procedures, knowledge base contribution process
+        * Product: research methods, PRD templates, sprint process, stakeholder mapping
+      - Shadow experienced team member on real work (4h)
+      - First small assignment with buddy/mentor guidance and code review (4h)
+      - For senior+: architecture deep-dive, technical debt tour, roadmap planning session
+      Estimated total: ~16h of structured activities
 
-      **Week 3 - Building Independence:**
-      - Take on tasks with decreasing supervision
-      - Cross-team collaboration introduction
-      - Advanced tool/system training
-      - Mid-point check-in with manager
+      **Week 3-4 - Building Independence (30-day milestone):**
+      - Take on tasks with decreasing supervision (buddy available but not pairing) (8h)
+      - Cross-team collaboration: participate in at least 1 cross-functional meeting (2h)
+      - Advanced tool/system training based on identified gaps (2h)
+      - Mid-point check-in with manager: progress review, goal adjustment (1h)
+      - For junior/mid: complete 2-3 independent tasks, get feedback
+      - For senior+: own a workstream, deliver first meaningful contribution
+      - For lead/director+: present initial team/process observations to manager
+      30-day review: formal assessment against onboarding goals
 
-      **Week 4 - Contributing:**
-      - Independent project work
-      - Team process participation (standups, reviews)
-      - 30-day goals assessment
-      - Feedback collection (both directions)
+      **Days 31-60 - Deepening Impact (60-day milestone):**
+      - Full participation in team processes and rituals
+      - Independent project ownership with manager check-ins (bi-weekly)
+      - Cross-functional relationship building: identify 2-3 key partners in other teams
+      - For senior+: begin mentoring a junior team member or contributing to docs
+      - For lead+: present observations and improvement proposals to broader team
+      - Advanced training: industry best practices, internal tech talks, conference materials
+      60-day review: trajectory discussion, career development conversation
 
-      Customize content based on the specific role and department.
-      Include estimated time for each activity and suggested resources.
+      **Days 61-90 - Full Integration (90-day milestone):**
+      - Fully autonomous in role, requiring minimal guidance
+      - Contributing to team improvements (process, documentation, tooling)
+      - 90-day formal performance review with manager
+      - Career development plan: growth goals, skill gaps, promotion criteria discussion
+      - For lead+: strategic recommendations presented, team leadership established
+      - Probation completion assessment (if applicable)
+      90-day review: comprehensive evaluation, mutual feedback, forward-looking goals
+
+      Include estimated time for each activity, suggested resources (wiki links, video
+      courses, documentation), and the responsible person (buddy, manager, HR, IT).
+      Tag each item as required or recommended.
     model: sonnet
     max_turns: 8
     tools: [notion]
@@ -208,19 +329,46 @@ steps:
       Use the Mail tool:
         node /home/user/tools/mail.mjs send '{input.manager_email}' '<subject>' '<body>'
 
-      Send a manager briefing email with:
-      1. **Status Summary** - what has been completed and what is pending
-      2. **Links** - onboarding checklist and training plan in Notion
-      3. **Manager's To-Do List:**
-         - Schedule Day 1 welcome meeting
-         - Assign onboarding buddy/mentor
-         - Prepare first-week project/tasks
-         - Block time for daily check-ins in week 1
-         - Schedule 30-day review
-      4. **Timeline** - key milestones and deadlines
-      5. **Escalation** - who to contact if anything is delayed
+      Send a comprehensive manager briefing email with:
 
-      Also post a brief confirmation to #hr-onboarding Slack channel.
+      1. **Status Dashboard** - clear at-a-glance summary:
+         - Checklist created: Yes/No (link)
+         - Welcome email sent: Yes/No
+         - IT accounts provisioned: Yes/No (list any pending)
+         - Training plan created: Yes/No (link)
+         - Buddy assigned: {input.buddy_email} or "Needs assignment"
+         - Compliance training: Enrolled (due end of Week 1)
+
+      2. **Links** - direct URLs to onboarding checklist and training plan in Notion
+
+      3. **Manager's To-Do List** (with suggested deadlines):
+         - [ ] Schedule Day 1 welcome meeting (30 min, before start date)
+         - [ ] Assign onboarding buddy/mentor if not yet assigned - ideal buddy profile:
+               same team, 6+ months tenure, good communicator, not currently overloaded
+         - [ ] Prepare first-week starter project/tasks (low-stakes, completable in 2-3 days)
+         - [ ] Block time for daily 15-min check-ins during Week 1
+         - [ ] Identify 3-5 key stakeholders for intro 1:1s and send calendar invites
+         - [ ] Review and customize the training plan for any role-specific additions
+         - [ ] Schedule 30-day review (set calendar hold now)
+         - [ ] Schedule 60-day and 90-day reviews (set calendar holds)
+         - [ ] For senior+ hires: prepare architecture review or strategy briefing materials
+         - [ ] For lead/director+ hires: arrange skip-level intro with your manager
+
+      4. **30/60/90 Day Milestone Framework:**
+         - Day 30: Employee should be completing tasks independently, compliance training done
+         - Day 60: Full participation in team processes, cross-functional relationships forming
+         - Day 90: Fully autonomous, contributing meaningfully, formal performance review
+         Include what "good" looks like at each milestone for this specific role/seniority.
+
+      5. **Escalation Contacts:**
+         - IT issues: #it-requests Slack channel or helpdesk@company.com
+         - HR/benefits: hr@company.com
+         - Onboarding process: #hr-onboarding Slack channel
+         - Equipment delays: IT manager name/contact
+
+      Also post a brief confirmation to #hr-onboarding Slack channel:
+      "Onboarding initiated for {input.employee_name} ({input.role}, {input.department}).
+      Start date: {input.start_date}. Manager: {input.manager_email}. Status: all systems go / pending items listed."
     model: sonnet
     max_turns: 5
     tools: [mail, slack]

@@ -1,14 +1,14 @@
 # name: Text Summarizer
-# description: Takes text input, summarizes it, and formats the summary for output
+# description: Performs deep text analysis with parallel key-point extraction and structural analysis, producing a tailored executive summary
 # tags: [text, summarization, formatting]
 # category: general_ai
 
 name: text-summarizer
-description: Takes text input, summarizes it, and formats the summary for output
+description: Performs deep text analysis with parallel key-point extraction and structural analysis, producing a tailored executive summary
 
 default_model: sonnet
-default_max_turns: 5
-default_timeout: 120
+default_max_turns: 8
+default_timeout: 180
 
 input_schema:
   required: ["text"]
@@ -16,20 +16,183 @@ input_schema:
     text:
       type: string
       description: "The text to summarize"
+    format:
+      type: string
+      description: "Output format style - executive, bullet-points, narrative, or academic"
+      default: "executive"
+    max_length:
+      type: string
+      description: "Target length for the final summary (e.g. '500 words', '1 page', '3 paragraphs')"
+      default: "500 words"
+    audience:
+      type: string
+      description: "Target audience - determines vocabulary complexity and assumed background knowledge"
+      default: "general"
 
 steps:
-  - id: summarize
-    prompt: >
-      Summarize the following text into a concise paragraph capturing
-      the key points and main ideas. Text: {input.text}
-    model: sonnet
-    max_turns: 5
+  - id: initial-analysis
+    prompt: |
+      Perform a thorough initial analysis of the following text to prepare
+      for high-quality summarization.
 
-  - id: format
-    depends_on: [summarize]
-    prompt: >
-      Format the following summary into a clean, well-structured output
-      with a title line and bullet points for each key finding.
-      Summary: {steps.summarize.output}
-    model: haiku
-    max_turns: 3
+      Text to analyze:
+      {input.text}
+
+      Your analysis must cover these dimensions:
+
+      1. **Document type classification** - Identify what kind of text this is
+         (academic paper, news article, technical documentation, business report,
+         legal document, narrative, transcript, etc.). This classification will
+         drive how we approach summarization.
+
+      2. **Core thesis identification** - What is the single most important
+         claim, argument, or message the author is communicating? State it
+         in one clear sentence. If there are multiple competing theses,
+         rank them by prominence.
+
+      3. **Scope and boundaries** - What topics does the text cover and,
+         equally important, what does it explicitly NOT cover? Note any
+         stated limitations or caveats by the author.
+
+      4. **Information density map** - Identify which sections of the text
+         carry the highest information density (novel claims, data, conclusions)
+         versus which are supporting material (background, methodology details,
+         examples). Rate each major section as HIGH, MEDIUM, or LOW density.
+
+      5. **Target audience assessment** - The final summary targets: {input.audience}
+         Note any jargon or domain-specific concepts that will need to be
+         simplified or preserved based on this audience.
+
+      6. **Key terminology** - List 5-10 critical terms or concepts that
+         must appear in any faithful summary of this text.
+
+      Output a structured analysis covering all six dimensions.
+    model: sonnet
+    max_turns: 8
+
+  - id: key-points-extraction
+    depends_on: [initial-analysis]
+    prompt: |
+      Extract and prioritize the key points from the source text, guided
+      by the initial analysis.
+
+      Source text: {input.text}
+      Analysis context: {steps.initial-analysis.output}
+
+      Follow this rigorous extraction methodology:
+
+      1. **Primary claims** (must-include) - Extract every major claim,
+         finding, or argument. For each one, note:
+         - The claim itself in a single clear sentence
+         - The evidence or reasoning supporting it
+         - How central it is to the overall message (CRITICAL / IMPORTANT / SUPPORTING)
+
+      2. **Quantitative data** - Pull out all statistics, metrics, dates,
+         percentages, and numerical comparisons. These are high-value for
+         summaries and must be preserved accurately.
+
+      3. **Causal relationships** - Identify any cause-and-effect chains
+         described in the text. These are often the most valuable insights
+         but easy to lose in summarization.
+
+      4. **Conclusions and recommendations** - Extract any explicit conclusions,
+         recommendations, action items, or forward-looking statements.
+
+      5. **Counterarguments and nuance** - Note any important caveats,
+         limitations, opposing viewpoints, or conditional statements that
+         would be misleading to omit.
+
+      Rank all extracted points by importance. The top 5-7 points should
+      form the backbone of the summary. Mark anything that can be cut
+      without losing the essential message.
+    model: sonnet
+    max_turns: 8
+
+  - id: structure-analysis
+    depends_on: [initial-analysis]
+    prompt: |
+      Analyze the rhetorical and logical structure of the source text
+      to determine the optimal summary organization.
+
+      Source text: {input.text}
+      Analysis context: {steps.initial-analysis.output}
+      Target format: {input.format}
+      Target audience: {input.audience}
+
+      Perform this structural analysis:
+
+      1. **Argument flow mapping** - Trace how the author builds their
+         argument. Is it deductive (general to specific), inductive (examples
+         to conclusion), chronological, problem-solution, comparative, or
+         some other structure? Understanding this determines how we should
+         organize the summary.
+
+      2. **Dependency analysis** - Which points depend on understanding
+         other points first? Map the logical dependencies so the summary
+         maintains coherence even when compressing heavily.
+
+      3. **Optimal summary structure recommendation** - Based on the
+         document type, argument flow, and requested format "{input.format}",
+         recommend a specific structure for the summary:
+         - Section order and headings
+         - What goes in the opening hook
+         - Where to place the most impactful finding
+         - How to handle the conclusion
+
+      4. **Compression strategy** - Given the target length of {input.max_length},
+         calculate what compression ratio is needed. Identify which sections
+         can be heavily compressed versus which need near-verbatim preservation.
+         Flag any content where compression would cause loss of critical nuance.
+
+      5. **Audience adaptation notes** - For the target audience "{input.audience}",
+         specify: reading level, assumed background knowledge, which technical
+         terms need definition vs. which can be used directly, and what
+         framing will resonate most.
+
+      Provide a concrete outline template for the final summary.
+    model: sonnet
+    max_turns: 8
+
+  - id: executive-summary
+    depends_on: [key-points-extraction, structure-analysis]
+    prompt: |
+      Compose the final polished summary by combining the extracted key
+      points with the recommended structure.
+
+      Key points: {steps.key-points-extraction.output}
+      Structure plan: {steps.structure-analysis.output}
+      Original text for reference: {input.text}
+
+      Composition requirements:
+
+      1. **Format:** {input.format}
+         - "executive" = opening headline insight, 2-3 focused paragraphs, closing implications
+         - "bullet-points" = categorized bullet list with bold lead-ins
+         - "narrative" = flowing prose that reads as a standalone piece
+         - "academic" = abstract-style with background, methods, findings, implications
+
+      2. **Length:** Stay within {input.max_length}. This is a hard constraint.
+         If you cannot fit all critical points, prioritize by the importance
+         rankings from the extraction step. Never sacrifice accuracy for brevity.
+
+      3. **Audience:** Written for {input.audience}. Match vocabulary,
+         assumed knowledge, and framing to this audience. A "general" audience
+         means no unexplained jargon. A "technical" audience means preserve
+         precise terminology.
+
+      4. **Accuracy standards:**
+         - Every claim in the summary must be traceable to the source text
+         - Preserve all quantitative data exactly as stated
+         - Do not introduce information not present in the original
+         - Maintain the author's intended nuance and caveats
+
+      5. **Quality checklist before finalizing:**
+         - Does the opening sentence convey the single most important takeaway?
+         - Are all CRITICAL-ranked points included?
+         - Is the logical flow coherent without reading the original?
+         - Would the target audience find this immediately useful?
+
+      Output the final summary with no meta-commentary. Just the clean,
+      polished summary text ready for delivery.
+    model: sonnet
+    max_turns: 8

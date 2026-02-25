@@ -16,49 +16,244 @@ input_schema:
     topic:
       type: string
       description: "The topic to research keywords for and write an SEO-optimized article about"
+    target_audience:
+      type: string
+      description: "Primary target audience for the content (e.g. 'SaaS founders', 'beginner developers')"
+    brand_url:
+      type: string
+      description: "Your website URL for internal linking strategy and brand context"
 
 steps:
   - id: keyword-research
-    prompt: >
-      Analyze the following topic and perform keyword research. Identify a
-      primary keyword, 5-8 secondary keywords, and long-tail variations.
-      For each keyword, describe the likely search intent (informational,
-      transactional, navigational) and estimated competition level.
+    prompt: |
+      You are an SEO strategist with deep expertise in keyword research and
+      search intent analysis. Perform comprehensive keyword research for the
+      following topic.
+
       Topic: {input.topic}
+      Target audience: {input.target_audience}
+
+      Deliver the following analysis:
+
+      1. PRIMARY KEYWORD: Select ONE primary keyword that represents the
+         best balance of search volume, competition, and relevance. Explain
+         your selection rationale. The primary keyword should:
+         - Have clear, consistent search intent
+         - Be specific enough to rank for (not too broad)
+         - Align with content that can genuinely serve the searcher
+
+      2. SECONDARY KEYWORDS (5-8): Related keywords that should appear
+         naturally throughout the content. For each, note:
+         - Estimated search intent: Informational (learning), Navigational
+           (finding), Commercial (comparing), Transactional (buying)
+         - Competition level estimate: Low / Medium / High
+         - Recommended placement: H2 heading, body text, or FAQ section
+         - Semantic relationship to primary keyword
+
+      3. LONG-TAIL VARIATIONS (5-8): Specific, question-based phrases that
+         real users type into Google. Format these as natural questions.
+         These will drive the FAQ section and featured snippet strategy.
+         Example: "how to [topic] for [audience]", "best [topic] tools 2026"
+
+      4. LSI (LATENT SEMANTIC INDEXING) TERMS (10-15): Related concepts
+         and terminology that Google expects to see in authoritative content
+         about this topic. These are NOT synonyms - they are contextually
+         related terms that signal topical depth.
+
+      5. KEYWORD DENSITY TARGETS:
+         - Primary keyword: 1.0-1.5% density (approx 15-22 uses in 1500 words)
+         - Each secondary keyword: 0.3-0.5% density (4-7 uses each)
+         - IMPORTANT: Never sacrifice readability for density. Google's
+           helpful content update penalizes keyword stuffing.
+
+      6. SERP ANALYSIS: Describe what currently ranks on page 1 for the
+         primary keyword. What content formats dominate (listicles, guides,
+         comparisons)? What is the average word count? What can we do
+         differently to provide MORE value than existing results?
+
+      7. FEATURED SNIPPET OPPORTUNITY: Identify 2-3 queries where a
+         featured snippet (position 0) is achievable. Note the current
+         snippet format (paragraph, list, table) and how to optimize for it.
     model: sonnet
     max_turns: 5
 
   - id: outline
     depends_on: [keyword-research]
-    prompt: >
-      Create a detailed article outline optimized for the target keywords.
-      Structure it with a compelling H1 title, 4-6 H2 sections, and H3
-      subsections where appropriate. Include notes on where to naturally
-      place primary and secondary keywords. Plan for approximately 1500-2000
-      words total.
+    prompt: |
+      You are a content strategist who designs article structures optimized
+      for both search engines and reader engagement. Create a detailed
+      article outline using the keyword research.
+
       Keywords: {steps.keyword-research.output}
+      Topic: {input.topic}
+      Target audience: {input.target_audience}
+
+      Build the outline following these SEO architecture rules:
+
+      1. H1 TITLE (1 only): Must contain the primary keyword within the
+         first 60 characters. Use a proven title format:
+         - "How to [Primary Keyword]: [Benefit]" (how-to intent)
+         - "X Best [Primary Keyword] in 2026: [Qualifier]" (listicle)
+         - "[Primary Keyword]: The Complete Guide for [Audience]" (guide)
+         Keep under 60 characters for full SERP display.
+
+      2. HEADING HIERARCHY: Design 5-7 H2 sections, each targeting a
+         secondary keyword or addressing a distinct sub-topic. Under each
+         H2, plan 2-3 H3 subsections. Follow these rules:
+         - H2s should be scannable - a reader who only reads H2s should
+           understand the full article structure
+         - Place the most valuable/searched content in the first 2 H2s
+           (readers and Google weight early content more heavily)
+         - Include one H2 specifically formatted to win a featured snippet
+         - Final H2 should be "Frequently Asked Questions" using long-tail
+           keywords as the questions
+
+      3. CONTENT PLAN PER SECTION: For each H2/H3, specify:
+         - Word count target (total article: 1800-2500 words)
+         - Which keywords to incorporate (primary, secondary, LSI)
+         - Content type: explanatory, example-driven, data-backed, opinion
+         - Internal link opportunity (where to link to related content)
+         - External link opportunity (authoritative sources to cite)
+
+      4. E-E-A-T SIGNALS PLAN: Google's Experience, Expertise,
+         Authoritativeness, and Trustworthiness framework requires:
+         - Experience: Plan for first-hand experience signals (personal
+           anecdotes, "in my experience", specific tool usage examples)
+         - Expertise: Plan for technical depth, specific data, and nuanced
+           analysis that only an expert would provide
+         - Authoritativeness: Plan citations from authoritative sources
+           (research papers, industry reports, official documentation)
+         - Trustworthiness: Plan for balanced perspective, acknowledging
+           limitations, and transparent methodology
+
+      5. INTERNAL LINKING STRATEGY: Suggest 5-8 internal link anchor
+         texts and the types of pages they should point to (pillar page,
+         related blog post, product page, landing page). Use the brand
+         URL context: {input.brand_url}
+
+      6. VISUAL CONTENT PLAN: Recommend 3-5 visual elements:
+         - Infographic ideas (what data to visualize)
+         - Table opportunities (comparison data, feature lists)
+         - Screenshot/example image needs
+         - Each visual should have alt text planned with keywords
     model: sonnet
     max_turns: 5
 
   - id: write-article
-    depends_on: [outline]
-    prompt: >
-      Write the full SEO-optimized article following the outline provided.
-      Naturally incorporate the target keywords without stuffing. Use short
-      paragraphs, include transition sentences between sections, and write
-      in an authoritative yet accessible tone. Add a strong introduction
-      and a conclusion with a clear call-to-action.
+    depends_on: [outline, keyword-research]
+    prompt: |
+      You are an expert content writer who creates articles that rank on
+      page 1 and genuinely help readers. Write the full article following
+      the outline and keyword strategy provided.
+
       Outline: {steps.outline.output}
+      Keyword research: {steps.keyword-research.output}
+      Target audience: {input.target_audience}
+
+      WRITING RULES - follow these precisely:
+
+      1. INTRODUCTION (150-200 words):
+         - Open with a hook: surprising statistic, bold claim, or relatable
+           pain point that your target audience immediately identifies with
+         - Include the primary keyword within the first 100 words
+         - State what the reader will learn and why it matters to them
+         - Add a "jump links" table of contents if the article exceeds 2000 words
+         - End the intro with a transition into the first H2
+
+      2. BODY SECTIONS (follow the outline's H2/H3 structure):
+         - Paragraphs: MAX 3-4 sentences each. White space is your friend.
+           Long paragraphs kill mobile readability (60%+ of traffic).
+         - Sentence length: Vary between short punchy sentences and longer
+           explanatory ones. Average 15-20 words per sentence.
+         - Transitions: Every section should flow naturally into the next.
+           Use bridge sentences between H2 sections.
+         - Evidence: Support every major claim with data, examples, or
+           expert quotes. Link to sources with descriptive anchor text.
+         - Practical value: Include at least 3 actionable tips, code
+           snippets, templates, or frameworks the reader can use immediately.
+
+      3. KEYWORD INTEGRATION:
+         - Primary keyword: Use naturally in intro, 2+ H2 headings, body
+           text, and conclusion. Target 1.0-1.5% density.
+         - Secondary keywords: Distribute across H2/H3 headings and body.
+         - LSI terms: Weave throughout to demonstrate topical depth.
+         - NEVER force a keyword where it reads unnaturally. Readability
+           always wins over density.
+
+      4. FEATURED SNIPPET OPTIMIZATION: For the identified snippet
+         opportunities, format content specifically:
+         - Paragraph snippets: Write a concise 40-60 word answer directly
+           after the H2 question, then elaborate below
+         - List snippets: Use ordered/unordered lists with 5-8 items
+         - Table snippets: Use markdown tables with clear headers
+
+      5. E-E-A-T SIGNALS: Incorporate throughout:
+         - First-person experience markers ("In practice..." or "A common
+           mistake I see is...")
+         - Specific, non-obvious insights that demonstrate genuine expertise
+         - Citations from authoritative sources (link to studies, docs)
+         - Balanced viewpoint (acknowledge when alternatives might be better)
+
+      6. CONCLUSION (100-150 words):
+         - Summarize the 3 most important takeaways
+         - Include the primary keyword one final time
+         - End with a clear, specific call-to-action (not generic "subscribe")
+         - Add a "What to read next" suggestion for internal linking
+
+      7. FAQ SECTION: Write 4-6 Q&A pairs using long-tail keywords as
+         questions. Keep answers concise (40-80 words each). Format with
+         proper heading tags for FAQ schema markup compatibility.
     model: sonnet
     max_turns: 10
 
   - id: meta-tags
-    depends_on: [write-article]
-    prompt: >
-      Generate SEO meta tags for the article. Include a title tag (under 60
-      characters), meta description (under 155 characters), Open Graph title
-      and description, Twitter card tags, and a suggested URL slug. Ensure
-      the primary keyword appears in the title tag and meta description.
+    depends_on: [write-article, keyword-research]
+    prompt: |
+      You are a technical SEO specialist. Generate all on-page SEO meta
+      elements for the article, optimized for maximum click-through rate
+      from search results.
+
       Article: {steps.write-article.output}
+      Keywords: {steps.keyword-research.output}
+
+      Generate EACH of the following with exact character counts:
+
+      1. TITLE TAG: Under 60 characters (Google truncates at ~60). Must
+         contain the primary keyword, preferably near the beginning. Add
+         a power modifier (Guide, 2026, Best, How to) and brand name at
+         end if space allows. Provide 3 variants ranked by CTR potential.
+         Show character count: [XX/60 chars]
+
+      2. META DESCRIPTION: Under 155 characters (Google truncates at ~155).
+         Must contain primary keyword (Google bolds matching terms).
+         Include a clear value proposition AND a call-to-action. Avoid
+         clickbait. Provide 3 variants. Show character count: [XX/155 chars]
+
+      3. URL SLUG: Short, lowercase, hyphen-separated. Include the primary
+         keyword. Remove stop words (the, and, of, etc.). Max 5 words.
+         Example: /primary-keyword-guide
+
+      4. OPEN GRAPH TAGS (for social sharing):
+         - og:title (can be longer than title tag, up to 95 chars)
+         - og:description (up to 200 chars, more engaging/informal tone)
+         - og:type: "article"
+         - og:image recommendation: describe ideal social preview image
+
+      5. TWITTER CARD TAGS:
+         - twitter:card: "summary_large_image"
+         - twitter:title (max 70 chars)
+         - twitter:description (max 200 chars)
+
+      6. SCHEMA MARKUP: Provide JSON-LD structured data for:
+         - Article schema (headline, author, datePublished, image)
+         - FAQ schema (from the FAQ section questions and answers)
+         - BreadcrumbList schema (suggested breadcrumb path)
+
+      7. IMAGE ALT TEXTS: Write keyword-rich alt text for each suggested
+         visual element from the article (max 125 chars each). Be
+         descriptive for accessibility while incorporating relevant keywords.
+
+      8. CANONICAL URL recommendation and hreflang tags if the content
+         targets a specific language/region.
     model: haiku
     max_turns: 3

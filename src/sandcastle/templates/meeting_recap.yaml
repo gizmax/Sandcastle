@@ -22,40 +22,173 @@ input_schema:
     sender_name:
       type: string
       description: "Name of the person sending the follow-up email"
+    meeting_type:
+      type: string
+      description: "Type of meeting: standup, sprint-planning, client-call, brainstorm, 1-on-1, all-hands, retrospective"
 
 steps:
   - id: summarize
-    prompt: >
-      Create a structured meeting summary from the following transcript.
-      Include the meeting date, attendees, key discussion points, decisions
-      made, and any open questions. Organize by topic and highlight the
-      most important outcomes clearly.
+    prompt: |
+      You are an executive assistant who produces meeting summaries that
+      save leadership hours of review time. Analyze the following transcript
+      and create a comprehensive, well-structured meeting summary.
+
       Transcript: {input.transcript}
       Meeting title: {input.meeting_title}
+      Meeting type: {input.meeting_type}
+
+      Structure the summary with these sections:
+
+      1. MEETING METADATA:
+         - Title: {input.meeting_title}
+         - Date: (extract from transcript or note "not specified")
+         - Duration: (estimate from transcript length and natural flow)
+         - Attendees: List every person who spoke, with their apparent role
+           or title if inferable from context. Note if anyone was mentioned
+           as absent or expected but did not speak.
+
+      2. TL;DR (2-3 sentences): The absolute essence of this meeting. What
+         happened, what was decided, and what happens next. A busy executive
+         should be able to read ONLY this and understand the meeting outcome.
+
+      3. KEY DISCUSSION TOPICS: For each major topic discussed:
+         - Topic heading with a one-line summary
+         - Context: Why this topic was raised
+         - Key points made by each participant (attribute by name)
+         - Data or evidence referenced
+         - Outcome: Was a decision made, or is it still open?
+         Order topics by time spent (most discussed first).
+
+      4. DECISIONS MADE: List every explicit decision with:
+         - The decision statement (clear and unambiguous)
+         - Who made/approved the decision
+         - Rationale discussed
+         - Any conditions or caveats attached
+         - Dissenting opinions (if any - important to capture these)
+         If NO decisions were made, explicitly state that.
+
+      5. KEY DISAGREEMENTS & OPEN QUESTIONS: Capture any unresolved
+         debates, differing opinions, or questions that were raised but
+         not answered. For each, note who held which position and what
+         information is needed to resolve it. This prevents important
+         tensions from being lost.
+
+      6. PARKING LOT: Topics that were briefly mentioned but deferred
+         for future discussion. These often get lost without tracking.
+
+      7. ATTENDEE CONTRIBUTION ANALYSIS (brief):
+         - Approximate speaking time distribution (who dominated, who
+           was quiet)
+         - Note if any key stakeholders were notably silent on topics
+           relevant to their domain (may indicate disagreement or
+           disengagement that should be followed up on privately)
     model: sonnet
     max_turns: 8
 
   - id: action-items
     depends_on: [summarize]
-    prompt: >
-      Extract all action items from the meeting summary. For each item,
-      specify the owner (who is responsible), a clear description of the
-      task, the agreed deadline or timeframe, and the priority level.
-      Format as a structured checklist that can be imported into a task
-      tracker.
+    prompt: |
+      You are a project manager who ensures nothing falls through the
+      cracks after meetings. Extract and structure ALL action items from
+      the meeting summary with precision.
+
       Meeting summary: {steps.summarize.output}
-    model: haiku
+      Original transcript: {input.transcript}
+
+      For EACH action item, capture:
+
+      1. ACTION ITEMS TABLE:
+         | # | Task | Owner | Deadline | Priority | Status |
+         - Task: Clear, specific, and actionable (starts with a verb).
+           Bad: "Look into the API issue"
+           Good: "Investigate API timeout errors in production and report
+           root cause to #engineering by Thursday"
+         - Owner: Specific person name. If no owner was assigned, mark
+           as "UNASSIGNED - needs owner" and flag this prominently.
+         - Deadline: Exact date if mentioned, otherwise infer from context
+           ("by next sprint", "before the client call on Friday"). If no
+           deadline was discussed, suggest one based on urgency.
+         - Priority: Critical (blocking others) / High / Medium / Low
+         - Status: New (just assigned) / Carried Over (from previous meeting)
+
+      2. DEPENDENCY MAP: Identify which action items depend on others.
+         Example: "Item #3 (API integration) is blocked until Item #1
+         (security review) is complete." This prevents parallel work
+         on dependent tasks.
+
+      3. UNASSIGNED ITEMS: Separately list any tasks or follow-ups that
+         were discussed but no clear owner was designated. These are the
+         items most likely to be dropped.
+
+      4. RECURRING ITEMS: Flag any action items that sound like they are
+         carry-overs from previous meetings ("we still need to..." or
+         "as discussed last time..."). These may indicate systemic blockers.
+
+      5. TASK TRACKER FORMAT: Output all action items in a format that
+         can be directly imported into common task trackers:
+         - Markdown checklist format (- [ ] Task @owner due:YYYY-MM-DD)
+         - Suitable for copy-paste into Jira, Asana, Linear, or Notion
+
+      6. FOLLOW-UP MEETING RECOMMENDATION:
+         - Is a follow-up meeting needed? (yes/no)
+         - If yes, suggested date (based on earliest action item deadline)
+         - Suggested attendees (subset of original, based on open items)
+         - Proposed agenda (based on unresolved questions and open items)
+    model: sonnet
     max_turns: 5
 
   - id: follow-up-email
     depends_on: [summarize, action-items]
-    prompt: >
-      Draft a professional follow-up email to send to all meeting attendees.
-      Include a brief recap of key decisions, the full list of action items
-      with owners and deadlines, and proposed next steps or next meeting date.
-      Keep the tone friendly but professional, and make it easy to scan quickly.
+    prompt: |
+      You are a professional communicator who writes follow-up emails that
+      recipients actually read and act on. Draft a follow-up email that
+      will be sent to all meeting attendees.
+
       Meeting summary: {steps.summarize.output}
       Action items: {steps.action-items.output}
       Sender name: {input.sender_name}
+      Meeting title: {input.meeting_title}
+
+      Write the email following these guidelines:
+
+      1. SUBJECT LINE: "Recap: {meeting_title} - [X] Decisions, [Y] Action
+         Items" (fill in actual counts). This format has 25% higher open
+         rates than generic "Meeting Notes" subjects.
+
+      2. OPENING (2 sentences max): Thank attendees for their time. If
+         the meeting ran over or was cut short, acknowledge it gracefully.
+
+      3. TL;DR SECTION: Copy the 2-3 sentence executive summary from the
+         meeting analysis. Bold the most important outcome. Busy recipients
+         who read only this paragraph should still get the key message.
+
+      4. DECISIONS MADE: Numbered list of all decisions. Format each as
+         a clear statement with the decision-maker in parentheses. Use
+         bold for the decision itself. This section serves as an official
+         record - if someone disagrees, they need to speak up now.
+
+      5. ACTION ITEMS: Present as a clean table or bulleted list with
+         owner names bolded. Group by owner so each person can quickly
+         scan their responsibilities. Include deadlines inline.
+         End with: "Please confirm your action items by replying to this
+         email or updating [task tracker] by [EOD tomorrow]."
+
+      6. OPEN QUESTIONS: List any unresolved items that need follow-up.
+         Tag specific people who need to provide input.
+
+      7. NEXT STEPS: If a follow-up meeting is recommended, propose a
+         specific date/time. Include a brief proposed agenda.
+
+      8. CLOSING: Professional sign-off. Include a line like "Please
+         reply with any corrections or additions to these notes by
+         [date]" to establish the notes as the official record.
+
+      FORMATTING RULES:
+      - Total email length: 300-500 words (no one reads longer emails)
+      - Use bold, bullets, and white space liberally for scannability
+      - Put the most important information in the first 3 lines (mobile
+        email preview shows approximately 90 characters)
+      - Tone: warm but professional, action-oriented, not bureaucratic
+      - Sign off as: {input.sender_name}
     model: sonnet
     max_turns: 8

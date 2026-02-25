@@ -1,14 +1,14 @@
 # name: Research Agent
-# description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results
+# description: Systematic research with scope definition, three parallel investigation tracks, rigorous synthesis, and a structured research report
 # tags: [research, parallel, analysis, extraction]
 # category: general_ai
 
 name: research-agent
-description: Searches for information, then analyzes sources and extracts facts in parallel, and combines all results
+description: Systematic research with scope definition, three parallel investigation tracks, rigorous synthesis, and a structured research report
 
 default_model: sonnet
-default_max_turns: 10
-default_timeout: 300
+default_max_turns: 12
+default_timeout: 420
 
 input_schema:
   required: ["topic"]
@@ -16,40 +16,333 @@ input_schema:
     topic:
       type: string
       description: "The research topic to investigate"
+    research_questions:
+      type: string
+      description: "Specific questions the research should answer (comma-separated)"
+      default: ""
+    depth:
+      type: string
+      description: "Research depth - survey (broad overview), standard (balanced), or deep-dive (exhaustive)"
+      default: "standard"
+    perspective:
+      type: string
+      description: "Analytical lens - neutral, critical, comparative, or advocate"
+      default: "neutral"
 
 steps:
-  - id: search
-    prompt: >
-      Search for comprehensive information about: {input.topic}.
-      Gather multiple sources and relevant data points.
-      Return a list of sources with their content summaries.
+  - id: scope-definition
+    prompt: |
+      Define a rigorous research scope and methodology for investigating
+      the following topic.
+
+      Topic: {input.topic}
+      Specific research questions: {input.research_questions}
+      Depth: {input.depth}
+      Perspective: {input.perspective}
+
+      Develop a complete research plan:
+
+      1. **Topic framing** - Define the research topic precisely:
+         - What exactly are we investigating? State in one clear sentence.
+         - What is the broader context this topic sits within?
+         - Why does this topic matter now? What makes it timely or important?
+         - Temporal scope: are we looking at current state, historical
+           development, future projections, or all three?
+
+      2. **Research questions** - Formalize the questions to answer:
+         - If specific questions were provided ("{input.research_questions}"),
+           refine them into precise, answerable research questions
+         - If none provided, generate 4-6 key questions that would
+           comprehensively cover the topic
+         - Classify each as: descriptive (what is), explanatory (why/how),
+           evaluative (how good/bad), or predictive (what will happen)
+
+      3. **Source strategy** - Plan where to find information:
+         - Primary sources: original research, data, expert opinions
+         - Secondary sources: analysis, reviews, meta-analyses
+         - Tertiary sources: encyclopedias, textbooks, overviews
+         - For each source type, specify what to look for and where
+
+      4. **Methodology selection** - Based on depth "{input.depth}":
+         - "survey": Focus on breadth, cover main positions, 5-8 sources
+         - "standard": Balance breadth and depth, 8-15 sources, some analysis
+         - "deep-dive": Exhaustive coverage, 15+ sources, detailed analysis
+         Specify the analysis framework to apply.
+
+      5. **Bias mitigation plan** - Given perspective "{input.perspective}":
+         - "neutral": Actively seek all sides, weight evidence equally
+         - "critical": Focus on weaknesses, counterarguments, risks
+         - "comparative": Structure around alternatives and tradeoffs
+         - "advocate": Build strongest case while acknowledging limitations
+         Regardless of perspective, identify your own potential biases.
+
+      6. **Quality criteria** - Define what makes a source credible
+         for this topic: publication type, author credentials, recency,
+         methodology quality, peer review status. Set minimum thresholds.
+
+      Output the complete research plan with questions and methodology.
+    model: sonnet
+    max_turns: 8
+
+  - id: primary-research
+    depends_on: [scope-definition]
+    prompt: |
+      Conduct primary research: gather firsthand information, original
+      data, and direct evidence on the topic.
+
+      Topic: {input.topic}
+      Research plan: {steps.scope-definition.output}
+
+      Primary research methodology:
+
+      1. **Direct source identification** - Find the most authoritative
+         primary sources on this topic:
+         - Original research papers, studies, or experiments
+         - Official data from government agencies, NGOs, or institutions
+         - Direct statements from key figures or organizations
+         - Raw datasets, statistics databases, or surveys
+         For each source, record: title, author/organization, date,
+         URL/citation, and credibility assessment (1-10).
+
+      2. **Evidence extraction** - From each primary source, extract:
+         - Key findings or data points (with exact figures)
+         - Methodology used (how was this information produced?)
+         - Sample size, scope, and limitations acknowledged
+         - Confidence level of the findings as stated by the source
+
+      3. **Expert positions mapping** - Identify the leading experts
+         or organizations on this topic and map their positions:
+         - Who are the key voices? (researchers, practitioners, critics)
+         - What are their main arguments or findings?
+         - Where do experts agree? Where do they disagree?
+         - What credentials give each voice authority?
+
+      4. **Timeline and evolution** - If relevant, trace how the primary
+         evidence has evolved over time:
+         - What did early research show?
+         - How have findings changed or been refined?
+         - What is the current state of knowledge?
+         - Are there pending studies or upcoming data releases?
+
+      5. **Evidence quality assessment** - Rate the overall strength of
+         primary evidence available:
+         - STRONG: Multiple high-quality sources with convergent findings
+         - MODERATE: Some good sources but with gaps or contradictions
+         - WEAK: Limited primary evidence, heavily reliant on secondary sources
+         - EMERGING: Topic is new, primary research is still developing
+
+      Output all primary research findings with full source citations.
+    model: sonnet
+    max_turns: 12
+
+  - id: secondary-research
+    depends_on: [scope-definition]
+    prompt: |
+      Conduct secondary research: analyze existing analyses, reviews,
+      commentary, and interpretive works on the topic.
+
+      Topic: {input.topic}
+      Research plan: {steps.scope-definition.output}
+
+      Secondary research methodology:
+
+      1. **Literature review** - Survey the analytical landscape:
+         - Review articles, meta-analyses, and systematic reviews
+         - Industry reports and analyst coverage
+         - Journalistic investigations and longform reporting
+         - Book chapters or monographs on the topic
+         For each, record: title, author, date, publication, and
+         how it advances understanding beyond primary sources.
+
+      2. **Narrative analysis** - How is this topic discussed and framed?
+         - What are the dominant narratives or frameworks used?
+         - Are there competing schools of thought? Describe each.
+         - What metaphors or mental models do commentators use?
+         - Has the narrative shifted over time? How and why?
+
+      3. **Bias and perspective detection** - For each secondary source:
+         - What is the author's or organization's potential bias?
+         - Is the source funded by parties with vested interests?
+         - Does the analysis cherry-pick evidence or present it fairly?
+         - How does this source's perspective compare to "{input.perspective}"?
+
+      4. **Synthesis of interpretations** - Across all secondary sources:
+         - What is the consensus interpretation (if one exists)?
+         - What are the most compelling minority interpretations?
+         - Where does genuine uncertainty remain?
+         - What questions do analysts wish they could answer but cannot?
+
+      5. **Practical implications** - What do secondary sources say about:
+         - Real-world impact of this topic
+         - Policy recommendations or best practices
+         - Predictions and forecasts
+         - Risks and opportunities identified
+
+      Output the secondary research findings with source evaluations.
     model: sonnet
     max_turns: 10
 
-  - id: analyze-sources
-    depends_on: [search]
-    prompt: >
-      Analyze the credibility and relevance of each source found.
-      Rate each source and identify potential biases or conflicts.
-      Sources: {steps.search.output}
-    model: sonnet
-    max_turns: 5
+  - id: data-collection
+    depends_on: [scope-definition]
+    prompt: |
+      Collect, organize, and analyze quantitative and structured data
+      relevant to the research topic.
 
-  - id: extract-facts
-    depends_on: [search]
-    prompt: >
-      Extract key facts, statistics, and claims from the search results.
-      Categorize them by topic and note supporting evidence.
-      Sources: {steps.search.output}
-    model: sonnet
-    max_turns: 5
+      Topic: {input.topic}
+      Research plan: {steps.scope-definition.output}
 
-  - id: synthesize
-    depends_on: [analyze-sources, extract-facts]
-    prompt: >
-      Combine the source analysis and extracted facts into a comprehensive
-      research report. Include a summary, key findings, and source reliability notes.
-      Source analysis: {steps.analyze-sources.output}
-      Extracted facts: {steps.extract-facts.output}
+      Data collection methodology:
+
+      1. **Quantitative data gathering** - Find all relevant metrics:
+         - Market data: size, growth rates, market share figures
+         - Statistical data: survey results, census data, indices
+         - Financial data: revenue, funding, investment figures
+         - Performance data: benchmarks, comparisons, rankings
+         - Demographic data: population, adoption rates, usage statistics
+         For each data point: exact value, source, date, and methodology.
+
+      2. **Trend analysis** - For key metrics, gather time-series data:
+         - Historical values (at least 3 data points over time)
+         - Current values
+         - Projected/forecasted values (if available)
+         - Growth rates and acceleration/deceleration patterns
+         Calculate compound growth rates where applicable.
+
+      3. **Comparative data** - Collect data enabling comparisons:
+         - Geographic comparisons (country/region differences)
+         - Temporal comparisons (before/after key events)
+         - Category comparisons (competitors, alternatives, segments)
+         - Benchmark comparisons (vs. industry average, vs. best-in-class)
+
+      4. **Data quality assessment** - For each data source:
+         - How was the data collected? (survey, measurement, estimation)
+         - What is the sample size and margin of error?
+         - How recent is the data?
+         - Are there known limitations or biases?
+         Flag any data points that are estimates vs. measured values.
+
+      5. **Key statistics summary** - Compile the 10-15 most impactful
+         data points that should definitely appear in the final report.
+         For each, provide the stat, source, date, and one sentence
+         explaining why it matters.
+
+      Output all collected data in organized categories with full citations.
+    model: sonnet
+    max_turns: 10
+
+  - id: synthesis-analysis
+    depends_on: [primary-research, secondary-research, data-collection]
+    prompt: |
+      Synthesize all three research tracks into a unified analysis
+      that answers the original research questions.
+
+      Topic: {input.topic}
+      Research plan: {steps.scope-definition.output}
+      Primary research: {steps.primary-research.output}
+      Secondary research: {steps.secondary-research.output}
+      Collected data: {steps.data-collection.output}
+      Perspective: {input.perspective}
+
+      Synthesis methodology:
+
+      1. **Evidence triangulation** - For each research question from
+         the scope definition, cross-reference findings from all three
+         tracks. Where primary sources, secondary analysis, and data
+         all point to the same conclusion, confidence is HIGH. Where
+         they diverge, investigate and explain why.
+
+      2. **Answer each research question** - Address every research
+         question defined in the scope. For each:
+         - Direct answer in 2-3 sentences
+         - Supporting evidence (cite specific sources and data)
+         - Confidence level: HIGH / MEDIUM / LOW
+         - Caveats or conditions that affect the answer
+
+      3. **Emergent insights** - Identify findings that only become
+         visible when combining all three research tracks:
+         - Patterns that no single source revealed alone
+         - Contradictions that reveal deeper complexity
+         - Surprising connections between different aspects of the topic
+
+      4. **Source reliability assessment** - Rate the overall evidence base:
+         - Which sources proved most valuable and why?
+         - Which sources had significant limitations?
+         - Are there important perspectives that are underrepresented?
+         - What additional research would strengthen the conclusions?
+
+      5. **Perspective application** - Apply the requested perspective
+         "{input.perspective}" to the synthesized findings:
+         - "neutral": Present all sides with equal weight, note uncertainties
+         - "critical": Stress-test the consensus, highlight weaknesses
+         - "comparative": Structure around alternatives and tradeoffs
+         - "advocate": Build the strongest evidence-based case
+
+      6. **Key takeaways** - Distill the entire analysis into 5-7
+         key takeaways that directly answer what the reader most needs
+         to know. Rank them by importance.
+
+      Output the complete synthesis with answered questions and takeaways.
+    model: sonnet
+    max_turns: 12
+
+  - id: research-report
+    depends_on: [synthesis-analysis]
+    prompt: |
+      Produce the final research report, formatted as a professional
+      deliverable ready for presentation or distribution.
+
+      Synthesis: {steps.synthesis-analysis.output}
+      Topic: {input.topic}
+      Research plan: {steps.scope-definition.output}
+      Depth: {input.depth}
+
+      Report structure and requirements:
+
+      1. **Executive Summary** (200-300 words)
+         - One-paragraph overview of the topic and why it matters
+         - 3-5 bullet points with the most critical findings
+         - Overall assessment or recommendation in one sentence
+
+      2. **Introduction and Scope**
+         - Topic definition and context
+         - Research questions addressed
+         - Methodology overview (sources consulted, analytical approach)
+         - Scope limitations
+
+      3. **Key Findings** (the main body)
+         - Organized by theme or research question (whichever is clearer)
+         - Each finding supported with specific evidence and data
+         - Clearly distinguish between established facts and interpretations
+         - Use data visualizations descriptions where helpful
+           (e.g. "a trend chart would show X growing from Y to Z")
+
+      4. **Analysis and Discussion**
+         - Interpretation of findings in broader context
+         - Comparison with prevailing narratives or expectations
+         - Implications for stakeholders (who should care and why)
+         - Risk factors and uncertainties
+
+      5. **Data Appendix**
+         - Consolidated table of all key statistics and metrics
+         - Source citations for each data point
+         - Timeline of key events or milestones (if relevant)
+
+      6. **Conclusions and Recommendations**
+         - Direct answers to each research question
+         - 3-5 actionable recommendations based on the evidence
+         - Suggested areas for further research
+
+      7. **Sources**
+         - Complete list of all sources cited, with credibility ratings
+         - Organized by type (primary, secondary, data)
+
+      Quality standards:
+      - Professional, clear language throughout
+      - Every claim cited to a specific source
+      - Balanced presentation regardless of perspective chosen
+      - Concise: for "survey" depth aim for 2-3 pages, "standard" 4-6 pages,
+        "deep-dive" 8-12 pages
+
+      Output the complete, formatted research report.
     model: sonnet
     max_turns: 10

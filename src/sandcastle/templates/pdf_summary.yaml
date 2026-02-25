@@ -1,14 +1,14 @@
 # name: PDF Summary
-# description: Scan a directory for PDF files, summarize each one in parallel, and create a final report
+# description: Deep PDF document analysis with parallel content extraction and structure mapping, producing focused key findings and an executive brief
 # tags: [pdf, summarization, parallel, documents]
 # category: general_ai
 
 name: pdf-summary
-description: Scan a directory for PDF files, summarize each one in parallel, and create a final report
+description: Deep PDF document analysis with parallel content extraction and structure mapping, producing focused key findings and an executive brief
 
-default_model: haiku
-default_max_turns: 5
-default_timeout: 300
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 360
 
 input_schema:
   required: ["directory"]
@@ -17,26 +17,256 @@ input_schema:
       type: string
       description: "Path to directory containing PDF files"
       default: "~/Desktop"
+    focus_areas:
+      type: string
+      description: "Specific topics, questions, or areas of interest to prioritize in the analysis (e.g. 'financial performance, risk factors, growth strategy')"
+      default: ""
+    output_format:
+      type: string
+      description: "Desired output format - executive-brief, detailed-report, comparison-table, or slide-notes"
+      default: "executive-brief"
 
 steps:
-  - id: scan
-    prompt: >
-      List all PDF files in the directory: {input.directory}
-      Return a JSON object with a "files" key containing an array of full file paths.
-      Only include files ending with .pdf.
-    max_turns: 3
+  - id: document-analysis
+    prompt: |
+      Scan the directory and perform an initial analysis of all PDF files
+      to understand the document corpus before deep processing.
 
-  - id: summarize
-    depends_on: [scan]
-    parallel_over: "steps.scan.output.files"
-    prompt: >
-      Read the PDF file: {input._item}
-      Extract the key content and create a concise summary (3-5 sentences).
-      Include: what the document is about, main findings or topics, and any conclusions.
+      Directory: {input.directory}
+      Focus areas: {input.focus_areas}
 
-  - id: report
-    depends_on: [summarize]
-    prompt: >
-      Create a final summary report from all the PDF summaries.
-      For each PDF include: file name, short summary, and key takeaways.
-      Format as a clean markdown document with a table of contents at the top.
+      Execute these steps:
+
+      1. **File discovery** - List all PDF files in the directory. For each file:
+         - Full file path
+         - File name
+         - File size (approximate page count if detectable)
+         Return this as a JSON object with a "files" key containing an array
+         of objects with "path" and "name" fields.
+
+      2. **Document type classification** - Open each PDF and classify it:
+         - Academic paper / Research report
+         - Business document (annual report, prospectus, proposal)
+         - Legal document (contract, terms, filing)
+         - Technical documentation (manual, specification, API docs)
+         - Presentation / slide deck
+         - Government or regulatory filing
+         - Other (describe)
+
+      3. **Corpus overview** - Describe the collection as a whole:
+         - How many documents? What types?
+         - Are they related (same topic/company/project) or independent?
+         - Estimated total content volume
+         - Which documents are likely most relevant to the focus areas?
+
+      4. **Processing strategy** - Based on document types and focus areas,
+         recommend which documents deserve deep analysis vs. light scanning.
+         If focus areas are specified ("{input.focus_areas}"), prioritize
+         documents most likely to contain relevant information.
+
+      5. **Cross-reference potential** - Identify any documents that likely
+         reference each other (e.g. a report and its appendix, a contract
+         and its amendment). These connections are important for synthesis.
+
+      Output the file list JSON and the corpus analysis.
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              name:
+                type: string
+
+  - id: content-extraction
+    depends_on: [document-analysis]
+    parallel_over: "steps.document-analysis.output.files"
+    prompt: |
+      Perform deep content extraction on this PDF document.
+
+      File: {input._item}
+      Focus areas: {input.focus_areas}
+
+      Extract the following with high fidelity:
+
+      1. **Core content extraction** - Read the entire document and extract:
+         - Title, author(s), date, version (if present)
+         - Abstract or executive summary (if present, quote it verbatim)
+         - All main arguments, findings, or claims
+         - All quantitative data: numbers, percentages, financial figures,
+           statistics, dates, timelines. Preserve exact values.
+
+      2. **Focus area deep-dive** - If focus areas are specified
+         ("{input.focus_areas}"), perform targeted extraction:
+         - For each focus area, find all relevant passages
+         - Quote key sentences directly (with page/section reference)
+         - Note the strength of evidence for each relevant finding
+
+      3. **Key quotes and passages** - Extract 5-10 of the most important
+         or insightful passages from the document. These should be direct
+         quotes that capture the essence of the document's message.
+         Include enough context to understand each quote standalone.
+
+      4. **Data tables and figures** - If the document contains tables,
+         charts, or figures, describe their content and extract the
+         key data points. Note any trends visible in charts.
+
+      5. **Conclusions and recommendations** - Extract all explicit
+         conclusions, recommendations, action items, next steps, or
+         forward-looking statements. These are often the highest-value
+         content for the executive brief.
+
+      6. **Unanswered questions** - Note any questions the document
+         raises but does not answer, or areas where the analysis
+         acknowledges uncertainty or need for further investigation.
+
+      Output a structured extraction organized by the categories above.
+    model: sonnet
+    max_turns: 8
+
+  - id: structure-mapping
+    depends_on: [document-analysis]
+    parallel_over: "steps.document-analysis.output.files"
+    prompt: |
+      Map the structural and argumentative architecture of this PDF document.
+
+      File: {input._item}
+
+      Analyze the document's structure at multiple levels:
+
+      1. **Physical structure** - Map the document layout:
+         - Table of contents (if present)
+         - Section hierarchy (chapters, sections, subsections)
+         - Appendices, references, footnotes
+         - Total estimated length and content density by section
+
+      2. **Logical structure** - How is the argument built?
+         - What is the central thesis or purpose?
+         - How does the author establish credibility/authority?
+         - What evidence structure is used (empirical, logical, narrative)?
+         - Where is the climax or most important revelation in the document?
+
+      3. **Information flow** - Map how ideas connect:
+         - What is the reading order dependency (what must you read first)?
+         - Which sections are self-contained vs. dependent on others?
+         - Are there any circular references or logical dependencies?
+
+      4. **Quality signals** - Assess document quality indicators:
+         - Is it well-structured with clear headings and transitions?
+         - Are sources cited? How many and what quality?
+         - Is the writing clear and professional?
+         - Are there any red flags (unsupported claims, logical gaps,
+           contradictions)?
+
+      5. **Summarizability assessment** - Rate how well this document
+         can be compressed (1-10) and explain why. Some documents have
+         a clear hierarchy that compresses well; others have dense
+         interconnected arguments that lose meaning when summarized.
+
+      Output the structural map and quality assessment.
+    model: haiku
+    max_turns: 5
+
+  - id: key-findings
+    depends_on: [content-extraction, structure-mapping]
+    prompt: |
+      Synthesize the content extractions and structure maps from all
+      documents into a unified set of key findings.
+
+      Content extractions: {steps.content-extraction.output}
+      Structure maps: {steps.structure-mapping.output}
+      Focus areas: {input.focus_areas}
+
+      Synthesis methodology:
+
+      1. **Cross-document analysis** - Compare findings across all documents:
+         - Where do documents agree? (convergent findings = high confidence)
+         - Where do documents contradict? (note the contradiction and assess
+           which source is more reliable and why)
+         - What information appears in only one document? (unique findings)
+         - Are there temporal patterns (earlier vs. later documents)?
+
+      2. **Key findings extraction** - Identify the 10-15 most important
+         findings across the entire corpus. For each:
+         - Finding stated in one clear sentence
+         - Source document(s) and strength of evidence
+         - Relevance to stated focus areas (HIGH / MEDIUM / LOW / N/A)
+         - Confidence level based on source quality and corroboration
+         Rank findings by importance.
+
+      3. **Theme identification** - Group findings into 3-5 major themes
+         or narratives that emerge from the corpus. Give each theme a
+         clear name and 2-3 sentence description.
+
+      4. **Data consolidation** - Merge all quantitative data from across
+         documents into a consolidated data summary. Resolve any conflicting
+         numbers by noting the discrepancy and likely explanation.
+
+      5. **Gap analysis** - Based on the stated focus areas
+         ("{input.focus_areas}"), what questions remain unanswered by this
+         corpus? What additional documents or data would be needed to
+         fill these gaps?
+
+      6. **Actionable insights** - From the key findings, derive 3-5
+         actionable insights or recommendations. What should the reader
+         DO with this information?
+
+      Output the ranked key findings, themes, and actionable insights.
+    model: sonnet
+    max_turns: 10
+
+  - id: executive-brief
+    depends_on: [key-findings]
+    prompt: |
+      Produce the final executive brief from the synthesized key findings,
+      formatted for immediate decision-making use.
+
+      Key findings: {steps.key-findings.output}
+      Requested format: {input.output_format}
+      Focus areas: {input.focus_areas}
+      Document corpus info: {steps.document-analysis.output}
+
+      Format the output according to "{input.output_format}":
+
+      **If "executive-brief":**
+      - Start with a 2-3 sentence "bottom line up front" (BLUF)
+      - Follow with key findings grouped by theme
+      - Include a data highlights section with critical numbers
+      - End with recommended actions and open questions
+      - Total length: 1-2 pages
+
+      **If "detailed-report":**
+      - Table of contents
+      - Introduction with corpus description
+      - Detailed findings by theme with source citations
+      - Data appendix with all extracted metrics
+      - Conclusions and next steps
+      - Total length: 3-5 pages
+
+      **If "comparison-table":**
+      - Matrix comparing all documents across key dimensions
+      - Color-coded agreement/disagreement indicators
+      - Side-by-side key metrics from each document
+      - Summary row with consensus findings
+
+      **If "slide-notes":**
+      - 8-12 slide outlines with title, 3-4 bullet points each
+      - Speaker notes for each slide (what to say, not what to show)
+      - Data slide suggestions with specific figures to highlight
+      - Opening and closing slide recommendations
+
+      Quality requirements for all formats:
+      - Every claim must be traceable to a specific source document
+      - Quantitative data must be exact as extracted
+      - Confidence levels should be visible for uncertain findings
+      - The output must be immediately usable without reading the source PDFs
+
+      Output the final formatted brief. No meta-commentary - just the
+      clean, professional deliverable.
+    model: sonnet
+    max_turns: 8

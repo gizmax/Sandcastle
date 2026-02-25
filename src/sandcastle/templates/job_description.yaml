@@ -16,43 +16,227 @@ input_schema:
     role_brief:
       type: string
       description: "Brief describing the role, responsibilities, and requirements"
+    company_name:
+      type: string
+      description: "Company name for the About Us section"
+    salary_range:
+      type: string
+      description: "Salary range to include (e.g. '$120k-$160k'). Recommended for transparency and SEO."
+    location_type:
+      type: string
+      description: "Work arrangement: remote, hybrid, on-site, or flexible"
 
 steps:
   - id: analyze-role
-    prompt: >
-      Analyze the following role brief and extract the key details: core responsibilities,
-      required and preferred skills, seniority level, team context, and reporting structure.
-      Identify any implicit requirements and suggest a clear job title if not provided.
+    prompt: |
+      You are a senior talent acquisition specialist and organizational
+      design expert. Analyze the following role brief to build a comprehensive
+      role profile that will drive the entire job description creation process.
+
       Role brief: {input.role_brief}
+      Company name: {input.company_name}
+      Location type: {input.location_type}
+
+      Perform the following analysis and output each as a labeled section:
+
+      1. JOB ARCHITECTURE: Determine the job family, career level (IC1-IC6
+         or M1-M4), and where this role sits in a typical org chart. Identify
+         the likely reporting structure (reports to whom, any direct reports).
+         Suggest an SEO-optimized job title that matches what candidates
+         actually search for on LinkedIn, Indeed, and Glassdoor.
+
+      2. CORE RESPONSIBILITIES: List 6-8 primary responsibilities ranked by
+         time allocation (approximate % of weekly time). For each, distinguish
+         between "what they'll do day-1" vs "what they'll grow into by month 6".
+
+      3. SKILLS DECOMPOSITION: Separate into three tiers:
+         - Must-have (truly non-negotiable, max 5): Skills without which the
+           person cannot perform the core job function
+         - Strong-to-have (preferred, 3-5): Skills that significantly accelerate
+           ramp-up or expand the role's impact
+         - Nice-to-have (bonus, 2-3): Skills that indicate exceptional fit
+         Flag any requirements that might unnecessarily narrow the candidate
+         pool (e.g. specific degree requirements when experience suffices).
+
+      4. SENIORITY CALIBRATION: Based on responsibilities, estimate the
+         appropriate years-of-experience range. IMPORTANT: Express this as
+         a range and note that equivalent non-traditional experience (bootcamps,
+         open-source contributions, career transitions) should be considered.
+
+      5. TEAM CONTEXT: Infer or describe the team size, methodology (agile,
+         etc.), collaboration patterns, and key cross-functional relationships.
+
+      6. SUCCESS METRICS: Define what "great performance" looks like at 30,
+         60, and 90 days. What are 2-3 measurable outcomes for the first year?
     model: sonnet
     max_turns: 5
 
   - id: write-jd
     depends_on: [analyze-role]
-    prompt: >
-      Write a complete, polished job description using inclusive language based on the role
-      analysis. Include sections for About the Role, Responsibilities, Requirements (must-have
-      vs nice-to-have), Benefits, and Growth Opportunities. Avoid gendered pronouns and
-      unnecessary jargon. Role analysis: {steps.analyze-role.output}
+    prompt: |
+      You are a recruiting content writer who specializes in job descriptions
+      that maximize qualified applicant conversion. Using the role analysis,
+      write a complete, polished, and SEO-optimized job description.
+
+      Role analysis: {steps.analyze-role.output}
+      Company name: {input.company_name}
+      Salary range: {input.salary_range}
+      Location type: {input.location_type}
+
+      Follow this EXACT section structure (proven to convert 40% better than
+      unstructured JDs according to LinkedIn Talent Insights):
+
+      1. JOB TITLE: Use the SEO-optimized title from the analysis. Avoid
+         internal jargon like "Ninja", "Rockstar", "Guru", or "Wizard".
+
+      2. ABOUT US (3-4 sentences): Company mission, what the team is building,
+         why it matters, and company stage/size. Sound human, not corporate.
+         Avoid cliches like "fast-paced environment" or "wear many hats".
+
+      3. ABOUT THE ROLE (2-3 sentences): A compelling elevator pitch for why
+         this role exists and what impact the hire will make. Start with
+         "You will..." to put the candidate at the center.
+
+      4. WHAT YOU'LL DO: 6-8 bullet points of responsibilities. Start each
+         with a strong action verb. Order by importance and excitement factor.
+         Use present tense ("Design and implement..." not "Will design...").
+
+      5. WHAT WE'RE LOOKING FOR:
+         - Required (5 max): Only truly essential qualifications
+         - Preferred: Nice-to-haves clearly separated from requirements
+         Include the phrase "If you don't meet 100% of these qualifications,
+         we encourage you to apply. We value diverse perspectives and
+         transferable skills." (this increases female applicants by 20%+).
+
+      6. COMPENSATION & BENEFITS:
+         - Include salary range prominently (legal requirement in CO, CA, NY,
+           WA and best practice everywhere). Use the provided range.
+         - List 6-8 specific benefits: health, equity, PTO, learning budget,
+           parental leave, remote stipend, etc.
+
+      7. HIRING PROCESS (3-5 steps): Briefly outline the interview stages
+         so candidates know what to expect. This reduces drop-off by 30%.
+
+      8. EQUAL OPPORTUNITY STATEMENT: Include a substantive EEO statement
+         that goes beyond boilerplate. Mention specific commitment to
+         diversity dimensions relevant to the role and industry.
+
+      SEO OPTIMIZATION RULES:
+      - Include the job title in the first 60 characters
+      - Use industry-standard skill keywords (not internal terminology)
+      - Keep total length between 700-1000 words (optimal for Indeed/LinkedIn)
+      - Use bullet points over paragraphs for scannability
     model: sonnet
     max_turns: 10
 
   - id: bias-check
     depends_on: [write-jd]
-    prompt: >
-      Review the job description for potential bias issues. Check for gendered language,
-      age-coded terms, unnecessary degree requirements, culturally exclusive phrases, and
-      inflated experience requirements. Provide a corrected version with all issues fixed
-      and a summary of changes made. Job description: {steps.write-jd.output}
+    prompt: |
+      You are a DEI (Diversity, Equity, and Inclusion) specialist and
+      organizational psychologist. Perform a rigorous bias audit on the
+      following job description. Your goal is to maximize the diversity
+      of qualified applicants.
+
+      Job description: {steps.write-jd.output}
+
+      Audit the following dimensions and flag EVERY instance found:
+
+      1. GENDERED LANGUAGE: Scan for masculine-coded words (aggressive,
+         dominant, competitive, rock star, ninja, crushing it) and
+         feminine-coded words (supportive, nurturing, collaborative -
+         which can signal the role is undervalued). Use the Gaucher et al.
+         (2011) gendered wording research as a reference. List each word
+         found with a neutral replacement.
+
+      2. AGE-CODED TERMS: Flag "digital native", "young and hungry",
+         "recent graduate", "5+ years" when the role doesn't truly need it,
+         "high energy", "startup mentality". Each one discourages older or
+         younger candidates depending on direction.
+
+      3. ABLEIST LANGUAGE: Check for physical ability assumptions like
+         "must be able to lift 50 lbs" (when not actually required),
+         "walks clients through", "stand-up meetings" used literally.
+
+      4. UNNECESSARY BARRIERS:
+         - Degree requirements: Is a bachelor's/master's truly required,
+           or would equivalent experience suffice? (Google, Apple, IBM
+           have all dropped degree requirements for most roles.)
+         - Certification requirements: Are they legally required or just
+           preferred?
+         - Experience inflation: Is "7+ years" actually needed, or would
+           "3-5 years" suffice for the actual responsibilities listed?
+         - Tool-specific requirements: Is "must know Jira" a real need,
+           or is "experience with project management tools" sufficient?
+
+      5. CULTURAL EXCLUSION: Check for phrases that assume specific cultural
+         backgrounds ("beer Fridays", "ping-pong table", "work hard play
+         hard", religious holiday assumptions in benefits).
+
+      6. READABILITY: Run a Flesch-Kincaid assessment. Job descriptions
+         above grade 10 reading level lose 50%+ of applicants. Flag any
+         sentences that are overly complex or use unnecessary jargon.
+
+      OUTPUT FORMAT:
+      - ISSUES FOUND: Numbered list with original text, issue type, and
+        suggested replacement
+      - CORRECTED JOB DESCRIPTION: Full rewritten version with all fixes
+      - BIAS SCORE: Rate the original 1-10 (10 = fully inclusive) and the
+        corrected version similarly
+      - CHANGE SUMMARY: Brief list of all modifications made
     model: sonnet
     max_turns: 5
 
   - id: interview-plan
-    depends_on: [analyze-role]
-    prompt: >
-      Create a structured interview plan aligned with the role requirements. Include
-      screening questions, technical assessment criteria, behavioral interview questions
-      mapped to key competencies, and a scoring rubric. Ensure questions are legal and
-      non-discriminatory. Role analysis: {steps.analyze-role.output}
+    depends_on: [analyze-role, bias-check]
+    prompt: |
+      You are a structured interviewing expert who designs evidence-based
+      hiring processes. Create a comprehensive interview plan aligned with
+      the role requirements and inclusive hiring best practices.
+
+      Role analysis: {steps.analyze-role.output}
+      Bias-checked JD: {steps.bias-check.output}
+
+      Design the following:
+
+      1. SCREENING STAGE (Recruiter phone screen, 20-30 min):
+         - 5 screening questions mapped to must-have requirements
+         - 3 motivational/culture-add questions (NOT culture "fit")
+         - Clear pass/fail criteria for each question
+         - Note: NEVER ask about current salary (illegal in many jurisdictions),
+           visa status (can only ask "authorized to work in [country]?"),
+           or family/marital status
+
+      2. TECHNICAL ASSESSMENT (if applicable):
+         - Recommend assessment format (take-home, live coding, portfolio
+           review, case study) with time limit (max 2-4 hours take-home)
+         - Design 2-3 assessment tasks that mirror actual job responsibilities
+         - Scoring rubric with 4-point scale for each competency assessed
+         - Anti-cheating measures that don't create undue burden
+         - Accommodation plan for candidates with disabilities
+
+      3. BEHAVIORAL INTERVIEW (45-60 min, 2 interviewers):
+         - 6-8 behavioral questions using STAR format prompts
+         - Map each question to a specific competency from the role profile
+         - Sample "what good looks like" answers for calibration
+         - Follow-up probes for each question to go deeper
+         - Scoring rubric (1-4 scale with behavioral anchors)
+
+      4. HIRING MANAGER INTERVIEW (45-60 min):
+         - 4-5 role-specific depth questions
+         - 2-3 "reverse interview" prompts to sell the role and team
+         - Red flag indicators to watch for (without creating bias)
+
+      5. COMPOSITE SCORING MATRIX:
+         - Weight each interview stage (e.g. technical 40%, behavioral 35%,
+           screening 15%, hiring manager 10%)
+         - Decision framework: Strong Hire / Hire / No Hire / Strong No Hire
+         - Debrief protocol: structured scorecard review before open discussion
+           to prevent anchoring bias
+         - Tie-breaking criteria when candidates are closely matched
+
+      6. CANDIDATE EXPERIENCE CHECKLIST:
+         - Timeline: target offer within X business days of final interview
+         - Communication cadence: when to update candidate at each stage
+         - Rejection email templates: personalized, constructive, warm
     model: sonnet
     max_turns: 5

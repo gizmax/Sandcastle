@@ -34,63 +34,192 @@ steps:
       Use the HubSpot tool to list deals:
         node /home/user/tools/hubspot.mjs list_deals '{input.pipeline_name}' 50
 
-      Return deal name, stage, amount, last activity date, and owner for each deal.
+      For each deal, capture the FULL deal record:
+      - Deal basics: name, stage, amount, close date, create date, deal owner
+      - Activity data: last activity date, last contacted date, number of activities,
+        last email open date, last meeting date
+      - Engagement history: number of emails sent, emails opened, calls logged,
+        meetings completed, notes added
+      - Contact associations: primary contact, all associated contacts with titles
+        (count the number of stakeholders engaged - critical for multi-threading analysis)
+      - Company association: company name, size, industry
+      - Deal properties: deal type, lead source, competitor mentioned, next step field
+      - Pipeline position: time in current stage (days), total time in pipeline (days)
+
+      Also fetch the pipeline stage definitions to understand the expected progression
+      and stage-specific close probabilities.
+
+      Return all deals sorted by amount (descending) with complete data.
     model: haiku
     max_turns: 5
 
   - id: analyze-stalled
     depends_on: [fetch-deals]
     prompt: |
-      Analyze these deals for stalled progress:
+      Perform comprehensive pipeline health analysis with deal stage validation,
+      stale deal detection, and forecast accuracy assessment.
 
       Deals: {steps.fetch-deals.output}
       Stale threshold: {input.stale_days} days
 
-      For each deal, determine:
-      1. Is it stalled? (no activity for more than the threshold)
-      2. Risk level (High/Medium/Low) based on deal size, stage, and inactivity duration
-      3. Recommended next action (follow-up call, send proposal, escalate, etc.)
-      4. Suggested follow-up message angle
+      DEAL STAGE VALIDATION:
+      For each deal, verify stage-appropriate progress:
+      - Discovery stage: must have >2 activities and identified decision maker.
+        If not, flag as "insufficient qualification."
+      - Demo/Evaluation stage: must have meeting completed and >1 stakeholder engaged.
+        If not, flag as "single-threaded risk."
+      - Proposal stage: must have proposal sent (check activity log) and close date
+        within 30 days. If close date has passed, flag as "stale close date."
+      - Negotiation stage: must have activity in last 5 days and legal/procurement
+        contact engaged. If not, flag as "negotiation stall."
+      - Flag any deal that has regressed stages (moved backward) or been in the same
+        stage for >2x the average time for that stage.
 
-      Return as JSON array with deal_name, stage, amount, days_inactive, risk_level,
-      recommended_action, and followup_angle.
+      STALE DEAL DETECTION (beyond simple inactivity):
+      A deal is considered stale if ANY of these are true:
+      - No activity for >{input.stale_days} days (explicit threshold)
+      - Close date is in the past and deal hasn't moved stages in 14+ days
+      - Last 3+ emails were sent by us with no response (one-way communication)
+      - No meetings in last 30 days for deals in Demo or later stages
+      - Deal amount decreased (sign of scope reduction or champion losing internal support)
+
+      RISK SCORING (composite 1-100):
+      - Inactivity penalty: +5 per day over threshold (max 30)
+      - Stage-inappropriate behavior: +20 per validation failure
+      - Single-threaded (only 1 contact): +15 (deals die when the single champion leaves)
+      - Close date slippage: +10 per push (count how many times close date was extended)
+      - No executive engagement on deals >$50K: +15
+      - Competitor mentioned in deal notes: +10
+      - Decreasing deal amount: +10
+
+      Classify risk:
+      - Critical (80-100): Deal likely dead, needs executive intervention or close-out
+      - High (50-79): Urgent action needed this week, re-engage or validate opportunity
+      - Medium (25-49): Proactive intervention, adjust strategy
+      - Healthy (0-24): On track, maintain cadence
+
+      MULTI-THREADING ASSESSMENT:
+      For each deal, analyze stakeholder engagement:
+      - How many contacts are associated? (target: 3+ for deals >$25K)
+      - What roles are covered? (need: economic buyer, technical evaluator, champion)
+      - Are we engaging at the right level for this deal size?
+      - Multi-threading recommendation: who else should we be talking to?
+
+      COMPETITIVE DISPLACEMENT PLAYBOOK:
+      For deals where a competitor is mentioned:
+      - Identify which competitor and their typical strengths/weaknesses
+      - Suggest competitive positioning angle based on the deal context
+      - Recommend competitive battle card activation
+      - Flag if competitor recently won similar deals (market intelligence)
+
+      FORECAST ACCURACY:
+      - For each deal, calculate weighted pipeline value = amount x stage probability
+      - Flag deals where the rep's confidence doesn't match stage velocity
+        (e.g., "committed" forecast but deal is stalling)
+      - Identify forecast risk: deals expected to close this month/quarter that show
+        stall indicators
+
+      Return JSON array per deal: deal_name, stage, amount, days_in_stage, days_inactive,
+      risk_score, risk_level, stage_validation_issues, threading_status, threading_gaps,
+      competitor_detected, recommended_actions (array), followup_angle, forecast_risk_flag.
     model: sonnet
     max_turns: 8
 
   - id: draft-followups
     depends_on: [analyze-stalled]
     prompt: |
-      Draft personalized follow-up emails for each stalled deal:
+      Draft personalized follow-up communications for stalled and at-risk deals.
 
       Stalled deals analysis: {steps.analyze-stalled.output}
 
-      For each High or Medium risk deal, write a brief follow-up email that:
-      - References the deal context and last interaction
-      - Uses the suggested followup angle
-      - Includes a clear call-to-action
-      - Keeps a professional but warm tone
-      - Is 3-5 sentences max
+      FOR CRITICAL RISK DEALS (score 80-100):
+      Draft a "break-up email" - a polite but direct message to re-engage or qualify out:
+      - Subject: straightforward, creates urgency without being pushy
+      - Acknowledge the gap in communication honestly
+      - Give the prospect an easy "out" (paradoxically increases response rate)
+      - Example tone: "I want to make sure I'm not wasting your time. If [project] is no
+        longer a priority, I completely understand. Just let me know either way."
+      - Include a specific next step with a deadline
+      - Also draft an internal note recommending whether to close-lost or try one more time
 
-      Return each draft with deal_name, recipient, subject_line, and email_body.
+      FOR HIGH RISK DEALS (score 50-79):
+      Draft a value-add follow-up that re-engages without being "just checking in":
+      - Reference the specific stage and last meaningful interaction
+      - Provide NEW value: relevant case study, industry insight, competitive intel,
+        or product update that maps to their expressed needs
+      - Use the multi-threading recommendation: if single-threaded, suggest involving
+        another stakeholder (e.g., "Would it be helpful to loop in your [VP/CTO] for
+        the technical evaluation?")
+      - Include a specific CTA with 2 time options for a meeting
+      - Subject line should reference their specific situation, not generic "following up"
+
+      FOR MEDIUM RISK DEALS (score 25-49):
+      Draft a lighter touch follow-up:
+      - Share relevant content (blog post, webinar, product update)
+      - Reference their timeline or upcoming events
+      - Soft CTA: "Happy to reconnect when the timing is right"
+
+      FOR EACH DRAFT PROVIDE:
+      - deal_name, recipient_name, recipient_title
+      - subject_line (< 50 chars, personalized, no spam trigger words)
+      - email_body (3-7 sentences, conversational but professional)
+      - follow_up_schedule: day 3 (phone call), day 7 (different channel), day 14 (final)
+      - internal_notes: strategy reasoning for the sales manager
+      - also_contact: additional stakeholders to reach out to for multi-threading
     model: sonnet
     max_turns: 8
 
   - id: send-alerts
     depends_on: [analyze-stalled]
     prompt: |
-      Send a pipeline health summary to Slack channel {input.alert_channel}.
+      Send a comprehensive pipeline health summary to Slack channel {input.alert_channel}.
 
       Analysis: {steps.analyze-stalled.output}
 
       Use the Slack tool to post a formatted message:
         node /home/user/tools/slack.mjs post_message '{input.alert_channel}' '<message>'
 
-      Format the message as:
+      FORMAT THE MESSAGE AS:
+
       *Pipeline Health Report - {input.pipeline_name}*
-      - Total stalled deals: <count>
-      - High risk: <count> ($<total_amount>)
-      - Medium risk: <count> ($<total_amount>)
-      Then list each high-risk deal with name, amount, and days inactive.
+      _Generated: [today's date]_
+
+      *PIPELINE SUMMARY*
+      - Total open deals: <count> ($<total_value>)
+      - Weighted pipeline: $<weighted_total> (amount x stage probability)
+      - Avg days in pipeline: <avg_days>
+      - Deals expected to close this month: <count> ($<amount>)
+
+      *RISK DASHBOARD*
+      - :red_circle: Critical: <count> deals ($<amount>) - likely dead, need decision
+      - :large_orange_circle: High Risk: <count> deals ($<amount>) - action needed this week
+      - :yellow_circle: Medium Risk: <count> deals ($<amount>) - monitor closely
+      - :green_circle: Healthy: <count> deals ($<amount>) - on track
+
+      *CRITICAL DEALS REQUIRING IMMEDIATE ACTION*
+      For each critical/high-risk deal, list:
+      > *[Deal Name]* - $<amount> - <stage>
+      > Owner: @<owner> | Inactive: <days> days | Risk: <score>/100
+      > Issue: <primary issue>
+      > Action: <recommended next step>
+
+      *FORECAST RISK*
+      - Deals at risk of missing close date this quarter: <list>
+      - Pipeline gap: $<amount needed> to hit quarterly target (if calculable)
+
+      *MULTI-THREADING ALERTS*
+      - Single-threaded deals >$25K: <count> (list deal names)
+      - Deals with no executive engagement >$50K: <count>
+
+      *WEEKLY TREND* (if historical data available)
+      - New deals added: <count> ($<amount>)
+      - Deals moved forward: <count>
+      - Deals stalled (new this week): <count>
+      - Deals closed-won: <count> ($<amount>)
+      - Deals closed-lost: <count> ($<amount>)
+
+      Keep the Slack message scannable - use emoji, bold, and block quotes.
+      Tag deal owners (@mention) on their critical deals.
     model: haiku
     max_turns: 5
     tools: [slack]

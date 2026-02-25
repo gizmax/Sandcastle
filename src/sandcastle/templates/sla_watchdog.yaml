@@ -25,6 +25,16 @@ input_schema:
       type: string
       description: "Slack channel for SLA breach alerts (e.g. '#sla-alerts')"
       default: "#sla-alerts"
+    business_hours:
+      type: string
+      description: "Business hours for SLA calculation - e.g. 'Mon-Fri 09:00-18:00 UTC' or '24/7' (default: '24/7')"
+      default: "24/7"
+    customer_tiers:
+      type: string
+      description: "Optional tier-based SLA overrides - e.g. 'Platinum: 0.5x targets; Gold: 1x; Silver: 2x'"
+    escalation_chain:
+      type: string
+      description: "Escalation contacts - e.g. 'L1: @support-lead; L2: @support-director; L3: @vp-cx'"
 
 steps:
   - id: fetch-tickets
@@ -36,7 +46,14 @@ steps:
 
       For each ticket, return: ticket_id, subject, priority, status, created_at,
       first_response_at (null if no agent response yet), assigned_agent, requester,
-      and current SLA target based on priority.
+      requester_organization, requester_tags (for customer tier identification),
+      last_agent_activity_at, number_of_agent_replies, and current SLA target based on priority.
+
+      Also fetch the requester's organization tier/plan if available in custom fields
+      (e.g., "Platinum", "Gold", "Silver") to enable tier-based SLA differentiation.
+
+      If the requester has a customer tier tag, include it - this will be used to apply
+      tier-specific SLA multipliers from the customer_tiers configuration.
     model: haiku
     max_turns: 5
     output_schema:
@@ -63,14 +80,43 @@ steps:
       Tickets: {steps.fetch-tickets.output}
       SLA Policy: {input.sla_policy}
 
-      For each ticket, calculate:
-      1. **Time to first response** - elapsed time from creation to first agent reply
-      2. **Time to resolution** - elapsed time from creation to now (for open tickets)
-      3. **SLA target** - based on ticket priority and the policy
-      4. **Remaining time** - how much time is left before SLA breach
-      5. **Status**: compliant, at_risk (< 25% time remaining), breached
+      For each ticket, perform a comprehensive SLA evaluation:
 
-      Return JSON with per-ticket SLA status and overall compliance rate (percentage).
+      1. **Business hours calculation:**
+         - Business hours policy: {input.business_hours}
+         - If not 24/7, calculate elapsed time using ONLY business hours. Exclude weekends
+           and non-business hours from all SLA calculations.
+         - Example: ticket created Friday 17:00, business hours Mon-Fri 09:00-18:00 -
+           by Monday 10:00, only 2 business hours have elapsed (1h Friday + 1h Monday).
+         - Track both calendar time and business-hours time for reporting.
+
+      2. **Customer tier adjustment:**
+         - Customer tiers config: {input.customer_tiers}
+         - If customer has a tier tag, apply the corresponding SLA multiplier to targets.
+         - Example: "Platinum: 0.5x" means a 4h SLA target becomes 2h for Platinum customers.
+         - If no tier is specified, use default (1x) targets.
+
+      3. **SLA metrics per ticket:**
+         - Time to first response (business hours): elapsed from creation to first agent reply
+         - Time to resolution (business hours): elapsed from creation to now (for open tickets)
+         - SLA target: adjusted for priority AND customer tier
+         - Remaining time: how much business-hour time is left before SLA breach
+         - Predicted breach time: if current pace continues, when will SLA breach occur
+         - Status classification:
+           * compliant: within SLA targets with comfortable margin (> 50% time remaining)
+           * at_risk: approaching breach (< 25% time remaining OR predicted to breach)
+           * breached: SLA target exceeded
+           * near_miss: was at_risk but resolved in time (for trend analysis)
+
+      4. **Predictive breach alerting:**
+         - For tickets NOT yet breached, predict likelihood of breach based on:
+           * Current elapsed time vs remaining time ratio
+           * Historical average resolution time for similar priority/category
+           * Current agent workload (number of assigned open tickets)
+           * Time of day and staffing patterns
+         - Flag tickets with > 60% predicted breach probability as "predicted_breach"
+
+      Return JSON with per-ticket SLA status, predictions, and overall compliance rate.
     model: sonnet
     max_turns: 8
     output_schema:
@@ -96,16 +142,41 @@ steps:
 
       SLA results: {steps.check-sla.output}
 
-      1. List all **breached** tickets with severity and duration of breach
-      2. List all **at-risk** tickets ranked by urgency (least time remaining first)
-      3. Identify patterns: repeat offenders (agents with multiple breaches),
-         problematic categories, time-of-day trends
-      4. For each breached or at-risk ticket, recommend an immediate action:
-         - Reassign to available agent
-         - Escalate to team lead
-         - Send customer proactive update
+      1. **Breached tickets** - list all with:
+         - Breach severity: minor (< 30min over), moderate (30min-2h over), severe (> 2h over)
+         - Duration of breach in business hours
+         - Customer tier and ARR impact (Platinum customer breach is more severe)
+         - Whether customer has been notified of the delay
 
-      Return structured JSON with breaches, at_risk, patterns, and recommendations.
+      2. **At-risk tickets** - ranked by urgency (least remaining time first):
+         - Predicted time until breach
+         - Breach probability percentage
+         - Assigned agent's current workload (total open tickets)
+
+      3. **Predicted breaches** - tickets currently compliant but predicted to breach:
+         - Prediction confidence level and reasoning
+         - Preventive action recommendations
+
+      4. **Pattern analysis:**
+         - Repeat offender agents: names with breach count and compliance rate
+         - Problematic ticket categories: which types consistently breach SLA
+         - Time-of-day and day-of-week trends: when do most breaches occur
+         - Queue depth correlation: is there a staffing bottleneck at specific hours
+         - Customer tier distribution: are high-value customers disproportionately affected
+
+      5. **Escalation recommendations** using the escalation chain: {input.escalation_chain}
+         For each breached or at-risk ticket, recommend a specific action:
+         - **Reassign**: to a specific available agent with capacity (L1 escalation)
+         - **Escalate**: to team lead with context summary (L2 escalation)
+         - **Executive escalate**: for Platinum/high-value customer breaches (L3 escalation)
+         - **Proactive outreach**: send customer a proactive status update before they complain
+         - Include who specifically should be notified at each escalation level
+
+      6. **Trend comparison**: compare current period vs previous period compliance rate
+         to identify improving or deteriorating trends.
+
+      Return structured JSON with breaches, at_risk, predicted_breaches, patterns,
+      escalations, and trend_comparison.
     model: sonnet
     max_turns: 8
 
@@ -120,21 +191,39 @@ steps:
       Use the Slack tool:
         node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
 
-      Format the message as:
+      Format the Slack message with clear visual hierarchy and actionable information:
+
       :rotating_light: *SLA Watchdog Report* (last {input.hours_lookback}h)
+      Business hours: {input.business_hours}
 
-      *Overall Compliance:* <rate>%
-      - Breached: <count> tickets
-      - At Risk: <count> tickets
-      - Compliant: <count> tickets
+      *Overall Compliance:* <rate>% (trend: up/down/stable vs previous period)
+      :red_circle: Breached: <count> tickets (<customer tier breakdown>)
+      :large_orange_circle: At Risk: <count> tickets (<minutes until first breach>)
+      :warning: Predicted Breach: <count> tickets flagged by predictive analysis
+      :white_check_mark: Compliant: <count> tickets
 
-      *Immediate Action Required:*
-      For each breached ticket: ticket ID, subject, breach duration, recommended action.
+      *:red_circle: BREACHED - Immediate Action Required:*
+      For each breached ticket (ordered by severity):
+      > *#<ticket_id>* - <subject>
+      > Priority: <priority> | Customer: <name> (<tier>)
+      > Breach duration: <duration> | Escalation: <recommended level and contact>
+      > Action: <specific recommendation> | Owner: @<agent>
 
-      *At-Risk Tickets:*
-      For each at-risk ticket: ticket ID, subject, minutes remaining.
+      *:large_orange_circle: AT RISK - Intervention Needed:*
+      For each at-risk ticket:
+      > *#<ticket_id>* - <subject> | <minutes remaining> left
+      > Breach probability: <percentage> | Action: <recommendation>
 
-      If compliance rate is 100%, post a positive summary instead.
+      *:chart_with_upwards_trend: Patterns Detected:*
+      - Top bottleneck: <pattern description>
+      - Staffing alert: <if queue depth issue detected>
+
+      *Escalation summary:*
+      - Tag specific people from the escalation chain who need to act NOW
+
+      If compliance rate is 100%, post a positive summary:
+      :white_check_mark: *SLA Watchdog - All Clear* | 100% compliance across <count> tickets
+      Include a brief note on any predicted risks to watch.
     model: haiku
     max_turns: 5
     tools: [slack]

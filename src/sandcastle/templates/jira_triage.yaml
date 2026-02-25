@@ -27,36 +27,108 @@ input_schema:
 steps:
   - id: fetch-issues
     prompt: |
-      Search for untriaged Jira issues in project {input.project}.
+      Search for untriaged Jira issues in project {input.project} and gather sprint context.
 
+      STEP 1 - FETCH UNTRIAGED ISSUES:
       Use this JQL query with the Jira tool:
         node /home/user/tools/jira.mjs search_issues 'project = {input.project} AND status = "To Do" AND priority = None ORDER BY created DESC' 20
 
       If a custom filter was provided, use: {input.jql_filter}
 
-      Return the list of issues found.
+      For each issue, capture: key, summary, description, issue type, reporter, created date,
+      components, existing labels, linked issues, and any attachments or comments.
+
+      STEP 2 - FETCH SPRINT CONTEXT:
+      Also query current sprint information:
+        node /home/user/tools/jira.mjs search_issues 'project = {input.project} AND sprint in openSprints()' 50
+
+      Capture the active sprint's:
+      - Sprint name, start date, end date, days remaining
+      - Total story points committed vs completed (burndown position)
+      - Number of issues in each status column (To Do, In Progress, In Review, Done)
+      - Current team member assignments and their load (issues per person)
+
+      Return both the untriaged issues and the sprint context summary.
     model: haiku
     max_turns: 5
 
   - id: analyze-issues
     depends_on: [fetch-issues]
     prompt: |
-      Analyze these Jira issues and provide triage recommendations:
+      Perform comprehensive triage analysis on each untriaged issue using a structured
+      priority matrix, story point estimation, and dependency chain analysis.
 
       Issues: {steps.fetch-issues.output}
-
       Team context: {input.team_context}
 
-      For each issue, determine:
-      1. **Priority** (Critical/High/Medium/Low) based on:
-         - Impact scope (how many users affected)
-         - Severity (workaround available?)
-         - Business urgency
-      2. **Labels** - suggest 1-3 relevant labels (bug, feature, tech-debt, ux, performance, security)
-      3. **Assignment suggestion** - who should work on it based on team context
-      4. **Estimated effort** - T-shirt size (XS/S/M/L/XL)
+      FOR EACH ISSUE, ASSESS:
 
-      Return as structured JSON array with issue_key, priority, labels, assignee_suggestion, effort, reasoning.
+      1. PRIORITY MATRIX (Impact x Urgency):
+         Score IMPACT (1-5):
+         - 5: Service down, data loss, or security vulnerability affecting all users
+         - 4: Major feature broken, no workaround, affecting >50% of users
+         - 3: Significant issue with workaround, or feature gap blocking key workflows
+         - 2: Minor issue, cosmetic, or affecting small user segment
+         - 1: Trivial, nice-to-have, or internal-only improvement
+
+         Score URGENCY (1-5):
+         - 5: Must fix immediately (SLA breach, compliance deadline, production outage)
+         - 4: Must fix this sprint (customer commitment, blocking other work)
+         - 3: Should fix soon (growing user complaints, tech debt accumulating)
+         - 2: Can wait (scheduled for future milestone, no external pressure)
+         - 1: No time pressure (backlog grooming candidate)
+
+         PRIORITY = Impact x Urgency:
+         - Critical (20-25): Immediate attention, interrupt current sprint if needed
+         - High (12-19): Top of next sprint, or pull into current if capacity allows
+         - Medium (6-11): Backlog priority, schedule in next 2-3 sprints
+         - Low (1-5): Backlog, address opportunistically
+
+      2. STORY POINT ESTIMATION:
+         Estimate using modified Fibonacci (1, 2, 3, 5, 8, 13, 21):
+         - 1 point: Trivial change, config update, copy fix (<1 hour)
+         - 2 points: Simple, well-understood change, single file (<half day)
+         - 3 points: Small feature or fix, 1-2 files, clear approach (<1 day)
+         - 5 points: Medium complexity, multiple files, some unknowns (1-2 days)
+         - 8 points: Significant work, cross-component, needs design (2-4 days)
+         - 13 points: Large feature, architecture implications, needs breakdown (1 week)
+         - 21 points: Epic-level, MUST be broken into sub-tasks before sprint planning
+
+         Consider: code complexity, testing requirements, review overhead,
+         deployment risk, documentation needs.
+
+      3. TECH DEBT CLASSIFICATION:
+         Categorize if the issue involves tech debt:
+         - NONE: Pure feature or external bug
+         - DELIBERATE: Known shortcut taken with intent to revisit (document the original decision)
+         - ACCIDENTAL: Unintentional design flaw now causing problems
+         - BIT_ROT: Code/dependency that degraded over time
+         - RECKLESS: Shortcuts causing active harm, must address soon
+         If tech debt, estimate the "interest rate" - how much worse does it get per sprint
+         if not addressed? (low/medium/high)
+
+      4. DEPENDENCY CHAIN ANALYSIS:
+         - Check for linked issues (blocks/is-blocked-by relationships).
+         - Identify implicit dependencies from description (mentions of other features,
+           APIs, or services).
+         - Flag circular dependencies or long chains (>3 deep).
+         - If this issue blocks other high-priority work, escalate its priority accordingly.
+
+      5. SKILL-BASED ASSIGNMENT:
+         Based on team context: {input.team_context}
+         - Match issue requirements (frontend/backend/infra/data/security) to team expertise.
+         - Consider current sprint load (don't overload a team member).
+         - For complex issues, suggest primary + reviewer pairing.
+         - If no team member is a clear fit, flag as "needs cross-training" or "external help."
+
+      6. SPRINT CAPACITY CHECK:
+         - Can this issue fit in the current sprint based on remaining capacity?
+         - If not, recommend which sprint to target.
+         - If Critical priority, identify what to deprioritize to make room.
+
+      Return as structured JSON array: issue_key, summary, priority (with impact and urgency
+      scores), story_points, labels, tech_debt_type, dependencies, assignee_suggestion,
+      reviewer_suggestion, sprint_recommendation, reasoning.
     model: sonnet
     max_turns: 8
     output_schema:
@@ -85,21 +157,43 @@ steps:
   - id: apply-triage
     depends_on: [analyze-issues]
     prompt: |
-      Apply the triage results to the Jira issues by adding comments with the recommendations.
+      Apply the triage results to Jira issues with detailed, actionable comments.
 
       Triage results: {steps.analyze-issues.output}
 
-      For each issue, add a comment using the Jira tool:
+      For each issue, add a structured comment using the Jira tool:
         node /home/user/tools/jira.mjs add_comment '<issue_key>' '<comment>'
 
-      Format each comment as:
-      **Auto-Triage Results**
-      - Priority: <priority>
-      - Labels: <labels>
-      - Suggested assignee: <assignee>
-      - Estimated effort: <effort>
-      - Reasoning: <reasoning>
+      FORMAT EACH COMMENT AS:
 
-      Report which issues were successfully updated.
+      **Auto-Triage Analysis**
+
+      | Dimension | Assessment |
+      |-----------|-----------|
+      | Priority | <Critical/High/Medium/Low> (Impact: X/5, Urgency: X/5) |
+      | Story Points | <N> points (<reasoning>) |
+      | Labels | <labels> |
+      | Tech Debt | <type> (interest: <rate>) or N/A |
+      | Dependencies | <linked issues or "None detected"> |
+      | Sprint Target | <current sprint / next sprint / backlog> |
+
+      **Suggested Assignment:** <assignee> (reviewer: <reviewer>)
+      **Reasoning:** <2-3 sentence explanation of priority and assignment rationale>
+
+      **Next Steps:**
+      - [ ] <specific action item 1>
+      - [ ] <specific action item 2>
+
+      BATCH SUMMARY:
+      After updating all issues, generate a triage summary report:
+      - Total issues triaged: N
+      - By priority: Critical (N), High (N), Medium (N), Low (N)
+      - Total story points estimated: N
+      - Sprint capacity impact: X points can fit in current sprint, Y overflow to next
+      - Tech debt items identified: N (total interest: low/medium/high)
+      - Issues with dependency chains requiring coordination: list them
+      - Issues requiring breakdown before sprint planning (>13 points): list them
+
+      Report which issues were successfully updated and any failures.
     model: haiku
     max_turns: 15

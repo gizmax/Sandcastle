@@ -25,6 +25,13 @@ input_schema:
       type: string
       description: "Slack channel for churn alerts (e.g. '#customer-success')"
       default: "#customer-success"
+    cohort_window:
+      type: string
+      description: "Cohort grouping for trend analysis - 'monthly', 'quarterly', or 'by_contract_start' (default: 'quarterly')"
+      default: "quarterly"
+    health_score_weights:
+      type: string
+      description: "Custom weights for health score categories - e.g. 'usage:30,support:20,engagement:25,contract:25' (default: equal 25 each)"
 
 steps:
   - id: fetch-accounts
@@ -74,33 +81,62 @@ steps:
 
       Account data: {steps.fetch-accounts.output}
 
-      For each account, evaluate these churn signal categories:
+      For each account, evaluate these churn signal categories using the weighted scoring
+      methodology. Apply custom weights if provided: {input.health_score_weights}
+      (default: 25 points per category, 100 total).
 
-      **Usage Decline (0-25 points):**
-      - Drop in monthly active users vs 3 months ago
-      - Decrease in seat utilization (active/contracted)
-      - Reduced feature adoption or login frequency
+      **Usage Decline (0-25 points) - Engagement Scoring Methodology:**
+      - Monthly Active Users trend: compare current MAU vs 30/60/90-day rolling averages.
+        Score: >20% decline = 15pts, 10-20% decline = 10pts, 5-10% = 5pts, stable/growing = 0pts
+      - Seat utilization ratio: active users / contracted seats.
+        Score: <25% = 8pts, 25-50% = 5pts, 50-75% = 2pts, >75% = 0pts
+      - Feature adoption depth: number of core features used in last 30 days vs total available.
+        Score: <20% features = 5pts, 20-50% = 3pts, >50% = 0pts
+      - Login frequency trend: compare weekly login count vs 90-day baseline
+      - Key feature abandonment: any previously-used core feature unused for 30+ days
+      Document the specific metric value and threshold that triggered each signal.
 
       **Support Friction (0-25 points):**
-      - High ticket volume relative to account size
-      - Unresolved or escalated tickets
-      - Negative CSAT/NPS trend
-      - Repeated issues in the same area
+      - Ticket velocity: tickets/month normalized by seat count.
+        Score: >2x segment average = 10pts, 1.5-2x = 6pts, 1-1.5x = 3pts
+      - Escalation rate: percentage of tickets escalated to Tier 2+.
+        Score: >20% = 8pts, 10-20% = 5pts, <10% = 0pts
+      - CSAT/NPS trajectory: compare last 3 surveys vs historical average.
+        Score: declining trend = 5pts, low but stable = 3pts, improving = 0pts
+      - Repeat issue clusters: same root cause appearing in 3+ tickets.
+        Score: yes = 5pts, no = 0pts
+      - Open ticket age: any unresolved ticket older than 14 days = 3pts
 
       **Engagement Gap (0-25 points):**
-      - No CSM touchpoint in 30+ days
-      - Missed QBRs or check-in meetings
-      - No response to outreach attempts
-      - Champion/sponsor departure
+      - CSM touchpoint recency: days since last meaningful interaction (not auto-emails).
+        Score: >60 days = 10pts, 30-60 days = 6pts, 14-30 days = 3pts, <14 days = 0pts
+      - QBR/EBR attendance: missed scheduled business review.
+        Score: missed last QBR = 8pts, attended but low engagement = 4pts, active = 0pts
+      - Outreach responsiveness: response rate to CSM emails/calls in last 90 days.
+        Score: <25% response = 5pts, 25-50% = 3pts, >50% = 0pts
+      - Champion/sponsor risk: key contact departed, changed role, or went silent.
+        Score: departed = 8pts, role change = 4pts, unresponsive = 3pts, active = 0pts
+      - Multi-threading depth: number of active contacts at account.
+        Score: single-threaded (1 contact) = 5pts, 2-3 contacts = 2pts, 4+ = 0pts
 
       **Contract Signals (0-25 points):**
-      - Approaching renewal without expansion discussion
-      - Previous downgrades or credit requests
-      - Competitor mentions in support tickets
-      - Short remaining contract term
+      - Renewal proximity without expansion: within 90 days of renewal, no expansion pipeline.
+        Score: <30 days + no discussion = 10pts, 30-60 days = 6pts, 60-90 days = 3pts
+      - Downgrade/credit history: previous downgrades or credit requests.
+        Score: downgrade in last 12mo = 8pts, credit request = 5pts, none = 0pts
+      - Competitive signals: competitor mentions in tickets, RFP activity, or eval requests.
+        Score: active evaluation = 10pts, mentions = 5pts, none = 0pts
+      - Contract length and terms: month-to-month vs annual vs multi-year.
+        Score: month-to-month = 5pts, annual approaching renewal = 3pts, multi-year = 0pts
+      - Payment issues: late payments or failed charges in last 90 days = 3pts
 
-      For each signal, note the specific data point that triggered it.
-      Return JSON with per-account signal analysis.
+      **Cohort context:** Group this account within its {input.cohort_window} cohort
+      (accounts that started in the same period) and note whether its signals are
+      better or worse than cohort average. This contextualizes individual account
+      health within peer group performance.
+
+      For each signal, record: signal name, raw data value, points assigned, and
+      the specific evidence/data point. Return JSON with per-account signal analysis.
     model: sonnet
     max_turns: 10
 
@@ -112,20 +148,49 @@ steps:
       Signal analysis: {steps.analyze-signals.output}
       Account data: {steps.fetch-accounts.output}
 
-      For each account:
-      1. **Churn Risk Score** (0-100): sum of signal category scores
-      2. **Risk Classification:**
-         - Critical (75-100): High probability of churn, immediate intervention needed
-         - High (50-74): Significant risk signals, proactive engagement required
-         - Moderate (25-49): Some concerning signals, monitor closely
-         - Low (0-24): Healthy account, maintain current engagement
-      3. **Primary Risk Factor** - the single biggest driver of risk
-      4. **Trend** - improving, stable, or deteriorating (based on signal trajectory)
-      5. **Revenue Impact** - ARR at risk if account churns
-      6. **Confidence** - how reliable the prediction is (high/medium/low) based on data completeness
+      For each account, compute the composite health score and churn risk classification:
 
-      Rank accounts by risk score (highest first).
-      Calculate portfolio-level metrics: total ARR at risk, average risk score, risk distribution.
+      1. **Health Score Formula** (0-100, where 100 = healthiest):
+         Health Score = 100 - Churn Risk Score
+         Churn Risk Score = sum of weighted signal category scores
+         Document the formula transparently so CSMs understand exactly why an account
+         is flagged. Example: "Score 72 = Usage(18/25) + Support(12/25) + Engagement(22/25) + Contract(20/25)"
+
+      2. **Risk Classification** with action thresholds:
+         - Critical (75-100 risk / 0-25 health): Immediate executive intervention, save plan required
+           within 48 hours. Assign to senior CSM or CS Director.
+         - High (50-74 risk / 26-50 health): Proactive rescue engagement within 1 week.
+           CSM-led with manager oversight.
+         - Moderate (25-49 risk / 51-75 health): Enhanced monitoring cadence.
+           Increase touchpoint frequency to bi-weekly.
+         - Low (0-24 risk / 76-100 health): Healthy. Maintain standard engagement.
+           Focus on expansion opportunities.
+
+      3. **Primary Risk Factor** - the single highest-scoring signal category and the
+         specific signal within it driving the most points
+      4. **Secondary Risk Factors** - the next 2 contributing signals for context
+      5. **Trend** - improving, stable, or deteriorating based on comparing current signals
+         vs 30-day-ago signals. Quantify the change (e.g., "deteriorating: risk score +15 in 30 days")
+      6. **Revenue Impact** - ARR at risk if account churns, plus estimated downstream impact
+         (referral revenue, expansion pipeline, logo value for case studies)
+      7. **Confidence Level** with justification:
+         - high: 80%+ of signal data points available, consistent signals across categories
+         - medium: 50-79% data available, or mixed signals across categories
+         - low: <50% data available, score may not reflect reality
+         List which specific data points are missing that reduce confidence.
+
+      8. **Cohort comparison** (using {input.cohort_window} grouping):
+         - Where does this account rank within its cohort (percentile)?
+         - Is the entire cohort trending poorly (systemic issue) or is this an outlier?
+         - Cohort average health score for context
+
+      **Portfolio-level metrics:**
+      - Total ARR at risk (Critical + High accounts)
+      - ARR-weighted average risk score (larger accounts weighted more heavily)
+      - Risk distribution: count and ARR by classification tier
+      - Cohort health comparison: which cohorts are healthiest/riskiest
+      - Month-over-month trend: is portfolio health improving or declining
+      Rank accounts by risk score (highest first), with ARR as tiebreaker.
     model: sonnet
     max_turns: 8
     output_schema:
@@ -153,32 +218,61 @@ steps:
       Churn risk scores: {steps.score-churn-risk.output}
       Signal analysis: {steps.analyze-signals.output}
 
-      For each account classified as Critical or High risk, create a retention plan:
+      For each account classified as Critical or High risk, create a specific retention plan
+      that references the intervention playbook appropriate to the primary risk factor.
 
-      1. **Immediate Actions (this week):**
-         - Specific outreach strategy (who should contact whom)
-         - Talking points tailored to their risk factors
-         - Quick wins to demonstrate value
+      **Select the matching intervention playbook based on primary risk factor:**
 
-      2. **30-Day Plan:**
-         - Executive sponsor engagement (for Critical accounts)
-         - Success planning session agenda
-         - Feature adoption or training recommendations
-         - Support issue resolution plan
+      - *Usage Decline Playbook:* Product re-engagement campaign - schedule a personalized
+        product workshop, share usage benchmarks vs similar customers, offer dedicated
+        onboarding session for underutilized features, create a custom success plan with
+        adoption milestones tied to their business goals.
+      - *Support Friction Playbook:* Service recovery program - escalate open tickets to
+        senior support, schedule a technical deep-dive to address root cause of repeat issues,
+        assign a dedicated support engineer for 30 days, provide direct Slack channel access.
+      - *Engagement Gap Playbook:* Relationship rebuilding - executive-to-executive outreach,
+        invite to customer advisory board, schedule on-site visit (for Enterprise), re-establish
+        regular cadence with new agenda focused on business outcomes not product updates.
+      - *Contract Signals Playbook:* Competitive defense - prepare ROI analysis with their
+        actual data, arrange reference calls with similar customers, offer proof-of-concept
+        for features they are evaluating competitors for, engage product team on roadmap gaps.
 
-      3. **Incentive Options** (if applicable):
-         - Early renewal discount range
-         - Added value (extra seats, premium support, training)
-         - Contract flexibility (shorter term, usage-based)
+      **For Critical accounts, create:**
+      1. **48-Hour Action Plan:**
+         - Executive sponsor outreach: who from our leadership contacts who at their org
+         - Talking points tailored to their specific risk factors and business context
+         - Quick wins: 1-2 things we can do THIS WEEK to demonstrate value
+         - Internal war room: who from product/support/engineering needs to be briefed
+      2. **30-Day Recovery Plan:**
+         - Weekly milestones with specific deliverables
+         - Success planning session agenda customized to their pain points
+         - Feature adoption or training recommendations based on usage gaps
+         - Support issue resolution timeline with committed SLAs
+         - Executive business review (EBR) scheduling
+      3. **Incentive Framework** (select based on account value and risk level):
+         - For >$100K ARR: custom pricing review, multi-year lock-in discount (10-20%)
+         - For $50-100K ARR: added value (extra seats, premium support tier, training credits)
+         - For <$50K ARR: contract flexibility (quarterly billing, usage-based, reduced scope)
+         - Never lead with discounts - lead with value demonstration, incentives are last resort
+      4. **Success Metrics and Exit Criteria:**
+         - Define exactly which signals must improve and by how much to move from Critical to Moderate
+         - Example: "MAU must increase >15%, response rate >50%, no open escalations"
+         - Check-in milestones: Day 7, Day 14, Day 21, Day 30 with specific review criteria
+         - CSM accountability: who owns each metric, reported in weekly pipeline review
 
-      4. **Success Metrics:**
-         - What signals would indicate improving health
-         - Check-in milestones and dates
+      **For High risk accounts, create:**
+      - Similar structure but with 1-week and 60-day horizons
+      - CSM-led (not executive-led) engagement
+      - Focus on the top 2 risk factors only
 
-      For Moderate risk accounts, provide a brief monitoring plan with trigger conditions
-      for escalation.
+      **For Moderate risk accounts, create:**
+      - Enhanced monitoring plan: bi-weekly check-ins instead of monthly
+      - Specific trigger conditions that would escalate to High: "If MAU drops another 10%
+        or NPS falls below 6, immediately escalate to High risk protocol"
+      - Proactive engagement ideas to prevent deterioration
 
-      Be specific - reference actual data points from the analysis, not generic advice.
+      Be specific throughout - reference actual data points from the signal analysis.
+      Every recommendation must connect to a specific finding, not generic advice.
     model: sonnet
     max_turns: 10
 
