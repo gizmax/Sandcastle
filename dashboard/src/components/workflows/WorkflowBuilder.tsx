@@ -25,6 +25,7 @@ import {
   type SloConfig,
   type AutoPilotConfig,
   type GateStepConfig,
+  type BrowserStepConfig,
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
@@ -57,6 +58,7 @@ const DEFAULT_GATE_CONFIG = { strategies: [] as GateStepConfig["strategies"] };
 const DEFAULT_TRANSFORM_CONFIG = { template: "" };
 const DEFAULT_NOTIFY_CONFIG = { service: "", channel: "", message: "" };
 const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 3600 };
+const DEFAULT_BROWSER_CONFIG: BrowserStepConfig = { mode: "playwright", startUrl: "", viewportWidth: 1280, viewportHeight: 720, timeout: 120, waitAfterAction: 1.0, headless: true, credentialsEnvVar: "", screenshotOnError: true };
 
 function generateYaml(
   workflowName: string,
@@ -260,6 +262,32 @@ function generateYaml(
       }
       if (step.delegateConfig.timeout !== 3600) {
         yaml += `      timeout: ${step.delegateConfig.timeout}\n`;
+      }
+    } else if (sType === "browser") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: browser\n`;
+      yaml += `    browser_config:\n`;
+      yaml += `      mode: ${step.browserConfig.mode}\n`;
+      if (step.browserConfig.startUrl) {
+        yaml += `      start_url: "${step.browserConfig.startUrl}"\n`;
+      }
+      if (step.browserConfig.viewportWidth !== 1280 || step.browserConfig.viewportHeight !== 720) {
+        yaml += `      viewport: [${step.browserConfig.viewportWidth}, ${step.browserConfig.viewportHeight}]\n`;
+      }
+      if (step.browserConfig.timeout !== 120) {
+        yaml += `      timeout: ${step.browserConfig.timeout}\n`;
+      }
+      if (step.browserConfig.waitAfterAction !== 1.0) {
+        yaml += `      wait_after_action: ${step.browserConfig.waitAfterAction}\n`;
+      }
+      if (!step.browserConfig.headless) {
+        yaml += `      headless: false\n`;
+      }
+      if (step.browserConfig.credentialsEnvVar) {
+        yaml += `      credentials_env_var: "${step.browserConfig.credentialsEnvVar}"\n`;
+      }
+      if (!step.browserConfig.screenshotOnError) {
+        yaml += `      screenshot_on_error: false\n`;
       }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
@@ -541,6 +569,7 @@ function buildInitialState(wf: InitialWorkflow) {
       transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
+      browserConfig: { ...DEFAULT_BROWSER_CONFIG },
     };
   });
 
@@ -602,6 +631,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       condition: "check", classify: "route", loop: "loop",
       race: "race", sensor: "sensor", gate: "gate",
       transform: "transform", notify: "notify", delegate: "delegate",
+      browser: "browser",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -637,6 +667,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
+      browserConfig: { ...DEFAULT_BROWSER_CONFIG },
     };
 
     const newNode: Node = {
@@ -676,6 +707,8 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   hasSlo: updated.slo.enabled,
                   hasTools: updated.tools.length > 0,
                   toolNames: updated.tools,
+                  browserMode: updated.browserConfig.mode,
+                  browserUrl: updated.browserConfig.startUrl,
                 },
               }
             : n
@@ -850,6 +883,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             { type: "llm" as const, icon: MessageSquare, label: "LLM", color: "text-accent" },
             { type: "http" as const, icon: Globe, label: "HTTP", color: "text-emerald-400" },
             { type: "code" as const, icon: Code, label: "Code", color: "text-amber-400" },
+            { type: "browser" as const, icon: Monitor, label: "Browser", color: "text-fuchsia-400" },
             { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
             { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
             { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },

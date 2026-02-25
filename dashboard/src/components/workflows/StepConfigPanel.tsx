@@ -7,6 +7,7 @@ import {
   FlaskConical,
   FolderOpen,
   Gauge,
+  Monitor,
   Plus,
   RefreshCw,
   ShieldAlert,
@@ -79,7 +80,7 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
 
 export interface HttpStepConfig {
   url: string;
@@ -159,6 +160,18 @@ export interface DelegateStepConfig {
   timeout: number;
 }
 
+export interface BrowserStepConfig {
+  mode: "playwright" | "computer_use";
+  startUrl: string;
+  viewportWidth: number;
+  viewportHeight: number;
+  timeout: number;
+  waitAfterAction: number;
+  headless: boolean;
+  credentialsEnvVar: string;
+  screenshotOnError: boolean;
+}
+
 export interface StepConfig {
   id: string;
   stepType: StepType;
@@ -189,6 +202,7 @@ export interface StepConfig {
   transformConfig: TransformStepConfig;
   notifyConfig: NotifyStepConfig;
   delegateConfig: DelegateStepConfig;
+  browserConfig: BrowserStepConfig;
 }
 
 interface StepConfigPanelProps {
@@ -307,6 +321,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="transform">Transform (Template)</option>
           <option value="notify">Notify (Alert)</option>
           <option value="delegate">Delegate (Sub-workflow)</option>
+          <option value="browser">Browser (RPA)</option>
         </select>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
@@ -322,6 +337,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           {step.stepType === "transform" && "Template-based data transformation - $0 cost, no LLM."}
           {step.stepType === "notify" && "Send notifications via Slack, Teams, Gmail, or webhook - $0 cost."}
           {step.stepType === "delegate" && "Delegate work to another workflow as a sub-task."}
+          {step.stepType === "browser" && "Browser automation via Playwright selectors or Computer Use visual AI."}
         </p>
       </div>
 
@@ -901,6 +917,170 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               className={inputClass}
             />
           </div>
+        </div>
+      )}
+
+      {/* Browser Config */}
+      {step.stepType === "browser" && (
+        <div className="space-y-3">
+          {/* Info box */}
+          <div className="rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/5 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Monitor className="h-3.5 w-3.5 text-fuchsia-400" />
+              <span className="text-xs font-medium text-fuchsia-400">Browser Automation</span>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Playwright mode:</span> Fast, reliable automation using CSS selectors. Best for modern web apps with clean HTML.
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Computer Use mode:</span> AI-driven visual automation. The agent sees screenshots and clicks like a human. Best for legacy systems, Java applets, or complex UIs without stable selectors.
+              </p>
+            </div>
+          </div>
+
+          {/* Mode */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Mode</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, mode: "playwright" } })}
+                className={cn(
+                  "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                  step.browserConfig.mode === "playwright"
+                    ? "border-fuchsia-500/50 bg-fuchsia-500/10 text-fuchsia-400"
+                    : "border-border text-muted hover:border-fuchsia-500/30 hover:text-fuchsia-400"
+                )}
+              >
+                Playwright (Selector-based)
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, mode: "computer_use" } })}
+                className={cn(
+                  "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                  step.browserConfig.mode === "computer_use"
+                    ? "border-fuchsia-500/50 bg-fuchsia-500/10 text-fuchsia-400"
+                    : "border-border text-muted hover:border-fuchsia-500/30 hover:text-fuchsia-400"
+                )}
+              >
+                Computer Use (Visual AI)
+              </button>
+            </div>
+          </div>
+
+          {/* Start URL */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Start URL</label>
+            <input
+              type="text"
+              value={step.browserConfig.startUrl}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, startUrl: e.target.value } })}
+              placeholder="https://example.com/login"
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Initial URL the browser navigates to. Supports {input.url} variables."}
+            </p>
+          </div>
+
+          {/* Viewport */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Viewport</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-0.5 block text-[11px] text-muted">Width</label>
+                <input
+                  type="number"
+                  value={step.browserConfig.viewportWidth}
+                  onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, viewportWidth: Number(e.target.value) } })}
+                  min={320}
+                  max={3840}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[11px] text-muted">Height</label>
+                <input
+                  type="number"
+                  value={step.browserConfig.viewportHeight}
+                  onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, viewportHeight: Number(e.target.value) } })}
+                  min={240}
+                  max={2160}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Timeout */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Timeout (seconds)</label>
+            <input
+              type="number"
+              value={step.browserConfig.timeout}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, timeout: Number(e.target.value) } })}
+              min={10}
+              max={3600}
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Maximum total time for the browser step to complete.</p>
+          </div>
+
+          {/* Wait after action */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Wait After Action (seconds)</label>
+            <input
+              type="number"
+              value={step.browserConfig.waitAfterAction}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, waitAfterAction: Number(e.target.value) } })}
+              min={0}
+              max={30}
+              step={0.1}
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Delay between browser actions to let pages load.</p>
+          </div>
+
+          {/* Headless */}
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={step.browserConfig.headless}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, headless: e.target.checked } })}
+              className="rounded border-border text-accent focus:ring-accent"
+            />
+            <span className="font-medium">Headless</span>
+            <span className="text-muted-foreground">- Run browser without visible window</span>
+          </label>
+
+          {/* Credentials env var */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Credentials Env Var</label>
+            <input
+              type="text"
+              value={step.browserConfig.credentialsEnvVar}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, credentialsEnvVar: e.target.value } })}
+              placeholder="BROWSER_CREDENTIALS"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Environment variable name containing login credentials (JSON)."}
+            </p>
+          </div>
+
+          {/* Screenshot on error */}
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={step.browserConfig.screenshotOnError}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, screenshotOnError: e.target.checked } })}
+              className="rounded border-border text-accent focus:ring-accent"
+            />
+            <span className="font-medium">Screenshot on Error</span>
+            <span className="text-muted-foreground">- Capture screenshot when step fails</span>
+          </label>
         </div>
       )}
 

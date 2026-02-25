@@ -1,10 +1,10 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Bell, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
+import { Bell, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
-type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate";
+type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
 
 type StepNodeData = {
   label: string;
@@ -19,6 +19,8 @@ type StepNodeData = {
   hasSlo?: boolean;
   hasTools?: boolean;
   toolNames?: string[];
+  browserMode?: string;
+  browserUrl?: string;
 };
 
 type StepNodeType = Node<StepNodeData, "step">;
@@ -38,6 +40,7 @@ const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
   transform: Shuffle,
   notify: Bell,
   delegate: ExternalLink,
+  browser: Monitor,
 };
 
 const STEP_TYPE_COLORS: Record<string, string> = {
@@ -55,6 +58,7 @@ const STEP_TYPE_COLORS: Record<string, string> = {
   transform: "text-cyan-400",
   notify: "text-pink-400",
   delegate: "text-indigo-400",
+  browser: "text-fuchsia-400",
 };
 
 // Raw color values for left border and background tint
@@ -73,6 +77,7 @@ const STEP_TYPE_RAW_COLORS: Record<string, string> = {
   transform: "34 211 238",
   notify: "244 114 182",
   delegate: "129 140 248",
+  browser: "217 70 239",
 };
 
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
@@ -119,12 +124,28 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             {stepType}
           </span>
         )}
-        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && stepType !== "race" && stepType !== "sensor" && stepType !== "transform" && stepType !== "notify" && (
+        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && stepType !== "race" && stepType !== "sensor" && stepType !== "transform" && stepType !== "notify" && stepType !== "browser" && (
           <span className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
             {data.model}
           </span>
         )}
       </div>
+
+      {/* Browser step subtitle: mode + start URL */}
+      {stepType === "browser" && (data.browserMode || data.browserUrl) && (
+        <div className="mt-1 flex flex-col gap-0.5">
+          {data.browserMode && (
+            <span className="text-[10px] text-fuchsia-400/70 truncate max-w-[160px]">
+              {data.browserMode === "computer_use" ? "Computer Use" : "Playwright"}
+            </span>
+          )}
+          {data.browserUrl && (
+            <span className="text-[10px] text-muted truncate max-w-[160px]" title={data.browserUrl}>
+              {data.browserUrl}
+            </span>
+          )}
+        </div>
+      )}
 
       {showBadges && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
