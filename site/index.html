@@ -1612,7 +1612,7 @@
   <header class="hero" id="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.15.0 - AutoPilot v2 + Browser RPA + Community Hub + 88 Templates
+        v0.16.0 - 53 Integrations + Sentry Telemetry + Agent Memory v2
       </div>
       <h1>
         Stop babysitting<br>
@@ -1675,7 +1675,7 @@
     <div class="container fade-in">
       <div class="stats-row">
         <div class="stat-item">
-          <div class="stat-number">833</div>
+          <div class="stat-number">921</div>
           <div class="stat-label">Tests Passing</div>
         </div>
         <div class="stat-item">
@@ -1907,8 +1907,8 @@
           <div class="tab-grid">
             <div class="feature-card">
               <span class="feature-icon">🔧</span>
-              <h3>20+ Tool Connectors</h3>
-              <p>Slack, Jira, GitHub, HubSpot, Salesforce, Zendesk, Notion, Teams, Gmail, Google Drive, PostgreSQL, webhooks, and more. Add <code>tools: [slack]</code> to any step.</p>
+              <h3>53 Tool Connectors</h3>
+              <p>Slack, GitHub, OpenAI, Anthropic, AWS S3, Google Sheets, Airtable, Discord, Supabase, Pinecone, Stripe, Shopify, PagerDuty, Datadog, and 39 more. Add <code>tools: [slack]</code> to any step.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🤝</span>
@@ -1939,6 +1939,16 @@
               <span class="feature-icon">🌐</span>
               <h3>Browser RPA</h3>
               <p>Three modes: Playwright (selector-based), Computer Use (vision AI), DOM Extract (accessibility tree). Action caching, CAPTCHA escalation, execution replay.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🧠</span>
+              <h3>AI Connectors</h3>
+              <p>OpenAI, Anthropic, ElevenLabs, Tavily, Firecrawl, Pinecone. Chain multiple AI providers, vector search, web scraping, and text-to-speech in your workflows.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🚀</span>
+              <h3>DevOps Connectors</h3>
+              <p>Vercel, Cloudflare Workers, Datadog, PagerDuty, AWS S3, Redis. Deploy, monitor, alert, and manage infrastructure from workflow steps.</p>
             </div>
           </div>
         </div>
@@ -2457,7 +2467,7 @@
       if (!body || !cursor) return;
 
       var commands = [
-        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.15.0' },
+        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.16.0' },
         { cmd: 'sandcastle init', output: 'Created .env with E2B backend' },
         { cmd: 'sandcastle serve', output: 'Dashboard ready at http://localhost:8080' }
       ];
