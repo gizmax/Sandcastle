@@ -889,6 +889,17 @@ async def execute_step_with_retry(
                     return fallback_result
 
             logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
+            from sandcastle.engine.telemetry import capture_step_error
+
+            capture_step_error(
+                Exception(result.error or "Step failed after retries"),
+                step_id=step.id,
+                step_type=step.type,
+                model=step.model,
+                workflow_name=context.workflow_name,
+                run_id=context.run_id,
+                attempt=attempt,
+            )
             # Record step failure
             await _save_run_step(
                 run_id=context.run_id,
@@ -974,6 +985,16 @@ async def _execute_fallback(
     except Exception as e:
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
         logger.error(f"Fallback for step '{step.id}' also failed: {e}")
+        from sandcastle.engine.telemetry import capture_step_error
+
+        capture_step_error(
+            e,
+            step_id=step.id,
+            step_type=step.type,
+            model=step.model,
+            workflow_name=context.workflow_name,
+            run_id=context.run_id,
+        )
         return StepResult(
             step_id=step.id,
             parallel_index=parallel_index,
@@ -4242,6 +4263,15 @@ async def execute_workflow(
         max_cost_usd=max_cost_usd,
         workflow_name=workflow.name,
         default_tools=getattr(workflow, "default_tools", []),
+    )
+
+    # Set telemetry context for this workflow run
+    from sandcastle.engine.telemetry import set_workflow_context
+
+    set_workflow_context(
+        workflow_name=workflow.name,
+        run_id=run_id,
+        sandbox_backend=getattr(settings, "sandbox_backend", ""),
     )
 
     # Initialize agent memory if configured

@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
+    # Initialize telemetry (opt-in, disabled by default)
+    from sandcastle.engine.telemetry import init_sentry
+
+    init_sentry()
+
     if settings.is_local_mode:
         logger.info(
             "Sandcastle starting in local mode (SQLite + filesystem + in-process queue)"

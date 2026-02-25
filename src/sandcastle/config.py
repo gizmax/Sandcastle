@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     memory_max_age_days: int = 90  # TTL for memory decay (0 = no expiry)
     memory_admit_threshold: float = 0.3  # Minimum importance score to store
 
+    # Telemetry (opt-in error reporting)
+    telemetry_enabled: bool = False  # Set to True to send error reports via Sentry
+    sentry_dsn: str = ""  # Sentry DSN - get one free at sentry.io
+
     # Logging
     log_level: str = "info"
 
