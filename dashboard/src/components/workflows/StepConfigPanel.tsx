@@ -79,7 +79,7 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "transform" | "notify" | "delegate";
 
 export interface HttpStepConfig {
   url: string;
@@ -113,6 +113,22 @@ export interface LoopStepConfig {
   maxIterations: number;
 }
 
+export interface TransformStepConfig {
+  template: string;
+}
+
+export interface NotifyStepConfig {
+  service: string;
+  channel: string;
+  message: string;
+}
+
+export interface DelegateStepConfig {
+  workflow: string;
+  taskDescription: string;
+  timeout: number;
+}
+
 export interface StepConfig {
   id: string;
   stepType: StepType;
@@ -137,6 +153,9 @@ export interface StepConfig {
   conditionConfig: ConditionStepConfig;
   classifyConfig: ClassifyStepConfig;
   loopConfig: LoopStepConfig;
+  transformConfig: TransformStepConfig;
+  notifyConfig: NotifyStepConfig;
+  delegateConfig: DelegateStepConfig;
 }
 
 interface StepConfigPanelProps {
@@ -249,6 +268,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="condition">Condition (If/Else)</option>
           <option value="classify">Classify (Route)</option>
           <option value="loop">Loop (For Each)</option>
+          <option value="transform">Transform (Template)</option>
+          <option value="notify">Notify (Alert)</option>
+          <option value="delegate">Delegate (Sub-workflow)</option>
         </select>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
@@ -258,6 +280,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           {step.stepType === "condition" && "If/else branching based on expression evaluation."}
           {step.stepType === "classify" && "LLM-based classification into categories, routes to branches."}
           {step.stepType === "loop" && "Iterate over a list, running sub-steps for each item."}
+          {step.stepType === "transform" && "Template-based data transformation - $0 cost, no LLM."}
+          {step.stepType === "notify" && "Send notifications via Slack, Teams, Gmail, or webhook - $0 cost."}
+          {step.stepType === "delegate" && "Delegate work to another workflow as a sub-task."}
         </p>
       </div>
 
@@ -467,6 +492,111 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               onChange={(e) => onChange({ ...step, loopConfig: { ...step.loopConfig, maxIterations: Number(e.target.value) } })}
               min={1}
               max={1000}
+              className={inputClass}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Transform Config */}
+      {step.stepType === "transform" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Template</label>
+            <textarea
+              value={step.transformConfig.template}
+              onChange={(e) => onChange({ ...step, transformConfig: { ...step.transformConfig, template: e.target.value } })}
+              rows={10}
+              placeholder={'{"summary": "{steps.analyze.output.summary}", "count": {steps.fetch.output.count}}'}
+              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Use {steps.id.output} for previous step data, {input.field} for workflow input. Supports {{ var | tojson }} syntax."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Notify Config */}
+      {step.stepType === "notify" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Service</label>
+            <select
+              value={step.notifyConfig.service}
+              onChange={(e) => onChange({ ...step, notifyConfig: { ...step.notifyConfig, service: e.target.value } })}
+              className={inputClass}
+            >
+              <option value="">Select service...</option>
+              <option value="slack">Slack</option>
+              <option value="teams">Teams</option>
+              <option value="gmail">Gmail</option>
+              <option value="webhook">Webhook</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Channel / Recipient</label>
+            <input
+              type="text"
+              value={step.notifyConfig.channel}
+              onChange={(e) => onChange({ ...step, notifyConfig: { ...step.notifyConfig, channel: e.target.value } })}
+              placeholder="#alerts or user@example.com"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Message</label>
+            <textarea
+              value={step.notifyConfig.message}
+              onChange={(e) => onChange({ ...step, notifyConfig: { ...step.notifyConfig, message: e.target.value } })}
+              rows={4}
+              placeholder={"Workflow completed. Result: {steps.analyze.output.summary}"}
+              className={cn(inputClass, "h-auto py-2 resize-y")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Use {steps.id.output} for previous step data, {input.field} for workflow input."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Delegate Config */}
+      {step.stepType === "delegate" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Target Workflow</label>
+            <input
+              type="text"
+              value={step.delegateConfig.workflow}
+              onChange={(e) => onChange({ ...step, delegateConfig: { ...step.delegateConfig, workflow: e.target.value } })}
+              placeholder="data-enrichment"
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Name of the workflow YAML file (without .yaml extension).
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Task Description</label>
+            <textarea
+              value={step.delegateConfig.taskDescription}
+              onChange={(e) => onChange({ ...step, delegateConfig: { ...step.delegateConfig, taskDescription: e.target.value } })}
+              rows={4}
+              placeholder={"Enrich the data from {steps.fetch.output} with additional context."}
+              className={cn(inputClass, "h-auto py-2 resize-y")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Natural language description. Use {steps.id.output} and {input.field} variables."}
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Timeout (seconds)</label>
+            <input
+              type="number"
+              value={step.delegateConfig.timeout}
+              onChange={(e) => onChange({ ...step, delegateConfig: { ...step.delegateConfig, timeout: Number(e.target.value) } })}
+              min={60}
+              max={86400}
               className={inputClass}
             />
           </div>

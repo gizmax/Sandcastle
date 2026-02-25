@@ -172,6 +172,31 @@ class LoopConfig:
 
 
 @dataclass
+class TransformConfig:
+    """Configuration for a template-based data transformation step."""
+
+    template: str = ""  # Jinja2-style template string
+
+
+@dataclass
+class NotifyConfig:
+    """Configuration for a notification step."""
+
+    service: str = ""  # Tool connector name (slack, teams, gmail, etc.)
+    channel: str = ""  # Target channel/recipient
+    message: str = ""  # Message template with {steps.X.output} vars
+
+
+@dataclass
+class DelegateConfig:
+    """Configuration for delegating to another workflow."""
+
+    workflow: str = ""  # Workflow name to run
+    task_description: str = ""  # NL description with template vars
+    timeout: int = 3600  # Max wait time in seconds
+
+
+@dataclass
 class SLOConfig:
     """Service Level Objective for optimizer-driven model selection."""
 
@@ -251,13 +276,14 @@ class MemoryConfig:
 VALID_STEP_TYPES = frozenset({
     "standard", "approval", "sub_workflow",
     "llm", "http", "code", "condition", "classify", "loop",
+    "transform", "notify", "delegate",
 })
 
 # Types that don't need a prompt
-NON_PROMPT_TYPES = frozenset({"http", "code", "condition", "loop"})
+NON_PROMPT_TYPES = frozenset({"http", "code", "condition", "loop", "transform", "notify"})
 
 # Types that don't use an LLM model (skip model validation)
-NON_LLM_TYPES = frozenset({"http", "code", "condition", "loop"})
+NON_LLM_TYPES = frozenset({"http", "code", "condition", "loop", "transform", "notify"})
 
 
 @dataclass
@@ -274,7 +300,7 @@ class StepDefinition:
     output_schema: dict | None = None
     retry: RetryConfig | None = None
     fallback: FallbackConfig | None = None
-    type: str = "standard"  # "standard" | "approval" | "sub_workflow" | "llm" | "http" | "code" | "condition" | "classify" | "loop"
+    type: str = "standard"  # "standard" | "approval" | "sub_workflow" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "transform" | "notify" | "delegate"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -291,6 +317,9 @@ class StepDefinition:
     condition_config: ConditionConfig | None = None
     classify_config: ClassifyConfig | None = None
     loop_config: LoopConfig | None = None
+    transform_config: TransformConfig | None = None
+    notify_config: NotifyConfig | None = None
+    delegate_config: DelegateConfig | None = None
 
 
 @dataclass
@@ -633,6 +662,37 @@ def _parse_loop_config(data: dict | None) -> LoopConfig | None:
     )
 
 
+def _parse_transform_config(data: dict | None) -> TransformConfig | None:
+    """Parse transform step configuration from YAML data."""
+    if data is None:
+        return None
+    return TransformConfig(
+        template=data.get("template", ""),
+    )
+
+
+def _parse_notify_config(data: dict | None) -> NotifyConfig | None:
+    """Parse notify step configuration from YAML data."""
+    if data is None:
+        return None
+    return NotifyConfig(
+        service=data.get("service", ""),
+        channel=data.get("channel", ""),
+        message=data.get("message", ""),
+    )
+
+
+def _parse_delegate_config(data: dict | None) -> DelegateConfig | None:
+    """Parse delegate step configuration from YAML data."""
+    if data is None:
+        return None
+    return DelegateConfig(
+        workflow=data.get("workflow", ""),
+        task_description=data.get("task_description", ""),
+        timeout=data.get("timeout", 3600),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     step_type = data.get("type", "standard")
@@ -685,6 +745,9 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         condition_config=_parse_condition_config(data.get("condition_config")),
         classify_config=_parse_classify_config(data.get("classify_config")),
         loop_config=_parse_loop_config(data.get("loop_config")),
+        transform_config=_parse_transform_config(data.get("transform_config")),
+        notify_config=_parse_notify_config(data.get("notify_config")),
+        delegate_config=_parse_delegate_config(data.get("delegate_config")),
     )
 
 
@@ -845,6 +908,25 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
             if not step.loop_config or not step.loop_config.over:
                 errors.append(
                     f"Loop step '{step.id}' must have loop_config with over"
+                )
+        elif step.type == "transform":
+            if not step.transform_config or not step.transform_config.template:
+                errors.append(
+                    f"Transform step '{step.id}' must have transform_config with a template"
+                )
+        elif step.type == "notify":
+            if not step.notify_config or not step.notify_config.service:
+                errors.append(
+                    f"Notify step '{step.id}' must have notify_config with a service"
+                )
+            if not step.notify_config or not step.notify_config.message:
+                errors.append(
+                    f"Notify step '{step.id}' must have notify_config with a message"
+                )
+        elif step.type == "delegate":
+            if not step.delegate_config or not step.delegate_config.workflow:
+                errors.append(
+                    f"Delegate step '{step.id}' must have delegate_config with a workflow"
                 )
 
     # Check model names against provider registry

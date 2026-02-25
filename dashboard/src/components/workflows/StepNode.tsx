@@ -1,10 +1,10 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Code, Cpu, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, RefreshCw, Repeat, ShieldCheck, Tag, Wrench } from "lucide-react";
+import { Bell, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
-type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow";
+type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "transform" | "notify" | "delegate";
 
 type StepNodeData = {
   label: string;
@@ -32,6 +32,9 @@ const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
   classify: Tag,
   loop: Repeat,
   approval: ShieldCheck,
+  transform: Shuffle,
+  notify: Bell,
+  delegate: ExternalLink,
 };
 
 const STEP_TYPE_COLORS: Record<string, string> = {
@@ -43,6 +46,9 @@ const STEP_TYPE_COLORS: Record<string, string> = {
   classify: "text-pink-400",
   loop: "text-cyan-400",
   approval: "text-warning",
+  transform: "text-cyan-400",
+  notify: "text-pink-400",
+  delegate: "text-indigo-400",
 };
 
 const STEP_TYPE_BORDER: Record<string, string> = {
@@ -52,6 +58,9 @@ const STEP_TYPE_BORDER: Record<string, string> = {
   classify: "border-l-pink-400/50",
   loop: "border-l-cyan-400/50",
   llm: "border-l-accent/50",
+  transform: "border-l-cyan-400/50",
+  notify: "border-l-pink-400/50",
+  delegate: "border-l-indigo-400/50",
 };
 
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
@@ -91,7 +100,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             {stepType}
           </span>
         )}
-        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && (
+        {data.model && stepType !== "http" && stepType !== "code" && stepType !== "condition" && stepType !== "loop" && stepType !== "transform" && stepType !== "notify" && (
           <span className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
             {data.model}
           </span>

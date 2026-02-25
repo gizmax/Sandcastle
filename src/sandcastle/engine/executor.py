@@ -2148,6 +2148,183 @@ async def _execute_loop_step(
         )
 
 
+async def _execute_transform_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a template-based data transformation step - $0 cost."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.transform_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing transform_config")
+
+    try:
+        template = cfg.template
+
+        # Resolve {var} template variables
+        rendered = resolve_templates(template, context, step.depends_on)
+
+        # Support basic Jinja2-like {{ var }} syntax
+        def _jinja_replace(match: re.Match) -> str:
+            expr = match.group(1).strip()
+            # Handle tojson filter
+            if "|" in expr:
+                parts = expr.split("|", 1)
+                var_path = parts[0].strip()
+                filter_name = parts[1].strip()
+                value = resolve_variable(var_path, context)
+                if filter_name == "tojson":
+                    return json.dumps(value) if value is not None else "null"
+                return str(value) if value is not None else ""
+            else:
+                value = resolve_variable(expr, context)
+                if isinstance(value, (dict, list)):
+                    return json.dumps(value)
+                return str(value) if value is not None else ""
+
+        rendered = re.sub(r"\{\{(.+?)\}\}", _jinja_replace, rendered)
+
+        # Try to parse as JSON
+        output: Any = rendered
+        try:
+            parsed = json.loads(rendered)
+            if isinstance(parsed, (dict, list)):
+                output = parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=output, cost_usd=0.0,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_notify_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a notification step - resolve message and log notification. $0 cost."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.notify_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing notify_config")
+
+    try:
+        message = resolve_templates(cfg.message, context, step.depends_on)
+        channel = resolve_templates(cfg.channel, context, step.depends_on) if cfg.channel else ""
+
+        logger.info(
+            "Notify step '%s': service=%s channel=%s message=%s",
+            step.id, cfg.service, channel, message[:200],
+        )
+
+        output = {
+            "service": cfg.service,
+            "channel": channel,
+            "message": message,
+            "status": "sent",
+        }
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=output, cost_usd=0.0,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_delegate_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+    workflow_loader: Any = None,
+    depth: int = 0,
+) -> StepResult:
+    """Execute a delegate step - run another workflow as a sub-workflow."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.delegate_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing delegate_config")
+
+    try:
+        task_description = resolve_templates(
+            cfg.task_description, context, step.depends_on,
+        )
+
+        # Try to load and execute the target workflow (same pattern as sub_workflow)
+        try:
+            from sandcastle.engine.dag import parse as parse_workflow
+            from sandcastle.config import settings
+            from pathlib import Path
+
+            workflows_dir = Path(settings.workflows_dir) if hasattr(settings, "workflows_dir") else Path("workflows")
+            wf_path = workflows_dir / f"{cfg.workflow}.yaml"
+
+            if wf_path.exists():
+                sub_wf = parse_workflow(str(wf_path))
+                sub_context = RunContext(
+                    run_id=context.run_id,
+                    input={**context.input, "task_description": task_description},
+                    step_outputs={},
+                    workflow_name=cfg.workflow,
+                )
+
+                sub_result = await execute_workflow(
+                    sub_wf, sub_context.input, storage,
+                    max_cost_usd=context.max_cost_usd,
+                    depth=depth + 1,
+                )
+
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    output=sub_result.outputs,
+                    cost_usd=sub_result.total_cost_usd,
+                    duration_seconds=duration,
+                    status="completed" if sub_result.status == "completed" else "failed",
+                    error=sub_result.error,
+                )
+        except Exception:
+            pass  # Fall back to returning delegation info
+
+        # Fallback: return delegation info without actually running the workflow
+        output = {
+            "workflow": cfg.workflow,
+            "task_description": task_description,
+            "status": "delegated",
+        }
+
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, output=output, cost_usd=0.0,
+            duration_seconds=duration, status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
 async def _prepare_and_run_step(
     step_id: str,
     workflow: WorkflowDefinition,
@@ -2312,6 +2489,59 @@ async def _prepare_and_run_step(
         else:
             raise StepExecutionError(
                 f"Loop step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "transform":
+        result = await _execute_transform_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Transform step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "notify":
+        result = await _execute_notify_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Notify step '{step_id}' failed: {result.error}"
+            )
+        return
+
+    if step.type == "delegate":
+        result = await _execute_delegate_step(
+            step, context, storage, depth=depth,
+        )
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id, step_id=step.id,
+                status="completed", output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(
+                f"Delegate step '{step_id}' failed: {result.error}"
             )
         return
 

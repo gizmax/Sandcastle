@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare } from "lucide-react";
+import { Bell, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Shuffle, ExternalLink } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -50,6 +50,9 @@ const DEFAULT_CODE_CONFIG = { code: "", language: "python" };
 const DEFAULT_CONDITION_CONFIG = { expression: "", thenSteps: [] as string[], elseSteps: [] as string[] };
 const DEFAULT_CLASSIFY_CONFIG = { categories: [] as string[], input: "", model: "haiku", branches: {} as Record<string, string[]> };
 const DEFAULT_LOOP_CONFIG = { over: "", stepIds: [] as string[], maxIterations: 100 };
+const DEFAULT_TRANSFORM_CONFIG = { template: "" };
+const DEFAULT_NOTIFY_CONFIG = { service: "", channel: "", message: "" };
+const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 3600 };
 
 function generateYaml(
   workflowName: string,
@@ -166,6 +169,40 @@ function generateYaml(
       yaml += `      over: "${step.loopConfig.over}"\n`;
       yaml += `      step_ids: [${step.loopConfig.stepIds.join(", ")}]\n`;
       yaml += `      max_iterations: ${step.loopConfig.maxIterations}\n`;
+    } else if (sType === "transform") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: transform\n`;
+      yaml += `    transform_config:\n`;
+      yaml += `      template: |\n`;
+      step.transformConfig.template.split("\n").forEach((line) => {
+        yaml += `        ${line}\n`;
+      });
+    } else if (sType === "notify") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: notify\n`;
+      yaml += `    notify_config:\n`;
+      yaml += `      service: ${step.notifyConfig.service}\n`;
+      if (step.notifyConfig.channel) {
+        yaml += `      channel: "${step.notifyConfig.channel}"\n`;
+      }
+      yaml += `      message: |\n`;
+      step.notifyConfig.message.split("\n").forEach((line) => {
+        yaml += `        ${line}\n`;
+      });
+    } else if (sType === "delegate") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: delegate\n`;
+      yaml += `    delegate_config:\n`;
+      yaml += `      workflow: "${step.delegateConfig.workflow}"\n`;
+      if (step.delegateConfig.taskDescription) {
+        yaml += `      task_description: |\n`;
+        step.delegateConfig.taskDescription.split("\n").forEach((line) => {
+          yaml += `        ${line}\n`;
+        });
+      }
+      if (step.delegateConfig.timeout !== 3600) {
+        yaml += `      timeout: ${step.delegateConfig.timeout}\n`;
+      }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
       yaml += `    type: llm\n`;
@@ -440,6 +477,9 @@ function buildInitialState(wf: InitialWorkflow) {
       conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
       classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
       loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
+      notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
+      delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
     };
   });
 
@@ -499,6 +539,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     const prefixes: Record<string, string> = {
       standard: "step", llm: "llm", http: "http", code: "code",
       condition: "check", classify: "route", loop: "loop",
+      transform: "transform", notify: "notify", delegate: "delegate",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -528,6 +569,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
       classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
       loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
+      notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
+      delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
     };
 
     const newNode: Node = {
@@ -744,6 +788,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
             { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
             { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },
+            { type: "transform" as const, icon: Shuffle, label: "Transform", color: "text-cyan-400" },
+            { type: "notify" as const, icon: Bell, label: "Notify", color: "text-pink-400" },
+            { type: "delegate" as const, icon: ExternalLink, label: "Delegate", color: "text-indigo-400" },
           ] as const).map(({ type, icon: Icon, label, color }) => (
             <button
               key={type}

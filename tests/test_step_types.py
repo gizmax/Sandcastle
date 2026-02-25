@@ -1,4 +1,4 @@
-"""Tests for hybrid step types: llm, http, code, condition, classify, loop."""
+"""Tests for hybrid step types: llm, http, code, condition, classify, loop, transform, notify, delegate."""
 
 from __future__ import annotations
 
@@ -12,12 +12,15 @@ from sandcastle.engine.dag import (
     ClassifyConfig,
     CodeConfig,
     ConditionConfig,
+    DelegateConfig,
     HttpConfig,
     LlmConfig,
     LoopConfig,
     NON_LLM_TYPES,
     NON_PROMPT_TYPES,
+    NotifyConfig,
     StepDefinition,
+    TransformConfig,
     VALID_STEP_TYPES,
     WorkflowDefinition,
     parse_yaml_string,
@@ -38,6 +41,8 @@ _execute_http_step = _executor_mod._execute_http_step
 _execute_llm_step = _executor_mod._execute_llm_step
 _execute_loop_step = _executor_mod._execute_loop_step
 _execute_classify_step = _executor_mod._execute_classify_step
+_execute_transform_step = _executor_mod._execute_transform_step
+_execute_notify_step = _executor_mod._execute_notify_step
 
 
 # ---- DAG parsing tests ----
@@ -219,17 +224,18 @@ steps:
 
     def test_valid_step_types_set(self):
         """All new types should be in VALID_STEP_TYPES."""
-        for t in ["llm", "http", "code", "condition", "classify", "loop"]:
+        for t in ["llm", "http", "code", "condition", "classify", "loop",
+                   "transform", "notify", "delegate"]:
             assert t in VALID_STEP_TYPES
 
     def test_non_prompt_types(self):
-        """http, code, condition, loop don't need prompts."""
-        for t in ["http", "code", "condition", "loop"]:
+        """http, code, condition, loop, transform, notify don't need prompts."""
+        for t in ["http", "code", "condition", "loop", "transform", "notify"]:
             assert t in NON_PROMPT_TYPES
 
     def test_non_llm_types(self):
-        """http, code, condition, loop don't use LLM models."""
-        for t in ["http", "code", "condition", "loop"]:
+        """http, code, condition, loop, transform, notify don't use LLM models."""
+        for t in ["http", "code", "condition", "loop", "transform", "notify"]:
             assert t in NON_LLM_TYPES
 
 
@@ -993,3 +999,378 @@ steps:
         errors = validate(wf)
         # Should have no errors
         assert len(errors) == 0, f"Unexpected errors: {errors}"
+
+
+# ---- Phase 3: Transform step parsing tests ----
+
+class TestTransformStepParsing:
+    """Test YAML parsing for transform step type."""
+
+    def test_parse_transform_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: format-output
+    type: transform
+    depends_on: [analyze]
+    transform_config:
+      template: '{"summary": "{steps.analyze.output.summary}", "score": {steps.analyze.output.score}}'
+  - id: analyze
+    prompt: "Analyze data"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("format-output")
+        assert step.type == "transform"
+        assert step.transform_config is not None
+        assert "summary" in step.transform_config.template
+
+    def test_parse_transform_multiline_template(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: render
+    type: transform
+    transform_config:
+      template: |
+        Report for {input.company}
+        Score: {steps.score.output}
+  - id: score
+    prompt: "Score"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("render")
+        assert step.type == "transform"
+        assert "Report for" in step.transform_config.template
+
+    def test_transform_placeholder_prompt(self):
+        """Transform steps should get a placeholder prompt."""
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: fmt
+    type: transform
+    transform_config:
+      template: "hello"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("fmt")
+        assert step.prompt == "transform step"
+
+
+# ---- Phase 3: Notify step parsing tests ----
+
+class TestNotifyStepParsing:
+    """Test YAML parsing for notify step type."""
+
+    def test_parse_notify_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: alert-team
+    type: notify
+    notify_config:
+      service: slack
+      channel: "#alerts"
+      message: "Workflow done: {steps.analyze.output.summary}"
+  - id: analyze
+    prompt: "Analyze"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("alert-team")
+        assert step.type == "notify"
+        assert step.notify_config is not None
+        assert step.notify_config.service == "slack"
+        assert step.notify_config.channel == "#alerts"
+        assert "Workflow done" in step.notify_config.message
+
+    def test_parse_notify_without_channel(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: webhook-notify
+    type: notify
+    notify_config:
+      service: webhook
+      message: "Build completed"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("webhook-notify")
+        assert step.notify_config.service == "webhook"
+        assert step.notify_config.channel == ""
+
+    def test_notify_placeholder_prompt(self):
+        """Notify steps should get a placeholder prompt."""
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: ping
+    type: notify
+    notify_config:
+      service: slack
+      message: "hello"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("ping")
+        assert step.prompt == "notify step"
+
+
+# ---- Phase 3: Delegate step parsing tests ----
+
+class TestDelegateStepParsing:
+    """Test YAML parsing for delegate step type."""
+
+    def test_parse_delegate_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: enrich-data
+    type: delegate
+    delegate_config:
+      workflow: data-enrichment
+      task_description: "Enrich customer data from {input.source}"
+      timeout: 1800
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("enrich-data")
+        assert step.type == "delegate"
+        assert step.delegate_config is not None
+        assert step.delegate_config.workflow == "data-enrichment"
+        assert "Enrich customer" in step.delegate_config.task_description
+        assert step.delegate_config.timeout == 1800
+
+    def test_parse_delegate_default_timeout(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: sub-task
+    type: delegate
+    delegate_config:
+      workflow: helper-workflow
+      task_description: "Do something"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("sub-task")
+        assert step.delegate_config.timeout == 3600
+
+    def test_delegate_uses_llm_model(self):
+        """Delegate steps should NOT be in NON_LLM_TYPES (they may run sub-workflows with LLMs)."""
+        assert "delegate" not in NON_LLM_TYPES
+
+
+# ---- Phase 3: Transform validation tests ----
+
+class TestTransformStepValidation:
+    """Test validation rules for transform step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+{steps_yaml}
+"""
+        return parse_yaml_string(yaml_content)
+
+    def test_transform_requires_template(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: transform
+    transform_config:
+      template: ""
+""")
+        errors = validate(wf)
+        assert any("template" in e.lower() for e in errors)
+
+    def test_transform_valid(self):
+        wf = self._make_wf("""
+  - id: good
+    type: transform
+    transform_config:
+      template: "Hello {input.name}"
+""")
+        errors = validate(wf)
+        transform_errors = [e for e in errors if "transform" in e.lower()]
+        assert len(transform_errors) == 0
+
+
+# ---- Phase 3: Notify validation tests ----
+
+class TestNotifyStepValidation:
+    """Test validation rules for notify step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+{steps_yaml}
+"""
+        return parse_yaml_string(yaml_content)
+
+    def test_notify_requires_service(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: notify
+    notify_config:
+      message: "hello"
+""")
+        errors = validate(wf)
+        assert any("service" in e.lower() for e in errors)
+
+    def test_notify_requires_message(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: notify
+    notify_config:
+      service: slack
+""")
+        errors = validate(wf)
+        assert any("message" in e.lower() for e in errors)
+
+
+# ---- Phase 3: Delegate validation tests ----
+
+class TestDelegateStepValidation:
+    """Test validation rules for delegate step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+{steps_yaml}
+"""
+        return parse_yaml_string(yaml_content)
+
+    def test_delegate_requires_workflow(self):
+        wf = self._make_wf("""
+  - id: bad
+    type: delegate
+    delegate_config:
+      task_description: "do something"
+""")
+        errors = validate(wf)
+        assert any("workflow" in e.lower() for e in errors)
+
+    def test_delegate_valid(self):
+        wf = self._make_wf("""
+  - id: good
+    type: delegate
+    delegate_config:
+      workflow: helper-workflow
+      task_description: "do something"
+""")
+        errors = validate(wf)
+        delegate_errors = [e for e in errors if "delegate" in e.lower()]
+        assert len(delegate_errors) == 0
+
+
+# ---- Phase 3: Transform executor tests ----
+
+class TestTransformStepExecutor:
+    """Test transform step execution."""
+
+    @pytest.fixture
+    def context(self):
+        return RunContext(
+            run_id="test-run",
+            input={"name": "World", "company": "Acme"},
+            step_outputs={
+                "analyze": {"summary": "All good", "score": 95},
+                "fetch": {"items": [1, 2, 3]},
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_simple_template(self, context):
+        step = StepDefinition(
+            id="format",
+            type="transform",
+            transform_config=TransformConfig(
+                template="Hello {input.name}, score is {steps.analyze.output.score}",
+            ),
+        )
+        result = await _execute_transform_step(step, context)
+        assert result.status == "completed"
+        assert "Hello World" in result.output
+        assert "95" in result.output
+        assert result.cost_usd == 0.0
+
+    @pytest.mark.asyncio
+    async def test_jinja_tojson_filter(self, context):
+        step = StepDefinition(
+            id="format",
+            type="transform",
+            transform_config=TransformConfig(
+                template='{{ steps.fetch.output.items | tojson }}',
+            ),
+        )
+        result = await _execute_transform_step(step, context)
+        assert result.status == "completed"
+        assert result.output == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_transform_missing_config(self, context):
+        step = StepDefinition(id="bad", type="transform")
+        result = await _execute_transform_step(step, context)
+        assert result.status == "failed"
+        assert "Missing" in result.error
+
+
+# ---- Phase 3: Notify executor tests ----
+
+class TestNotifyStepExecutor:
+    """Test notify step execution."""
+
+    @pytest.fixture
+    def context(self):
+        return RunContext(
+            run_id="test-run",
+            input={"user": "admin"},
+            step_outputs={"analyze": {"summary": "Build passed"}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_success(self, context):
+        step = StepDefinition(
+            id="alert",
+            type="notify",
+            notify_config=NotifyConfig(
+                service="slack",
+                channel="#builds",
+                message="Result: {steps.analyze.output.summary}",
+            ),
+        )
+        result = await _execute_notify_step(step, context)
+        assert result.status == "completed"
+        assert result.output["service"] == "slack"
+        assert result.output["channel"] == "#builds"
+        assert "Build passed" in result.output["message"]
+        assert result.output["status"] == "sent"
+        assert result.cost_usd == 0.0
+
+    @pytest.mark.asyncio
+    async def test_notify_missing_config(self, context):
+        step = StepDefinition(id="bad", type="notify")
+        result = await _execute_notify_step(step, context)
+        assert result.status == "failed"
+        assert "Missing" in result.error
