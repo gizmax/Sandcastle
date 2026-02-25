@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from sandcastle import __version__
+from sandcastle.api.a2a import a2a_router
+from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
 from sandcastle.config import settings
@@ -205,6 +207,12 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api")
 
+# A2A protocol routes (root level - /.well-known/agent.json and /a2a)
+app.include_router(a2a_router)
+
+# AG-UI protocol routes (/api/agui/stream/{run_id})
+app.include_router(agui_router, prefix="/api/agui")
+
 # ---------------------------------------------------------------------------
 # Dashboard static files (served from the same port)
 # ---------------------------------------------------------------------------
@@ -227,6 +235,11 @@ if _dashboard_dir:
         """Serve dashboard SPA - static files or fallback to index.html."""
         # Don't intercept /api paths - let FastAPI return 404 for unknown API routes
         if path.startswith("api/") or path == "api":
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Not found")
+        # Don't intercept A2A protocol paths
+        if path.startswith(".well-known/") or path == "a2a":
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="Not found")

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc"}
 
 # Path prefixes that don't require authentication
-PUBLIC_PREFIXES = ("/api/templates",)
+PUBLIC_PREFIXES = ("/api/templates", "/api/agui")
 
 # Pepper for HMAC key hashing - falls back to a stable default for dev/local mode.
 # In production, set API_KEY_PEPPER as an environment variable.
