@@ -348,6 +348,48 @@ async def _save_checkpoint(
         logger.warning(f"Could not save checkpoint for step {step_id}: {e}")
 
 
+# Browser action cache for self-healing selectors
+_browser_action_cache: dict[str, list[dict]] = {}
+
+
+def _cache_key(url: str, intent: str) -> str:
+    """Generate cache key from URL pattern and intent."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    # Normalize to domain + path pattern
+    return f"{parsed.netloc}{parsed.path}:{intent[:100]}"
+
+
+def _get_cached_actions(url: str, intent: str) -> list[dict] | None:
+    """Get cached action sequence for a URL+intent pair."""
+    key = _cache_key(url, intent)
+    return _browser_action_cache.get(key)
+
+
+def _save_cached_actions(url: str, intent: str, actions: list[dict]) -> None:
+    """Save successful action sequence to cache."""
+    key = _cache_key(url, intent)
+    _browser_action_cache[key] = actions
+    # Keep cache bounded
+    if len(_browser_action_cache) > 500:
+        # Remove oldest entries (first added)
+        oldest = list(_browser_action_cache.keys())[:100]
+        for k in oldest:
+            del _browser_action_cache[k]
+
+
+def _escape_js_string(text: str) -> str:
+    """Escape a string for safe embedding in JavaScript single-quoted strings inside shell."""
+    return (
+        text.replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
 # In-memory cancel flags for local mode (no Redis)
 _cancel_flags: set[str] = set()
 
@@ -2675,7 +2717,7 @@ async def _execute_browser_step(
 ) -> StepResult:
     """Execute a browser automation step.
 
-    Supports two modes:
+    Supports three modes:
     - playwright: Agent writes and executes Playwright scripts inside the
       sandbox via the standard agent loop. The step prompt is augmented with
       browser tool instructions, viewport config, and start URL context.
@@ -2683,6 +2725,8 @@ async def _execute_browser_step(
       beta API. Takes screenshots of a headless browser running inside the
       sandbox, sends them to Claude, and executes returned mouse/keyboard
       actions. Loops until the task is complete or the timeout is reached.
+    - dom: Uses the accessibility tree instead of screenshots for faster and
+      cheaper data extraction from known page layouts.
     """
     import base64
     import os
@@ -2707,14 +2751,22 @@ async def _execute_browser_step(
     if cfg.credentials_env:
         credentials_json = os.environ.get(cfg.credentials_env)
 
+    # Feature F: execution replay - collect screenshots across modes
+    replay_screenshots: list[dict] = []
+
     try:
-        if cfg.mode == "playwright":
-            return await _browser_playwright_mode(
-                step, cfg, prompt, credentials_json, context, sandbox,
-                storage, started_at,
+        if cfg.mode == "dom":
+            result = await _browser_dom_mode(
+                step, cfg, sandbox, context.run_id, context.input,
+                context=context, storage=storage,
             )
         elif cfg.mode == "computer_use":
-            return await _browser_computer_use_mode(
+            result = await _browser_computer_use_mode(
+                step, cfg, prompt, credentials_json, context, sandbox,
+                storage, started_at, replay_screenshots,
+            )
+        elif cfg.mode == "playwright":
+            result = await _browser_playwright_mode(
                 step, cfg, prompt, credentials_json, context, sandbox,
                 storage, started_at,
             )
@@ -2724,6 +2776,30 @@ async def _execute_browser_step(
                 error=f"Unknown browser mode: {cfg.mode}",
                 duration_seconds=time.monotonic() - started_at,
             )
+
+        # Feature F: attach replay data to the result output
+        if replay_screenshots and result.status == "completed":
+            output = result.output
+            if isinstance(output, dict):
+                output["replay"] = replay_screenshots
+                output["replay_count"] = len(replay_screenshots)
+            else:
+                output = {
+                    "result": output,
+                    "replay": replay_screenshots,
+                    "replay_count": len(replay_screenshots),
+                }
+            result = StepResult(
+                step_id=result.step_id,
+                parallel_index=result.parallel_index,
+                output=output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                status=result.status,
+                attempt=result.attempt,
+            )
+
+        return result
     except Exception as e:
         duration = time.monotonic() - started_at
         logger.error(f"Browser step '{step.id}' failed: {e}")
@@ -2801,7 +2877,9 @@ async def _browser_playwright_mode(
     if credentials_json:
         browser_instructions += (
             "\n## Credentials\n"
-            f"Credentials JSON is available: {credentials_json}\n"
+            "Credentials are available as environment variables in the sandbox. "
+            "Use process.env.VARIABLE_NAME to access them. "
+            f"Available variables: {', '.join(credentials_json.split(','))}\n"
             "Use these for any login forms or authentication.\n"
         )
 
@@ -2816,6 +2894,14 @@ async def _browser_playwright_mode(
         f"{browser_instructions}\n"
         f"## Task\n{prompt}\n"
     )
+
+    # Feature A: inject cached action hints for self-healing selectors
+    cached = _get_cached_actions(cfg.start_url, step.prompt)
+    if cached:
+        cache_hint = "\n\nPreviously successful actions for similar pages:\n"
+        for act in cached[:10]:
+            cache_hint += f"  - {act.get('action', 'unknown')}: selector={act.get('selector', 'N/A')}\n"
+        augmented_prompt += cache_hint + "\nTry these selectors first. If they fail, find the correct elements.\n"
 
     # Install playwright in sandbox (idempotent)
     try:
@@ -2863,6 +2949,153 @@ async def _browser_playwright_mode(
     return result
 
 
+async def _browser_dom_mode(
+    step: StepDefinition,
+    cfg: Any,
+    sandbox: Any,
+    run_id: str,
+    input_data: dict,
+    context: RunContext | None = None,
+    storage: StorageBackend | None = None,
+) -> StepResult:
+    """DOM extraction mode - uses accessibility tree instead of screenshots.
+
+    Faster and cheaper than vision-based modes. Best for structured data
+    extraction from known page layouts.
+    """
+    import time
+
+    started_at = time.monotonic()
+    logger.info("Browser DOM mode: %s -> %s", step.id, cfg.start_url)
+
+    runtime = get_sandshore_runtime()
+
+    # Install playwright in sandbox
+    try:
+        await runtime.sandbox_exec(
+            sandbox, "bash",
+            [
+                "-c",
+                "command -v npx && "
+                "npx playwright install chromium 2>/dev/null || "
+                "(npm install -g playwright && "
+                "npx playwright install chromium)",
+            ],
+            timeout=60,
+        )
+    except Exception as install_err:
+        logger.warning(
+            "Playwright install warning (may already be present): "
+            f"{install_err}"
+        )
+
+    # Navigate to URL
+    safe_url = _escape_js_string(cfg.start_url)
+    nav_script = (
+        "const { chromium } = require('playwright');\n"
+        "(async () => {\n"
+        "  const browser = await chromium.launch({ headless: true });\n"
+        f"  const page = await browser.newPage({{ viewport: "
+        f"{{ width: {cfg.viewport_width}, height: {cfg.viewport_height} }} }});\n"
+        f"  await page.goto('{safe_url}');\n"
+        "  // Get interactive elements\n"
+        "  const elements = await page.evaluate(() => {\n"
+        "    const items = [];\n"
+        "    const selectors = 'a, button, input, select, textarea, [role=\"button\"], [onclick]';\n"
+        "    document.querySelectorAll(selectors).forEach((el, i) => {\n"
+        "      items.push({\n"
+        "        index: i,\n"
+        "        tag: el.tagName.toLowerCase(),\n"
+        "        type: el.getAttribute('type') || '',\n"
+        "        text: (el.textContent || '').trim().slice(0, 100),\n"
+        "        placeholder: el.getAttribute('placeholder') || '',\n"
+        "        name: el.getAttribute('name') || '',\n"
+        "        href: el.getAttribute('href') || '',\n"
+        "        role: el.getAttribute('role') || '',\n"
+        "      });\n"
+        "    });\n"
+        "    return items;\n"
+        "  });\n"
+        "  // Get page info\n"
+        "  const title = await page.title();\n"
+        "  const url = page.url();\n"
+        "  const text = await page.evaluate(() => document.body.innerText.slice(0, 5000));\n"
+        "  console.log(JSON.stringify({\n"
+        "    elements: elements,\n"
+        "    page_info: { title: title, url: url, body_text: text }\n"
+        "  }));\n"
+        "  await browser.close();\n"
+        "})();\n"
+    )
+
+    try:
+        result = await runtime.sandbox_exec(
+            sandbox, "bash",
+            ["-c", f"cat > /tmp/dom_extract.js << 'SCRIPT_EOF'\n"
+             f"{nav_script}\nSCRIPT_EOF\nnode /tmp/dom_extract.js"],
+            timeout=30,
+        )
+        dom_output = (
+            result.get("stdout", "")
+            if isinstance(result, dict) else str(result)
+        )
+    except Exception as e:
+        dom_output = f"DOM extraction failed: {e}"
+
+    # Build context for the LLM
+    dom_context = f"Page: {cfg.start_url}\n{dom_output}"
+
+    # Build augmented prompt
+    augmented_prompt = (
+        "You are a browser automation agent working in DOM mode. "
+        "You can interact with elements by their index number or CSS selector.\n\n"
+        "Available tools:\n"
+        "- click(selector) - click an element\n"
+        "- type_text(selector, text) - type into an element\n"
+        "- select_option(selector, value) - select dropdown option\n"
+        "- get_text(selector) - get element text\n"
+        "- navigate(url) - go to a URL\n\n"
+        f"Current page state:\n{dom_context}\n\n"
+        f"Task: {step.prompt}"
+    )
+
+    if cfg.output_schema:
+        augmented_prompt += (
+            f"\n\nExtract data matching this schema:\n"
+            f"{json.dumps(cfg.output_schema, indent=2)}\n"
+            f"Return the extracted data as valid JSON."
+        )
+
+    # Execute as a standard LLM step with browser context
+    dom_step = StepDefinition(
+        id=step.id,
+        prompt=augmented_prompt,
+        depends_on=step.depends_on,
+        model=step.model or "sonnet",
+        max_turns=step.max_turns or 5,
+        timeout=max(step.timeout, cfg.timeout_seconds),
+        output_schema=step.output_schema,
+        type="standard",
+    )
+
+    # Use the standard sandbox execution path
+    ctx = context if context is not None else RunContext(
+        run_id=run_id,
+        input=input_data,
+    )
+
+    # Use provided storage or create a minimal local storage
+    if storage is None:
+        from sandcastle.engine.storage import LocalStorage
+        storage = LocalStorage("/tmp/sandcastle_dom_storage")
+
+    result = await execute_step_with_retry(
+        dom_step, ctx, sandbox, storage,
+    )
+    result.step_id = step.id
+    return result
+
+
 async def _browser_computer_use_mode(
     step: StepDefinition,
     cfg: Any,
@@ -2872,6 +3105,7 @@ async def _browser_computer_use_mode(
     sandbox: Any,
     storage: StorageBackend,
     started_at: float,
+    replay_screenshots: list[dict] | None = None,
 ) -> StepResult:
     """Computer use mode: screenshot-action loop via Anthropic API.
 
@@ -2887,6 +3121,9 @@ async def _browser_computer_use_mode(
 
     from sandcastle.engine.providers import get_api_key, resolve_model
 
+    if replay_screenshots is None:
+        replay_screenshots = []
+
     model_info = resolve_model(step.model)
     api_key = get_api_key(model_info)
 
@@ -2895,6 +3132,7 @@ async def _browser_computer_use_mode(
     total_cost = 0.0
     action_count = 0
     max_actions = 200  # Safety limit
+    iteration = 0
 
     # Resolve start URL
     start_url = cfg.start_url
@@ -2902,6 +3140,7 @@ async def _browser_computer_use_mode(
         start_url = resolve_templates(start_url, context, step.depends_on)
 
     # Build and run browser launch script in sandbox
+    safe_start_url = _escape_js_string(start_url) if start_url else ""
     launch_script = (
         "const { chromium } = require('playwright');\n"
         "const fs = require('fs');\n"
@@ -2912,7 +3151,7 @@ async def _browser_computer_use_mode(
         f"height: {cfg.viewport_height} }} }});\n"
     )
     if start_url:
-        launch_script += f"  await page.goto('{start_url}');\n"
+        launch_script += f"  await page.goto('{safe_start_url}');\n"
     launch_script += (
         "  await page.screenshot({ path: '/tmp/screenshot.png' });\n"
         "  console.log('BROWSER_READY');\n"
@@ -2948,7 +3187,11 @@ async def _browser_computer_use_mode(
         f"Task: {prompt}"
     )
     if credentials_json:
-        task_prompt += f"\n\nCredentials available: {credentials_json}"
+        task_prompt += (
+            "\n\nCredentials are available as environment variables in the sandbox. "
+            "Use process.env.VARIABLE_NAME to access them. "
+            f"Available variables: {', '.join(credentials_json.split(','))}"
+        )
 
     messages: list[dict] = [{"role": "user", "content": [
         {"type": "text", "text": task_prompt},
@@ -2969,6 +3212,7 @@ async def _browser_computer_use_mode(
     last_result = None
 
     while time.monotonic() < deadline and action_count < max_actions:
+        iteration += 1
         # Call Claude with computer_use tool
         try:
             async with httpx.AsyncClient(timeout=60) as client:
@@ -3018,6 +3262,48 @@ async def _browser_computer_use_mode(
         content_blocks = data.get("content", [])
         stop_reason = data.get("stop_reason", "")
 
+        # Feature E: CAPTCHA detection in AI response
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_lower = block.get("text", "").lower()
+                if any(kw in text_lower for kw in [
+                    "captcha", "recaptcha", "hcaptcha",
+                    "verify you're human", "turnstile",
+                ]):
+                    if cfg.captcha_strategy == "pause":
+                        logger.warning(
+                            "CAPTCHA detected in step %s - pausing for human intervention",
+                            step.id,
+                        )
+                        return StepResult(
+                            step_id=step.id,
+                            output={
+                                "status": "captcha_detected",
+                                "message": "CAPTCHA detected. Human intervention required.",
+                                "iterations": iteration,
+                                "captcha_type": "detected_by_ai",
+                                "requires_approval": True,
+                            },
+                            cost_usd=total_cost,
+                            duration_seconds=time.monotonic() - started_at,
+                            status="completed",
+                        )
+                    elif cfg.captcha_strategy == "fail":
+                        return StepResult(
+                            step_id=step.id,
+                            output={
+                                "status": "failed",
+                                "message": "CAPTCHA detected and captcha_strategy is 'fail'.",
+                                "iterations": iteration,
+                            },
+                            cost_usd=total_cost,
+                            duration_seconds=time.monotonic() - started_at,
+                            status="failed",
+                            error="CAPTCHA detected and captcha_strategy is 'fail'.",
+                        )
+                    # "skip" strategy: continue and hope it resolves
+                    break
+
         has_tool_use = any(
             b.get("type") == "tool_use" for b in content_blocks
         )
@@ -3040,11 +3326,11 @@ async def _browser_computer_use_mode(
                 continue
 
             tool_input = block.get("input", {})
-            action = tool_input.get("action", "")
+            action_type = tool_input.get("action", "")
             action_count += 1
 
             action_script = _build_computer_use_action_script(
-                action, tool_input, cfg,
+                action_type, tool_input, cfg,
             )
 
             try:
@@ -3097,6 +3383,23 @@ async def _browser_computer_use_mode(
         })
         messages.append({"role": "user", "content": tool_results})
 
+        # Feature B: Post-action validation - store screenshots for replay
+        if cfg.capture_screenshots or cfg.screenshot_on_error:
+            try:
+                validation_screenshot = await _take_sandbox_screenshot(
+                    runtime, sandbox,
+                )
+                if validation_screenshot:
+                    # Store for execution replay
+                    if cfg.capture_screenshots:
+                        replay_screenshots.append({
+                            "iteration": iteration,
+                            "action": action_type if tool_results else "unknown",
+                            "screenshot_b64": validation_screenshot,
+                        })
+            except Exception:
+                pass
+
     duration = time.monotonic() - started_at
 
     if last_result is None:
@@ -3133,15 +3436,14 @@ def _build_computer_use_action_script(
 ) -> str:
     """Build a Node.js script to execute a computer_use action in the
     sandbox browser.
+
+    All text values are escaped via _escape_js_string to prevent shell
+    injection when the script is passed through ``node -e '...'``.
     """
     coordinate = tool_input.get("coordinate", [0, 0])
     x = coordinate[0] if len(coordinate) > 0 else 0
     y = coordinate[1] if len(coordinate) > 1 else 0
-    text = (
-        tool_input.get("text", "")
-        .replace("\\", "\\\\")
-        .replace("'", "\\'")
-    )
+    text = _escape_js_string(tool_input.get("text", ""))
 
     if action == "screenshot":
         return (
@@ -3174,11 +3476,11 @@ def _build_computer_use_action_script(
             "console.log('typed text'); }})();"
         )
     elif action == "key":
-        key = tool_input.get("text", "Enter").replace("'", "\\'")
+        key = _escape_js_string(tool_input.get("text", "Enter"))
         return (
             "const page = global._page; "
             f"(async () => {{ await page.keyboard.press('{key}'); "
-            f"console.log('pressed {key}'); }})();"
+            f"console.log('pressed {_escape_js_string(key)}'); }})();"
         )
     elif action == "scroll":
         scroll_dir = tool_input.get("coordinate", [0, 0])
@@ -3195,7 +3497,8 @@ def _build_computer_use_action_script(
             f"console.log('moved to {x},{y}'); }})();"
         )
     else:
-        return f"console.log('Unknown action: {action}');"
+        safe_action = _escape_js_string(action)
+        return f"console.log('Unknown action: {safe_action}');"
 
 
 async def _take_sandbox_screenshot(

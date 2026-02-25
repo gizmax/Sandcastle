@@ -13,12 +13,18 @@ import { chromium } from "playwright";
 
 let browser = null;
 let page = null;
+let _viewportWidth = 1280;
+let _viewportHeight = 720;
 
 /**
  * Ensure a browser instance is running and return the active page.
  * Reuses the existing browser/page across calls within the same session.
  */
-async function ensureBrowser(headless = true) {
+async function ensureBrowser(headless = true, viewportWidth = null, viewportHeight = null) {
+  // Update viewport settings if provided
+  if (viewportWidth) _viewportWidth = viewportWidth;
+  if (viewportHeight) _viewportHeight = viewportHeight;
+
   if (!browser || !browser.isConnected()) {
     browser = await chromium.launch({
       headless,
@@ -30,7 +36,7 @@ async function ensureBrowser(headless = true) {
       ],
     });
     const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
+      viewport: { width: _viewportWidth, height: _viewportHeight },
       userAgent:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
@@ -192,6 +198,119 @@ export async function computer_use_action(action_type, x = null, y = null, text 
 }
 
 // ---------------------------------------------------------------------------
+// DOM Extraction mode functions
+// ---------------------------------------------------------------------------
+
+export async function get_accessibility_tree(maxDepth = 5) {
+  const p = await ensureBrowser();
+  const snapshot = await p.accessibility.snapshot({ interestingOnly: true });
+
+  function pruneTree(node, depth) {
+    if (!node || depth > maxDepth) return null;
+    const result = {
+      role: node.role,
+      name: node.name || "",
+    };
+    if (node.value) result.value = node.value;
+    if (node.checked !== undefined) result.checked = node.checked;
+    if (node.pressed !== undefined) result.pressed = node.pressed;
+    if (node.disabled) result.disabled = true;
+    if (node.children && node.children.length > 0 && depth < maxDepth) {
+      result.children = node.children
+        .map(c => pruneTree(c, depth + 1))
+        .filter(Boolean);
+    }
+    return result;
+  }
+
+  return {
+    ok: true,
+    tree: pruneTree(snapshot, 0),
+    url: p.url(),
+    title: await p.title(),
+  };
+}
+
+export async function get_interactive_elements() {
+  const p = await ensureBrowser();
+  const elements = await p.evaluate(() => {
+    const selectors = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [contenteditable="true"]';
+    const nodes = document.querySelectorAll(selectors);
+    const results = [];
+    let idx = 0;
+    for (const el of nodes) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue;
+      if (el.offsetParent === null && el.tagName !== 'BODY') continue;
+      results.push({
+        idx: idx++,
+        tag: el.tagName.toLowerCase(),
+        type: el.type || null,
+        role: el.getAttribute('role') || null,
+        name: el.getAttribute('aria-label') || el.innerText?.slice(0, 100) || el.getAttribute('name') || el.getAttribute('placeholder') || '',
+        value: el.value || null,
+        selector: buildSelector(el),
+        rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+      });
+    }
+
+    function buildSelector(el) {
+      if (el.id) return '#' + CSS.escape(el.id);
+      const tag = el.tagName.toLowerCase();
+      const cls = el.className && typeof el.className === 'string'
+        ? '.' + el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).map(c => CSS.escape(c)).join('.')
+        : '';
+      const nth = el.parentElement
+        ? ':nth-child(' + (Array.from(el.parentElement.children).indexOf(el) + 1) + ')'
+        : '';
+      return tag + cls + nth;
+    }
+
+    return results;
+  });
+
+  return {
+    ok: true,
+    elements,
+    count: elements.length,
+    url: p.url(),
+  };
+}
+
+export async function extract_structured(schema) {
+  const p = await ensureBrowser();
+  const html = await p.locator('body').first().innerHTML({ timeout: 10000 });
+  const truncated = html.length > 30000 ? html.slice(0, 30000) : html;
+  return {
+    ok: true,
+    html: truncated,
+    schema,
+    url: p.url(),
+    title: await p.title(),
+  };
+}
+
+export async function get_page_info() {
+  const p = await ensureBrowser();
+  const info = await p.evaluate(() => ({
+    url: document.location.href,
+    title: document.title,
+    forms: document.forms.length,
+    links: document.links.length,
+    images: document.images.length,
+    iframes: document.querySelectorAll('iframe').length,
+    hasCaptcha: !!(
+      document.querySelector('[class*="captcha"]') ||
+      document.querySelector('[id*="captcha"]') ||
+      document.querySelector('iframe[src*="recaptcha"]') ||
+      document.querySelector('iframe[src*="hcaptcha"]') ||
+      document.querySelector('[class*="turnstile"]')
+    ),
+  }));
+  return { ok: true, ...info };
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup - close browser when the process exits
 // ---------------------------------------------------------------------------
 
@@ -227,6 +346,10 @@ if (process.argv[1]?.endsWith("browser.mjs")) {
     select_option,
     get_page_html,
     computer_use_action,
+    get_accessibility_tree,
+    get_interactive_elements,
+    extract_structured,
+    get_page_info,
   };
   if (!dispatch[fn]) {
     console.error(

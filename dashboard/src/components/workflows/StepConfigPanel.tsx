@@ -7,7 +7,6 @@ import {
   FlaskConical,
   FolderOpen,
   Gauge,
-  Monitor,
   Plus,
   RefreshCw,
   ShieldAlert,
@@ -161,15 +160,19 @@ export interface DelegateStepConfig {
 }
 
 export interface BrowserStepConfig {
-  mode: "playwright" | "computer_use";
+  mode: string;
   startUrl: string;
   viewportWidth: number;
   viewportHeight: number;
   timeout: number;
   waitAfterAction: number;
   headless: boolean;
-  credentialsEnvVar: string;
+  credentials_env: string;
   screenshotOnError: boolean;
+  max_actions: number;
+  capture_screenshots: boolean;
+  output_schema: Record<string, unknown> | null;
+  captcha_strategy: string;
 }
 
 export interface StepConfig {
@@ -923,50 +926,56 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {/* Browser Config */}
       {step.stepType === "browser" && (
         <div className="space-y-3">
-          {/* Info box */}
-          <div className="rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/5 p-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <Monitor className="h-3.5 w-3.5 text-fuchsia-400" />
-              <span className="text-xs font-medium text-fuchsia-400">Browser Automation</span>
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">Playwright mode:</span> Fast, reliable automation using CSS selectors. Best for modern web apps with clean HTML.
+          {/* Mode-specific info box */}
+          <div className={cn(
+            "rounded-lg border p-3",
+            step.browserConfig.mode === "dom"
+              ? "border-success/30 bg-success/5"
+              : step.browserConfig.mode === "computer_use"
+              ? "border-warning/30 bg-warning/5"
+              : "border-running/30 bg-running/5"
+          )}>
+            {step.browserConfig.mode === "playwright" && (
+              <p className="text-xs text-muted">
+                <span className="font-medium text-running">Playwright mode</span> uses CSS/XPath selectors for fast, reliable automation. Best for known page structures. Supports action caching for repeat visits.
               </p>
-              <p className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">Computer Use mode:</span> AI-driven visual automation. The agent sees screenshots and clicks like a human. Best for legacy systems, Java applets, or complex UIs without stable selectors.
+            )}
+            {step.browserConfig.mode === "computer_use" && (
+              <p className="text-xs text-muted">
+                <span className="font-medium text-warning">Computer Use mode</span> uses AI vision to interact with pages via screenshots. Best for legacy systems without stable DOM. Includes CAPTCHA detection and post-action validation.
               </p>
-            </div>
+            )}
+            {step.browserConfig.mode === "dom" && (
+              <p className="text-xs text-muted">
+                <span className="font-medium text-success">DOM Extraction mode</span> uses the accessibility tree for fast, structured data extraction. 10x cheaper than vision. Best for scraping tables, forms, and structured content.
+              </p>
+            )}
           </div>
 
-          {/* Mode */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Mode</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, mode: "playwright" } })}
-                className={cn(
-                  "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
-                  step.browserConfig.mode === "playwright"
-                    ? "border-fuchsia-500/50 bg-fuchsia-500/10 text-fuchsia-400"
-                    : "border-border text-muted hover:border-fuchsia-500/30 hover:text-fuchsia-400"
-                )}
-              >
-                Playwright (Selector-based)
-              </button>
-              <button
-                type="button"
-                onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, mode: "computer_use" } })}
-                className={cn(
-                  "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
-                  step.browserConfig.mode === "computer_use"
-                    ? "border-fuchsia-500/50 bg-fuchsia-500/10 text-fuchsia-400"
-                    : "border-border text-muted hover:border-fuchsia-500/30 hover:text-fuchsia-400"
-                )}
-              >
-                Computer Use (Visual AI)
-              </button>
+          {/* Mode selection - 3 options */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted">Mode</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: "playwright", label: "Playwright", desc: "Selector-based, fast" },
+                { value: "computer_use", label: "Computer Use", desc: "Visual AI, screenshots" },
+                { value: "dom", label: "DOM Extract", desc: "Accessibility tree, structured" },
+              ].map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, mode: m.value } })}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-lg border p-2.5 text-xs transition-colors",
+                    step.browserConfig.mode === m.value
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-border text-muted hover:border-accent/50"
+                  )}
+                >
+                  <span className="font-medium">{m.label}</span>
+                  <span className="text-[10px] text-muted">{m.desc}</span>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -1060,8 +1069,8 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             <label className="mb-1 block text-xs font-medium text-muted">Credentials Env Var</label>
             <input
               type="text"
-              value={step.browserConfig.credentialsEnvVar}
-              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, credentialsEnvVar: e.target.value } })}
+              value={step.browserConfig.credentials_env}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, credentials_env: e.target.value } })}
               placeholder="BROWSER_CREDENTIALS"
               className={cn(inputClass, "font-mono text-xs")}
             />
@@ -1081,6 +1090,80 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             <span className="font-medium">Screenshot on Error</span>
             <span className="text-muted-foreground">- Capture screenshot when step fails</span>
           </label>
+
+          {/* Max Actions (Computer Use mode) */}
+          {step.browserConfig.mode === "computer_use" && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted">Max Actions</label>
+              <input
+                type="number"
+                value={step.browserConfig.max_actions || 100}
+                onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, max_actions: parseInt(e.target.value) || 100 } })}
+                min={10}
+                max={500}
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+              />
+              <p className="text-[10px] text-muted">Safety limit for screenshot-action cycles</p>
+            </div>
+          )}
+
+          {/* CAPTCHA Strategy */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted">CAPTCHA Strategy</label>
+            <select
+              value={step.browserConfig.captcha_strategy || "pause"}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, captcha_strategy: e.target.value } })}
+              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+            >
+              <option value="pause">Pause for human (HITL)</option>
+              <option value="skip">Skip and continue</option>
+              <option value="fail">Fail step</option>
+            </select>
+            <p className="text-[10px] text-muted">What to do when CAPTCHA is detected</p>
+          </div>
+
+          {/* Capture Screenshots (for execution replay) */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-muted">Execution Replay</p>
+              <p className="text-[10px] text-muted">Save screenshots after each action</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, capture_screenshots: !step.browserConfig.capture_screenshots } })}
+              className={cn(
+                "relative h-5 w-9 rounded-full transition-colors",
+                step.browserConfig.capture_screenshots ? "bg-accent" : "bg-border"
+              )}
+            >
+              <span className={cn(
+                "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+                step.browserConfig.capture_screenshots ? "translate-x-4" : "translate-x-0.5"
+              )} />
+            </button>
+          </div>
+
+          {/* Output Schema (DOM mode) */}
+          {step.browserConfig.mode === "dom" && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted">Output Schema (JSON)</label>
+              <textarea
+                value={step.browserConfig.output_schema ? JSON.stringify(step.browserConfig.output_schema, null, 2) : ""}
+                onChange={(e) => {
+                  try {
+                    const schema = e.target.value ? JSON.parse(e.target.value) : null;
+                    onChange({ ...step, browserConfig: { ...step.browserConfig, output_schema: schema } });
+                  } catch {
+                    // Invalid JSON, don't update
+                  }
+                }}
+                placeholder='{"type": "object", "properties": {"invoices": {"type": "array"}}}'
+                rows={4}
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs"
+              />
+              <p className="text-[10px] text-muted">Define expected output structure for data extraction</p>
+            </div>
+          )}
         </div>
       )}
 

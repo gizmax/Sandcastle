@@ -1025,10 +1025,8 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
     "browser": ToolDefinition(
         name="browser",
         description=(
-            "Browser automation for web apps and legacy systems. Navigate pages, "
-            "fill forms, click buttons, take screenshots, and extract data. Supports "
-            "both CSS selector-based automation (Playwright) and visual AI-driven "
-            "automation (Computer Use)."
+            "Playwright-based browser automation with CSS, text, and XPath selectors, "
+            "plus AI-driven Computer Use and DOM extraction modes."
         ),
         category="general",
         functions=[
@@ -1045,7 +1043,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="click",
-                description="Click an element by CSS selector or text content",
+                description="Click an element by selector",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1061,7 +1059,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="type_text",
-                description="Type text into an input field",
+                description="Type text into an element",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1078,7 +1076,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="screenshot",
-                description="Take a screenshot of the current page. Returns base64-encoded PNG image.",
+                description="Take a page screenshot",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1092,7 +1090,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="get_text",
-                description="Extract text content from an element",
+                description="Get text content of an element",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1103,7 +1101,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="wait_for",
-                description="Wait for an element to appear on the page",
+                description="Wait for an element to appear",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1119,7 +1117,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="select_option",
-                description="Select an option from a dropdown",
+                description="Select a dropdown option",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1131,20 +1129,60 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="get_page_html",
-                description="Get the current page HTML content (for analysis)",
+                description="Get the HTML of a section",
                 parameters={
                     "type": "object",
                     "properties": {
                         "selector": {
                             "type": "string",
-                            "description": "Optional CSS selector to get HTML of specific element. Default: 'body'",
+                            "description": "Optional CSS selector for specific element. Default: 'body'",
                             "default": "body",
                         },
                     },
                 },
             ),
+            ToolFunction(
+                name="get_accessibility_tree",
+                description="Get the accessibility tree for DOM extraction mode",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "maxDepth": {
+                            "type": "number",
+                            "description": "Maximum depth to traverse. Default: 5",
+                            "default": 5,
+                        },
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_interactive_elements",
+                description="List all interactive elements with selectors and positions",
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            ToolFunction(
+                name="extract_structured",
+                description="Extract page HTML for structured data extraction",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "schema": {"type": "object", "description": "JSON schema describing desired output structure"},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_page_info",
+                description="Get page metadata including CAPTCHA detection",
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
         ],
-        credential_env_vars=[],  # No credentials needed - browser runs in sandbox
+        credential_env_vars=[],
         connector_file="browser.mjs",
         icon="browser",
     ),

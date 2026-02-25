@@ -135,8 +135,19 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       {stepType === "browser" && (data.browserMode || data.browserUrl) && (
         <div className="mt-1 flex flex-col gap-0.5">
           {data.browserMode && (
-            <span className="text-[10px] text-fuchsia-400/70 truncate max-w-[160px]">
-              {data.browserMode === "computer_use" ? "Computer Use" : "Playwright"}
+            <span className={cn(
+              "text-[10px] truncate max-w-[160px]",
+              data.browserMode === "computer_use"
+                ? "text-warning"
+                : data.browserMode === "dom"
+                ? "text-success"
+                : "text-running"
+            )}>
+              {data.browserMode === "computer_use"
+                ? "Computer Use"
+                : data.browserMode === "dom"
+                ? "DOM Extract"
+                : "Playwright"}
             </span>
           )}
           {data.browserUrl && (

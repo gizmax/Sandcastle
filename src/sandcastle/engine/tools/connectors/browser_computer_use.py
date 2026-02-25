@@ -7,6 +7,7 @@ until the model signals completion or the iteration limit is reached.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable, Awaitable
 
@@ -27,6 +28,7 @@ async def computer_use_loop(
     api_key: str,
     max_iterations: int = 30,
     model: str = "claude-sonnet-4-20250514",
+    wait_after_action: float = 0.5,
 ) -> dict[str, Any]:
     """Run a computer use automation loop.
 
@@ -39,6 +41,7 @@ async def computer_use_loop(
         api_key: Anthropic API key.
         max_iterations: Maximum number of screenshot-action cycles.
         model: Claude model to use for reasoning.
+        wait_after_action: Seconds to wait between actions for page settle.
 
     Returns:
         dict with keys: status ("completed" | "timeout"), message, iterations.
@@ -54,7 +57,7 @@ async def computer_use_loop(
 
     tools = [
         {
-            "type": "computer_20241022",
+            "type": "computer_20250124",
             "name": "computer",
             "display_width_px": DISPLAY_WIDTH,
             "display_height_px": DISPLAY_HEIGHT,
@@ -119,7 +122,7 @@ async def computer_use_loop(
                 headers={
                     "x-api-key": api_key,
                     "anthropic-version": "2023-06-01",
-                    "anthropic-beta": "computer-use-2024-10-22",
+                    "anthropic-beta": "computer-use-2025-01-24",
                     "content-type": "application/json",
                 },
                 json={
@@ -175,6 +178,10 @@ async def computer_use_loop(
                     ],
                 })
 
+                # Wait between actions to let the page settle
+                if wait_after_action > 0:
+                    await asyncio.sleep(wait_after_action)
+
     logger.warning("Computer use reached max iterations (%d)", max_iterations)
     return {
         "status": "timeout",
@@ -206,11 +213,11 @@ async def _dispatch_action(
 
         if action_type == "mouse_move":
             return await action_fn("mouse_move", x=x, y=y)
-        elif action_type in ("left_click", "right_click", "middle_click",
-                             "double_click"):
-            # Move to coordinates first, then click
+        else:
+            # Click at coordinates (or current position if none)
             if x is not None and y is not None:
                 return await action_fn("mouse_click", x=x, y=y)
+            # No coordinates - click at current cursor position
             return await action_fn("mouse_click", x=0, y=0)
 
     elif action_type == "type":
