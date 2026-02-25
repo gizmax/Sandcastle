@@ -1,0 +1,226 @@
+# name: Employee Onboarding
+# description: Automate new employee onboarding - checklist, welcome email, accounts, training plan, and manager notification
+# tags: [HR, Onboarding, Automation, Slack, Notion]
+# category: hr_legal
+
+name: employee-onboarding
+description: Automate new employee onboarding - checklist, welcome email, accounts, training plan, and manager notification
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack, notion, mail]
+
+input_schema:
+  required: ["employee_name", "role", "department", "start_date", "manager_email"]
+  properties:
+    employee_name:
+      type: string
+      description: "Full name of the new employee"
+    role:
+      type: string
+      description: "Job title/role (e.g. 'Senior Frontend Engineer')"
+    department:
+      type: string
+      description: "Department (e.g. 'Engineering', 'Marketing', 'Sales')"
+    start_date:
+      type: string
+      description: "Start date in YYYY-MM-DD format"
+    manager_email:
+      type: string
+      description: "Direct manager's email address"
+    employee_email:
+      type: string
+      description: "New employee's email address (if already provisioned)"
+    location:
+      type: string
+      description: "Office location or 'Remote' (default: 'Remote')"
+      default: "Remote"
+
+steps:
+  - id: create-checklist
+    prompt: |
+      Create a comprehensive onboarding checklist for a new employee in Notion.
+
+      Employee: {input.employee_name}
+      Role: {input.role}
+      Department: {input.department}
+      Start date: {input.start_date}
+      Location: {input.location}
+
+      Use the Notion tool to create a new page:
+        node /home/user/tools/notion.mjs create_page 'Onboarding' '<content>'
+
+      Generate a department-appropriate checklist organized by timeline:
+
+      **Before Day 1 (IT/Admin):**
+      - [ ] Provision email and SSO accounts
+      - [ ] Set up laptop/equipment order
+      - [ ] Create accounts: Slack, GitHub/Jira, relevant SaaS tools
+      - [ ] Add to department Slack channels
+      - [ ] Prepare welcome package
+
+      **Day 1:**
+      - [ ] Welcome meeting with manager
+      - [ ] IT setup and tool access verification
+      - [ ] HR paperwork and benefits enrollment
+      - [ ] Office tour / remote setup guide
+      - [ ] Team introduction
+
+      **Week 1:**
+      - [ ] Department-specific onboarding sessions
+      - [ ] 1:1 with key stakeholders
+      - [ ] First small task/project assignment
+      - [ ] Security and compliance training
+
+      **First 30 Days:**
+      - [ ] Complete all required training modules
+      - [ ] 30-day check-in with manager
+      - [ ] Feedback survey
+
+      Customize items based on department and role. Return the Notion page URL and checklist.
+    model: sonnet
+    max_turns: 8
+    tools: [notion]
+
+  - id: send-welcome-email
+    depends_on: [create-checklist]
+    prompt: |
+      Send a warm welcome email to the new employee.
+
+      Employee: {input.employee_name}
+      Email: {input.employee_email}
+      Role: {input.role}
+      Department: {input.department}
+      Start date: {input.start_date}
+      Onboarding checklist: {steps.create-checklist.output}
+
+      Use the Mail tool:
+        node /home/user/tools/mail.mjs send '{input.employee_email}' '<subject>' '<body>'
+
+      Compose a welcome email that includes:
+      - Warm, personal greeting
+      - Excitement about them joining the team
+      - Their start date and first-day logistics
+      - Link to onboarding checklist in Notion
+      - Who to contact for questions (manager + IT support)
+      - What to expect in the first week
+      - Any pre-start tasks (paperwork, reading materials)
+
+      Keep the tone friendly and professional. Avoid information overload.
+      If employee_email is not provided, draft the email and note it needs to be sent manually.
+    model: sonnet
+    max_turns: 5
+    tools: [mail]
+
+  - id: setup-accounts
+    depends_on: [create-checklist]
+    prompt: |
+      Notify IT and relevant teams to set up accounts and access for the new employee.
+
+      Employee: {input.employee_name}
+      Role: {input.role}
+      Department: {input.department}
+      Start date: {input.start_date}
+
+      Use the Slack tool to post to #it-requests:
+        node /home/user/tools/slack.mjs post_message '#it-requests' '<message>'
+
+      Post a structured IT request with:
+      - Employee name and start date
+      - Required accounts based on department:
+        - All: Email, Slack, SSO, VPN
+        - Engineering: GitHub, Jira, AWS/GCP console, CI/CD
+        - Marketing: HubSpot, Analytics, CMS
+        - Sales: Salesforce, LinkedIn Sales Nav, Outreach
+        - Support: Zendesk, knowledge base admin
+      - Equipment needs based on role and location
+      - Security group/permissions level
+      - Deadline: 2 business days before start date
+
+      Also post to the department Slack channel introducing the incoming team member
+      (without sharing private details - just name, role, and start date).
+    model: haiku
+    max_turns: 5
+    tools: [slack]
+
+  - id: create-training-plan
+    depends_on: [create-checklist]
+    prompt: |
+      Create a personalized 30-day training plan for the new employee.
+
+      Employee: {input.employee_name}
+      Role: {input.role}
+      Department: {input.department}
+      Onboarding checklist: {steps.create-checklist.output}
+
+      Use the Notion tool to create a training plan page:
+        node /home/user/tools/notion.mjs create_page 'Training Plans' '<content>'
+
+      Design a structured training plan:
+
+      **Week 1 - Foundation:**
+      - Company overview, mission, and values
+      - Product deep-dive and customer personas
+      - Tools and systems training
+      - Security awareness and compliance basics
+      - Meet key team members (schedule 1:1s)
+
+      **Week 2 - Role-Specific:**
+      - Department processes and workflows
+      - Role-specific tool training
+      - Shadow experienced team member
+      - First small assignment with mentor guidance
+
+      **Week 3 - Building Independence:**
+      - Take on tasks with decreasing supervision
+      - Cross-team collaboration introduction
+      - Advanced tool/system training
+      - Mid-point check-in with manager
+
+      **Week 4 - Contributing:**
+      - Independent project work
+      - Team process participation (standups, reviews)
+      - 30-day goals assessment
+      - Feedback collection (both directions)
+
+      Customize content based on the specific role and department.
+      Include estimated time for each activity and suggested resources.
+    model: sonnet
+    max_turns: 8
+    tools: [notion]
+
+  - id: notify-manager
+    depends_on: [create-checklist, send-welcome-email, setup-accounts, create-training-plan]
+    prompt: |
+      Send a comprehensive onboarding summary to the hiring manager.
+
+      Manager email: {input.manager_email}
+      Employee: {input.employee_name}
+      Role: {input.role}
+      Start date: {input.start_date}
+
+      Onboarding checklist: {steps.create-checklist.output}
+      Welcome email status: {steps.send-welcome-email.output}
+      Account setup status: {steps.setup-accounts.output}
+      Training plan: {steps.create-training-plan.output}
+
+      Use the Mail tool:
+        node /home/user/tools/mail.mjs send '{input.manager_email}' '<subject>' '<body>'
+
+      Send a manager briefing email with:
+      1. **Status Summary** - what has been completed and what is pending
+      2. **Links** - onboarding checklist and training plan in Notion
+      3. **Manager's To-Do List:**
+         - Schedule Day 1 welcome meeting
+         - Assign onboarding buddy/mentor
+         - Prepare first-week project/tasks
+         - Block time for daily check-ins in week 1
+         - Schedule 30-day review
+      4. **Timeline** - key milestones and deadlines
+      5. **Escalation** - who to contact if anything is delayed
+
+      Also post a brief confirmation to #hr-onboarding Slack channel.
+    model: sonnet
+    max_turns: 5
+    tools: [mail, slack]

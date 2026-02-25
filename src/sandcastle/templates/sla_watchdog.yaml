@@ -1,0 +1,140 @@
+# name: SLA Watchdog
+# description: Monitor SLA compliance, check ticket response times, and alert on breaches via Slack
+# tags: [Support, Zendesk, SLA, Monitoring]
+# category: support
+
+name: sla-watchdog
+description: Monitor SLA compliance, check ticket response times, and alert on breaches via Slack
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [zendesk, slack]
+
+input_schema:
+  required: ["sla_policy"]
+  properties:
+    sla_policy:
+      type: string
+      description: "SLA policy to enforce - e.g. 'Critical: 1h first response, 4h resolution; High: 4h first response, 24h resolution'"
+    hours_lookback:
+      type: number
+      description: "How many hours back to scan for tickets (default: 24)"
+      default: 24
+    slack_channel:
+      type: string
+      description: "Slack channel for SLA breach alerts (e.g. '#sla-alerts')"
+      default: "#sla-alerts"
+
+steps:
+  - id: fetch-tickets
+    prompt: |
+      Fetch all open and pending Zendesk tickets from the last {input.hours_lookback} hours.
+
+      Use the Zendesk tool:
+        node /home/user/tools/zendesk.mjs list_tickets 'open,pending' {input.hours_lookback}
+
+      For each ticket, return: ticket_id, subject, priority, status, created_at,
+      first_response_at (null if no agent response yet), assigned_agent, requester,
+      and current SLA target based on priority.
+    model: haiku
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        tickets:
+          type: array
+          items:
+            type: object
+            properties:
+              ticket_id: { type: string }
+              subject: { type: string }
+              priority: { type: string }
+              status: { type: string }
+              created_at: { type: string }
+              first_response_at: { type: string }
+        total_count: { type: integer }
+
+  - id: check-sla
+    depends_on: [fetch-tickets]
+    prompt: |
+      Evaluate each ticket against the SLA policy and calculate compliance metrics.
+
+      Tickets: {steps.fetch-tickets.output}
+      SLA Policy: {input.sla_policy}
+
+      For each ticket, calculate:
+      1. **Time to first response** - elapsed time from creation to first agent reply
+      2. **Time to resolution** - elapsed time from creation to now (for open tickets)
+      3. **SLA target** - based on ticket priority and the policy
+      4. **Remaining time** - how much time is left before SLA breach
+      5. **Status**: compliant, at_risk (< 25% time remaining), breached
+
+      Return JSON with per-ticket SLA status and overall compliance rate (percentage).
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        compliance_rate: { type: number }
+        total_tickets: { type: integer }
+        breached_count: { type: integer }
+        at_risk_count: { type: integer }
+        ticket_details:
+          type: array
+          items:
+            type: object
+            properties:
+              ticket_id: { type: string }
+              sla_status: { type: string }
+              remaining_minutes: { type: number }
+
+  - id: identify-breaches
+    depends_on: [check-sla]
+    prompt: |
+      Analyze the SLA compliance results and identify actionable breach patterns.
+
+      SLA results: {steps.check-sla.output}
+
+      1. List all **breached** tickets with severity and duration of breach
+      2. List all **at-risk** tickets ranked by urgency (least time remaining first)
+      3. Identify patterns: repeat offenders (agents with multiple breaches),
+         problematic categories, time-of-day trends
+      4. For each breached or at-risk ticket, recommend an immediate action:
+         - Reassign to available agent
+         - Escalate to team lead
+         - Send customer proactive update
+
+      Return structured JSON with breaches, at_risk, patterns, and recommendations.
+    model: sonnet
+    max_turns: 8
+
+  - id: notify-slack
+    depends_on: [identify-breaches]
+    prompt: |
+      Post SLA compliance alerts to Slack channel {input.slack_channel}.
+
+      Breach analysis: {steps.identify-breaches.output}
+      Overall compliance: {steps.check-sla.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Format the message as:
+      :rotating_light: *SLA Watchdog Report* (last {input.hours_lookback}h)
+
+      *Overall Compliance:* <rate>%
+      - Breached: <count> tickets
+      - At Risk: <count> tickets
+      - Compliant: <count> tickets
+
+      *Immediate Action Required:*
+      For each breached ticket: ticket ID, subject, breach duration, recommended action.
+
+      *At-Risk Tickets:*
+      For each at-risk ticket: ticket ID, subject, minutes remaining.
+
+      If compliance rate is 100%, post a positive summary instead.
+    model: haiku
+    max_turns: 5
+    tools: [slack]

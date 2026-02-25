@@ -1,0 +1,145 @@
+# name: FAQ Generator
+# description: Analyze resolved support tickets to auto-generate FAQ entries and publish to Notion
+# tags: [Support, Zendesk, Notion, Knowledge-Base]
+# category: support
+
+name: faq-generator
+description: Analyze resolved support tickets to auto-generate FAQ entries and publish to Notion
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [zendesk, notion]
+
+input_schema:
+  required: ["days_lookback"]
+  properties:
+    days_lookback:
+      type: number
+      description: "How many days of resolved tickets to analyze (default: 30)"
+      default: 30
+    min_cluster_size:
+      type: number
+      description: "Minimum number of similar tickets to form a FAQ topic (default: 3)"
+      default: 3
+    notion_page_id:
+      type: string
+      description: "Notion page ID where FAQ entries will be written"
+
+steps:
+  - id: fetch-resolved
+    prompt: |
+      Fetch resolved/closed Zendesk tickets from the last {input.days_lookback} days.
+
+      Use the Zendesk tool:
+        node /home/user/tools/zendesk.mjs list_tickets 'solved,closed' {input.days_lookback}
+
+      For each ticket, return: ticket_id, subject, description (first 500 chars),
+      resolution_summary, tags, category, and satisfaction_rating if available.
+
+      Focus on tickets that had a clear resolution - skip tickets closed as spam,
+      duplicates, or without a resolution.
+    model: haiku
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        tickets:
+          type: array
+          items:
+            type: object
+            properties:
+              ticket_id: { type: string }
+              subject: { type: string }
+              description: { type: string }
+              resolution_summary: { type: string }
+              tags: { type: array, items: { type: string } }
+        total_count: { type: integer }
+
+  - id: cluster-topics
+    depends_on: [fetch-resolved]
+    prompt: |
+      Cluster the resolved tickets by topic similarity to identify recurring questions.
+
+      Resolved tickets: {steps.fetch-resolved.output}
+      Minimum cluster size: {input.min_cluster_size}
+
+      Group tickets that ask about the same underlying question or issue. For each cluster:
+      1. **Topic label** - short descriptive name (e.g. "Password Reset", "Billing Cycle")
+      2. **Canonical question** - the most common way this question is asked
+      3. **Ticket count** - number of tickets in the cluster
+      4. **Ticket IDs** - list of ticket IDs in this cluster
+      5. **Key variations** - different ways customers phrase this question
+      6. **Category** - getting-started, billing, technical, account, integrations, troubleshooting
+
+      Only include clusters with at least {input.min_cluster_size} tickets.
+      Rank clusters by ticket count (most frequent first).
+
+      Return JSON array of topic clusters.
+    model: sonnet
+    max_turns: 10
+
+  - id: generate-faq
+    depends_on: [cluster-topics, fetch-resolved]
+    prompt: |
+      Generate polished FAQ entries from the ticket clusters and their resolutions.
+
+      Topic clusters: {steps.cluster-topics.output}
+      Original tickets: {steps.fetch-resolved.output}
+
+      For each topic cluster, create a FAQ entry:
+      1. **Question** - clear, concise question in the customer's voice
+      2. **Answer** - comprehensive answer that:
+         - Directly answers the question in the first sentence
+         - Provides step-by-step instructions where applicable
+         - Includes common variations or edge cases
+         - Links to relevant docs/settings where helpful (use placeholder URLs)
+         - Keeps a friendly, helpful tone
+      3. **Category** - from the cluster analysis
+      4. **Related questions** - 1-2 related FAQ topics if applicable
+      5. **Keywords** - search keywords for discoverability
+
+      Keep answers between 50-200 words. Avoid jargon.
+      Return JSON array of FAQ entries ordered by category, then by frequency.
+    model: sonnet
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        faq_entries:
+          type: array
+          items:
+            type: object
+            properties:
+              question: { type: string }
+              answer: { type: string }
+              category: { type: string }
+              keywords: { type: array, items: { type: string } }
+        total_entries: { type: integer }
+
+  - id: write-to-notion
+    depends_on: [generate-faq]
+    prompt: |
+      Write the generated FAQ entries to the Notion knowledge base.
+
+      FAQ entries: {steps.generate-faq.output}
+      Notion page ID: {input.notion_page_id}
+
+      Use the Notion tool:
+        node /home/user/tools/notion.mjs append_blocks '{input.notion_page_id}' '<content>'
+
+      For each FAQ entry:
+      1. Create a toggle heading (H3) with the question text
+      2. Inside the toggle, add the answer as paragraph blocks
+      3. Add a divider between entries
+      4. Group entries under category headings (H2)
+
+      At the top of the page, add:
+      - Last updated timestamp
+      - Total number of FAQ entries
+      - Auto-generated notice with date range analyzed
+
+      Report how many entries were written and any errors encountered.
+    model: haiku
+    max_turns: 10
+    tools: [notion]
