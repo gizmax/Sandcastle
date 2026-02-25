@@ -102,7 +102,8 @@
     .layer-card { padding: 28px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; }
     .layer-card:hover { border-color: var(--border-light); transform: translateY(-2px); }
     .layer-card-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
-    .layer-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+    .layer-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .layer-icon svg { width: 22px; height: 22px; stroke-width: 1.75; }
     .layer-icon.green { background: var(--green-dim); }
     .layer-icon.amber { background: var(--accent-dim); }
     .layer-icon.blue { background: var(--blue-dim); }
@@ -136,12 +137,12 @@
     .compliance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
     .compliance-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); text-align: center; transition: border-color 0.2s; }
     .compliance-card:hover { border-color: var(--border-light); }
-    .compliance-card .icon { font-size: 28px; margin-bottom: 12px; }
+    .compliance-card .icon { margin-bottom: 12px; display: flex; justify-content: center; }
+    .compliance-card .icon svg { width: 28px; height: 28px; stroke-width: 1.75; }
     .compliance-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
     .compliance-card p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
     .compliance-card .status { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 100px; margin-top: 10px; }
     .compliance-card .status.active { background: var(--green-dim); color: var(--green); }
-    .compliance-card .status.planned { background: var(--accent-dim); color: var(--accent); }
 
     /* Credential table */
     .cred-table { width: 100%; border-collapse: collapse; margin-top: 24px; }
@@ -149,16 +150,6 @@
     .cred-table td { font-size: 13px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
     .cred-table tr:hover td { background: var(--surface-hover); }
     .cred-table code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); }
-
-    /* Improvements section */
-    .improve-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-    .improve-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); border-left: 3px solid var(--accent); }
-    .improve-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
-    .improve-card p { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
-    .improve-card .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 100px; margin-top: 10px; display: inline-block; }
-    .improve-card .priority.high { background: var(--red-dim); color: var(--red); }
-    .improve-card .priority.medium { background: var(--accent-dim); color: var(--accent); }
-    .improve-card .priority.low { background: var(--blue-dim); color: var(--blue); }
 
     /* Stats bar */
     .stats-bar { display: flex; flex-wrap: wrap; gap: 32px; justify-content: center; margin-bottom: 48px; }
@@ -320,7 +311,7 @@
         <!-- Sandbox Isolation -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon green">&#x1f512;</div>
+            <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
             <h3>Sandbox Isolation</h3>
           </div>
           <p>AI agent code runs in ephemeral sandboxes that are destroyed after each execution. No shared state, no persistent access to host resources.</p>
@@ -336,7 +327,7 @@
         <!-- Authentication -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon blue">&#x1f511;</div>
+            <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
             <h3>Authentication</h3>
           </div>
           <p>API key authentication with HMAC-SHA256 hashing. Keys are never stored in plaintext - only their peppered hash is persisted.</p>
@@ -353,7 +344,7 @@
         <!-- Multi-Tenant Isolation -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon blue">&#x1f465;</div>
+            <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
             <h3>Multi-Tenant Isolation</h3>
           </div>
           <p>Each API key is scoped to a tenant. Tenant-scoped queries filter all data access to prevent cross-tenant leaks.</p>
@@ -368,7 +359,7 @@
         <!-- Policy Engine -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon amber">&#x1f6e1;</div>
+            <div class="layer-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
             <h3>Policy Engine</h3>
           </div>
           <p>Declarative policy rules that evaluate step outputs in real-time. Automatically redact PII, block secrets, and trigger approvals.</p>
@@ -386,7 +377,7 @@
         <!-- SSRF Prevention -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon red">&#x1f6ab;</div>
+            <div class="layer-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div>
             <h3>SSRF Prevention</h3>
           </div>
           <p>All webhook callback URLs are validated against private network ranges before any HTTP request is made.</p>
@@ -402,7 +393,7 @@
         <!-- Path Traversal -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon red">&#x1f4c1;</div>
+            <div class="layer-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
             <h3>Path Traversal Protection</h3>
           </div>
           <p>All file operations are sandboxed within base directories. Resolved paths are validated to prevent escape.</p>
@@ -417,7 +408,7 @@
         <!-- Rate Limiting -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon amber">&#x23f1;</div>
+            <div class="layer-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
             <h3>Rate Limiting</h3>
           </div>
           <p>Sliding window counter per tenant or IP. Prevents abuse of expensive sandbox execution endpoints.</p>
@@ -432,7 +423,7 @@
         <!-- Credential Management -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon green">&#x1f50f;</div>
+            <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v3H7V7a5 5 0 0 1 5-5z"/><rect x="3" y="10" width="18" height="12" rx="2"/><circle cx="12" cy="16" r="1"/></svg></div>
             <h3>Credential Management</h3>
           </div>
           <p>Tool credentials are resolved from environment variables or database-stored named connections. Never logged, never exposed in outputs.</p>
@@ -448,7 +439,7 @@
         <!-- Telemetry Anonymization -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon blue">&#x1f4ca;</div>
+            <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="1" y1="1" x2="23" y2="23"/></svg></div>
             <h3>Telemetry Anonymization</h3>
           </div>
           <p>Opt-in error reporting via Sentry with aggressive anonymization. Disabled by default. No user data, no secrets, no hostnames.</p>
@@ -464,7 +455,7 @@
         <!-- Webhook Signing -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon green">&#x270d;</div>
+            <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
             <h3>Webhook Signing</h3>
           </div>
           <p>Outgoing webhooks are signed with HMAC-SHA256. Recipients can verify authenticity using the signature header.</p>
@@ -479,7 +470,7 @@
         <!-- Circuit Breaker -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon amber">&#x26a1;</div>
+            <div class="layer-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
             <h3>Circuit Breaker</h3>
           </div>
           <p>Three-state circuit breaker protects against cascading backend failures. Automatically recovers when the backend stabilizes.</p>
@@ -495,7 +486,7 @@
         <!-- Audit Trail -->
         <div class="layer-card">
           <div class="layer-card-header">
-            <div class="layer-icon blue">&#x1f4dd;</div>
+            <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></div>
             <h3>Audit Trail</h3>
           </div>
           <p>Every policy violation, approval decision, and API key usage is recorded in the database with timestamps and context.</p>
@@ -582,94 +573,46 @@
 
       <div class="compliance-grid">
         <div class="compliance-card">
-          <div class="icon">&#x1f6e1;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
           <h4>SOC 2 Type II</h4>
           <p>E2B cloud sandbox infrastructure is SOC 2 Type II certified</p>
           <div class="status active">E2B Backend</div>
         </div>
         <div class="compliance-card">
-          <div class="icon">&#x1f512;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
           <h4>Data Isolation</h4>
           <p>Multi-tenant scoping on every API query. Ephemeral sandboxes with zero shared state</p>
           <div class="status active">Active</div>
         </div>
         <div class="compliance-card">
-          <div class="icon">&#x1f4dd;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
           <h4>Audit Logging</h4>
           <p>Policy violations, approval decisions, and key usage tracked in database</p>
           <div class="status active">Active</div>
         </div>
         <div class="compliance-card">
-          <div class="icon">&#x1f50f;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
           <h4>Secret Management</h4>
           <p>Credentials in env vars or encrypted DB. Never logged, masked for display</p>
           <div class="status active">Active</div>
         </div>
         <div class="compliance-card">
-          <div class="icon">&#x1f6ab;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div>
           <h4>PII Protection</h4>
           <p>Automatic redaction of email, phone, SSN, credit card patterns in outputs</p>
           <div class="status active">Active</div>
         </div>
         <div class="compliance-card">
-          <div class="icon">&#x1f4ca;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="1" y1="1" x2="23" y2="23"/></svg></div>
           <h4>Telemetry Privacy</h4>
           <p>Opt-in only. Aggressive anonymization strips all secrets and user data</p>
           <div class="status active">Active</div>
         </div>
         <div class="compliance-card">
-          <div class="icon">&#x1f310;</div>
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
           <h4>GDPR Ready</h4>
           <p>No PII in telemetry. Tenant data isolation. PII redaction in policy engine</p>
           <div class="status active">Active</div>
-        </div>
-        <div class="compliance-card">
-          <div class="icon">&#x1f527;</div>
-          <h4>Encryption at Rest</h4>
-          <p>Database credential encryption and S3 server-side encryption</p>
-          <div class="status planned">Planned</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Improvement Recommendations -->
-  <section>
-    <div class="container fade-in">
-      <div class="section-label">Roadmap</div>
-      <h2 class="section-title">Security improvements</h2>
-      <p class="section-subtitle">Areas identified for hardening. These are enhancements, not vulnerabilities - existing controls mitigate these risks today.</p>
-
-      <div class="improve-grid">
-        <div class="improve-card">
-          <h4>Credential Encryption at Rest</h4>
-          <p>Named connection credentials are stored as plaintext JSON in the database. Encrypt with AES-256-GCM using a server-managed key envelope.</p>
-          <div class="priority high">High Priority</div>
-        </div>
-        <div class="improve-card">
-          <h4>API Key Rotation</h4>
-          <p>No built-in key rotation mechanism. Add automated rotation with grace period for old keys and notification on rotation.</p>
-          <div class="priority high">High Priority</div>
-        </div>
-        <div class="improve-card">
-          <h4>IP Allowlisting</h4>
-          <p>API access is currently unrestricted by source IP. Add per-key CIDR allowlists for enterprise deployments.</p>
-          <div class="priority medium">Medium Priority</div>
-        </div>
-        <div class="improve-card">
-          <h4>CSP Headers</h4>
-          <p>Dashboard does not set Content-Security-Policy headers. Add strict CSP to prevent XSS and data exfiltration.</p>
-          <div class="priority medium">Medium Priority</div>
-        </div>
-        <div class="improve-card">
-          <h4>Distributed Rate Limiting</h4>
-          <p>Rate limiter is in-memory only - resets on restart and doesn't scale across replicas. Add Redis-backed sliding window.</p>
-          <div class="priority medium">Medium Priority</div>
-        </div>
-        <div class="improve-card">
-          <h4>Docker Seccomp Profiles</h4>
-          <p>Docker sandbox runs non-root but without seccomp/AppArmor profiles. Add custom seccomp profile to restrict system calls.</p>
-          <div class="priority low">Low Priority</div>
         </div>
       </div>
     </div>
