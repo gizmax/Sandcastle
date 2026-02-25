@@ -1776,7 +1776,7 @@
     /* ========== Fetch ========== */
     async function fetchRegistry() {
       try {
-        var res = await fetch('./registry.json');
+        var res = await fetch('./registry.json?v=' + Date.now());
         if (!res.ok) throw new Error('HTTP ' + res.status);
         registry = await res.json();
         animateStats(registry.stats);
