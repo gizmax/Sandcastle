@@ -84,17 +84,21 @@ export default function EvaluationsPage() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [stats, setStats] = useState<EvalStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedCases, setExpandedCases] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
       const [runsRes, statsRes] = await Promise.all([
         api.get<EvalRun[]>("/eval/runs"),
         api.get<EvalStats>("/eval/stats"),
       ]);
       if (runsRes.data) setRuns(runsRes.data);
       if (statsRes.data) setStats(statsRes.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -118,6 +122,23 @@ export default function EvaluationsPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Evaluations</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchData(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

@@ -73,16 +73,20 @@ export default function AutoPilotPage() {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [stats, setStats] = useState<AutoPilotStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
       const [expRes, statsRes] = await Promise.all([
         api.get<Experiment[]>("/autopilot/experiments"),
         api.get<AutoPilotStats>("/autopilot/stats"),
       ]);
       if (expRes.data) setExperiments(expRes.data);
       if (statsRes.data) setStats(statsRes.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -135,6 +139,23 @@ export default function AutoPilotPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">AutoPilot</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchData(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
