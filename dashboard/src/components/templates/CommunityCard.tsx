@@ -1,4 +1,4 @@
-import { Download, Eye, ExternalLink, User } from "lucide-react";
+import { Download, Eye, ExternalLink, User, GitFork } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Category label + color mappings
@@ -41,6 +41,12 @@ export interface CommunityTemplate {
   tools: string[];
   download_url: string;
   created_at: string;
+  estimated_cost_per_run?: number;
+  avg_execution_time?: string;
+  downloads?: number;
+  remix_count?: number;
+  forked_from?: string | null;
+  source?: string;
 }
 
 interface CommunityCardProps {
@@ -86,7 +92,7 @@ export function CommunityCard({ template, onInstall, onPreview }: CommunityCardP
       </p>
 
       {/* Author */}
-      <div className="flex items-center gap-1.5 mb-3">
+      <div className="flex items-center gap-1.5 mb-1">
         <User className="h-3 w-3 text-muted-foreground" />
         <a
           href={template.author_url}
@@ -99,6 +105,19 @@ export function CommunityCard({ template, onInstall, onPreview }: CommunityCardP
           <ExternalLink className="h-2.5 w-2.5" />
         </a>
       </div>
+
+      {/* Remixed from */}
+      {template.forked_from && (
+        <p className="text-[10px] text-accent/70 mb-1 ml-4.5 flex items-center gap-1">
+          <GitFork className="h-2.5 w-2.5" />
+          Remixed from{" "}
+          <span className="font-medium text-accent hover:text-accent-hover cursor-pointer">
+            {template.forked_from}
+          </span>
+        </p>
+      )}
+
+      <div className="mb-3" />
 
       {/* Tags */}
       <div className="flex flex-wrap gap-1 mb-3">
@@ -140,13 +159,41 @@ export function CommunityCard({ template, onInstall, onPreview }: CommunityCardP
             </span>
           ))}
         </div>
-        <span className="text-[11px] text-muted-foreground shrink-0 ml-2 font-data">
-          {template.step_count} {template.step_count === 1 ? "step" : "steps"}
-        </span>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {template.downloads != null && template.downloads > 0 && (
+            <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground font-data">
+              <Download className="h-2.5 w-2.5" />
+              {template.downloads}
+            </span>
+          )}
+          {template.remix_count != null && template.remix_count > 0 && (
+            <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground font-data">
+              <GitFork className="h-2.5 w-2.5" />
+              {template.remix_count}
+            </span>
+          )}
+          <span className="text-[11px] text-muted-foreground font-data">
+            {template.step_count} {template.step_count === 1 ? "step" : "steps"}
+          </span>
+        </div>
       </div>
 
-      {/* Action buttons */}
+      {/* Cost badge + Action buttons */}
       <div className="flex items-center gap-2 pt-2 border-t border-border/60">
+        {template.estimated_cost_per_run != null && (
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-mono font-medium shrink-0",
+              template.estimated_cost_per_run < 0.01
+                ? "bg-success/15 text-success"
+                : template.estimated_cost_per_run > 0.05
+                  ? "bg-error/15 text-error"
+                  : "bg-accent/15 text-accent"
+            )}
+          >
+            ~${template.estimated_cost_per_run.toFixed(3)}
+          </span>
+        )}
         <button
           type="button"
           onClick={(e) => {
@@ -176,6 +223,21 @@ export function CommunityCard({ template, onInstall, onPreview }: CommunityCardP
         >
           <Eye className="h-3 w-3" />
           Preview
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreview();
+          }}
+          className={cn(
+            "flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5",
+            "text-xs font-medium text-muted-foreground",
+            "hover:text-foreground hover:bg-border/40 transition-colors"
+          )}
+        >
+          <GitFork className="h-3 w-3" />
+          Remix
         </button>
       </div>
     </div>

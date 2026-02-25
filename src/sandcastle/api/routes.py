@@ -574,6 +574,61 @@ async def get_hub_registry() -> ApiResponse:
         )
 
 
+@router.get("/hub/collections")
+async def get_hub_collections() -> ApiResponse:
+    """Get curated workflow collections from the community hub.
+
+    Public endpoint - no authentication required.
+    """
+    registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(registry_url)
+            resp.raise_for_status()
+            data = resp.json()
+            collections = data.get("collections", [])
+            # Enrich with template details
+            templates_by_slug: dict[str, dict] = {
+                t["slug"]: t for t in data.get("templates", [])
+            }
+            for col in collections:
+                col["templates"] = [
+                    templates_by_slug[slug]
+                    for slug in col.get("template_slugs", [])
+                    if slug in templates_by_slug
+                ]
+                col["template_count"] = len(col["templates"])
+            return ApiResponse(data=collections)
+    except Exception:
+        return ApiResponse(data=[])
+
+
+@router.post("/hub/playground")
+async def hub_playground(request: Request) -> ApiResponse:
+    """Simulate a workflow execution for the community hub playground.
+
+    Returns a mock result - no actual execution happens.
+    Public endpoint - no authentication required.
+    """
+    body = await request.json()
+    template_slug = body.get("slug", "")
+    inputs = body.get("inputs", {})
+
+    # Generate a simulated result based on the template
+    result = {
+        "slug": template_slug,
+        "status": "completed",
+        "execution_time": "3.2s",
+        "steps_completed": body.get("step_count", 3),
+        "output": (
+            f"Simulated output for '{template_slug}' with {len(inputs)} input(s). "
+            "Install this workflow and connect your tools to see real results."
+        ),
+        "note": "This is a demo preview - install the workflow for actual execution.",
+    }
+    return ApiResponse(data=result)
+
+
 @router.get("/workflows/{name}/export")
 async def export_workflow(name: str, request: Request) -> ApiResponse:
     """Export a saved workflow as sanitized YAML for sharing.

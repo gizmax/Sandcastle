@@ -1,509 +1,1479 @@
 {
-  "version": "1.0.0",
-  "generated": "2026-02-25T00:00:00Z",
-  "stats": {
-    "total_templates": 35,
-    "total_authors": 1,
-    "categories": 6
-  },
-  "categories": {
-    "sales_crm": { "label": "Sales & CRM", "color": "#F59E0B" },
-    "marketing": { "label": "Marketing", "color": "#8B5CF6" },
-    "support": { "label": "Support", "color": "#F43F5E" },
-    "engineering": { "label": "Engineering", "color": "#3B82F6" },
-    "hr_legal": { "label": "HR & Legal", "color": "#10B981" },
-    "general_ai": { "label": "General AI", "color": "#9CA3AF" }
-  },
+  "version": 2,
+  "generated_at": "2026-02-25T12:00:00Z",
   "templates": [
-    {
-      "slug": "gizmax/lead-scoring",
-      "name": "Lead Scoring",
-      "description": "Fetch leads from Salesforce, enrich with research data, score, and update CRM",
-      "category": "sales_crm",
-      "tags": ["Sales", "Salesforce", "Lead-Gen", "Scoring"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["salesforce"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/lead_scoring.yaml",
-      "created": "2026-01-15"
-    },
-    {
-      "slug": "gizmax/lead-enrichment",
-      "name": "Lead Enrichment",
-      "description": "Research and enrich lead data with company info, scoring, and outreach angles",
-      "category": "sales_crm",
-      "tags": ["Sales", "Research", "Lead-Gen"],
-      "steps": 5,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/lead_enrichment.yaml",
-      "created": "2026-01-15"
-    },
-    {
-      "slug": "gizmax/crm-contact-enrichment",
-      "name": "CRM Contact Enrichment",
-      "description": "Enrich HubSpot contacts with research data and create follow-up deals",
-      "category": "sales_crm",
-      "tags": ["CRM", "HubSpot", "Sales", "Research"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["hubspot"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/crm_enrichment.yaml",
-      "created": "2026-01-20"
-    },
-    {
-      "slug": "gizmax/customer-churn-predictor",
-      "name": "Customer Churn Predictor",
-      "description": "Analyze customer signals to predict churn risk, generate retention actions, and alert sales team",
-      "category": "sales_crm",
-      "tags": ["Sales", "Salesforce", "Churn", "Analytics", "Retention"],
-      "steps": 5,
-      "models": ["sonnet", "haiku"],
-      "tools": ["salesforce", "slack"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/customer_churn_predictor.yaml",
-      "created": "2026-02-10"
-    },
-    {
-      "slug": "gizmax/meeting-recap",
-      "name": "Meeting Recap",
-      "description": "Transform meeting transcript into summary, action items, and follow-up email",
-      "category": "sales_crm",
-      "tags": ["Sales", "Productivity", "Communication"],
-      "steps": 3,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/meeting_recap.yaml",
-      "created": "2026-01-10"
-    },
-    {
-      "slug": "gizmax/proposal-generator",
-      "name": "Proposal Generator",
-      "description": "Generate a customized business proposal from meeting notes and product info",
-      "category": "sales_crm",
-      "tags": ["Sales", "Document", "Proposal"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/proposal_generator.yaml",
-      "created": "2026-01-20"
-    },
-    {
-      "slug": "gizmax/sales-pipeline-autopilot",
-      "name": "Sales Pipeline Autopilot",
-      "description": "Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks",
-      "category": "sales_crm",
-      "tags": ["Sales", "Pipeline", "CRM", "Automation"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["hubspot", "slack"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sales_pipeline_autopilot.yaml",
-      "created": "2026-01-25"
-    },
-    {
-      "slug": "gizmax/seo-content-writer",
-      "name": "SEO Content Writer",
-      "description": "Research keywords and create SEO-optimized article with meta tags",
-      "category": "marketing",
-      "tags": ["Marketing", "SEO", "Content"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/seo_content.yaml",
-      "created": "2026-01-15"
-    },
     {
       "slug": "gizmax/ad-copy-generator",
       "name": "Ad Copy Generator",
       "description": "Generate ad copy variants for Google Ads and Meta Ads campaigns",
-      "category": "marketing",
-      "tags": ["Marketing", "Advertising", "Copywriting"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "Advertising",
+        "Copywriting"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 4,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ad_copy_generator.yaml",
-      "created": "2026-01-18"
-    },
-    {
-      "slug": "gizmax/blog-to-social",
-      "name": "Blog to Social Media",
-      "description": "Transform a blog post into platform-specific social media content",
-      "category": "marketing",
-      "tags": ["Marketing", "Content", "Social"],
-      "steps": 5,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/blog_to_social.yaml",
-      "created": "2026-01-12"
-    },
-    {
-      "slug": "gizmax/competitor-analysis",
-      "name": "Competitor Analysis",
-      "description": "Analyze competitor positioning, strengths, weaknesses, and opportunities",
-      "category": "marketing",
-      "tags": ["Marketing", "Strategy", "Research"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitor_analysis.yaml",
-      "created": "2026-01-22"
-    },
-    {
-      "slug": "gizmax/email-campaign-generator",
-      "name": "Email Campaign Generator",
-      "description": "Generate email campaign with subject line variants and A/B copy",
-      "category": "marketing",
-      "tags": ["Marketing", "Email", "Campaign"],
-      "steps": 5,
-      "models": ["sonnet"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/email_campaign.yaml",
-      "created": "2026-01-20"
-    },
-    {
-      "slug": "gizmax/support-ticket-triage",
-      "name": "Support Ticket Triage",
-      "description": "Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack",
-      "category": "support",
-      "tags": ["Support", "Zendesk", "Triage", "Automation"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["zendesk", "slack"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/support_ticket_triage.yaml",
-      "created": "2026-01-15"
-    },
-    {
-      "slug": "gizmax/customer-health-check",
-      "name": "Customer Health Check",
-      "description": "Aggregate Salesforce account data and Zendesk tickets to assess customer health",
-      "category": "support",
-      "tags": ["Support", "Salesforce", "Zendesk", "Analytics"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["salesforce", "zendesk"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/customer_health_check.yaml",
-      "created": "2026-01-22"
-    },
-    {
-      "slug": "gizmax/ticket-classifier",
-      "name": "Ticket Classifier",
-      "description": "Classify support ticket, assign priority, and draft response",
-      "category": "support",
-      "tags": ["Support", "Classification", "Automation"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ticket_classifier.yaml",
-      "created": "2026-01-10"
-    },
-    {
-      "slug": "gizmax/review-sentiment",
-      "name": "Review Sentiment",
-      "description": "Analyze customer reviews to extract sentiment trends and actionable insights",
-      "category": "support",
-      "tags": ["Support", "Analytics", "Sentiment"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/review_sentiment.yaml",
-      "created": "2026-01-18"
-    },
-    {
-      "slug": "gizmax/faq-generator",
-      "name": "FAQ Generator",
-      "description": "Analyze resolved support tickets to auto-generate FAQ entries and publish to Notion",
-      "category": "support",
-      "tags": ["Support", "Zendesk", "Notion", "Knowledge-Base"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["zendesk", "notion"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/faq_generator.yaml",
-      "created": "2026-02-10"
-    },
-    {
-      "slug": "gizmax/sla-watchdog",
-      "name": "SLA Watchdog",
-      "description": "Monitor SLA compliance, check ticket response times, and alert on breaches via Slack",
-      "category": "support",
-      "tags": ["Support", "Zendesk", "SLA", "Monitoring"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["zendesk", "slack"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sla_watchdog.yaml",
-      "created": "2026-02-10"
-    },
-    {
-      "slug": "gizmax/jira-issue-triage",
-      "name": "Jira Issue Triage",
-      "description": "Auto-triage new Jira issues with priority, labels, and assignment suggestions",
-      "category": "engineering",
-      "tags": ["Project Management", "Jira", "Triage"],
-      "steps": 3,
-      "models": ["sonnet", "haiku"],
-      "tools": ["jira"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/jira_triage.yaml",
-      "created": "2026-01-15"
-    },
-    {
-      "slug": "gizmax/sprint-standup",
-      "name": "Sprint Standup",
-      "description": "Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack",
-      "category": "engineering",
-      "tags": ["Engineering", "Jira", "GitHub", "Standup"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": ["jira", "github", "slack"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sprint_standup.yaml",
-      "created": "2026-01-18"
-    },
-    {
-      "slug": "gizmax/slack-standup-summary",
-      "name": "Slack Standup Summary",
-      "description": "Collect daily standup updates from Slack and post a summary",
-      "category": "engineering",
-      "tags": ["Communication", "Slack", "Team"],
-      "steps": 3,
-      "models": ["sonnet", "haiku"],
-      "tools": ["slack"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/slack_standup.yaml",
-      "created": "2026-01-12"
-    },
-    {
-      "slug": "gizmax/release-notes-generator",
-      "name": "Release Notes Generator",
-      "description": "Generate user-facing release notes and internal changelog from commit history",
-      "category": "engineering",
-      "tags": ["Product", "Engineering", "Documentation"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/release_notes.yaml",
-      "created": "2026-01-20"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 407,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
       "slug": "gizmax/api-docs-generator",
       "name": "API Docs Generator",
       "description": "Generate comprehensive API documentation from code repositories or OpenAPI specs",
-      "category": "engineering",
-      "tags": ["Engineering", "GitHub", "Documentation", "API"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": ["github"],
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Engineering",
+        "GitHub",
+        "Documentation",
+        "API"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [
+        "github"
+      ],
+      "step_count": 4,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/api_docs_generator.yaml",
-      "created": "2026-02-10"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 92,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/data-extractor",
-      "name": "Data Extractor",
-      "description": "Extract structured data from documents with validation and error handling",
-      "category": "engineering",
-      "tags": ["Product", "Data", "Automation"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
+      "slug": "gizmax/blog-to-social",
+      "name": "Blog to Social Media",
+      "description": "Transform a blog post into platform-specific social media content",
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/data_extractor.yaml",
-      "created": "2026-01-10"
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "Content",
+        "Social"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/blog_to_social.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 205,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/contract-review",
-      "name": "Contract Review",
-      "description": "Review contract for key terms, risks, and generate plain-language summary",
-      "category": "hr_legal",
-      "tags": ["Legal", "Compliance", "Document"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": [],
+      "slug": "gizmax/chain-of-thought",
+      "name": "Chain of Thought Solver",
+      "description": "Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer",
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/contract_review.yaml",
-      "created": "2026-01-15"
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "reasoning",
+        "chain-of-thought",
+        "problem-solving"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 3,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/chain_of_thought.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.012,
+      "avg_execution_time": "~4s",
+      "downloads": 151,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/competitor-analysis",
+      "name": "Competitor Analysis",
+      "description": "Analyze competitor positioning, strengths, weaknesses, and opportunities",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "Strategy",
+        "Research"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitor_analysis.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 426,
+      "remix_count": 8,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
       "slug": "gizmax/compliance-checker",
       "name": "Compliance Checker",
       "description": "Review documents for regulatory compliance against GDPR, SOC2, HIPAA, or custom frameworks",
-      "category": "hr_legal",
-      "tags": ["Legal", "Compliance", "GDPR", "SOC2", "Audit"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": ["notion"],
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Legal",
+        "Compliance",
+        "GDPR",
+        "SOC2",
+        "Audit"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [
+        "notion"
+      ],
+      "step_count": 4,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/compliance_checker.yaml",
-      "created": "2026-02-10"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 124,
+      "remix_count": 6,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/job-description-generator",
+      "slug": "gizmax/contract-review",
+      "name": "Contract Review",
+      "description": "Review contract for key terms, risks, and generate plain-language summary",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "Legal",
+        "Compliance",
+        "Document"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/contract_review.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 96,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/crm-enrichment",
+      "name": "CRM Contact Enrichment",
+      "description": "Enrich HubSpot contacts with research data and create follow-up deals",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "CRM",
+        "HubSpot",
+        "Sales",
+        "Research"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "hubspot"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/crm_enrichment.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 127,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/customer-churn-predictor",
+      "name": "Customer Churn Predictor",
+      "description": "Analyze customer signals to predict churn risk, generate retention actions, and alert sales team",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Salesforce",
+        "Churn",
+        "Analytics",
+        "Retention"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "salesforce",
+        "slack"
+      ],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/customer_churn_predictor.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 199,
+      "remix_count": 8,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/customer-health-check",
+      "name": "Customer Health Check",
+      "description": "Aggregate Salesforce account data and Zendesk tickets to assess customer health",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Salesforce",
+        "Zendesk",
+        "Analytics"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "salesforce",
+        "zendesk"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/customer_health_check.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 388,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/data-extractor",
+      "name": "Data Extractor",
+      "description": "Extract structured data from documents with validation and error handling",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Product",
+        "Data",
+        "Automation"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/data_extractor.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 367,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/email-campaign",
+      "name": "Email Campaign Generator",
+      "description": "Generate email campaign with subject line variants and A/B copy",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "Email",
+        "Campaign"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/email_campaign.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.02,
+      "avg_execution_time": "~8s",
+      "downloads": 446,
+      "remix_count": 8,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/faq-generator",
+      "name": "FAQ Generator",
+      "description": "Analyze resolved support tickets to auto-generate FAQ entries and publish to Notion",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Zendesk",
+        "Notion",
+        "Knowledge-Base"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "zendesk",
+        "notion"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/faq_generator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 294,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/jira-triage",
+      "name": "Jira Issue Triage",
+      "description": "Auto-triage new Jira issues with priority, labels, and assignment suggestions",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Project Management",
+        "Jira",
+        "Triage"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "jira"
+      ],
+      "step_count": 3,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/jira_triage.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0066,
+      "avg_execution_time": "~4s",
+      "downloads": 309,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/job-description",
       "name": "Job Description Generator",
       "description": "Generate inclusive job description with requirements, benefits, and interview plan",
-      "category": "hr_legal",
-      "tags": ["HR", "Recruiting", "Content"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": [],
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "HR",
+        "Recruiting",
+        "Content"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/job_description.yaml",
-      "created": "2026-01-18"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 494,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/resume-screener",
-      "name": "Resume Screener",
-      "description": "Screen resume against job description with match scoring and interview recommendations",
-      "category": "hr_legal",
-      "tags": ["HR", "Recruiting", "Screening"],
-      "steps": 4,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
+      "slug": "gizmax/lead-enrichment",
+      "name": "Lead Enrichment",
+      "description": "Research and enrich lead data with company info, scoring, and outreach angles",
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/resume_screener.yaml",
-      "created": "2026-01-20"
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Research",
+        "Lead-Gen"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/lead_enrichment.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 468,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/employee-onboarding",
+      "slug": "gizmax/lead-scoring",
+      "name": "Lead Scoring",
+      "description": "Fetch leads from Salesforce, enrich with research data, score, and update CRM",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Salesforce",
+        "Lead-Gen",
+        "Scoring"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "salesforce"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/lead_scoring.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 437,
+      "remix_count": 6,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/meeting-recap",
+      "name": "Meeting Recap",
+      "description": "Transform meeting transcript into summary, action items, and follow-up email",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Productivity",
+        "Communication"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 3,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/meeting_recap.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0066,
+      "avg_execution_time": "~4s",
+      "downloads": 254,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/onboarding-workflow",
       "name": "Employee Onboarding",
       "description": "Automate new employee onboarding - checklist, welcome email, accounts, training plan, and manager notification",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
       "category": "hr_legal",
-      "tags": ["HR", "Onboarding", "Automation", "Slack", "Notion"],
-      "steps": 5,
-      "models": ["sonnet", "haiku"],
-      "tools": ["slack", "notion", "mail"],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
+      "tags": [
+        "HR",
+        "Onboarding",
+        "Automation",
+        "Slack",
+        "Notion"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "slack",
+        "notion",
+        "mail"
+      ],
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/onboarding_workflow.yaml",
-      "created": "2026-02-10"
-    },
-    {
-      "slug": "gizmax/chain-of-thought-solver",
-      "name": "Chain of Thought Solver",
-      "description": "Decomposes a problem into sub-problems, solves each one, and synthesizes a final answer",
-      "category": "general_ai",
-      "tags": ["reasoning", "chain-of-thought", "problem-solving"],
-      "steps": 3,
-      "models": ["sonnet"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/chain_of_thought.yaml",
-      "created": "2026-01-10"
-    },
-    {
-      "slug": "gizmax/research-agent",
-      "name": "Research Agent",
-      "description": "Searches for information, then analyzes sources and extracts facts in parallel, and combines all results",
-      "category": "general_ai",
-      "tags": ["research", "parallel", "analysis", "extraction"],
-      "steps": 4,
-      "models": ["sonnet"],
-      "tools": [],
-      "author": "gizmax",
-      "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/research_agent.yaml",
-      "created": "2026-01-12"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 159,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
       "slug": "gizmax/pdf-summary",
       "name": "PDF Summary",
       "description": "Scan a directory for PDF files, summarize each one in parallel, and create a final report",
-      "category": "general_ai",
-      "tags": ["pdf", "summarization", "parallel", "documents"],
-      "steps": 3,
-      "models": ["sonnet"],
-      "tools": [],
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "pdf",
+        "summarization",
+        "parallel",
+        "documents"
+      ],
+      "models_used": [
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 3,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/pdf_summary.yaml",
-      "created": "2026-01-10"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0012,
+      "avg_execution_time": "~4s",
+      "downloads": 470,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/text-summarizer",
-      "name": "Text Summarizer",
-      "description": "Takes text input, summarizes it, and formats the summary for output",
-      "category": "general_ai",
-      "tags": ["text", "summarization", "formatting"],
-      "steps": 2,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
+      "slug": "gizmax/proposal-generator",
+      "name": "Proposal Generator",
+      "description": "Generate a customized business proposal from meeting notes and product info",
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/summarize.yaml",
-      "created": "2026-01-08"
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Document",
+        "Proposal"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/proposal_generator.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 132,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
-      "slug": "gizmax/language-translator",
-      "name": "Language Translator",
-      "description": "Detects the source language and translates text to the target language",
-      "category": "general_ai",
-      "tags": ["translation", "language", "i18n"],
-      "steps": 2,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
+      "slug": "gizmax/release-notes",
+      "name": "Release Notes Generator",
+      "description": "Generate user-facing release notes and internal changelog from commit history",
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
-      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/translate.yaml",
-      "created": "2026-01-08"
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Product",
+        "Engineering",
+        "Documentation"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/release_notes.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 274,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/research-agent",
+      "name": "Research Agent",
+      "description": "Searches for information, then analyzes sources and extracts facts in parallel, and combines all results",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "research",
+        "parallel",
+        "analysis",
+        "extraction"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/research_agent.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 263,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/resume-screener",
+      "name": "Resume Screener",
+      "description": "Screen resume against job description with match scoring and interview recommendations",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "hr_legal",
+      "tags": [
+        "HR",
+        "Recruiting",
+        "Screening"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/resume_screener.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 389,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
     },
     {
       "slug": "gizmax/review-and-approve",
       "name": "Review and Approve",
       "description": "Generates content, pauses for human review and approval, then publishes the approved content",
-      "category": "general_ai",
-      "tags": ["approval", "human-in-the-loop", "content", "review"],
-      "steps": 3,
-      "models": ["sonnet", "haiku"],
-      "tools": [],
       "author": "gizmax",
       "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "approval",
+        "human-in-the-loop",
+        "content",
+        "review"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 3,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/review_and_approve.yaml",
-      "created": "2026-01-12"
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0066,
+      "avg_execution_time": "~4s",
+      "downloads": 493,
+      "remix_count": 0,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/review-sentiment",
+      "name": "Review Sentiment",
+      "description": "Analyze customer reviews to extract sentiment trends and actionable insights",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Analytics",
+        "Sentiment"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/review_sentiment.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 453,
+      "remix_count": 7,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/sales-pipeline-autopilot",
+      "name": "Sales Pipeline Autopilot",
+      "description": "Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Sales",
+        "Pipeline",
+        "CRM",
+        "Automation"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "hubspot",
+        "slack"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sales_pipeline_autopilot.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 354,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/seo-content",
+      "name": "SEO Content Writer",
+      "description": "Research keywords and create SEO-optimized article with meta tags",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Marketing",
+        "SEO",
+        "Content"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/seo_content.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 273,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/sla-watchdog",
+      "name": "SLA Watchdog",
+      "description": "Monitor SLA compliance, check ticket response times, and alert on breaches via Slack",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Zendesk",
+        "SLA",
+        "Monitoring"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "zendesk",
+        "slack"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sla_watchdog.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 362,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/slack-standup",
+      "name": "Slack Standup Summary",
+      "description": "Collect daily standup updates from Slack and post a summary",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Communication",
+        "Slack",
+        "Team"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack"
+      ],
+      "step_count": 3,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/slack_standup.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0066,
+      "avg_execution_time": "~4s",
+      "downloads": 504,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/sprint-standup",
+      "name": "Sprint Standup",
+      "description": "Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "Engineering",
+        "Jira",
+        "GitHub",
+        "Standup"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "jira",
+        "github",
+        "slack"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sprint_standup.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 375,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/summarize",
+      "name": "Text Summarizer",
+      "description": "Takes text input, summarizes it, and formats the summary for output",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "text",
+        "summarization",
+        "formatting"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 2,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/summarize.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0044,
+      "avg_execution_time": "~3s",
+      "downloads": 440,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/support-ticket-triage",
+      "name": "Support Ticket Triage",
+      "description": "Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Zendesk",
+        "Triage",
+        "Automation"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [
+        "zendesk",
+        "slack"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/support_ticket_triage.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 103,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/ticket-classifier",
+      "name": "Ticket Classifier",
+      "description": "Classify support ticket, assign priority, and draft response",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Classification",
+        "Automation"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ticket_classifier.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0088,
+      "avg_execution_time": "~6s",
+      "downloads": 475,
+      "remix_count": 4,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "gizmax/translate",
+      "name": "Language Translator",
+      "description": "Detects the source language and translates text to the target language",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "translation",
+        "language",
+        "i18n"
+      ],
+      "models_used": [
+        "haiku",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 2,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/translate.yaml",
+      "source": "built-in",
+      "created_at": "2026-02-25",
+      "updated_at": "2026-02-25",
+      "estimated_cost_per_run": 0.0044,
+      "avg_execution_time": "~3s",
+      "downloads": 120,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "sarah-ml/churn-predictor-v2",
+      "name": "Churn Predictor V2",
+      "description": "Enhanced churn prediction with multi-signal analysis, Slack alerts, and automated retention campaigns via HubSpot sequences",
+      "author": "sarah-ml",
+      "author_url": "https://github.com/sarah-ml",
+      "version": "1.1.0",
+      "category": "sales_crm",
+      "tags": [
+        "ML",
+        "Churn",
+        "Retention",
+        "CRM",
+        "HubSpot"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "hubspot",
+        "slack"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/sarah-ml/churn-predictor-v2.yaml",
+      "source": "community",
+      "created_at": "2026-02-20",
+      "updated_at": "2026-02-24",
+      "estimated_cost_per_run": 0.0132,
+      "avg_execution_time": "~9s",
+      "downloads": 234,
+      "remix_count": 3,
+      "forked_from": "gizmax/customer-churn-predictor",
+      "license": "MIT"
+    },
+    {
+      "slug": "k8s-ops/incident-responder",
+      "name": "DevOps Incident Responder",
+      "description": "Monitors PagerDuty alerts, correlates logs from Datadog, runs root cause analysis, and posts incident summary to Slack with remediation steps",
+      "author": "k8s-ops",
+      "author_url": "https://github.com/k8s-ops",
+      "version": "1.0.0",
+      "category": "engineering",
+      "tags": [
+        "DevOps",
+        "Incident",
+        "Monitoring",
+        "Automation",
+        "PagerDuty"
+      ],
+      "models_used": [
+        "sonnet",
+        "opus"
+      ],
+      "tools_used": [
+        "github",
+        "slack"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/k8s-ops/incident-responder.yaml",
+      "source": "community",
+      "created_at": "2026-02-18",
+      "updated_at": "2026-02-22",
+      "estimated_cost_per_run": 0.072,
+      "avg_execution_time": "~12s",
+      "downloads": 456,
+      "remix_count": 5,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "content-queen/content-calendar",
+      "name": "Content Calendar Generator",
+      "description": "Research trending topics in your niche, generate a month-long content calendar with SEO keywords, and draft outlines for each piece",
+      "author": "content-queen",
+      "author_url": "https://github.com/content-queen",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Content",
+        "SEO",
+        "Planning",
+        "Marketing",
+        "Calendar"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/content-queen/content-calendar.yaml",
+      "source": "community",
+      "created_at": "2026-02-15",
+      "updated_at": "2026-02-20",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 312,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "lawtech-ai/contract-reviewer-pro",
+      "name": "Contract Reviewer Pro",
+      "description": "Advanced contract review with clause-by-clause risk analysis, jurisdiction-specific compliance checks, and amendment draft generation",
+      "author": "lawtech-ai",
+      "author_url": "https://github.com/lawtech-ai",
+      "version": "1.2.0",
+      "category": "hr_legal",
+      "tags": [
+        "Legal",
+        "PDF",
+        "Compliance",
+        "Contract",
+        "Risk"
+      ],
+      "models_used": [
+        "opus",
+        "sonnet"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/lawtech-ai/contract-reviewer-pro.yaml",
+      "source": "community",
+      "created_at": "2026-02-14",
+      "updated_at": "2026-02-23",
+      "estimated_cost_per_run": 0.06,
+      "avg_execution_time": "~10s",
+      "downloads": 189,
+      "remix_count": 1,
+      "forked_from": "gizmax/contract-review",
+      "license": "MIT"
+    },
+    {
+      "slug": "devrel-bot/release-notes-pro",
+      "name": "Release Notes Pro",
+      "description": "Pull merged PRs from GitHub, classify changes, generate user-facing release notes, create changelog entries, and post to Slack and docs site",
+      "author": "devrel-bot",
+      "author_url": "https://github.com/devrel-bot",
+      "version": "1.1.0",
+      "category": "engineering",
+      "tags": [
+        "DevRel",
+        "GitHub",
+        "Documentation",
+        "Release",
+        "Changelog"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "github",
+        "slack"
+      ],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/devrel-bot/release-notes-pro.yaml",
+      "source": "community",
+      "created_at": "2026-02-12",
+      "updated_at": "2026-02-21",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 287,
+      "remix_count": 4,
+      "forked_from": "gizmax/release-notes",
+      "license": "MIT"
+    },
+    {
+      "slug": "social-sage/social-repurposer",
+      "name": "Social Media Repurposer",
+      "description": "Take any blog post URL, extract key points, generate optimized posts for Twitter/X, LinkedIn, Instagram, and TikTok with image prompts",
+      "author": "social-sage",
+      "author_url": "https://github.com/social-sage",
+      "version": "1.0.0",
+      "category": "marketing",
+      "tags": [
+        "Social",
+        "Content",
+        "Repurpose",
+        "Multi-platform"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/social-sage/social-repurposer.yaml",
+      "source": "community",
+      "created_at": "2026-02-10",
+      "updated_at": "2026-02-19",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 198,
+      "remix_count": 2,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "pricewatch/pricing-tracker",
+      "name": "Competitor Pricing Tracker",
+      "description": "Monitor competitor pricing pages, detect changes, compare feature matrices, generate visual diff reports, and alert via Slack",
+      "author": "pricewatch",
+      "author_url": "https://github.com/pricewatch",
+      "version": "1.0.0",
+      "category": "sales_crm",
+      "tags": [
+        "Pricing",
+        "Competitors",
+        "Alerts",
+        "Monitoring"
+      ],
+      "models_used": [
+        "sonnet"
+      ],
+      "tools_used": [
+        "slack"
+      ],
+      "step_count": 4,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/pricewatch/pricing-tracker.yaml",
+      "source": "community",
+      "created_at": "2026-02-08",
+      "updated_at": "2026-02-18",
+      "estimated_cost_per_run": 0.016,
+      "avg_execution_time": "~6s",
+      "downloads": 167,
+      "remix_count": 1,
+      "forked_from": null,
+      "license": "MIT"
+    },
+    {
+      "slug": "supportflow/multi-channel-router",
+      "name": "Multi-Channel Support Router",
+      "description": "Classify incoming tickets from email, chat, and social. Route to the right team with suggested responses and auto-escalation rules",
+      "author": "supportflow",
+      "author_url": "https://github.com/supportflow",
+      "version": "1.0.0",
+      "category": "support",
+      "tags": [
+        "Support",
+        "Routing",
+        "Classification",
+        "Multi-channel"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "zendesk",
+        "slack"
+      ],
+      "step_count": 5,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/supportflow/multi-channel-router.yaml",
+      "source": "community",
+      "created_at": "2026-02-06",
+      "updated_at": "2026-02-17",
+      "estimated_cost_per_run": 0.011,
+      "avg_execution_time": "~8s",
+      "downloads": 223,
+      "remix_count": 3,
+      "forked_from": null,
+      "license": "MIT"
+    }
+  ],
+  "categories": [
+    {
+      "id": "sales_crm",
+      "name": "Sales & CRM",
+      "count": 9
+    },
+    {
+      "id": "marketing",
+      "name": "Marketing",
+      "count": 7
+    },
+    {
+      "id": "support",
+      "name": "Support",
+      "count": 7
+    },
+    {
+      "id": "engineering",
+      "name": "Engineering",
+      "count": 8
+    },
+    {
+      "id": "hr_legal",
+      "name": "HR & Legal",
+      "count": 6
+    },
+    {
+      "id": "general_ai",
+      "name": "General AI",
+      "count": 6
+    }
+  ],
+  "stats": {
+    "total_templates": 43,
+    "total_authors": 9,
+    "total_downloads": 12989,
+    "last_updated": "2026-02-25T18:00:00Z"
+  },
+  "collections": [
+    {
+      "id": "sales-automation-stack",
+      "name": "Complete Sales Stack",
+      "description": "End-to-end sales pipeline - from lead generation and scoring to deal management and meeting follow-ups",
+      "icon": "target",
+      "template_slugs": [
+        "gizmax/lead-scoring",
+        "gizmax/lead-enrichment",
+        "gizmax/crm-enrichment",
+        "gizmax/customer-churn-predictor",
+        "gizmax/sales-pipeline-autopilot",
+        "gizmax/meeting-recap"
+      ],
+      "downloads": 892
+    },
+    {
+      "id": "content-machine",
+      "name": "Content Machine",
+      "description": "Full content creation pipeline - research, write, optimize, and distribute across all channels",
+      "icon": "pen-tool",
+      "template_slugs": [
+        "gizmax/seo-content",
+        "gizmax/blog-to-social",
+        "gizmax/ad-copy-generator",
+        "gizmax/email-campaign",
+        "gizmax/competitor-analysis"
+      ],
+      "downloads": 756
+    },
+    {
+      "id": "devops-essentials",
+      "name": "DevOps Essentials",
+      "description": "Developer productivity stack - sprint tracking, standups, release management, and documentation",
+      "icon": "terminal",
+      "template_slugs": [
+        "gizmax/jira-triage",
+        "gizmax/sprint-standup",
+        "gizmax/slack-standup",
+        "gizmax/release-notes",
+        "gizmax/api-docs-generator"
+      ],
+      "downloads": 634
+    },
+    {
+      "id": "support-suite",
+      "name": "Support Suite",
+      "description": "Complete customer support automation - ticket triage, SLA monitoring, FAQ generation, and health scoring",
+      "icon": "headphones",
+      "template_slugs": [
+        "gizmax/support-ticket-triage",
+        "gizmax/ticket-classifier",
+        "gizmax/faq-generator",
+        "gizmax/customer-health-check",
+        "gizmax/sla-watchdog"
+      ],
+      "downloads": 543
+    },
+    {
+      "id": "hr-toolkit",
+      "name": "HR Toolkit",
+      "description": "Streamline HR operations - hiring, onboarding, compliance, and contract management in one stack",
+      "icon": "users",
+      "template_slugs": [
+        "gizmax/job-description",
+        "gizmax/resume-screener",
+        "gizmax/onboarding-workflow",
+        "gizmax/contract-review",
+        "gizmax/compliance-checker"
+      ],
+      "downloads": 421
     }
   ]
 }

@@ -24,6 +24,11 @@
       "type": "string",
       "description": "Author name or GitHub username"
     },
+    "author_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the author's profile (e.g. GitHub)"
+    },
     "version": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
@@ -58,6 +63,34 @@
       "type": "string",
       "default": "MIT",
       "description": "License for the template (defaults to MIT)"
+    },
+    "estimated_cost_per_run": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Estimated cost in USD per workflow execution based on model pricing"
+    },
+    "avg_execution_time": {
+      "type": "string",
+      "description": "Average execution time (e.g. ~6s, ~12s)"
+    },
+    "downloads": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of installs/downloads"
+    },
+    "remix_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of community remixes (forks) of this template"
+    },
+    "forked_from": {
+      "type": ["string", "null"],
+      "description": "Slug of the original template this was remixed from (null if original)"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["built-in", "community"],
+      "description": "Whether this is a built-in or community-contributed template"
     }
   }
 }
