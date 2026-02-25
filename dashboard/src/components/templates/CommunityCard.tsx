@@ -1,4 +1,4 @@
-import { Download, Eye, ExternalLink, User, GitFork } from "lucide-react";
+import { Download, Eye, ExternalLink, User, GitFork, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Category label + color mappings
@@ -51,11 +51,12 @@ export interface CommunityTemplate {
 
 interface CommunityCardProps {
   template: CommunityTemplate;
+  installed?: boolean;
   onInstall: () => void;
   onPreview: () => void;
 }
 
-export function CommunityCard({ template, onInstall, onPreview }: CommunityCardProps) {
+export function CommunityCard({ template, installed, onInstall, onPreview }: CommunityCardProps) {
   const cat = CATEGORY_META[template.category] || {
     label: template.category,
     color: "bg-muted",
@@ -81,10 +82,18 @@ export function CommunityCard({ template, onInstall, onPreview }: CommunityCardP
         </span>
       </div>
 
-      {/* Name */}
-      <h3 className="text-sm font-semibold text-foreground mb-1 line-clamp-1">
-        {template.name}
-      </h3>
+      {/* Name + installed badge */}
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-sm font-semibold text-foreground line-clamp-1">
+          {template.name}
+        </h3>
+        {installed && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-success/15 border border-success/30 px-2 py-0.5 text-[10px] font-semibold text-success shrink-0">
+            <Check className="h-3 w-3" />
+            Installed
+          </span>
+        )}
+      </div>
 
       {/* Description */}
       <p className="text-xs text-muted leading-relaxed mb-3 line-clamp-2">
@@ -201,13 +210,24 @@ export function CommunityCard({ template, onInstall, onPreview }: CommunityCardP
             onInstall();
           }}
           className={cn(
-            "flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-1.5",
-            "text-xs font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5",
+            "text-xs font-medium transition-all duration-200 shadow-sm",
+            installed
+              ? "border border-success/30 text-success hover:bg-success/10 bg-transparent"
+              : "bg-accent text-accent-foreground hover:bg-accent-hover"
           )}
         >
-          <Download className="h-3 w-3" />
-          Install
+          {installed ? (
+            <>
+              <Check className="h-3 w-3" />
+              Installed
+            </>
+          ) : (
+            <>
+              <Download className="h-3 w-3" />
+              Install
+            </>
+          )}
         </button>
         <button
           type="button"

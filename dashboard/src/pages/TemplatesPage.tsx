@@ -17,6 +17,7 @@ import {
   X,
   ArrowRight,
   ChevronLeft,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import jsYaml from "js-yaml";
@@ -60,6 +61,8 @@ interface Template {
   step_count: number;
   category?: string | null;
   input_schema?: InputSchema | null;
+  source?: "community";
+  author?: string;
 }
 
 interface TemplateDetailData extends Template {
@@ -150,6 +153,9 @@ export default function TemplatesPage() {
   const [communityCollections, setCommunityCollections] = useState<CommunityCollection[]>([]);
   const [communityCollection, setCommunityCollection] = useState<string | null>(null);
 
+  // Installed community template slugs
+  const [installedSlugs, setInstalledSlugs] = useState<Set<string>>(new Set());
+
   // ---- Fetch templates ----
 
   useEffect(() => {
@@ -182,6 +188,26 @@ export default function TemplatesPage() {
       .catch(() => setCommunityError(true))
       .finally(() => setCommunityLoading(false));
   }, [viewParam, communityTemplates.length, communityLoading]);
+
+  // ---- Fetch installed community template slugs ----
+
+  useEffect(() => {
+    if (communityTemplates.length === 0) return;
+    api.get<Array<{ filename: string }>>("/hub/installed").then((res) => {
+      if (res.data) {
+        const installed = new Set<string>();
+        for (const item of res.data) {
+          const stem = item.filename.replace(".yaml", "");
+          for (const ct of communityTemplates) {
+            if (ct.slug.endsWith("/" + stem)) {
+              installed.add(ct.slug);
+            }
+          }
+        }
+        setInstalledSlugs(installed);
+      }
+    });
+  }, [communityTemplates]);
 
   // ---- Derived data ----
 
@@ -243,6 +269,26 @@ export default function TemplatesPage() {
     }
     return result;
   }, [templatesWithCategory, search, selectedTag]);
+
+  // Unified view: local templates + installed community templates
+  const allTemplatesUnified = useMemo(() => {
+    const local = allFiltered;
+    // Add installed community templates that are not already in the local list
+    const localNames = new Set(local.map((t) => t.name.toLowerCase().replace(/[^a-z0-9]/g, "")));
+    const communityInstalled = communityTemplates
+      .filter((ct) => installedSlugs.has(ct.slug))
+      .filter((ct) => !localNames.has(ct.name.toLowerCase().replace(/[^a-z0-9]/g, "")))
+      .map((ct) => ({
+        name: ct.name,
+        description: ct.description,
+        tags: ct.tags,
+        step_count: ct.step_count,
+        category: ct.category,
+        source: "community" as const,
+        author: ct.author,
+      }));
+    return [...local, ...communityInstalled];
+  }, [allFiltered, communityTemplates, installedSlugs]);
 
   // Community view: filtered templates
   const communityFiltered = useMemo(() => {
@@ -481,19 +527,47 @@ export default function TemplatesPage() {
       .finally(() => setCommunityInstallLoading(false));
   }, []);
 
-  const handleCommunityFetchAndInstall = useCallback(() => {
+  const handleCommunityFetchAndInstall = useCallback(async () => {
     if (!communityInstallTarget) return;
     setCommunityInstallLoading(true);
-    fetch(communityInstallTarget.download_url)
-      .then((res) => (res.ok ? res.text() : Promise.reject(new Error("fetch failed"))))
-      .then((yaml) => {
-        setCommunityInstallYaml(yaml);
-      })
-      .catch(() => {
-        setCommunityInstallYaml(`# Could not fetch YAML from ${communityInstallTarget.download_url}\n# Use the CLI instead:\n# sandcastle hub install ${communityInstallTarget.slug}`);
-      })
-      .finally(() => setCommunityInstallLoading(false));
+    try {
+      const res = await api.post(`/hub/install/${communityInstallTarget.slug}`);
+      if (res.error) {
+        toast.error(`Install failed: ${res.error.message}`);
+        return;
+      }
+      toast.success(`Installed ${communityInstallTarget.name}`);
+      setInstalledSlugs((prev) => new Set([...prev, communityInstallTarget.slug]));
+      setCommunityInstallTarget(null);
+      setCommunityInstallYaml(null);
+      // Refresh templates list to include newly installed
+      api.get<Template[]>("/templates").then((r) => {
+        if (r.data) setTemplates(r.data);
+      });
+    } catch {
+      toast.error("Failed to install template");
+    } finally {
+      setCommunityInstallLoading(false);
+    }
   }, [communityInstallTarget]);
+
+  const handleCommunityUninstall = useCallback(async (slug: string) => {
+    const res = await api.delete(`/hub/install/${slug}`);
+    if (res.error) {
+      toast.error(`Uninstall failed: ${res.error.message}`);
+      return;
+    }
+    toast.success("Template uninstalled");
+    setInstalledSlugs((prev) => {
+      const next = new Set(prev);
+      next.delete(slug);
+      return next;
+    });
+    // Refresh templates list
+    api.get<Template[]>("/templates").then((r) => {
+      if (r.data) setTemplates(r.data);
+    });
+  }, []);
 
   const handleCommunityOpenInBuilder = useCallback(() => {
     const tpl = communityPreviewTarget || communityInstallTarget;
@@ -528,18 +602,6 @@ export default function TemplatesPage() {
     setCommunityPreviewTarget(null);
     setCommunityInstallYaml(null);
   }, [communityInstallYaml, communityInstallTarget, communityPreviewTarget, navigate]);
-
-  const handleCommunityDownloadYaml = useCallback(() => {
-    const tpl = communityPreviewTarget || communityInstallTarget;
-    if (!communityInstallYaml || !tpl) return;
-    const blob = new Blob([communityInstallYaml], { type: "text/yaml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${tpl.slug}.yaml`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [communityInstallYaml, communityInstallTarget, communityPreviewTarget]);
 
   const closeCommunityModals = useCallback(() => {
     setCommunityInstallTarget(null);
@@ -694,7 +756,7 @@ export default function TemplatesPage() {
       {/* ---- ALL TEMPLATES VIEW ---- */}
       {viewParam === "all" && (
         <AllTemplatesView
-          templates={allFiltered}
+          templates={allTemplatesUnified}
           search={search}
           selectedTag={selectedTag}
           onTagSelect={setSelectedTag}
@@ -842,6 +904,7 @@ export default function TemplatesPage() {
                 <CommunityCard
                   key={tpl.slug}
                   template={tpl}
+                  installed={installedSlugs.has(tpl.slug)}
                   onInstall={() => handleCommunityInstall(tpl)}
                   onPreview={() => handleCommunityPreview(tpl)}
                 />
@@ -866,51 +929,77 @@ export default function TemplatesPage() {
                 </button>
               </div>
 
-              {communityInstallYaml ? (
-                <div className="space-y-4">
-                  <pre className="max-h-48 overflow-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap">
-                    {communityInstallYaml.slice(0, 2000)}
-                    {communityInstallYaml.length > 2000 && "\n..."}
-                  </pre>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCommunityOpenInBuilder}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all shadow-sm"
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                      Open in Builder
-                    </button>
-                    <button
-                      onClick={handleCommunityDownloadYaml}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-border/40 transition-colors"
-                    >
-                      <Download className="h-4 w-4" />
-                      Download
-                    </button>
-                  </div>
-                </div>
-              ) : communityInstallLoading ? (
+              {communityInstallLoading ? (
                 <div className="flex h-24 items-center justify-center">
                   <LoadingSpinner size="md" />
+                </div>
+              ) : installedSlugs.has(communityInstallTarget.slug) ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 rounded-lg bg-success/10 border border-success/30 p-3">
+                    <Check className="h-5 w-5 text-success shrink-0" />
+                    <p className="text-sm text-success font-medium">
+                      This template is already installed.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleCommunityUninstall(communityInstallTarget.slug)}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-error/30 px-4 py-2 text-sm font-medium text-error hover:bg-error/10 transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                      Uninstall
+                    </button>
+                    <button
+                      onClick={closeCommunityModals}
+                      className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
                   <p className="text-sm text-muted">
                     Install this workflow from the community hub?
                   </p>
-                  <div className="rounded-lg bg-background p-3">
-                    <p className="text-xs text-muted mb-1">CLI command:</p>
-                    <code className="text-sm font-mono text-accent">
-                      sandcastle hub install {communityInstallTarget.slug}
-                    </code>
+                  <div className="rounded-lg bg-background p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium">Author:</span>
+                      <span className="font-mono text-foreground">@{communityInstallTarget.author}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium">Steps:</span>
+                      <span className="font-mono text-foreground">{communityInstallTarget.step_count}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium">CLI:</span>
+                      <code className="font-mono text-amber-500">
+                        sandcastle hub install {communityInstallTarget.slug}
+                      </code>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button
                       onClick={handleCommunityFetchAndInstall}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all shadow-sm"
+                      disabled={communityInstallLoading}
+                      className={cn(
+                        "flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2",
+                        "text-sm font-medium text-accent-foreground",
+                        "hover:bg-accent-hover transition-all shadow-sm",
+                        communityInstallLoading && "opacity-70 cursor-not-allowed"
+                      )}
                     >
-                      <Download className="h-4 w-4" />
-                      Fetch and Preview
+                      {communityInstallLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Installing...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="h-4 w-4" />
+                          Install
+                        </>
+                      )}
                     </button>
                     <button
                       onClick={closeCommunityModals}
@@ -960,16 +1049,26 @@ export default function TemplatesPage() {
               ) : null}
             </div>
             <div className="flex items-center gap-2 border-t border-border px-5 py-4">
-              <button
-                onClick={() => {
-                  setCommunityInstallTarget(communityPreviewTarget);
-                  setCommunityPreviewTarget(null);
-                }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all shadow-sm"
-              >
-                <Download className="h-4 w-4" />
-                Install
-              </button>
+              {installedSlugs.has(communityPreviewTarget.slug) ? (
+                <button
+                  onClick={() => handleCommunityUninstall(communityPreviewTarget.slug)}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-error/30 px-4 py-2 text-sm font-medium text-error hover:bg-error/10 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                  Uninstall
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setCommunityInstallTarget(communityPreviewTarget);
+                    setCommunityPreviewTarget(null);
+                  }}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all shadow-sm"
+                >
+                  <Download className="h-4 w-4" />
+                  Install
+                </button>
+              )}
               {communityInstallYaml && (
                 <button
                   onClick={handleCommunityOpenInBuilder}
