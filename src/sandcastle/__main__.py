@@ -1528,6 +1528,91 @@ def _cmd_hub_list(args: argparse.Namespace) -> None:
     print(f"\n{_color(str(total), _C.CYAN)} total workflows in {len(categories)} categories.")
 
 
+def _cmd_hub_collections(args: argparse.Namespace) -> None:
+    """List curated workflow collections."""
+    registry = _fetch_hub_registry()
+    collections = registry.get("collections", [])
+
+    if getattr(args, "json", False):
+        print(json.dumps(collections, indent=2))
+        return
+
+    if not collections:
+        print("No collections available.")
+        return
+
+    # Icon mapping
+    icons: dict[str, str] = {
+        "target": "[TARGET]",
+        "pen-tool": "[CONTENT]",
+        "terminal": "[DEVOPS]",
+        "headphones": "[SUPPORT]",
+        "users": "[HR]",
+    }
+
+    for col in collections:
+        icon = icons.get(col.get("icon", ""), "[*]")
+        name = col.get("name", "")
+        desc = col.get("description", "")
+        slugs = col.get("template_slugs", [])
+        downloads = col.get("downloads", 0)
+
+        print(f"\n  {_color(icon, _C.CYAN)} {_color(name, _C.BOLD)}")
+        print(f"     {desc}")
+        print(f"     {_color(str(len(slugs)), _C.GREEN)} templates | {_color(str(downloads), _C.CYAN)} downloads")
+        print(f"     Install: sandcastle hub install-collection {col.get('id', '')}")
+
+    print(f"\n{_color(str(len(collections)), _C.CYAN)} collection(s) available.")
+
+
+def _cmd_hub_install_collection(args: argparse.Namespace) -> None:
+    """Install all workflows from a collection."""
+    import urllib.request
+    from pathlib import Path
+
+    registry = _fetch_hub_registry()
+    collections = registry.get("collections", [])
+    collection_id = getattr(args, "collection_id", "")
+
+    col = None
+    for c in collections:
+        if c.get("id") == collection_id:
+            col = c
+            break
+
+    if not col:
+        print(
+            f"{_color('Error', _C.RED)}: Collection '{collection_id}' not found.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    templates = registry.get("templates", [])
+    templates_by_slug: dict[str, dict] = {t["slug"]: t for t in templates}
+
+    target_dir = Path(getattr(args, "dir", None) or "./workflows/")
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    installed = 0
+    for slug in col.get("template_slugs", []):
+        t = templates_by_slug.get(slug)
+        if not t or not t.get("download_url"):
+            print(f"  {_color('Skip', _C.YELLOW)}: {slug} (not found)")
+            continue
+
+        try:
+            with urllib.request.urlopen(t["download_url"], timeout=10) as resp:
+                yaml_content = resp.read().decode("utf-8")
+            filename = slug.split("/")[-1] + ".yaml"
+            (target_dir / filename).write_text(yaml_content)
+            print(f"  {_color('OK', _C.GREEN)}: {slug} -> {target_dir / filename}")
+            installed += 1
+        except Exception as exc:
+            print(f"  {_color('Error', _C.RED)}: {slug} - {exc}")
+
+    print(f"\n{_color(str(installed), _C.GREEN)} workflow(s) installed from '{col.get('name', '')}'.")
+
+
 def _cmd_hub_publish(args: argparse.Namespace) -> None:
     """Publish a workflow to the community hub."""
     import webbrowser
@@ -1593,12 +1678,714 @@ def _cmd_hub(args: argparse.Namespace) -> None:
         "install": _cmd_hub_install,
         "list": _cmd_hub_list,
         "publish": _cmd_hub_publish,
+        "collections": _cmd_hub_collections,
+        "install-collection": _cmd_hub_install_collection,
     }
     handler = hub_dispatch.get(action)
     if handler:
         handler(args)
     else:
-        print("Usage: sandcastle hub {search,install,list,publish}", file=sys.stderr)
+        print(
+            "Usage: sandcastle hub {search,install,list,publish,collections,install-collection}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# API helpers (shared by new command groups)
+# ---------------------------------------------------------------------------
+
+def _api_headers(args: argparse.Namespace) -> dict[str, str]:
+    """Build HTTP headers from CLI args (api-key, etc.)."""
+    api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _api_base(args: argparse.Namespace) -> str:
+    """Return the base API URL from CLI args or env."""
+    return getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
+
+
+def _api_get(
+    args: argparse.Namespace,
+    path: str,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Perform a GET request to the API and return parsed JSON body."""
+    import httpx
+
+    base = _api_base(args)
+    try:
+        resp = httpx.get(
+            f"{base}{path}",
+            params=params,
+            headers=_api_headers(args),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return resp.json()
+
+
+def _api_post(
+    args: argparse.Namespace,
+    path: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Perform a POST request to the API and return parsed JSON body."""
+    import httpx
+
+    base = _api_base(args)
+    try:
+        resp = httpx.post(
+            f"{base}{path}",
+            json=payload,
+            headers=_api_headers(args),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return resp.json()
+
+
+def _api_put(
+    args: argparse.Namespace,
+    path: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Perform a PUT request to the API and return parsed JSON body."""
+    import httpx
+
+    base = _api_base(args)
+    try:
+        resp = httpx.put(
+            f"{base}{path}",
+            json=payload,
+            headers=_api_headers(args),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return resp.json()
+
+
+def _api_delete(
+    args: argparse.Namespace,
+    path: str,
+) -> dict[str, Any]:
+    """Perform a DELETE request to the API and return parsed JSON body."""
+    import httpx
+
+    base = _api_base(args)
+    try:
+        resp = httpx.delete(
+            f"{base}{path}",
+            headers=_api_headers(args),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return resp.json()
+
+
+def _json_out(data: Any) -> None:
+    """Print data as formatted JSON."""
+    print(json.dumps(data, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# keys - API Key management
+# ---------------------------------------------------------------------------
+
+def _cmd_keys_list(args: argparse.Namespace) -> None:
+    """List all API keys (masked)."""
+    body = _api_get(args, "/api/api-keys")
+    items = body.get("data", [])
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if not items:
+        print("No API keys found.")
+        return
+
+    headers = ["ID", "PREFIX", "NAME", "TENANT", "COST LIMIT", "CREATED", "LAST USED"]
+    rows: list[list[str]] = []
+    for k in items:
+        if isinstance(k, dict):
+            cost = k.get("max_cost_per_run_usd")
+            cost_str = f"${cost:.2f}" if cost else "-"
+            rows.append([
+                k.get("id", "")[:12],
+                k.get("key_prefix", ""),
+                k.get("name", "") or "-",
+                k.get("tenant_id", "") or "-",
+                cost_str,
+                _fmt_time(k.get("created_at")),
+                _fmt_time(k.get("last_used_at")),
+            ])
+    print(_table(headers, rows))
+
+
+def _cmd_keys_create(args: argparse.Namespace) -> None:
+    """Create a new API key."""
+    payload: dict[str, Any] = {"name": args.name}
+    tenant = getattr(args, "tenant", None)
+    if tenant:
+        payload["tenant_id"] = tenant
+    cost_limit = getattr(args, "cost_limit", None)
+    if cost_limit is not None:
+        payload["max_cost_per_run_usd"] = cost_limit
+
+    body = _api_post(args, "/api/api-keys", payload)
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    plaintext = data.get("key", "")
+    print(f"API key created: {data.get('id', '?')}")
+    print(f"  Name:   {data.get('name', '-')}")
+    print(f"  Prefix: {data.get('key_prefix', '')}")
+    if data.get("tenant_id"):
+        print(f"  Tenant: {data['tenant_id']}")
+    print()
+    print(_color("  Key (shown ONCE - save it now!):", _C.YELLOW))
+    print(f"  {_color(plaintext, _C.GREEN)}")
+    print()
+
+
+def _cmd_keys_delete(args: argparse.Namespace) -> None:
+    """Delete (deactivate) an API key."""
+    body = _api_delete(args, f"/api/api-keys/{args.key_id}")
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if data.get("deactivated"):
+        print(f"API key deactivated: {args.key_id}")
+    else:
+        print(f"Unexpected response: {data}")
+
+
+def _cmd_keys_rotate(args: argparse.Namespace) -> None:
+    """Rotate an API key (create new + deactivate old).
+
+    Since there is no dedicated rotate endpoint, this performs
+    the operation client-side: create a new key, then deactivate
+    the old one.
+    """
+    # First, get the old key details to copy name/tenant
+    list_body = _api_get(args, "/api/api-keys")
+    old_key = None
+    for k in list_body.get("data", []):
+        if isinstance(k, dict) and k.get("id", "").startswith(args.key_id):
+            old_key = k
+            break
+
+    # Build create payload from old key metadata
+    create_payload: dict[str, Any] = {
+        "name": (old_key.get("name", "") if old_key else "") + " (rotated)",
+    }
+    if old_key and old_key.get("tenant_id"):
+        create_payload["tenant_id"] = old_key["tenant_id"]
+    if old_key and old_key.get("max_cost_per_run_usd"):
+        create_payload["max_cost_per_run_usd"] = old_key["max_cost_per_run_usd"]
+
+    # Create replacement key
+    create_body = _api_post(args, "/api/api-keys", create_payload)
+    new_data = create_body.get("data", {})
+
+    # Deactivate old key
+    _api_delete(args, f"/api/api-keys/{args.key_id}")
+
+    if getattr(args, "json", False):
+        _json_out({
+            "rotated": True,
+            "old_key_id": args.key_id,
+            "new_key_id": new_data.get("id"),
+            "new_key": new_data.get("key"),
+        })
+        return
+
+    print(f"Key rotated: {args.key_id} -> {new_data.get('id', '?')}")
+    print(f"  Old key deactivated.")
+    print()
+    print(_color("  New key (shown ONCE - save it now!):", _C.YELLOW))
+    print(f"  {_color(new_data.get('key', ''), _C.GREEN)}")
+    print()
+
+
+def _cmd_keys(args: argparse.Namespace) -> None:
+    """Route keys sub-commands."""
+    action = getattr(args, "keys_action", None)
+    keys_dispatch: dict[str, Any] = {
+        "list": _cmd_keys_list,
+        "create": _cmd_keys_create,
+        "delete": _cmd_keys_delete,
+        "rotate": _cmd_keys_rotate,
+    }
+    handler = keys_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle keys {list,create,delete,rotate}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# dlq - Dead Letter Queue management
+# ---------------------------------------------------------------------------
+
+def _cmd_dlq_list(args: argparse.Namespace) -> None:
+    """List dead letter queue items."""
+    params: dict[str, Any] = {}
+    if getattr(args, "resolved", False):
+        params["resolved"] = "true"
+
+    body = _api_get(args, "/api/dead-letter", params=params)
+    items = body.get("data", [])
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if not items:
+        print("No dead letter queue items found.")
+        return
+
+    headers = ["ID", "RUN ID", "STEP", "ERROR", "ATTEMPTS", "CREATED", "RESOLVED"]
+    rows: list[list[str]] = []
+    for item in items:
+        if isinstance(item, dict):
+            resolved = item.get("resolved_at")
+            resolved_str = _fmt_time(resolved) if resolved else "-"
+            rows.append([
+                item.get("id", "")[:12],
+                item.get("run_id", "")[:12],
+                item.get("step_id", ""),
+                (item.get("error", "") or "")[:40],
+                str(item.get("attempts", 0)),
+                _fmt_time(item.get("created_at")),
+                resolved_str,
+            ])
+    print(_table(headers, rows))
+
+
+def _cmd_dlq_retry(args: argparse.Namespace) -> None:
+    """Retry a dead letter queue item."""
+    body = _api_post(args, f"/api/dead-letter/{args.item_id}/retry")
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if data.get("retried"):
+        print(f"DLQ item retried: {args.item_id}")
+        print(f"  New run: {data.get('new_run_id', '?')}")
+    else:
+        print(f"Unexpected response: {data}")
+
+
+def _cmd_dlq_resolve(args: argparse.Namespace) -> None:
+    """Manually resolve a dead letter queue item."""
+    body = _api_post(args, f"/api/dead-letter/{args.item_id}/resolve")
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    resolved_at = data.get("resolved_at")
+    if resolved_at:
+        print(f"DLQ item resolved: {args.item_id}")
+        print(f"  Resolved by: {data.get('resolved_by', 'manual')}")
+    else:
+        print(f"Unexpected response: {data}")
+
+
+def _cmd_dlq(args: argparse.Namespace) -> None:
+    """Route dlq sub-commands."""
+    action = getattr(args, "dlq_action", None)
+    dlq_dispatch: dict[str, Any] = {
+        "list": _cmd_dlq_list,
+        "retry": _cmd_dlq_retry,
+        "resolve": _cmd_dlq_resolve,
+    }
+    handler = dlq_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle dlq {list,retry,resolve}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# violations - Policy violations
+# ---------------------------------------------------------------------------
+
+def _cmd_violations_list(args: argparse.Namespace) -> None:
+    """List policy violations."""
+    params: dict[str, Any] = {}
+    severity = getattr(args, "severity", None)
+    if severity:
+        params["severity"] = severity
+
+    body = _api_get(args, "/api/violations", params=params)
+    items = body.get("data", [])
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if not items:
+        print("No policy violations found.")
+        return
+
+    headers = ["ID", "RUN ID", "STEP", "POLICY", "SEVERITY", "ACTION", "CREATED"]
+    rows: list[list[str]] = []
+    for v in items:
+        if isinstance(v, dict):
+            sev = v.get("severity", "")
+            # Colorize severity levels
+            if sev == "critical":
+                sev_str = _color(sev, _C.RED)
+            elif sev == "high":
+                sev_str = _color(sev, _C.RED)
+            elif sev == "medium":
+                sev_str = _color(sev, _C.YELLOW)
+            else:
+                sev_str = _color(sev, _C.DIM) if sev else "-"
+            rows.append([
+                v.get("id", "")[:12],
+                v.get("run_id", "")[:12],
+                v.get("step_id", ""),
+                v.get("policy_id", ""),
+                sev_str,
+                v.get("action_taken", ""),
+                _fmt_time(v.get("created_at")),
+            ])
+    print(_table(headers, rows))
+
+
+def _cmd_violations(args: argparse.Namespace) -> None:
+    """Route violations sub-commands."""
+    action = getattr(args, "violations_action", None)
+    violations_dispatch: dict[str, Any] = {
+        "list": _cmd_violations_list,
+    }
+    handler = violations_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle violations {list}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# tools - Tool/connector management
+# ---------------------------------------------------------------------------
+
+def _cmd_tools_list(args: argparse.Namespace) -> None:
+    """List available tool connectors."""
+    params: dict[str, Any] = {}
+    category = getattr(args, "category", None)
+    if category:
+        params["category"] = category
+
+    body = _api_get(args, "/api/tools", params=params)
+    raw = body.get("data", {})
+    # The response wraps tools in a ToolListResponse with a 'tools' key
+    items = raw.get("tools", []) if isinstance(raw, dict) else raw
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if not items:
+        print("No tools found.")
+        return
+
+    headers = ["NAME", "CATEGORY", "STATUS", "CONNECTIONS"]
+    rows: list[list[str]] = []
+    for t in items:
+        if isinstance(t, dict):
+            configured = t.get("credentials_configured", [])
+            missing = t.get("credentials_missing", [])
+            if not missing:
+                status_str = _color("configured", _C.GREEN)
+            elif configured:
+                status_str = _color("partial", _C.YELLOW)
+            else:
+                status_str = _color("not configured", _C.RED)
+            conns = t.get("connections", [])
+            conn_str = str(len(conns)) if conns else "0"
+            rows.append([
+                t.get("name", ""),
+                t.get("category", ""),
+                status_str,
+                conn_str,
+            ])
+    print(_table(headers, rows))
+
+
+def _cmd_tools_configure(args: argparse.Namespace) -> None:
+    """Set credential env vars for a tool connector."""
+    tool_name = args.tool_name
+    env_pairs = getattr(args, "env", None)
+
+    if not env_pairs:
+        print("Error: at least one --env KEY=VALUE is required", file=sys.stderr)
+        sys.exit(1)
+
+    credentials: dict[str, str] = {}
+    for pair in env_pairs:
+        if "=" not in pair:
+            print(f"Error: invalid format '{pair}' - expected KEY=VALUE", file=sys.stderr)
+            sys.exit(1)
+        key, _, value = pair.partition("=")
+        credentials[key] = value
+
+    body = _api_put(args, f"/api/tools/{tool_name}/credentials", {"credentials": credentials})
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    print(f"Credentials updated for tool: {tool_name}")
+    configured = data.get("credentials_configured", [])
+    missing = data.get("credentials_missing", [])
+    if configured:
+        print(f"  Configured: {', '.join(configured)}")
+    if missing:
+        print(f"  Still missing: {_color(', '.join(missing), _C.YELLOW)}")
+
+
+def _cmd_tools(args: argparse.Namespace) -> None:
+    """Route tools sub-commands."""
+    action = getattr(args, "tools_action", None)
+    tools_dispatch: dict[str, Any] = {
+        "list": _cmd_tools_list,
+        "configure": _cmd_tools_configure,
+    }
+    handler = tools_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle tools {list,configure}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# runs compare - Side-by-side run comparison
+# ---------------------------------------------------------------------------
+
+def _cmd_runs_compare(args: argparse.Namespace) -> None:
+    """Compare two runs side by side."""
+    body = _api_get(args, "/api/runs/compare", params={
+        "run_a": args.run_a,
+        "run_b": args.run_b,
+    })
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    run_a = data.get("run_a", {})
+    run_b = data.get("run_b", {})
+
+    # Header
+    print()
+    print(_color("  Run Comparison", _C.BOLD))
+    print(_color("  ==============", _C.BOLD))
+    print()
+
+    # Summary table
+    summary_headers = ["", "RUN A", "RUN B", "DELTA"]
+    summary_rows: list[list[str]] = []
+
+    summary_rows.append([
+        "Run ID",
+        run_a.get("run_id", "")[:12],
+        run_b.get("run_id", "")[:12],
+        "",
+    ])
+    summary_rows.append([
+        "Workflow",
+        run_a.get("workflow_name", ""),
+        run_b.get("workflow_name", ""),
+        _color("same", _C.GREEN) if data.get("same_workflow") else _color("different", _C.YELLOW),
+    ])
+    summary_rows.append([
+        "Status",
+        _status_color(run_a.get("status", "")),
+        _status_color(run_b.get("status", "")),
+        "",
+    ])
+
+    cost_a = data.get("total_cost_a", 0)
+    cost_b = data.get("total_cost_b", 0)
+    cost_delta = data.get("total_cost_delta", 0)
+    delta_color = _C.GREEN if cost_delta <= 0 else _C.RED
+    summary_rows.append([
+        "Cost",
+        f"${cost_a:.4f}",
+        f"${cost_b:.4f}",
+        _color(f"{cost_delta:+.4f}", delta_color),
+    ])
+
+    dur_a = data.get("total_duration_a")
+    dur_b = data.get("total_duration_b")
+    dur_delta = data.get("total_duration_delta")
+    dur_a_str = f"{dur_a:.1f}s" if dur_a is not None else "-"
+    dur_b_str = f"{dur_b:.1f}s" if dur_b is not None else "-"
+    dur_delta_str = (
+        _color(f"{dur_delta:+.1f}s", _C.GREEN if (dur_delta or 0) <= 0 else _C.RED)
+        if dur_delta is not None
+        else "-"
+    )
+    summary_rows.append([
+        "Duration",
+        dur_a_str,
+        dur_b_str,
+        dur_delta_str,
+    ])
+
+    print(_table(summary_headers, summary_rows))
+
+    # Step diffs table
+    steps = data.get("steps", [])
+    if steps:
+        print()
+        print(_color("  Step Differences", _C.BOLD))
+        print()
+        step_headers = ["STEP", "PRESENCE", "STATUS A", "STATUS B", "COST A", "COST B", "CHANGED"]
+        step_rows: list[list[str]] = []
+        for s in steps:
+            if isinstance(s, dict):
+                presence = s.get("presence", "")
+                if presence == "both":
+                    pres_str = "both"
+                elif presence == "only_a":
+                    pres_str = _color("only A", _C.YELLOW)
+                else:
+                    pres_str = _color("only B", _C.YELLOW)
+
+                output_changed = s.get("output_changed", False)
+                config_changed = s.get("config_changed", False)
+                changes = []
+                if output_changed:
+                    changes.append("output")
+                if config_changed:
+                    changes.append("config")
+                change_str = _color(", ".join(changes), _C.YELLOW) if changes else "-"
+
+                step_rows.append([
+                    s.get("step_id", ""),
+                    pres_str,
+                    _status_color(s.get("status_a", "") or "-"),
+                    _status_color(s.get("status_b", "") or "-"),
+                    f"${s.get('cost_a', 0):.4f}",
+                    f"${s.get('cost_b', 0):.4f}",
+                    change_str,
+                ])
+        print(_table(step_headers, step_rows))
+
+    print()
+
+
+# ---------------------------------------------------------------------------
+# autopilot - AutoPilot experiment management
+# ---------------------------------------------------------------------------
+
+def _cmd_autopilot_list(args: argparse.Namespace) -> None:
+    """List AutoPilot experiments."""
+    params: dict[str, Any] = {}
+    status_filter = getattr(args, "status", None)
+    if status_filter:
+        params["status"] = status_filter
+
+    body = _api_get(args, "/api/autopilot/experiments", params=params)
+    items = body.get("data", [])
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if not items:
+        print("No autopilot experiments found.")
+        return
+
+    headers = ["ID", "WORKFLOW", "STEP", "STATUS", "OPTIMIZE FOR", "DEPLOYED", "CREATED"]
+    rows: list[list[str]] = []
+    for e in items:
+        if isinstance(e, dict):
+            status = e.get("status", "")
+            deployed = e.get("deployed_variant_id")
+            deployed_str = deployed[:12] if deployed else "-"
+            rows.append([
+                e.get("id", "")[:12],
+                e.get("workflow_name", ""),
+                e.get("step_id", ""),
+                _status_color(status),
+                e.get("optimize_for", ""),
+                deployed_str,
+                _fmt_time(e.get("created_at")),
+            ])
+    print(_table(headers, rows))
+
+
+def _cmd_autopilot_deploy(args: argparse.Namespace) -> None:
+    """Deploy the winning variant from an experiment."""
+    body = _api_post(args, f"/api/autopilot/experiments/{args.experiment_id}/deploy")
+    data = body.get("data", {})
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        return
+
+    if data.get("deployed"):
+        print(f"Experiment deployed: {args.experiment_id}")
+        print(f"  Winning variant: {data.get('deployed_variant_id', '?')}")
+        if data.get("workflow_name"):
+            print(f"  Workflow: {data['workflow_name']}")
+        if data.get("step_id"):
+            print(f"  Step: {data['step_id']}")
+    else:
+        print(f"Deploy response: {data}")
+
+
+def _cmd_autopilot(args: argparse.Namespace) -> None:
+    """Route autopilot sub-commands."""
+    action = getattr(args, "autopilot_action", None)
+    autopilot_dispatch: dict[str, Any] = {
+        "list": _cmd_autopilot_list,
+        "deploy": _cmd_autopilot_deploy,
+    }
+    handler = autopilot_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle autopilot {list,deploy}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -1782,12 +2569,105 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_args(p_reject)
 
     # --- runs ---
-    p_runs = subparsers.add_parser("runs", help="List recent workflow runs")
+    p_runs = subparsers.add_parser("runs", help="List or compare workflow runs")
+    runs_sub = p_runs.add_subparsers(dest="runs_action")
+
+    # runs list (default when no sub-command given)
+    p_runs_list = runs_sub.add_parser("list", help="List recent workflow runs")
+    p_runs_list.add_argument("--status", "-s", default=None,
+                             help="Filter by status (queued, running, completed, failed)")
+    p_runs_list.add_argument("--limit", "-n", type=int, default=20,
+                             help="Max number of results (default: 20)")
+    _add_connection_args(p_runs_list)
+
+    # runs compare
+    p_runs_compare = runs_sub.add_parser("compare", help="Compare two runs side by side")
+    p_runs_compare.add_argument("run_a", help="First run ID")
+    p_runs_compare.add_argument("run_b", help="Second run ID")
+    _add_connection_args(p_runs_compare)
+
+    # Keep backward compat: 'sandcastle runs --status ...' still works
     p_runs.add_argument("--status", "-s", default=None,
                         help="Filter by status (queued, running, completed, failed)")
     p_runs.add_argument("--limit", "-n", type=int, default=20,
                         help="Max number of results (default: 20)")
     _add_connection_args(p_runs)
+
+    # --- keys ---
+    p_keys = subparsers.add_parser("keys", help="Manage API keys")
+    keys_sub = p_keys.add_subparsers(dest="keys_action")
+
+    p_keys_list = keys_sub.add_parser("list", help="List all API keys (masked)")
+    _add_connection_args(p_keys_list)
+
+    p_keys_create = keys_sub.add_parser("create", help="Create a new API key")
+    p_keys_create.add_argument("--name", required=True, help="Name for the API key")
+    p_keys_create.add_argument("--tenant", default=None, help="Tenant ID to scope the key")
+    p_keys_create.add_argument("--cost-limit", type=float, default=None, dest="cost_limit",
+                               help="Max cost per run in USD")
+    _add_connection_args(p_keys_create)
+
+    p_keys_delete = keys_sub.add_parser("delete", help="Delete (deactivate) an API key")
+    p_keys_delete.add_argument("key_id", help="API key ID to delete")
+    _add_connection_args(p_keys_delete)
+
+    p_keys_rotate = keys_sub.add_parser("rotate", help="Rotate an API key (create new + deactivate old)")
+    p_keys_rotate.add_argument("key_id", help="API key ID to rotate")
+    _add_connection_args(p_keys_rotate)
+
+    # --- dlq ---
+    p_dlq = subparsers.add_parser("dlq", help="Dead letter queue management")
+    dlq_sub = p_dlq.add_subparsers(dest="dlq_action")
+
+    p_dlq_list = dlq_sub.add_parser("list", help="List failed items")
+    p_dlq_list.add_argument("--resolved", action="store_true",
+                            help="Include resolved items")
+    _add_connection_args(p_dlq_list)
+
+    p_dlq_retry = dlq_sub.add_parser("retry", help="Retry a failed item")
+    p_dlq_retry.add_argument("item_id", help="DLQ item ID to retry")
+    _add_connection_args(p_dlq_retry)
+
+    p_dlq_resolve = dlq_sub.add_parser("resolve", help="Mark a failed item as resolved")
+    p_dlq_resolve.add_argument("item_id", help="DLQ item ID to resolve")
+    _add_connection_args(p_dlq_resolve)
+
+    # --- violations ---
+    p_violations = subparsers.add_parser("violations", help="Policy violations")
+    violations_sub = p_violations.add_subparsers(dest="violations_action")
+
+    p_violations_list = violations_sub.add_parser("list", help="List policy violations")
+    p_violations_list.add_argument("--severity", default=None,
+                                   choices=["critical", "high", "medium", "low"],
+                                   help="Filter by severity level")
+    _add_connection_args(p_violations_list)
+
+    # --- tools ---
+    p_tools = subparsers.add_parser("tools", help="Tool/connector management")
+    tools_sub = p_tools.add_subparsers(dest="tools_action")
+
+    p_tools_list = tools_sub.add_parser("list", help="List available tools/connectors")
+    p_tools_list.add_argument("--category", default=None, help="Filter by category")
+    _add_connection_args(p_tools_list)
+
+    p_tools_configure = tools_sub.add_parser("configure", help="Set credentials for a tool")
+    p_tools_configure.add_argument("tool_name", help="Tool name to configure")
+    p_tools_configure.add_argument("--env", action="append", metavar="KEY=VALUE",
+                                   help="Credential env var (repeatable, e.g. --env SLACK_TOKEN=xoxb-...)")
+    _add_connection_args(p_tools_configure)
+
+    # --- autopilot ---
+    p_autopilot = subparsers.add_parser("autopilot", help="AutoPilot experiment management")
+    autopilot_sub = p_autopilot.add_subparsers(dest="autopilot_action")
+
+    p_autopilot_list = autopilot_sub.add_parser("list", help="List experiments")
+    p_autopilot_list.add_argument("--status", "-s", default=None,
+                                  help="Filter by status")
+    _add_connection_args(p_autopilot_list)
+
+    p_autopilot_deploy = autopilot_sub.add_parser("deploy", help="Deploy winning variant")
+    p_autopilot_deploy.add_argument("experiment_id", help="Experiment ID to deploy")
+    _add_connection_args(p_autopilot_deploy)
 
     # --- hub ---
     p_hub = subparsers.add_parser("hub", help="Community workflow hub")
@@ -1809,6 +2689,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     hub_publish = hub_sub.add_parser("publish", help="Publish a workflow to the community hub")
     hub_publish.add_argument("file", help="Path to workflow YAML file")
+
+    hub_collections = hub_sub.add_parser("collections", help="List curated workflow collections")
+    hub_collections.add_argument("--json", action="store_true")
+
+    hub_install_col = hub_sub.add_parser(
+        "install-collection", help="Install all workflows from a collection"
+    )
+    hub_install_col.add_argument("collection_id", help="Collection ID")
+    hub_install_col.add_argument("--dir", "-d", default=None,
+                                 help="Target directory (default: ./workflows/)")
 
     return parser
 
@@ -1846,13 +2736,27 @@ def main() -> None:
         "fork": _cmd_fork,
         "approve": _cmd_approve,
         "reject": _cmd_reject,
-        "runs": _cmd_runs,
         "hub": _cmd_hub,
+        "keys": _cmd_keys,
+        "dlq": _cmd_dlq,
+        "violations": _cmd_violations,
+        "tools": _cmd_tools,
+        "autopilot": _cmd_autopilot,
     }
 
     handler = dispatch.get(args.command)
     if handler:
         handler(args)
+        return
+
+    # --- runs (with sub-commands + backward compat) ---
+    if args.command == "runs":
+        action = getattr(args, "runs_action", None)
+        if action == "compare":
+            _cmd_runs_compare(args)
+        else:
+            # Default: list runs (backward compat for 'sandcastle runs')
+            _cmd_runs(args)
         return
 
     # Sub-commands that need further routing
