@@ -1,0 +1,83 @@
+# name: Memory Learning Agent
+# description: Research agent that accumulates domain knowledge across runs, learns from past analyses, and progressively improves its insights
+# tags: [Research, Memory, Learning, Knowledge, Analysis]
+# category: general_ai
+
+name: memory-learning-agent
+description: Research agent that accumulates domain knowledge across runs, learns from past analyses, and progressively improves its insights
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 240
+
+input_schema:
+  required: ["topic", "question"]
+  properties:
+    topic:
+      type: string
+      description: "Research domain or topic area"
+    question:
+      type: string
+      description: "Specific research question to investigate"
+    depth:
+      type: string
+      description: "Analysis depth (quick, standard, deep)"
+      default: "standard"
+
+memory:
+  scope: global
+  auto_inject: true
+  max_inject: 25
+  max_age_days: 365
+  enrich: true
+  admit_threshold: 0.5
+
+steps:
+  - id: research
+    prompt: |
+      You are a research analyst with accumulated domain knowledge.
+
+      Topic: {input.topic}
+      Question: {input.question}
+      Depth: {input.depth}
+
+      Using your accumulated knowledge from past research:
+      1. Check if you have prior insights on this topic
+      2. Build on existing knowledge rather than starting from scratch
+      3. Note any contradictions with previous findings
+      4. Identify knowledge gaps that need further investigation
+
+      Output JSON with keys:
+      - analysis (string with your full analysis)
+      - confidence (number 0-1 indicating confidence level)
+      - prior_knowledge_used (list of relevant past insights referenced)
+      - new_insights (list of new findings from this research)
+      - knowledge_gaps (list of areas needing more investigation)
+      - contradictions (list of conflicts with prior findings)
+    model: sonnet
+    memory:
+      read: true
+      write: true
+    output_schema:
+      type: object
+      properties:
+        analysis:
+          type: string
+        confidence:
+          type: number
+        prior_knowledge_used:
+          type: array
+          items:
+            type: string
+        new_insights:
+          type: array
+          items:
+            type: string
+        knowledge_gaps:
+          type: array
+          items:
+            type: string
+        contradictions:
+          type: array
+          items:
+            type: string

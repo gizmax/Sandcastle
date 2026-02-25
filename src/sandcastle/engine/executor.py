@@ -1205,7 +1205,9 @@ async def _execute_step_once(
         # Inject agent memories into the prompt (semantic search with step prompt)
         if _step_reads_memory:
             try:
+                from sandcastle.config import settings as _mem_read_settings
                 from sandcastle.engine.memory import (
+                    apply_decay,
                     format_memories_for_prompt,
                     load_memories,
                 )
@@ -1215,6 +1217,20 @@ async def _execute_step_once(
                     query=prompt[:500],
                     limit=context._memory_config.max_inject,
                 )
+                # Apply decay
+                max_age = (
+                    context._memory_config.max_age_days
+                    if (
+                        context._memory_config
+                        and context._memory_config.max_age_days > 0
+                    )
+                    else _mem_read_settings.memory_max_age_days
+                )
+                if max_age > 0:
+                    step_memories = apply_decay(
+                        step_memories, max_age_days=max_age
+                    )
+
                 mem_block = format_memories_for_prompt(step_memories)
                 if mem_block:
                     prompt = mem_block + "\n\n" + prompt
@@ -1224,7 +1240,9 @@ async def _execute_step_once(
                         step.id,
                     )
             except Exception as e:
-                logger.warning(f"Memory injection failed for step '{step.id}': {e}")
+                logger.warning(
+                    f"Memory injection failed for step '{step.id}': {e}"
+                )
 
         if step.pdf_report:
             # PDF report steps need verbose, structured output - skip the terse
@@ -1406,18 +1424,75 @@ async def _execute_step_once(
         # Write step output to agent memory if configured
         if context._memory_scope_id and step.memory and step.memory.write and output:
             try:
-                from sandcastle.engine.memory import save_memory
-
-                content = json.dumps(output) if isinstance(output, (dict, list)) else str(output)
-                await save_memory(
-                    context._memory_scope_id,
-                    content,
-                    metadata={"step_id": step.id, "workflow": context.workflow_name},
-                    run_id=context.run_id,
+                from sandcastle.config import settings as _mem_write_settings
+                from sandcastle.engine.memory import (
+                    enrich_memory,
+                    save_memory,
+                    should_admit,
                 )
-                logger.info("Saved memory from step '%s'", step.id)
+
+                content = (
+                    json.dumps(output)
+                    if isinstance(output, (dict, list))
+                    else str(output)
+                )
+
+                # Admission control
+                threshold = (
+                    step.memory.admit_threshold
+                    or (
+                        context._memory_config.admit_threshold
+                        if context._memory_config
+                        else 0
+                    )
+                    or _mem_write_settings.memory_admit_threshold
+                )
+                admitted, score, reason = should_admit(
+                    content, context.memories, threshold=threshold
+                )
+                if not admitted:
+                    logger.info(
+                        "Memory admission rejected for step '%s' "
+                        "(score=%.2f, reason=%s)",
+                        step.id,
+                        score,
+                        reason,
+                    )
+                else:
+                    # Enrich with keywords/tags if configured
+                    meta: dict = {
+                        "step_id": step.id,
+                        "workflow": context.workflow_name,
+                    }
+                    if (
+                        context._memory_config
+                        and context._memory_config.enrich
+                    ):
+                        enriched = enrich_memory(
+                            content, metadata=meta
+                        )
+                        meta = enriched.get("metadata", meta)
+                        meta["keywords"] = enriched.get(
+                            "keywords", []
+                        )
+                        meta["tags"] = enriched.get("tags", [])
+
+                    await save_memory(
+                        context._memory_scope_id,
+                        content,
+                        metadata=meta,
+                        run_id=context.run_id,
+                    )
+                    logger.info(
+                        "Saved memory from step '%s' "
+                        "(importance=%.2f)",
+                        step.id,
+                        score,
+                    )
             except Exception as e:
-                logger.warning(f"Memory write failed for step '{step.id}': {e}")
+                logger.warning(
+                    f"Memory write failed for step '{step.id}': {e}"
+                )
 
         return StepResult(
             step_id=step.id,
@@ -4175,7 +4250,11 @@ async def execute_workflow(
             from sandcastle.config import settings as _mem_settings
 
             if _mem_settings.memory_enabled:
-                from sandcastle.engine.memory import load_memories, resolve_scope_id
+                from sandcastle.engine.memory import (
+                    apply_decay,
+                    load_memories,
+                    resolve_scope_id,
+                )
 
                 context._memory_config = workflow.memory
                 context._memory_scope_id = resolve_scope_id(
@@ -4186,6 +4265,15 @@ async def execute_workflow(
                     context._memory_scope_id,
                     limit=workflow.memory.max_inject,
                 )
+                # Apply memory decay (TTL filtering)
+                max_age = (
+                    workflow.memory.max_age_days
+                    or _mem_settings.memory_max_age_days
+                )
+                if max_age > 0:
+                    context.memories = apply_decay(
+                        context.memories, max_age_days=max_age
+                    )
                 logger.info(
                     "Loaded %d memories for scope '%s'",
                     len(context.memories),
