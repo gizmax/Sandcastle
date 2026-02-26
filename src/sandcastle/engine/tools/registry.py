@@ -2329,6 +2329,193 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="quickbooks.mjs",
         icon="quickbooks",
     ),
+    "helios": ToolDefinition(
+        name="helios",
+        description=(
+            "Helios iNuvio (Asseco) - invoices, orders, contacts,"
+            " and stock queries via REST API"
+        ),
+        category="erp",
+        functions=[
+            ToolFunction(
+                name="get_contacts",
+                description="Search contacts (business partners)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search by name or ICO"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_invoices",
+                description="List issued invoices with optional filters",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "contact_id": {
+                            "type": "string",
+                            "description": "Filter by contact ID",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by status (draft, issued, paid, overdue)",
+                        },
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="create_invoice",
+                description="Create a new issued invoice",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "contact_id": {"type": "string", "description": "Contact (partner) ID"},
+                        "items": {
+                            "type": "array",
+                            "description": "Invoice line items [{description, quantity, unit_price}]",
+                        },
+                        "due_days": {
+                            "type": "integer",
+                            "description": "Payment due in days",
+                            "default": 14,
+                        },
+                    },
+                    "required": ["contact_id", "items"],
+                },
+            ),
+            ToolFunction(
+                name="get_orders",
+                description="List sales orders",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string", "description": "Filter by order status"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_stock",
+                description="Query warehouse stock levels",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "product_code": {
+                            "type": "string",
+                            "description": "Filter by product code/SKU",
+                        },
+                        "warehouse_id": {
+                            "type": "string",
+                            "description": "Filter by warehouse ID",
+                        },
+                    },
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_HELIOS_BASE_URL",
+            "TOOL_HELIOS_API_KEY",
+        ],
+        connector_file="helios.mjs",
+        icon="helios",
+    ),
+    "abra": ToolDefinition(
+        name="abra",
+        description=(
+            "ABRA Gen (ABRA Software) - business partners, invoices,"
+            " orders, and warehouse management via REST API"
+        ),
+        category="erp",
+        functions=[
+            ToolFunction(
+                name="get_firms",
+                description="Search business partners (firms)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search by name or ICO"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_issued_invoices",
+                description="List issued invoices with optional filters",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "firm_id": {
+                            "type": "string",
+                            "description": "Filter by firm (partner) ID",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by status (draft, posted, paid)",
+                        },
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="create_issued_invoice",
+                description="Create a new issued invoice",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "firm_id": {"type": "string", "description": "Firm (partner) ID"},
+                        "rows": {
+                            "type": "array",
+                            "description": "Invoice rows [{text, quantity, unit_price}]",
+                        },
+                        "due_days": {
+                            "type": "integer",
+                            "description": "Payment due in days",
+                            "default": 14,
+                        },
+                    },
+                    "required": ["firm_id", "rows"],
+                },
+            ),
+            ToolFunction(
+                name="get_orders",
+                description="List sales orders",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "firm_id": {"type": "string", "description": "Filter by firm ID"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_store_cards",
+                description="Query warehouse store cards (stock items)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search by name or code",
+                        },
+                        "store_id": {
+                            "type": "string",
+                            "description": "Filter by store (warehouse) ID",
+                        },
+                    },
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_ABRA_BASE_URL",
+            "TOOL_ABRA_USERNAME",
+            "TOOL_ABRA_PASSWORD",
+        ],
+        connector_file="abra.mjs",
+        icon="abra",
+    ),
     "calendly": ToolDefinition(
         name="calendly",
         description="Calendly - event types, scheduled events, cancellations",
