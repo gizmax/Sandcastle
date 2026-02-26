@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pricing - Sandcastle</title>
+  <meta name="description" content="Sandcastle pricing - free for development and testing. Commercial licenses for production use.">
+  <meta name="author" content="Tomas Pflanzer @gizmax">
+  <meta name="robots" content="noindex, nofollow">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Pricing - Sandcastle">
+  <meta property="og:description" content="Free for development. Commercial licenses for production deployments.">
+  <meta property="og:url" content="https://gizmax.cz/sandcastle/pricing">
+  <meta property="og:type" content="website">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-hover: #1a1a1a;
+      --surface-raised: #1e1e1e;
+      --border: #262626;
+      --border-light: #333;
+      --text: #f5f5f5;
+      --text-muted: #a3a3a3;
+      --text-dim: #737373;
+      --accent: #f59e0b;
+      --accent-hover: #fbbf24;
+      --accent-dim: rgba(245, 158, 11, 0.15);
+      --green: #22c55e;
+      --green-dim: rgba(34, 197, 94, 0.12);
+      --blue: #3b82f6;
+      --blue-dim: rgba(59, 130, 246, 0.12);
+      --code-bg: #0d0d0d;
+      --radius: 8px;
+      --radius-sm: 4px;
+      --radius-lg: 12px;
+      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+    }
+
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }
+    a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: var(--accent-hover); }
+    code, .mono { font-family: var(--font-mono); }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .nav-brand { font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+    .nav-links { display: flex; gap: 16px; align-items: center; }
+    .nav-link { font-size: 14px; font-weight: 500; color: var(--text-muted); transition: color 0.2s; }
+    .nav-link:hover { color: var(--text); }
+
+    /* Hero */
+    .hero { padding: 140px 0 80px; text-align: center; position: relative; overflow: hidden; }
+    .hero::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -40%);
+      width: 600px; height: 400px;
+      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.08) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .hero > .container { position: relative; z-index: 1; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 16px; font-size: 13px; font-weight: 500;
+      color: var(--accent); background: var(--accent-dim);
+      border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 100px;
+      margin-bottom: 32px;
+    }
+    .hero h1 { font-size: clamp(32px, 5vw, 52px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
+    .hero h1 .accent { color: var(--accent); }
+    .hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); max-width: 600px; margin: 0 auto; line-height: 1.7; }
+
+    /* Pricing grid */
+    .pricing-section { padding: 0 0 80px; }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .pricing-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      transition: border-color 0.2s, transform 0.2s;
+      position: relative;
+    }
+
+    .pricing-card:hover {
+      border-color: var(--border-light);
+      transform: translateY(-2px);
+    }
+
+    .pricing-card.featured {
+      border-color: var(--accent);
+      box-shadow: 0 0 32px rgba(245, 158, 11, 0.08);
+    }
+
+    .pricing-card.featured::before {
+      content: 'Most Popular';
+      position: absolute;
+      top: -12px; left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 16px;
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: #000; background: var(--accent);
+      border-radius: 100px;
+      white-space: nowrap;
+    }
+
+    .card-header { display: flex; flex-direction: column; gap: 8px; }
+
+    .card-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 4px;
+    }
+    .card-icon svg { width: 22px; height: 22px; stroke-width: 1.75; }
+    .card-icon.free { background: var(--green-dim); }
+    .card-icon.pro { background: var(--accent-dim); }
+    .card-icon.enterprise { background: var(--blue-dim); }
+
+    .card-name { font-size: 20px; font-weight: 700; }
+    .card-desc { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+    .card-price { display: flex; align-items: baseline; gap: 4px; }
+    .price-amount { font-size: 40px; font-weight: 700; font-family: var(--font-mono); letter-spacing: -0.02em; }
+    .price-period { font-size: 14px; color: var(--text-dim); }
+    .price-note { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+    .card-features { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+    .card-features li {
+      font-size: 14px; color: var(--text-muted);
+      display: flex; align-items: flex-start; gap: 10px;
+      line-height: 1.5; list-style: none;
+    }
+    .card-features li svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; }
+    .card-features li .check { color: var(--green); }
+    .card-features li .accent-check { color: var(--accent); }
+
+    .card-cta {
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 14px 24px;
+      font-family: var(--font-sans); font-size: 15px; font-weight: 600;
+      border-radius: var(--radius);
+      cursor: pointer; border: none;
+      transition: all 0.2s;
+      text-decoration: none; text-align: center;
+    }
+
+    .cta-secondary {
+      color: var(--text); background: var(--surface-raised);
+      border: 1px solid var(--border);
+    }
+    .cta-secondary:hover {
+      background: var(--surface-hover); border-color: var(--border-light);
+      color: var(--text);
+    }
+
+    .cta-primary {
+      color: #000; background: var(--accent);
+    }
+    .cta-primary:hover {
+      background: var(--accent-hover); color: #000;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+    }
+
+    .cta-outline {
+      color: var(--blue); background: transparent;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+    .cta-outline:hover {
+      background: var(--blue-dim);
+      border-color: rgba(59, 130, 246, 0.5);
+      color: var(--blue);
+    }
+
+    /* Comparison table */
+    .comparison-section { padding: 80px 0; border-top: 1px solid var(--border); }
+    .section-label {
+      display: inline-block; font-size: 13px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--accent); margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(24px, 3.5vw, 36px); font-weight: 700;
+      letter-spacing: -0.02em; margin-bottom: 16px; line-height: 1.2;
+    }
+    .section-subtitle {
+      font-size: 16px; color: var(--text-muted);
+      max-width: 600px; line-height: 1.6; margin-bottom: 48px;
+    }
+
+    .compare-table { width: 100%; border-collapse: collapse; }
+    .compare-table thead th {
+      font-size: 14px; font-weight: 600;
+      padding: 14px 16px; text-align: left;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    .compare-table thead th:first-child { color: var(--text-dim); }
+    .compare-table thead th.highlight { color: var(--accent); }
+
+    .compare-table tbody td {
+      font-size: 14px; padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .compare-table tbody td:first-child {
+      font-weight: 500; color: var(--text);
+    }
+    .compare-table tbody tr:hover td { background: var(--surface); }
+    .compare-table .check-cell { text-align: center; }
+    .compare-table .check-cell svg { width: 18px; height: 18px; }
+    .compare-table .yes { color: var(--green); }
+    .compare-table .no { color: var(--text-dim); }
+    .compare-table .accent-text { color: var(--accent); font-weight: 500; }
+
+    /* FAQ */
+    .faq-section { padding: 80px 0; border-top: 1px solid var(--border); }
+    .faq-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+    .faq-item { padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .faq-item h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; line-height: 1.4; }
+    .faq-item p { font-size: 14px; color: var(--text-muted); line-height: 1.65; }
+    .faq-item code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); }
+
+    /* CTA */
+    .bottom-cta { padding: 80px 0; border-top: 1px solid var(--border); }
+    .bottom-cta-card {
+      position: relative; background: var(--surface);
+      border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: 48px 32px; text-align: center; overflow: hidden;
+    }
+    .bottom-cta-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+    .bottom-cta-card h3 { font-size: clamp(22px, 3vw, 30px); font-weight: 700; margin-bottom: 12px; }
+    .bottom-cta-card p { font-size: 16px; color: var(--text-muted); max-width: 540px; margin: 0 auto 28px; }
+    .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* Footer */
+    footer { border-top: 1px solid var(--border); padding: 48px 0; }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
+    .footer-left { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+    .footer-left a { color: var(--text-muted); }
+    .footer-left a:hover { color: var(--accent); }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a { font-size: 14px; color: var(--text-muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--accent); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .pricing-grid { grid-template-columns: 1fr; max-width: 440px; margin: 0 auto; }
+      .pricing-card.featured { order: -1; }
+      .faq-grid { grid-template-columns: 1fr; }
+      .compare-table { font-size: 13px; }
+      .compare-table thead th, .compare-table tbody td { padding: 10px 10px; }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 110px 0 60px; }
+      .compare-table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container nav-inner">
+      <a href="/sandcastle" class="nav-brand">Sandcastle</a>
+      <div class="nav-links">
+        <a href="/sandcastle" class="nav-link">Home</a>
+        <a href="/sandcastle/hub" class="nav-link">Hub</a>
+        <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="container">
+      <div class="hero-badge">Simple, transparent pricing</div>
+      <h1>Free to build.<br><span class="accent">Licensed to ship.</span></h1>
+      <p>Sandcastle is free for development, testing, and personal projects. Production deployments require a commercial license.</p>
+    </div>
+  </header>
+
+  <!-- Pricing Cards -->
+  <section class="pricing-section">
+    <div class="container">
+      <div class="pricing-grid">
+
+        <!-- Community -->
+        <div class="pricing-card">
+          <div class="card-header">
+            <div class="card-icon free">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="card-name">Community</div>
+            <div class="card-desc">For developers, hobbyists, and open-source projects. Full access to all features.</div>
+          </div>
+          <div>
+            <div class="card-price">
+              <span class="price-amount">$0</span>
+              <span class="price-period">forever</span>
+            </div>
+            <div class="price-note">BSL-1.1 license - non-production use</div>
+          </div>
+          <ul class="card-features">
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>All features included</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>All 4 sandbox backends</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Dashboard + API</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>118 community templates</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Community support via GitHub</li>
+          </ul>
+          <a href="https://github.com/gizmax/Sandcastle" class="card-cta cta-secondary">Get Started</a>
+        </div>
+
+        <!-- Pro -->
+        <div class="pricing-card featured">
+          <div class="card-header">
+            <div class="card-icon pro">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="card-name">Pro</div>
+            <div class="card-desc">For startups and teams running Sandcastle in production. Self-hosted.</div>
+          </div>
+          <div>
+            <div class="card-price">
+              <span class="price-amount">$49</span>
+              <span class="price-period">/month</span>
+            </div>
+            <div class="price-note">Billed annually ($588/year) or $59/month</div>
+          </div>
+          <ul class="card-features">
+            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Everything in Community</li>
+            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><strong>Production use license</strong></li>
+            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Up to 10 team members</li>
+            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Email support (48h response)</li>
+            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Commercial invoice</li>
+          </ul>
+          <a href="mailto:tomas@gizmax.cz?subject=Sandcastle%20Pro%20License" class="card-cta cta-primary">Get Pro License</a>
+        </div>
+
+        <!-- Enterprise -->
+        <div class="pricing-card">
+          <div class="card-header">
+            <div class="card-icon enterprise">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </div>
+            <div class="card-name">Enterprise</div>
+            <div class="card-desc">For organizations that need custom terms, SLA, and dedicated support.</div>
+          </div>
+          <div>
+            <div class="card-price">
+              <span class="price-amount">Custom</span>
+            </div>
+            <div class="price-note">Annual contract, volume pricing</div>
+          </div>
+          <ul class="card-features">
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Everything in Pro</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Unlimited team members</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Priority support (24h SLA)</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Custom license terms</li>
+            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Onboarding + architecture review</li>
+          </ul>
+          <a href="mailto:tomas@gizmax.cz?subject=Sandcastle%20Enterprise%20Inquiry" class="card-cta cta-outline">Contact Us</a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison -->
+  <section class="comparison-section">
+    <div class="container">
+      <div class="section-label">Compare Plans</div>
+      <h2 class="section-title">Feature comparison</h2>
+      <p class="section-subtitle">All plans include the full Sandcastle platform. Paid plans add production rights and support.</p>
+
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Community</th>
+            <th class="highlight">Pro</th>
+            <th>Enterprise</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Workflow engine + DAG executor</td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Dashboard + REST API</td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>All sandbox backends (E2B, Docker, CF, Local)</td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>53 tool integrations</td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Policy engine + PII redaction</td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Community templates (118)</td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Production deployment rights</td>
+            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Team members</td>
+            <td class="check-cell accent-text">-</td>
+            <td class="check-cell accent-text">Up to 10</td>
+            <td class="check-cell accent-text">Unlimited</td>
+          </tr>
+          <tr>
+            <td>Support</td>
+            <td>GitHub Issues</td>
+            <td class="accent-text">Email (48h)</td>
+            <td class="accent-text">Priority (24h SLA)</td>
+          </tr>
+          <tr>
+            <td>Commercial invoice</td>
+            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Custom license terms</td>
+            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+          <tr>
+            <td>Onboarding + architecture review</td>
+            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq-section">
+    <div class="container">
+      <div class="section-label">FAQ</div>
+      <h2 class="section-title">Common questions</h2>
+      <p class="section-subtitle">Everything you need to know about Sandcastle licensing.</p>
+
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h4>What counts as "production use"?</h4>
+          <p>Any deployment that serves real users, processes real data, or runs as part of a business operation. Internal tools used by your team for day-to-day work also count as production.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Can I use it for free during development?</h4>
+          <p>Yes. The Community plan covers local development, testing, CI/CD pipelines, demos, prototypes, personal projects, and open-source contributions. No restrictions.</p>
+        </div>
+        <div class="faq-item">
+          <h4>What happens after the BSL Change Date (2030)?</h4>
+          <p>The license automatically converts to Apache 2.0. After that date, all versions released before it become fully open source with no production restrictions.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Is there a free tier for startups?</h4>
+          <p>If you're a bootstrapped startup with fewer than 5 people and under $100k ARR, reach out - we offer discounted or free production licenses on a case-by-case basis.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Do I need a license per server?</h4>
+          <p>No. The Pro license covers your entire team (up to 10 members) regardless of how many servers or instances you run. Enterprise is unlimited.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Can I modify the source code?</h4>
+          <p>Yes. All plans allow you to modify, fork, and create derivative works. Your modifications remain under BSL-1.1 terms (or Apache 2.0 after 2030).</p>
+        </div>
+        <div class="faq-item">
+          <h4>How do I get an invoice for my company?</h4>
+          <p>Pro and Enterprise plans include commercial invoices. Email <a href="mailto:tomas@gizmax.cz">tomas@gizmax.cz</a> with your company details and we'll send a proper invoice.</p>
+        </div>
+        <div class="faq-item">
+          <h4>What if I need custom terms?</h4>
+          <p>Enterprise plan includes custom license agreements. If you need specific clauses (indemnification, data processing, SLA), we can work with your legal team.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom CTA -->
+  <section class="bottom-cta">
+    <div class="container">
+      <div class="bottom-cta-card">
+        <h3>Ready to ship?</h3>
+        <p>Start building for free today. When you're ready for production, we'll get you licensed in minutes.</p>
+        <div class="btn-row">
+          <a href="mailto:tomas@gizmax.cz?subject=Sandcastle%20License%20Inquiry" class="card-cta cta-primary">Get a License</a>
+          <a href="https://github.com/gizmax/Sandcastle" class="card-cta cta-secondary">View on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div class="footer-left">
+        Sandcastle &middot; Built by <a href="https://github.com/gizmax">Tomas Pflanzer</a>
+      </div>
+      <div class="footer-links">
+        <a href="/sandcastle">Home</a>
+        <a href="/sandcastle/hub">Community Hub</a>
+        <a href="/sandcastle/security">Security</a>
+        <a href="https://github.com/gizmax/Sandcastle">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
