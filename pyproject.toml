@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 license = {text = "BSL-1.1"}
 readme = "README.md"
 authors = [
-    { name = "Tomas Pflanzer", email = "tomas@gizmax.cz" },
+    { name = "Tomas Pflanzer", email = "tom@pflanzer.cz" },
 ]
 keywords = ["ai", "agents", "workflow", "orchestrator", "e2b", "llm", "pipeline", "workflow-templates"]
 classifiers = [
