@@ -1,7 +1,12 @@
 """Application configuration loaded from environment variables."""
 
-from pydantic import computed_field
+from pathlib import Path
+
+from pydantic import computed_field, field_validator
 from pydantic_settings import BaseSettings
+
+_DEFAULT_DATA_DIR = str(Path.home() / ".sandcastle" / "data")
+_DEFAULT_WORKFLOWS_DIR = str(Path.home() / ".sandcastle" / "workflows")
 
 
 class Settings(BaseSettings):
@@ -45,8 +50,8 @@ class Settings(BaseSettings):
     aws_access_key_id: str = "minioadmin"
     aws_secret_access_key: str = "minioadmin"
 
-    # Local mode data directory
-    data_dir: str = "./data"
+    # Local mode data directory (default: ~/.sandcastle/data)
+    data_dir: str = _DEFAULT_DATA_DIR
 
     # Sandbox root for filesystem operations (browse, csv_output).
     # Empty = no restriction (current behavior). Set to e.g. "./data" to restrict.
@@ -62,8 +67,8 @@ class Settings(BaseSettings):
     # Budget
     default_max_cost_usd: float = 0.0  # 0 = no limit
 
-    # Workflows directory
-    workflows_dir: str = "./workflows"
+    # Workflows directory (default: ~/.sandcastle/workflows)
+    workflows_dir: str = _DEFAULT_WORKFLOWS_DIR
 
     # Hierarchical workflows
     max_workflow_depth: int = 5
@@ -127,6 +132,12 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: str = "info"
+
+    @field_validator("data_dir", "workflows_dir", mode="after")
+    @classmethod
+    def _expand_home(cls, v: str) -> str:
+        """Expand ~ to the user's home directory."""
+        return str(Path(v).expanduser())
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
