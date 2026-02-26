@@ -1514,21 +1514,24 @@ steps:
         assert step.delegate_config.timeout == 3600
 
     def test_delegate_uses_llm_model(self):
-        """Delegate steps should NOT be in NON_LLM_TYPES."""
+        """Delegate steps should NOT be in NON_LLM_TYPES (they may run sub-workflows with LLMs)."""
         assert "delegate" not in NON_LLM_TYPES
 
 
-# ---- Phase 3: Validation tests ----
+# ---- Phase 3: Transform validation tests ----
 
 class TestTransformStepValidation:
-    def _make_wf(self, steps_yaml):
-        return parse_yaml_string(f"""
+    """Test validation rules for transform step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
 name: test
 description: Test workflow
 default_model: sonnet
 steps:
 {steps_yaml}
-""")
+"""
+        return parse_yaml_string(yaml_content)
 
     def test_transform_requires_template(self):
         wf = self._make_wf("""
@@ -1548,18 +1551,24 @@ steps:
       template: "Hello {input.name}"
 """)
         errors = validate(wf)
-        assert not any("transform" in e.lower() for e in errors)
+        transform_errors = [e for e in errors if "transform" in e.lower()]
+        assert len(transform_errors) == 0
 
+
+# ---- Phase 3: Notify validation tests ----
 
 class TestNotifyStepValidation:
-    def _make_wf(self, steps_yaml):
-        return parse_yaml_string(f"""
+    """Test validation rules for notify step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
 name: test
 description: Test workflow
 default_model: sonnet
 steps:
 {steps_yaml}
-""")
+"""
+        return parse_yaml_string(yaml_content)
 
     def test_notify_requires_service(self):
         wf = self._make_wf("""
@@ -1582,15 +1591,20 @@ steps:
         assert any("message" in e.lower() for e in errors)
 
 
+# ---- Phase 3: Delegate validation tests ----
+
 class TestDelegateStepValidation:
-    def _make_wf(self, steps_yaml):
-        return parse_yaml_string(f"""
+    """Test validation rules for delegate step type."""
+
+    def _make_wf(self, steps_yaml: str) -> WorkflowDefinition:
+        yaml_content = f"""
 name: test
 description: Test workflow
 default_model: sonnet
 steps:
 {steps_yaml}
-""")
+"""
+        return parse_yaml_string(yaml_content)
 
     def test_delegate_requires_workflow(self):
         wf = self._make_wf("""
@@ -1611,12 +1625,15 @@ steps:
       task_description: "do something"
 """)
         errors = validate(wf)
-        assert not any("delegate" in e.lower() for e in errors)
+        delegate_errors = [e for e in errors if "delegate" in e.lower()]
+        assert len(delegate_errors) == 0
 
 
-# ---- Phase 3: Executor tests ----
+# ---- Phase 3: Transform executor tests ----
 
 class TestTransformStepExecutor:
+    """Test transform step execution."""
+
     @pytest.fixture
     def context(self):
         return RunContext(
@@ -1631,8 +1648,11 @@ class TestTransformStepExecutor:
     @pytest.mark.asyncio
     async def test_simple_template(self, context):
         step = StepDefinition(
-            id="format", type="transform",
-            transform_config=TransformConfig(template="Hello {input.name}, score is {steps.analyze.output.score}"),
+            id="format",
+            type="transform",
+            transform_config=TransformConfig(
+                template="Hello {input.name}, score is {steps.analyze.output.score}",
+            ),
         )
         result = await _execute_transform_step(step, context)
         assert result.status == "completed"
@@ -1643,8 +1663,11 @@ class TestTransformStepExecutor:
     @pytest.mark.asyncio
     async def test_jinja_tojson_filter(self, context):
         step = StepDefinition(
-            id="format", type="transform",
-            transform_config=TransformConfig(template='{{ steps.fetch.output.items | tojson }}'),
+            id="format",
+            type="transform",
+            transform_config=TransformConfig(
+                template='{{ steps.fetch.output.items | tojson }}',
+            ),
         )
         result = await _execute_transform_step(step, context)
         assert result.status == "completed"
@@ -1655,9 +1678,14 @@ class TestTransformStepExecutor:
         step = StepDefinition(id="bad", type="transform")
         result = await _execute_transform_step(step, context)
         assert result.status == "failed"
+        assert "Missing" in result.error
 
+
+# ---- Phase 3: Notify executor tests ----
 
 class TestNotifyStepExecutor:
+    """Test notify step execution."""
+
     @pytest.fixture
     def context(self):
         return RunContext(
@@ -1669,13 +1697,20 @@ class TestNotifyStepExecutor:
     @pytest.mark.asyncio
     async def test_notify_success(self, context):
         step = StepDefinition(
-            id="alert", type="notify",
-            notify_config=NotifyConfig(service="slack", channel="#builds", message="Result: {steps.analyze.output.summary}"),
+            id="alert",
+            type="notify",
+            notify_config=NotifyConfig(
+                service="slack",
+                channel="#builds",
+                message="Result: {steps.analyze.output.summary}",
+            ),
         )
         result = await _execute_notify_step(step, context)
         assert result.status == "completed"
         assert result.output["service"] == "slack"
+        assert result.output["channel"] == "#builds"
         assert "Build passed" in result.output["message"]
+        assert result.output["status"] == "sent"
         assert result.cost_usd == 0.0
 
     @pytest.mark.asyncio
@@ -1683,3 +1718,4 @@ class TestNotifyStepExecutor:
         step = StepDefinition(id="bad", type="notify")
         result = await _execute_notify_step(step, context)
         assert result.status == "failed"
+        assert "Missing" in result.error

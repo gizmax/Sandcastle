@@ -1081,6 +1081,25 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
                 )
+        elif step.type == "transform":
+            if not step.transform_config or not step.transform_config.template:
+                errors.append(
+                    f"Transform step '{step.id}' must have transform_config with a template"
+                )
+        elif step.type == "notify":
+            if not step.notify_config or not step.notify_config.service:
+                errors.append(
+                    f"Notify step '{step.id}' must have notify_config with a service"
+                )
+            if not step.notify_config or not step.notify_config.message:
+                errors.append(
+                    f"Notify step '{step.id}' must have notify_config with a message"
+                )
+        elif step.type == "delegate":
+            if not step.delegate_config or not step.delegate_config.workflow:
+                errors.append(
+                    f"Delegate step '{step.id}' must have delegate_config with a workflow"
+                )
 
     # Check model names against provider registry
     from sandcastle.engine.providers import KNOWN_MODELS

@@ -882,6 +882,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               placeholder={"Workflow completed. Result: {steps.analyze.output.summary}"}
               className={cn(inputClass, "h-auto py-2 resize-y")}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Use {steps.id.output} for previous step data, {input.field} for workflow input."}
+            </p>
           </div>
         </div>
       )}
@@ -898,6 +901,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               placeholder="data-enrichment"
               className={inputClass}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Name of the workflow YAML file (without .yaml extension).
+            </p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Task Description</label>
@@ -908,6 +914,9 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               placeholder={"Enrich the data from {steps.fetch.output} with additional context."}
               className={cn(inputClass, "h-auto py-2 resize-y")}
             />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Natural language description. Use {steps.id.output} and {input.field} variables."}
+            </p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Timeout (seconds)</label>
