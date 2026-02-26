@@ -25,7 +25,7 @@ const pages = [
   { name: "dead-letter", path: "/dead-letter" },
   { name: "api-keys", path: "/api-keys" },
   { name: "settings", path: "/settings" },
-  { name: "system", path: "/system" },
+  { name: "system", path: "/system-health" },
 ];
 
 function setLight(page) {
