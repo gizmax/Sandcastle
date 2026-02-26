@@ -221,7 +221,7 @@
 
       <div class="stats-bar">
         <div class="stat-item">
-          <div class="stat-num">5</div>
+          <div class="stat-num">7</div>
           <div class="stat-label">Security Layers</div>
         </div>
         <div class="stat-item">
@@ -233,7 +233,7 @@
           <div class="stat-label">Credential Patterns</div>
         </div>
         <div class="stat-item">
-          <div class="stat-num">1060</div>
+          <div class="stat-num">1361</div>
           <div class="stat-label">Passing Tests</div>
         </div>
       </div>
@@ -254,6 +254,8 @@
             <div class="arch-layer-content">
               <span>CORS Policy</span>
               <span>Rate Limiting</span>
+              <span>Security Headers</span>
+              <span>CSP</span>
               <span>SSRF Prevention</span>
               <span>Input Validation</span>
             </div>
@@ -262,9 +264,11 @@
             <div class="arch-layer-label">Auth</div>
             <div class="arch-layer-content">
               <span>HMAC-SHA256 Keys</span>
+              <span>Key Rotation</span>
+              <span>Key Expiry</span>
+              <span>IP Allowlisting</span>
               <span>Tenant Isolation</span>
               <span>Admin Scoping</span>
-              <span>Bearer / Header / Query</span>
             </div>
           </div>
           <div class="arch-layer">
@@ -280,14 +284,17 @@
             <div class="arch-layer-label">Execution</div>
             <div class="arch-layer-content">
               <span>Ephemeral Sandboxes</span>
+              <span>Seccomp Profiles</span>
+              <span>CapDrop ALL</span>
               <span>Circuit Breaker</span>
               <span>Timeout Enforcement</span>
               <span>Resource Limits</span>
             </div>
           </div>
           <div class="arch-layer">
-            <div class="arch-layer-label">Audit</div>
+            <div class="arch-layer-label">Data</div>
             <div class="arch-layer-content">
+              <span>Credential Encryption</span>
               <span>Policy Violations</span>
               <span>Approval Trail</span>
               <span>Run History</span>
@@ -314,10 +321,11 @@
             <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
             <h3>Sandbox Isolation</h3>
           </div>
-          <p>AI agent code runs in ephemeral sandboxes that are destroyed after each execution. No shared state, no persistent access to host resources.</p>
+          <p>AI agent code runs in ephemeral sandboxes that are destroyed after each execution. No shared state, no persistent access to host resources. Docker containers run with seccomp profiles and dropped capabilities.</p>
           <ul class="detail-list">
             <li><strong>E2B</strong> - Cloud-hosted microVMs with SOC 2 Type II certification</li>
-            <li><strong>Docker</strong> - Local containers with 512 MB memory limit, non-root user (UID 1000), bridge networking, auto-remove on exit</li>
+            <li><strong>Docker</strong> - <code>CapDrop: ALL</code>, seccomp syscall allowlist, PID limits, CPU quotas, non-root user (UID 1000), bridge networking, auto-remove</li>
+            <li><strong>Seccomp profiles</strong> - Blocks ptrace, mount, kexec_load, keyctl, reboot, swapon and other dangerous syscalls</li>
             <li><strong>Cloudflare Workers</strong> - Edge V8 isolates with per-request timeout</li>
             <li><strong>Local</strong> - Subprocess mode for development only (no isolation)</li>
             <li>Runner file validation - blocks path traversal (<code>..</code>) and absolute paths before execution</li>
@@ -330,12 +338,14 @@
             <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
             <h3>Authentication</h3>
           </div>
-          <p>API key authentication with HMAC-SHA256 hashing. Keys are never stored in plaintext - only their peppered hash is persisted.</p>
+          <p>API key authentication with HMAC-SHA256 hashing, key rotation with grace periods, expiry enforcement, and per-key IP allowlisting.</p>
           <ul class="detail-list">
             <li>HMAC-SHA256 with configurable server-side pepper (<code>API_KEY_PEPPER</code>)</li>
             <li>Keys accepted via <code>X-API-Key</code> header, <code>Authorization: Bearer</code>, or query param (SSE)</li>
-            <li><code>sc_</code> prefix with 32-byte URL-safe random token</li>
-            <li>First 8 characters stored as <code>key_prefix</code> for UI identification</li>
+            <li><strong>Key rotation</strong> - <code>POST /api/api-keys/{id}/rotate</code> generates new key, old key enters configurable grace period</li>
+            <li><strong>Key expiry</strong> - <code>expires_at</code> enforced in auth middleware, returns 401 <code>KEY_EXPIRED</code></li>
+            <li><strong>IP allowlisting</strong> - per-key CIDR allowlist (IPv4 + IPv6), empty list allows all IPs</li>
+            <li><code>sc_</code> prefix with 32-byte URL-safe random token, first 8 chars stored as <code>key_prefix</code></li>
             <li><code>last_used_at</code> timestamp updated on every authenticated request</li>
             <li>Soft deletion via <code>is_active</code> flag - preserves audit trail</li>
           </ul>
@@ -411,12 +421,13 @@
             <div class="layer-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
             <h3>Rate Limiting</h3>
           </div>
-          <p>Sliding window counter per tenant or IP. Prevents abuse of expensive sandbox execution endpoints.</p>
+          <p>Pluggable rate limiting with in-memory and distributed Redis backends. Sliding window counter per tenant or IP prevents abuse of sandbox endpoints.</p>
           <ul class="detail-list">
             <li>Default: 10 requests per 60 seconds on execution endpoints</li>
             <li>Keyed by <code>tenant:{id}</code> when authenticated, <code>ip:{addr}</code> when anonymous</li>
+            <li><strong>In-memory backend</strong> - default, zero config, sliding window with stale entry pruning</li>
+            <li><strong>Redis backend</strong> - distributed sorted set pipeline, auto-selected when <code>REDIS_URL</code> is set</li>
             <li>HTTP 429 response with <code>Retry-After</code>, <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> headers</li>
-            <li>Stale window entries pruned on each check</li>
           </ul>
         </div>
 
@@ -426,8 +437,10 @@
             <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v3H7V7a5 5 0 0 1 5-5z"/><rect x="3" y="10" width="18" height="12" rx="2"/><circle cx="12" cy="16" r="1"/></svg></div>
             <h3>Credential Management</h3>
           </div>
-          <p>Tool credentials are resolved from environment variables or database-stored named connections. Never logged, never exposed in outputs.</p>
+          <p>Tool credentials are encrypted at rest with Fernet symmetric encryption, resolved from environment variables or database-stored named connections. Never logged, never exposed in outputs.</p>
           <ul class="detail-list">
+            <li><strong>Encryption at rest</strong> - Fernet (AES-128-CBC + HMAC-SHA256) via <code>CREDENTIAL_ENCRYPTION_KEY</code></li>
+            <li>Graceful fallback - no key configured means plaintext passthrough (backwards compatible)</li>
             <li><code>TOOL_*</code> prefix convention for environment variables</li>
             <li>Named connections (<code>postgresql:analytics</code>) stored in DB with unique constraint</li>
             <li>Credential masking for UI display - shows first 4 + last 4 chars only</li>
@@ -464,6 +477,24 @@
             <li>Header: <code>X-Sandcastle-Signature</code></li>
             <li>Timing-safe comparison via <code>hmac.compare_digest()</code></li>
             <li>10-second timeout on webhook delivery</li>
+          </ul>
+        </div>
+
+        <!-- Security Headers -->
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div>
+            <h3>Security Headers</h3>
+          </div>
+          <p>Middleware injects hardened HTTP headers on every response. Content Security Policy applied to dashboard routes, with a report-only mode for gradual rollout.</p>
+          <ul class="detail-list">
+            <li><code>X-Content-Type-Options: nosniff</code> - prevents MIME sniffing</li>
+            <li><code>X-Frame-Options: DENY</code> - blocks clickjacking</li>
+            <li><code>Referrer-Policy: strict-origin-when-cross-origin</code></li>
+            <li><code>Permissions-Policy</code> - disables camera, microphone, geolocation, payment</li>
+            <li><strong>CSP</strong> - <code>default-src 'self'</code> with scoped overrides for styles, scripts, images, fonts</li>
+            <li>CSP applied to dashboard paths only (not <code>/api</code>) to avoid breaking JSON responses</li>
+            <li><code>CSP_REPORT_ONLY=true</code> uses <code>Content-Security-Policy-Report-Only</code> header for safe testing</li>
           </ul>
         </div>
 
@@ -593,7 +624,7 @@
         <div class="compliance-card">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
           <h4>Secret Management</h4>
-          <p>Credentials in env vars or encrypted DB. Never logged, masked for display</p>
+          <p>Fernet encryption at rest. Key rotation with grace periods. Never logged, masked for display</p>
           <div class="status active">Active</div>
         </div>
         <div class="compliance-card">
