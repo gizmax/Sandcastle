@@ -7,6 +7,9 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { ToastContainer } from "@/components/shared/ToastContainer";
 import { useToasts } from "@/hooks/useToasts";
+import { useAdvisor } from "@/hooks/useAdvisor";
+import { Beacon } from "@/components/advisor/Beacon";
+import { AdvisorPanel } from "@/components/advisor/AdvisorPanel";
 import type { StreamEvent } from "@/hooks/useEventStream";
 import { api } from "@/api/client";
 
@@ -65,6 +68,7 @@ function eventToLink(event: StreamEvent): string | undefined {
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [dlqCount, setDlqCount] = useState(0);
   const [approvalsCount, setApprovalsCount] = useState(0);
@@ -72,6 +76,7 @@ export function Layout() {
   const navigate = useNavigate();
   const { subscribe } = useEventStreamContext();
   const { toasts, addToast, dismissToast } = useToasts();
+  const advisor = useAdvisor();
 
   useKeyboardShortcuts();
 
@@ -176,6 +181,23 @@ export function Layout() {
         </main>
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <Beacon
+        score={advisor.score}
+        insights={advisor.activeInsights}
+        loading={advisor.loading}
+        onClick={() => setAdvisorOpen(true)}
+      />
+      <AdvisorPanel
+        open={advisorOpen}
+        onClose={() => setAdvisorOpen(false)}
+        score={advisor.score}
+        previousScore={advisor.previousScore}
+        deductions={advisor.deductions}
+        insights={advisor.activeInsights}
+        lastChecked={advisor.lastChecked}
+        onRefresh={advisor.refresh}
+        onDismiss={advisor.dismiss}
+      />
     </div>
   );
 }
