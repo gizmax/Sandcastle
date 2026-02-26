@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Menu, Search, PlayCircle, GitBranch } from "lucide-react";
+import { Menu, Search, PlayCircle, GitBranch, Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
@@ -11,7 +11,7 @@ import {
 } from "@/components/layout/NotificationCenter";
 
 interface SearchResult {
-  type: "run" | "workflow";
+  type: "run" | "workflow" | "tool";
   label: string;
   sub: string;
   link: string;
@@ -76,9 +76,10 @@ export function Header({
     const lower = q.toLowerCase();
     const items: SearchResult[] = [];
 
-    const [runsRes, workflowsRes] = await Promise.all([
+    const [runsRes, workflowsRes, toolsRes] = await Promise.all([
       api.get<Array<{ run_id: string; workflow_name: string; status: string }>>("/runs", { limit: "50", offset: "0" }),
       api.get<Array<{ name: string; file_name: string; steps_count: number }>>("/workflows"),
+      api.get<{ tools: Array<{ name: string; description: string; category: string; configured: boolean }> }>("/tools"),
     ]);
 
     if (runsRes.data) {
@@ -109,6 +110,23 @@ export function Header({
             label: w.name,
             sub: `${w.steps_count} steps - ${w.file_name}`,
             link: "/workflows",
+          });
+        }
+      }
+    }
+
+    if (toolsRes.data?.tools) {
+      for (const t of toolsRes.data.tools) {
+        if (
+          t.name.toLowerCase().includes(lower) ||
+          t.description.toLowerCase().includes(lower) ||
+          t.category.toLowerCase().includes(lower)
+        ) {
+          items.push({
+            type: "tool",
+            label: t.name,
+            sub: `${t.category} - ${t.configured ? "configured" : "not configured"}`,
+            link: "/integrations",
           });
         }
       }
@@ -198,6 +216,8 @@ export function Header({
               >
                 {r.type === "run"
                   ? <PlayCircle className="h-4 w-4 shrink-0 text-muted" />
+                  : r.type === "tool"
+                  ? <Plug className="h-4 w-4 shrink-0 text-muted" />
                   : <GitBranch className="h-4 w-4 shrink-0 text-muted" />
                 }
                 <div className="min-w-0 flex-1">
