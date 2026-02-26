@@ -6,10 +6,12 @@ import {
   Link2,
   Blocks,
   Plug,
+  KeyRound,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { ToolConfigPanel } from "@/components/integrations/ToolConfigPanel";
 import {
   TOOL_ICON_MAP,
@@ -185,6 +187,13 @@ export default function IntegrationsPage() {
           Connect your workflows to external services and APIs.
         </p>
       </div>
+
+      {/* Context banner */}
+      {configuredTools.filter((t) => t.missing_credentials.length > 0).length > 0 && (
+        <ContextBanner variant="warning" icon={KeyRound}>
+          {configuredTools.filter((t) => t.missing_credentials.length > 0).length} configured tool{configuredTools.filter((t) => t.missing_credentials.length > 0).length > 1 ? "s" : ""} missing credentials - click any to configure.
+        </ContextBanner>
+      )}
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { PlayCircle, Trash2, XCircle, Search } from "lucide-react";
+import { PlayCircle, Trash2, XCircle, Search, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
@@ -7,6 +7,7 @@ import { RunsTable } from "@/components/runs/RunsTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { cn } from "@/lib/utils";
 
 const STATUS_OPTIONS = ["all", "queued", "running", "completed", "failed", "partial"];
@@ -86,6 +87,17 @@ export default function Runs() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Runs</h1>
+
+      {/* Failure rate banner */}
+      {(() => {
+        const failed = runs.filter((r) => r.status === "failed").length;
+        const rate = runs.length > 0 ? failed / runs.length : 0;
+        return rate > 0.3 && runs.length >= 5 ? (
+          <ContextBanner variant={rate > 0.5 ? "error" : "warning"} icon={TrendingDown}>
+            {Math.round(rate * 100)}% failure rate across recent runs - filter by "failed" to investigate.
+          </ContextBanner>
+        ) : null;
+      })()}
 
       {/* Filters */}
       <div className="space-y-3">
