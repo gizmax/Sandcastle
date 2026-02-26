@@ -284,6 +284,12 @@ class SandshoreRuntime:
                         "total_cost_usd", 0.0
                     )
                     result.num_turns = event.data.get("num_turns", 0)
+                    result.input_tokens = event.data.get(
+                        "input_tokens", 0
+                    )
+                    result.output_tokens = event.data.get(
+                        "output_tokens", 0
+                    )
                     if not result.text:
                         logger.debug(
                             "Result event has no text. Keys: %s, "
@@ -385,14 +391,16 @@ class SandshoreRuntime:
             "SANDCASTLE_REQUEST": json.dumps(request),
         }
 
+        # Always pass pricing so both runners can calculate cost
+        envs["MODEL_INPUT_PRICE"] = str(model_info.input_price_per_m)
+        envs["MODEL_OUTPUT_PRICE"] = str(model_info.output_price_per_m)
+
         if use_claude_runner:
             envs["ANTHROPIC_API_KEY"] = self.anthropic_api_key
         else:
             model_api_key = get_api_key(model_info)
             envs["MODEL_API_KEY"] = model_api_key
             envs["MODEL_ID"] = model_info.api_model_id
-            envs["MODEL_INPUT_PRICE"] = str(model_info.input_price_per_m)
-            envs["MODEL_OUTPUT_PRICE"] = str(model_info.output_price_per_m)
             if model_info.api_base_url:
                 envs["MODEL_BASE_URL"] = model_info.api_base_url
 
