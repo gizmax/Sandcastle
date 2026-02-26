@@ -305,12 +305,16 @@ def _cmd_init(args: argparse.Namespace) -> None:
     ]
     env_path.write_text("\n".join(lines) + "\n")
 
-    # Create workflows directory
-    wf_dir = Path("workflows")
-    wf_dir.mkdir(exist_ok=True)
+    # Create default directories
+    from sandcastle.config import _DEFAULT_DATA_DIR, _DEFAULT_WORKFLOWS_DIR
+
+    Path(_DEFAULT_DATA_DIR).mkdir(parents=True, exist_ok=True)
+    Path(_DEFAULT_WORKFLOWS_DIR).mkdir(parents=True, exist_ok=True)
 
     print()
     print(_color("  .env created", _C.GREEN))
+    print(_color(f"  Data:      {_DEFAULT_DATA_DIR}", _C.DIM))
+    print(_color(f"  Workflows: {_DEFAULT_WORKFLOWS_DIR}", _C.DIM))
     print(_color("  Run: sandcastle serve", _C.CYAN))
     print()
 
