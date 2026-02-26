@@ -49,6 +49,8 @@ import {
   Terminal,
   Code2,
   Globe,
+  Landmark,
+  Briefcase,
   type LucideIcon,
 } from "lucide-react";
 
@@ -108,6 +110,8 @@ export const TOOL_ICON_MAP: Record<string, LucideIcon> = {
   "python-runtime": Code2,
   "code-interpreter": Code2,
   browser: Globe,
+  helios: Landmark,
+  abra: Briefcase,
 };
 
 /** Category -> Tailwind color classes (bg for icon wrapper, text for icon). */
