@@ -720,12 +720,13 @@ steps:
         plan = build_plan(workflow)
         storage = mock_storage()
 
-        result = await execute_workflow(
-            workflow=workflow,
-            plan=plan,
-            input_data={"brands": ["Notino", "DM", "Sephora"]},
-            storage=storage,
-        )
+        with patch("sandcastle.engine.executor.get_sandshore_runtime", return_value=sb):
+            result = await execute_workflow(
+                workflow=workflow,
+                plan=plan,
+                input_data={"brands": ["Notino", "DM", "Sephora"]},
+                storage=storage,
+            )
         assert result.status == "completed"
         assert isinstance(result.outputs.get("fetch"), list)
         assert len(result.outputs["fetch"]) == 3
