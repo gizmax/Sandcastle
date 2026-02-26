@@ -363,7 +363,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             f"\n  {_color('Port ' + str(port) + ' is already in use.', _C.YELLOW)}"
         )
         try:
-            answer = input(f"  Kill the existing process and restart? [Y/n] ").strip().lower()
+            answer = input("  Kill the existing process and restart? [Y/n] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             sys.exit(1)
@@ -372,7 +372,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             if _kill_port(port):
                 print(f"  {_color('Freed port ' + str(port), _C.GREEN)}\n")
             else:
-                print(f"  {_color('Could not free port ' + str(port) + '. Try: sudo lsof -ti :' + str(port) + ' | xargs kill', _C.RED)}")
+                msg = f"Could not free port {port}. Try: sudo lsof -ti :{port} | xargs kill"
+                print(f"  {_color(msg, _C.RED)}")
                 sys.exit(1)
         else:
             print("  Aborted.")
