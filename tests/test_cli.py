@@ -269,7 +269,8 @@ class TestServeCommand:
         parser = _build_parser()
         args = parser.parse_args(["serve", "--host", "127.0.0.1", "--port", "9000", "--no-reload"])
 
-        with patch("uvicorn.run") as mock_run:
+        with patch("uvicorn.run") as mock_run, \
+             patch("sandcastle.__main__._port_in_use", return_value=False):
             _cmd_serve(args)
 
         mock_run.assert_called_once_with(
@@ -284,7 +285,8 @@ class TestServeCommand:
         parser = _build_parser()
         args = parser.parse_args(["serve"])
 
-        with patch("uvicorn.run") as mock_run:
+        with patch("uvicorn.run") as mock_run, \
+             patch("sandcastle.__main__._port_in_use", return_value=False):
             _cmd_serve(args)
 
         mock_run.assert_called_once_with(
