@@ -2,9 +2,6 @@
 
 Supports multiple sandbox backends (E2B, Docker, Local, Cloudflare)
 through the ``SandboxBackend`` protocol defined in ``backends.py``.
-
-When no backend is available, falls back to the legacy HTTP proxy
-mode for backward compatibility.
 """
 
 from __future__ import annotations
@@ -13,17 +10,20 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncIterator
-
-import httpx
-from httpx_sse import aconnect_sse
 
 from sandcastle.engine.backends import SandboxBackend, SSEEvent, create_backend
 from sandcastle.engine.providers import get_failover
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Data classes
+# ------------------------------------------------------------------
 
 
 @dataclass
@@ -34,25 +34,144 @@ class SandshoreResult:
     structured_output: dict | None = None
     total_cost_usd: float = 0.0
     num_turns: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass
+class RuntimeMetrics:
+    """Lightweight metrics for runtime observability."""
+
+    total_queries: int = 0
+    successful_queries: int = 0
+    failed_queries: int = 0
+    failover_attempts: int = 0
+    circuit_breaker_rejections: int = 0
+    total_cost_usd: float = 0.0
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def record_query_success(self, cost_usd: float = 0.0) -> None:
+        """Record a successful query execution."""
+        async with self._lock:
+            self.total_queries += 1
+            self.successful_queries += 1
+            self.total_cost_usd += cost_usd
+
+    async def record_query_failure(self) -> None:
+        """Record a failed query execution."""
+        async with self._lock:
+            self.total_queries += 1
+            self.failed_queries += 1
+
+    async def record_failover(self) -> None:
+        """Record a failover attempt to an alternative model."""
+        async with self._lock:
+            self.failover_attempts += 1
+
+    async def record_circuit_breaker_rejection(self) -> None:
+        """Record a request rejected by the circuit breaker."""
+        async with self._lock:
+            self.circuit_breaker_rejections += 1
+
+    def snapshot(self) -> dict:
+        """Return a point-in-time snapshot of metrics (not locked)."""
+        return {
+            "total_queries": self.total_queries,
+            "successful_queries": self.successful_queries,
+            "failed_queries": self.failed_queries,
+            "failover_attempts": self.failover_attempts,
+            "circuit_breaker_rejections": self.circuit_breaker_rejections,
+            "total_cost_usd": round(self.total_cost_usd, 6),
+        }
+
+
+# ------------------------------------------------------------------
+# Circuit breaker
+# ------------------------------------------------------------------
+
+
+class CircuitBreaker:
+    """Circuit breaker for backend failure detection.
+
+    Three states:
+    - CLOSED: normal operation, requests pass through.
+    - OPEN: backend is failing, reject immediately.
+    - HALF_OPEN: cooldown expired, allow one test request.
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 30.0,
+    ) -> None:
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self._state = self.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0.0
+        self._lock = asyncio.Lock()
+
+    @property
+    def state(self) -> str:
+        """Return the current effective state, accounting for recovery timeout."""
+        if self._state == self.OPEN:
+            if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
+                return self.HALF_OPEN
+        return self._state
+
+    async def record_success(self) -> None:
+        """Record a successful execution - reset to CLOSED."""
+        async with self._lock:
+            self._failure_count = 0
+            self._state = self.CLOSED
+
+    async def record_failure(self) -> None:
+        """Record a failed execution - trip to OPEN after threshold."""
+        async with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = time.monotonic()
+            if self._failure_count >= self.failure_threshold:
+                if self._state != self.OPEN:
+                    logger.warning(
+                        "Circuit breaker tripped OPEN after %d consecutive failures",
+                        self._failure_count,
+                    )
+                self._state = self.OPEN
+
+    def allow_request(self) -> bool:
+        """Return True if a request should be allowed through."""
+        return self.state != self.OPEN
+
+
+# ------------------------------------------------------------------
+# Errors
+# ------------------------------------------------------------------
 
 
 class SandshoreError(Exception):
     """Error from the Sandshore runtime."""
 
 
+# ------------------------------------------------------------------
+# Runtime
+# ------------------------------------------------------------------
+
+
 class SandshoreRuntime:
     """Unified runtime with pluggable sandbox backends.
 
     Resolves the sandbox backend from config (``sandbox_backend`` setting)
-    and delegates execution.  Falls back to the legacy HTTP proxy when
-    no backend is healthy and a ``proxy_url`` is configured.
+    and delegates execution to the appropriate backend.
     """
 
     def __init__(
         self,
         anthropic_api_key: str,
         e2b_api_key: str,
-        proxy_url: str | None = None,
         timeout: float = 300.0,
         template: str = "",
         max_concurrent: int = 5,
@@ -60,27 +179,44 @@ class SandshoreRuntime:
         docker_image: str = "sandcastle-runner:latest",
         docker_url: str | None = None,
         cloudflare_worker_url: str = "",
+        # Kept for backward compatibility - ignored
+        proxy_url: str | None = None,
     ) -> None:
         self.anthropic_api_key = anthropic_api_key
         self.e2b_api_key = e2b_api_key
-        self.proxy_url = proxy_url.rstrip("/") if proxy_url else None
         self.timeout = timeout
         self.template = template
         self._semaphore = asyncio.Semaphore(max_concurrent)
-        self._http: httpx.AsyncClient | None = None
+        self._max_concurrent = max_concurrent
         self._sandbox_backend_type = sandbox_backend
+        self._docker_image = docker_image
+        self._docker_url = docker_url
+        self._cloudflare_worker_url = cloudflare_worker_url
 
-        # Cached health check result (value, timestamp)
+        # Cached health check result (value, timestamp) with lock
         self._health_cache: tuple[bool, float] = (False, 0.0)
         self._health_cache_ttl = 60.0  # seconds
+        self._health_lock = asyncio.Lock()
+
+        # Circuit breaker for backend failures
+        self._circuit_breaker = CircuitBreaker()
+
+        # Runtime metrics
+        self._metrics = RuntimeMetrics()
 
         # Create the pluggable backend
+        from sandcastle.config import settings as _cfg
+
         self._backend: SandboxBackend = create_backend(
             sandbox_backend,
             e2b_api_key=e2b_api_key,
             template=template,
             docker_image=docker_image,
             docker_url=docker_url or None,
+            docker_seccomp_profile=_cfg.docker_seccomp_profile,
+            docker_pids_limit=_cfg.docker_pids_limit,
+            docker_cpu_period=_cfg.docker_cpu_period,
+            docker_cpu_quota=_cfg.docker_cpu_quota,
             cloudflare_worker_url=cloudflare_worker_url,
             timeout=timeout,
         )
@@ -90,27 +226,36 @@ class SandshoreRuntime:
         """Return the name of the active sandbox backend."""
         return self._backend.name
 
+    @property
+    def metrics(self) -> RuntimeMetrics:
+        """Return the runtime metrics collector."""
+        return self._metrics
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker:
+        """Return the circuit breaker instance."""
+        return self._circuit_breaker
+
     async def close(self) -> None:
         """Close underlying resources."""
         await self._backend.close()
-        if self._http:
-            await self._http.aclose()
-            self._http = None
+
+    async def __aenter__(self) -> SandshoreRuntime:
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Exit async context manager - close resources."""
+        await self.close()
 
     async def health(self) -> bool:
         """Check runtime health via the active backend."""
-        backend_ok = await self._backend.health()
-        if backend_ok:
-            return True
-        # Fallback: check proxy if available
-        if self.proxy_url:
-            try:
-                client = await self._get_http()
-                resp = await client.get(f"{self.proxy_url}/health")
-                return resp.status_code == 200
-            except httpx.HTTPError:
-                return False
-        return False
+        return await self._backend.health()
 
     async def query(
         self,
@@ -121,52 +266,72 @@ class SandshoreRuntime:
         result = SandshoreResult()
         assistant_texts: list[str] = []
 
-        async for event in self.query_stream(request, cancel_event=cancel_event):
-            evt_type = event.data.get("type", event.event)
+        try:
+            async for event in self.query_stream(
+                request, cancel_event=cancel_event
+            ):
+                evt_type = event.data.get("type", event.event)
 
-            if evt_type == "result":
-                result.text = (
-                    event.data.get("result", "")
-                    or event.data.get("text", "")
-                )
-                result.structured_output = event.data.get("structured_output")
-                result.total_cost_usd = event.data.get("total_cost_usd", 0.0)
-                result.num_turns = event.data.get("num_turns", 0)
-                if not result.text:
-                    logger.debug(
-                        "Result event has no text. Keys: %s, turns=%d, cost=%.4f",
-                        list(event.data.keys()),
-                        result.num_turns,
-                        result.total_cost_usd,
+                if evt_type == "result":
+                    result.text = (
+                        event.data.get("result", "")
+                        or event.data.get("text", "")
                     )
-            elif evt_type == "error":
-                error_msg = event.data.get("error", "Unknown runtime error")
-                raise SandshoreError(error_msg)
-            elif evt_type in ("assistant", "message"):
-                text = _extract_text(event.data)
-                if text:
-                    assistant_texts.append(text)
+                    result.structured_output = event.data.get(
+                        "structured_output"
+                    )
+                    result.total_cost_usd = event.data.get(
+                        "total_cost_usd", 0.0
+                    )
+                    result.num_turns = event.data.get("num_turns", 0)
+                    if not result.text:
+                        logger.debug(
+                            "Result event has no text. Keys: %s, "
+                            "turns=%d, cost=%.4f",
+                            list(event.data.keys()),
+                            result.num_turns,
+                            result.total_cost_usd,
+                        )
+                elif evt_type == "error":
+                    error_msg = event.data.get(
+                        "error", "Unknown runtime error"
+                    )
+                    raise SandshoreError(error_msg)
+                elif evt_type in ("assistant", "message"):
+                    text = _extract_text(event.data)
+                    if text:
+                        assistant_texts.append(text)
 
-        # Fallback: use last assistant message if result text is empty
-        if not result.text and assistant_texts:
-            result.text = assistant_texts[-1]
-            logger.info(
-                "Using last assistant message as result text (%d chars, "
-                "%d total messages)",
-                len(result.text),
-                len(assistant_texts),
-            )
+            # Fallback: use last assistant message if result text is empty
+            if not result.text and assistant_texts:
+                result.text = assistant_texts[-1]
+                logger.info(
+                    "Using last assistant message as result text "
+                    "(%d chars, %d total messages)",
+                    len(result.text),
+                    len(assistant_texts),
+                )
+
+            await self._metrics.record_query_success(result.total_cost_usd)
+
+        except Exception:
+            await self._metrics.record_query_failure()
+            raise
 
         return result
 
     async def _cached_health(self) -> bool:
-        """Return cached health check, refreshing if stale."""
-        cached_result, cached_at = self._health_cache
-        if time.monotonic() - cached_at < self._health_cache_ttl:
-            return cached_result
-        result = await self._backend.health()
-        self._health_cache = (result, time.monotonic())
-        return result
+        """Return cached health check, refreshing if stale.
+
+        Uses a lock to prevent thundering herd on concurrent health checks.
+        """
+        async with self._health_lock:
+            cached_result, cached_at = self._health_cache
+            if time.monotonic() - cached_at < self._health_cache_ttl:
+                return cached_result
+            result = await self._backend.health()
+            self._health_cache = (result, time.monotonic())
+            return result
 
     async def query_stream(
         self,
@@ -181,23 +346,22 @@ class SandshoreRuntime:
                 request, cancel_event=cancel_event
             ):
                 yield event
-        elif self.proxy_url:
-            async for event in self._stream_proxy(request):
-                yield event
         else:
             raise SandshoreError(
                 f"Sandbox backend '{self._sandbox_backend_type}' is not "
-                f"available and no proxy URL is configured."
+                f"available."
             )
 
     # ------------------------------------------------------------------
     # Backend delegation
     # ------------------------------------------------------------------
 
-    def _build_env(self, request: dict) -> tuple[dict[str, str], str, bool]:
+    def _build_env(
+        self, request: dict
+    ) -> tuple[dict[str, str], str, bool, dict[str, str]]:
         """Build environment variables and resolve runner info for request.
 
-        Returns (envs, runner_file, use_claude_runner).
+        Returns (envs, runner_file, use_claude_runner, tool_files).
         """
         from sandcastle.engine.providers import (
             get_api_key,
@@ -208,7 +372,9 @@ class SandshoreRuntime:
         try:
             model_info = resolve_model(model_str)
         except KeyError:
-            logger.warning("Unknown model '%s', falling back to sonnet", model_str)
+            logger.warning(
+                "Unknown model '%s', falling back to sonnet", model_str
+            )
             model_str = "sonnet"
             model_info = resolve_model(model_str)
 
@@ -230,11 +396,22 @@ class SandshoreRuntime:
             if model_info.api_base_url:
                 envs["MODEL_BASE_URL"] = model_info.api_base_url
 
-        return envs, runner_file, use_claude_runner
+        # Inject tool credentials and bundle tool files
+        tool_files: dict[str, str] = {}
+        tools = request.get("tools", [])
+        if tools:
+            from sandcastle.engine.tools.credentials import get_tool_credentials
+            from sandcastle.engine.tools.loader import bundle_tool_files
+
+            tool_creds = get_tool_credentials(tools)
+            envs.update(tool_creds)
+            tool_files = bundle_tool_files(tools)
+
+        return envs, runner_file, use_claude_runner, tool_files
 
     @staticmethod
     def _is_retriable_provider_error(error_msg: str) -> bool:
-        """Return True if *error_msg* indicates a retriable provider error (429/5xx)."""
+        """Return True if error_msg indicates a retriable provider error."""
         msg = error_msg.lower()
         # Rate limit patterns
         if "429" in msg or "rate limit" in msg or "too many requests" in msg:
@@ -253,10 +430,19 @@ class SandshoreRuntime:
     ) -> AsyncIterator[SSEEvent]:
         """Execute via the pluggable backend with semaphore + cancellation.
 
-        Detects retriable SSE error events and raises ``SandshoreError``
-        instead of yielding them, so the failover wrapper can catch and retry.
+        Checks the circuit breaker before executing. On success resets it,
+        on failure records the failure. Detects retriable SSE error events
+        and raises ``SandshoreError`` so the failover wrapper can retry.
         """
-        envs, runner_file, use_claude_runner = self._build_env(request)
+        # Check circuit breaker
+        if not self._circuit_breaker.allow_request():
+            await self._metrics.record_circuit_breaker_rejection()
+            raise SandshoreError(
+                f"Circuit breaker is OPEN for backend "
+                f"'{self._backend.name}' - rejecting request"
+            )
+
+        envs, runner_file, use_claude_runner, tool_files = self._build_env(request)
 
         try:
             async with self._semaphore:
@@ -266,16 +452,23 @@ class SandshoreRuntime:
                     envs=envs,
                     use_claude_runner=use_claude_runner,
                     timeout=self.timeout,
+                    tool_files=tool_files or None,
                 ):
                     if cancel_event is not None and cancel_event.is_set():
-                        logger.info("Cancellation requested, stopping backend")
+                        logger.info(
+                            "Cancellation requested, stopping backend"
+                        )
                         cancelled = True
                         break
 
                     # Detect retriable provider errors in SSE error events
-                    if event.event == "error" or event.data.get("type") == "error":
+                    if (
+                        event.event == "error"
+                        or event.data.get("type") == "error"
+                    ):
                         error_msg = event.data.get("error", "")
                         if self._is_retriable_provider_error(error_msg):
+                            await self._circuit_breaker.record_failure()
                             raise SandshoreError(error_msg)
 
                     yield event
@@ -283,10 +476,14 @@ class SandshoreRuntime:
                 if cancelled:
                     return
 
+            # Successful execution - reset circuit breaker
+            await self._circuit_breaker.record_success()
+
         except SandshoreError:
             raise
         except Exception as e:
             import traceback
+
             logger.error(
                 "Backend '%s' raised %s: %s\n%s",
                 self._backend.name,
@@ -294,8 +491,10 @@ class SandshoreRuntime:
                 e,
                 traceback.format_exc(),
             )
+            await self._circuit_breaker.record_failure()
             raise SandshoreError(
-                f"Sandbox backend '{self._backend.name}' execution failed: {e}"
+                f"Sandbox backend '{self._backend.name}' "
+                f"execution failed: {e}"
             ) from e
 
     async def _stream_backend(
@@ -324,8 +523,10 @@ class SandshoreRuntime:
                 info = resolve_model(model_str)
                 failover.mark_cooldown(info.api_key_env)
                 logger.warning(
-                    "Model '%s' hit retriable error: %s - trying alternatives",
-                    model_str, exc,
+                    "Model '%s' hit retriable error: %s - "
+                    "trying alternatives",
+                    model_str,
+                    exc,
                 )
             except KeyError:
                 raise exc
@@ -334,14 +535,18 @@ class SandshoreRuntime:
         alternatives = failover.get_alternatives(model_str)
         if not alternatives:
             raise SandshoreError(
-                f"Model '{model_str}' is rate-limited and no alternatives are available"
+                f"Model '{model_str}' is rate-limited and no "
+                f"alternatives are available"
             )
 
         last_error: SandshoreError | None = None
         for alt_model in alternatives:
+            await self._metrics.record_failover()
             alt_request = {**request, "model": alt_model}
             try:
-                logger.info("Failing over from '%s' to '%s'", model_str, alt_model)
+                logger.info(
+                    "Failing over from '%s' to '%s'", model_str, alt_model
+                )
                 async for event in self._stream_backend_once(
                     alt_request, cancel_event=cancel_event
                 ):
@@ -356,52 +561,17 @@ class SandshoreRuntime:
                     except KeyError:
                         pass
                     logger.warning(
-                        "Alternative '%s' also failed: %s", alt_model, exc,
+                        "Alternative '%s' also failed: %s",
+                        alt_model,
+                        exc,
                     )
                     continue
                 raise
 
         raise SandshoreError(
-            f"All failover alternatives exhausted for '{model_str}': {last_error}"
+            f"All failover alternatives exhausted for "
+            f"'{model_str}': {last_error}"
         )
-
-    # ------------------------------------------------------------------
-    # HTTP proxy fallback
-    # ------------------------------------------------------------------
-
-    async def _stream_proxy(self, request: dict) -> AsyncIterator[SSEEvent]:
-        """Stream events via HTTP proxy (legacy fallback mode)."""
-        payload = {
-            "prompt": request["prompt"],
-            "anthropic_api_key": self.anthropic_api_key,
-            "e2b_api_key": self.e2b_api_key,
-        }
-
-        for key in ("model", "max_turns", "timeout", "output_format"):
-            if key in request:
-                payload[key] = request[key]
-
-        client = await self._get_http()
-        async with aconnect_sse(
-            client,
-            "POST",
-            f"{self.proxy_url}/query",
-            json=payload,
-        ) as event_source:
-            async for sse in event_source.aiter_sse():
-                try:
-                    data = json.loads(sse.data) if sse.data else {}
-                except json.JSONDecodeError:
-                    data = {"raw": sse.data}
-                yield SSEEvent(event=sse.event or "message", data=data)
-
-    async def _get_http(self) -> httpx.AsyncClient:
-        """Lazy-init HTTP client for proxy mode."""
-        if self._http is None:
-            self._http = httpx.AsyncClient(
-                timeout=httpx.Timeout(self.timeout)
-            )
-        return self._http
 
 
 # ------------------------------------------------------------------
@@ -440,16 +610,16 @@ def _extract_text(data: dict) -> str:
 
 
 # ------------------------------------------------------------------
-# Singleton pool
+# Singleton pool with thread safety
 # ------------------------------------------------------------------
 
 _client_pool: dict[tuple[str, ...], SandshoreRuntime] = {}
+_pool_lock = threading.Lock()
 
 
 def get_sandshore_runtime(
     anthropic_api_key: str,
     e2b_api_key: str,
-    proxy_url: str | None = None,
     timeout: float = 300.0,
     template: str = "",
     max_concurrent: int = 5,
@@ -457,24 +627,67 @@ def get_sandshore_runtime(
     docker_image: str = "sandcastle-runner:latest",
     docker_url: str | None = None,
     cloudflare_worker_url: str = "",
+    # Kept for backward compatibility - ignored
+    proxy_url: str | None = None,
 ) -> SandshoreRuntime:
-    """Return a shared SandshoreRuntime instance."""
-    key = (anthropic_api_key, e2b_api_key, template or "", sandbox_backend)
-    client = _client_pool.get(key)
-    if client is None:
-        client = SandshoreRuntime(
-            anthropic_api_key=anthropic_api_key,
-            e2b_api_key=e2b_api_key,
-            proxy_url=proxy_url,
-            timeout=timeout,
-            template=template,
-            max_concurrent=max_concurrent,
-            sandbox_backend=sandbox_backend,
-            docker_image=docker_image,
-            docker_url=docker_url,
-            cloudflare_worker_url=cloudflare_worker_url,
-        )
-        _client_pool[key] = client
+    """Return a shared SandshoreRuntime instance.
+
+    The pool key includes all backend-specific parameters to ensure
+    different configurations yield separate runtime instances.
+    """
+    key = (
+        anthropic_api_key,
+        e2b_api_key,
+        template or "",
+        sandbox_backend,
+        docker_image,
+        docker_url or "",
+        cloudflare_worker_url or "",
+        str(timeout),
+        str(max_concurrent),
+    )
+    with _pool_lock:
+        client = _client_pool.get(key)
+        if client is None:
+            client = SandshoreRuntime(
+                anthropic_api_key=anthropic_api_key,
+                e2b_api_key=e2b_api_key,
+                timeout=timeout,
+                template=template,
+                max_concurrent=max_concurrent,
+                sandbox_backend=sandbox_backend,
+                docker_image=docker_image,
+                docker_url=docker_url,
+                cloudflare_worker_url=cloudflare_worker_url,
+            )
+            _client_pool[key] = client
     return client
 
 
+async def cleanup_pool() -> None:
+    """Gracefully close and remove all runtime instances from the pool."""
+    with _pool_lock:
+        runtimes = list(_client_pool.values())
+        _client_pool.clear()
+    for rt in runtimes:
+        try:
+            await rt.close()
+        except Exception as e:
+            logger.warning("Error closing runtime during pool cleanup: %s", e)
+
+
+def pool_stats() -> dict:
+    """Return observability info about the singleton pool."""
+    with _pool_lock:
+        entries = []
+        for key, rt in _client_pool.items():
+            entries.append({
+                "backend": rt.backend_name,
+                "template": rt.template,
+                "circuit_breaker_state": rt.circuit_breaker.state,
+                "metrics": rt.metrics.snapshot(),
+            })
+        return {
+            "pool_size": len(_client_pool),
+            "runtimes": entries,
+        }

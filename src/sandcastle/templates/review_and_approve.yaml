@@ -1,10 +1,10 @@
 # name: Review and Approve
-# description: Generates content, pauses for human review and approval, then publishes the approved content
+# description: Comprehensive content generation with parallel quality and compliance checks, revision suggestions, and human approval gate
 # tags: [approval, human-in-the-loop, content, review]
 # category: general_ai
 
 name: review-and-approve
-description: Generates content, pauses for human review and approval, then publishes the approved content
+description: Comprehensive content generation with parallel quality and compliance checks, revision suggestions, and human approval gate
 
 default_model: sonnet
 default_max_turns: 10
@@ -19,33 +19,226 @@ input_schema:
     audience:
       type: string
       description: "The target audience for the content"
+    review_criteria:
+      type: string
+      description: "Specific criteria the content must meet (e.g. 'must include 3 case studies, cite sources, stay under 2000 words')"
+      default: "Accuracy, clarity, engagement, and completeness"
+    standards:
+      type: string
+      description: "Quality or compliance standards to check against (e.g. 'AP Style Guide', 'GDPR compliant', 'brand voice guidelines')"
+      default: "Professional writing standards with clear sourcing and factual accuracy"
 
 steps:
-  - id: generate
-    prompt: >
-      Generate content based on the following brief.
-      Produce a polished draft ready for review.
+  - id: content-analysis
+    prompt: |
+      Analyze the content brief thoroughly and produce a detailed content
+      plan before any writing begins.
+
       Brief: {input.brief}
       Target audience: {input.audience}
+      Review criteria: {input.review_criteria}
+      Standards: {input.standards}
+
+      Develop a comprehensive content plan covering:
+
+      1. **Brief interpretation** - Restate the brief in your own words to
+         confirm understanding. Identify the core message, desired action
+         from the reader, and any implicit requirements not stated directly.
+         If the brief is ambiguous on any point, note the ambiguity and
+         state the interpretation you will follow.
+
+      2. **Audience profile** - Build a detailed profile of "{input.audience}":
+         - Knowledge level on this topic (novice / intermediate / expert)
+         - What they care about most (pain points, goals, motivations)
+         - Preferred content style (data-driven, story-driven, actionable)
+         - Reading context (skimming on mobile, deep reading, reference material)
+
+      3. **Content architecture** - Design the structure:
+         - Proposed headline / title
+         - Section breakdown with purpose of each section
+         - Key points to hit in each section
+         - Opening hook strategy
+         - Call-to-action or conclusion approach
+
+      4. **Success criteria mapping** - Map each review criterion from
+         "{input.review_criteria}" to specific, measurable checkpoints
+         that can be verified during the quality check phase.
+
+      5. **Risk identification** - Flag potential issues:
+         - Claims that need sourcing or verification
+         - Topics that could be sensitive or controversial
+         - Areas where the brief is underspecified
+         - Compliance requirements from the stated standards
+
+      6. **Draft the full content** - Based on all the above analysis,
+         produce a complete, polished draft that follows the content
+         architecture and addresses all success criteria. This draft
+         should be ready for parallel quality and compliance review.
+
+      Output the complete content plan followed by the full draft content.
     model: sonnet
     max_turns: 10
 
-  - id: review-gate
-    depends_on: [generate]
+  - id: quality-check
+    depends_on: [content-analysis]
+    prompt: |
+      Perform a rigorous quality check on the generated content against
+      the stated review criteria and professional standards.
+
+      Generated content: {steps.content-analysis.output}
+      Original brief: {input.brief}
+      Target audience: {input.audience}
+      Review criteria: {input.review_criteria}
+
+      Evaluate each of these quality dimensions:
+
+      1. **Criteria compliance** - Go through each criterion in
+         "{input.review_criteria}" one by one. For each:
+         - State the criterion
+         - Assessment: PASS / PARTIAL / FAIL
+         - Evidence: quote the specific section that satisfies it (or note what is missing)
+
+      2. **Factual accuracy** - Identify every factual claim, statistic,
+         or assertion in the content. For each:
+         - Is it verifiable?
+         - Is it stated with appropriate confidence/hedging?
+         - Flag any claims that appear unsupported or potentially inaccurate
+
+      3. **Audience alignment** - Does the vocabulary, complexity level,
+         and framing match what "{input.audience}" would expect and find
+         valuable? Flag any jargon that needs simplification or any
+         oversimplifications that might insult an expert audience.
+
+      4. **Structural quality** - Evaluate:
+         - Logical flow between sections (does each section build on the previous?)
+         - Paragraph coherence (does each paragraph have a clear purpose?)
+         - Transition quality (are connections between ideas explicit?)
+         - Opening strength (does it hook the reader in the first 2 sentences?)
+         - Conclusion effectiveness (does it drive the intended action?)
+
+      5. **Writing quality** - Check for:
+         - Grammar, spelling, and punctuation errors
+         - Passive voice overuse
+         - Redundancy or repetition
+         - Sentence variety (mix of lengths and structures)
+         - Word choice precision
+
+      Output a structured quality report with an overall score (1-10)
+      and a prioritized list of issues found, ordered by severity.
+    model: sonnet
+    max_turns: 8
+
+  - id: compliance-check
+    depends_on: [content-analysis]
+    prompt: |
+      Perform a compliance and standards check on the generated content
+      against the specified standards and general best practices.
+
+      Generated content: {steps.content-analysis.output}
+      Standards to check: {input.standards}
+      Target audience: {input.audience}
+
+      Evaluate compliance across these dimensions:
+
+      1. **Standards adherence** - Check every requirement in
+         "{input.standards}" systematically:
+         - State each standard requirement
+         - Assessment: COMPLIANT / NON-COMPLIANT / NOT APPLICABLE
+         - Details: specific evidence of compliance or violation
+
+      2. **Legal and regulatory check** - Scan for potential issues:
+         - Unattributed quotes or potential plagiarism concerns
+         - Claims that could be considered misleading or deceptive
+         - Privacy concerns (personal data, identifying information)
+         - Trademark or copyright issues
+         - Disclaimers that may be needed but are missing
+
+      3. **Inclusivity and sensitivity** - Review for:
+         - Language that could exclude or offend any group
+         - Gender-neutral language where appropriate
+         - Cultural sensitivity in examples and references
+         - Accessibility of language (readability score assessment)
+
+      4. **Brand and tone consistency** - If brand guidelines are part
+         of the standards, verify:
+         - Voice consistency throughout
+         - Approved terminology usage
+         - Formatting adherence
+         - Visual/structural alignment with brand patterns
+
+      5. **Risk assessment** - Rate the overall compliance risk:
+         - LOW: All standards met, no legal concerns
+         - MEDIUM: Minor standards gaps, easily fixable
+         - HIGH: Significant compliance issues requiring major revision
+         - CRITICAL: Content should not be published without legal review
+
+      Output a compliance report with overall risk rating, list of
+      all findings, and required changes before approval.
+    model: sonnet
+    max_turns: 8
+
+  - id: revision-suggestions
+    depends_on: [quality-check, compliance-check]
+    prompt: |
+      Synthesize the quality check and compliance check results into
+      a concrete set of revisions, then apply them to produce an
+      improved version of the content.
+
+      Original content: {steps.content-analysis.output}
+      Quality report: {steps.quality-check.output}
+      Compliance report: {steps.compliance-check.output}
+      Original brief: {input.brief}
+      Review criteria: {input.review_criteria}
+
+      Follow this revision process:
+
+      1. **Issue consolidation** - Merge findings from both reports.
+         Remove duplicates. Categorize all issues as:
+         - BLOCKING: Must fix before approval (factual errors, compliance violations, missing required elements)
+         - IMPORTANT: Should fix to meet quality bar (structural issues, unclear passages, weak sections)
+         - NICE-TO-HAVE: Would improve but not essential (style polish, word choice refinements)
+
+      2. **Conflict resolution** - If quality and compliance checks
+         give conflicting recommendations (e.g. quality says add detail,
+         compliance says reduce claims), resolve in favor of compliance
+         first, then quality.
+
+      3. **Revision plan** - For each BLOCKING and IMPORTANT issue,
+         specify exactly:
+         - What to change (quote the current text)
+         - What to change it to (provide the replacement text)
+         - Why this change improves the content
+
+      4. **Apply all revisions** - Produce the complete revised content
+         with all BLOCKING and IMPORTANT changes applied. Also apply
+         NICE-TO-HAVE changes where they do not conflict with other fixes.
+
+      5. **Revision summary** - Provide a brief changelog:
+         - Number of BLOCKING issues fixed
+         - Number of IMPORTANT issues fixed
+         - Number of NICE-TO-HAVE issues applied
+         - Any issues intentionally left unresolved and why
+
+      Output the fully revised content followed by the revision summary.
+      The revised content should be ready for human approval.
+    model: sonnet
+    max_turns: 10
+
+  - id: approval-summary
+    depends_on: [revision-suggestions]
     type: approval
-    prompt: Review the generated content before publishing
+    prompt: |
+      Prepare a concise approval package for the human reviewer.
+
+      Present:
+      1. The final revised content
+      2. Summary of changes made from quality and compliance reviews
+      3. Overall quality score
+      4. Compliance risk rating
+      5. Any remaining notes or caveats for the reviewer
     approval_config:
-      message: "Review the generated content and approve for publishing"
-      show_data: steps.generate.output
-      timeout_hours: 24
+      message: "Review the content below. It has passed automated quality and compliance checks. Approve to finalize, or edit and resubmit."
+      show_data: steps.revision-suggestions.output
+      timeout_hours: 48
       on_timeout: abort
       allow_edit: true
-
-  - id: publish
-    depends_on: [review-gate]
-    prompt: >
-      Format and finalize the approved content for publishing.
-      Apply any reviewer edits and prepare the final output.
-      Approved content: {steps.generate.output}
-    model: haiku
-    max_turns: 3

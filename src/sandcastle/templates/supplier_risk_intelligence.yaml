@@ -1,0 +1,250 @@
+# name: Supplier Risk Intelligence
+# description: Assess supplier portfolio risks across financial, geopolitical, and ESG dimensions with alternative sourcing recommendations
+# tags: [Supply-Chain, Risk, Procurement, ESG]
+# category: general_ai
+
+name: supplier-risk-intelligence
+description: Assess supplier portfolio risks across financial, geopolitical, and ESG dimensions with alternative sourcing recommendations
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["supplier_list", "industry"]
+  properties:
+    supplier_list:
+      type: string
+      description: "Comma-separated list of supplier names to evaluate (e.g. 'Foxconn, TSMC, Samsung SDI')"
+    industry:
+      type: string
+      description: "Industry vertical for context (e.g. 'automotive', 'electronics', 'pharma')"
+    risk_threshold:
+      type: string
+      description: "Minimum risk level to flag: 'low', 'medium', or 'high' (default: 'medium')"
+      default: "medium"
+
+steps:
+  - id: supplier-scan
+    prompt: |
+      Parse and profile each supplier from the provided list for the specified industry.
+
+      Supplier list: {input.supplier_list}
+      Industry: {input.industry}
+
+      For each supplier, compile a baseline profile including:
+      1. **Company overview** - headquarters location, founding year, ownership structure
+         (public/private/state-owned), approximate revenue and employee count
+      2. **Industry role** - what they supply, their position in the value chain,
+         key products or components relevant to the {input.industry} sector
+      3. **Geographic footprint** - manufacturing facilities, primary operating regions,
+         key export/import corridors
+      4. **Customer concentration** - known major customers, estimated dependency ratio
+      5. **Recent news** - any notable events in the last 12 months (M&A, leadership
+         changes, regulatory actions, supply disruptions)
+
+      Return a structured profile for each supplier that will serve as the foundation
+      for parallel risk assessments. Flag any suppliers where public information is
+      limited, as this itself is a risk indicator.
+    model: haiku
+    max_turns: 8
+
+  - id: financial-health
+    depends_on: [supplier-scan]
+    prompt: |
+      Conduct a financial health assessment for each supplier based on available data.
+
+      Supplier profiles: {steps.supplier-scan.output}
+      Industry: {input.industry}
+
+      For each supplier, evaluate the following financial dimensions:
+
+      1. **Liquidity indicators** - current ratio, quick ratio, cash runway estimates.
+         For private companies, infer from available signals (funding rounds, credit
+         ratings, payment behavior reports).
+      2. **Profitability trajectory** - revenue growth trend, margin stability, comparison
+         to industry benchmarks for the {input.industry} sector.
+      3. **Debt and leverage** - debt-to-equity ratio, recent borrowing activity,
+         covenant risk signals. Flag any suppliers with deteriorating credit profiles.
+      4. **Operational efficiency** - inventory turnover, days payable/receivable
+         outstanding, capacity utilization signals.
+      5. **Going concern risks** - bankruptcy probability indicators, audit opinion
+         flags, material weakness disclosures.
+
+      Score each supplier's financial health from 1 (critical risk) to 10 (excellent).
+      Provide a brief rationale for each score, noting which specific indicators drove
+      the assessment. Highlight any suppliers scoring below 5 as requiring immediate
+      attention.
+    model: sonnet
+    max_turns: 8
+
+  - id: geopolitical-risk
+    depends_on: [supplier-scan]
+    prompt: |
+      Assess geopolitical and operational risk exposure for each supplier.
+
+      Supplier profiles: {steps.supplier-scan.output}
+      Industry: {input.industry}
+
+      For each supplier, analyze risks across these categories:
+
+      1. **Country/region risk** - political stability of operating regions, rule of law
+         index, corruption perception, currency volatility, and capital controls.
+         Consider both headquarters and manufacturing locations.
+      2. **Trade policy exposure** - tariff vulnerability, sanctions risk, export control
+         restrictions (e.g. ITAR, EAR, EU dual-use), forced labor import bans (UFLPA).
+         Map which trade corridors each supplier depends on.
+      3. **Concentration risk** - single points of failure in geography. Would a natural
+         disaster, port closure, or regional conflict disrupt this supplier?
+      4. **Regulatory environment** - upcoming regulations that could impact operations
+         (carbon border adjustments, CBAM, chip export controls, data localization).
+      5. **Logistics vulnerability** - dependence on specific shipping routes (Suez,
+         Panama, Taiwan Strait), lead time sensitivity, warehousing locations.
+
+      Score geopolitical risk from 1 (minimal) to 10 (critical) per supplier.
+      Identify the top 2 scenario risks for each supplier - specific events that
+      would cause the most disruption to supply continuity.
+    model: sonnet
+    max_turns: 8
+
+  - id: esg-compliance
+    depends_on: [supplier-scan]
+    prompt: |
+      Evaluate ESG (Environmental, Social, Governance) compliance and sustainability
+      risk for each supplier.
+
+      Supplier profiles: {steps.supplier-scan.output}
+      Industry: {input.industry}
+
+      Assess each supplier across three ESG pillars:
+
+      **Environmental:**
+      - Carbon footprint and emissions disclosure (Scope 1, 2, 3 if available)
+      - Environmental violations, fines, or remediation orders in the last 5 years
+      - Climate transition readiness - science-based targets, renewable energy usage
+      - Hazardous materials handling and waste management practices
+      - Water usage intensity relative to {input.industry} benchmarks
+
+      **Social:**
+      - Labor practices - fair wages, working conditions, freedom of association
+      - Human rights due diligence - forced labor risk, child labor risk by region
+      - Workplace safety record - incident rates, OSHA/equivalent violations
+      - Community impact and stakeholder relations
+      - Diversity and inclusion policies
+
+      **Governance:**
+      - Board independence and oversight quality
+      - Anti-corruption and bribery controls
+      - Whistleblower protection mechanisms
+      - Supply chain transparency and disclosure practices
+      - Data privacy and cybersecurity posture
+
+      Score each pillar 1-10 and provide an overall ESG risk rating. Flag any
+      suppliers with known controversies, pending investigations, or that appear
+      on watchlists (e.g. MSCI ESG controversy flags, Sustainalytics severe events).
+    model: sonnet
+    max_turns: 8
+
+  - id: risk-synthesis
+    depends_on: [financial-health, geopolitical-risk, esg-compliance]
+    prompt: |
+      Synthesize all risk dimensions into a unified supplier risk scorecard.
+
+      Financial assessments: {steps.financial-health.output}
+      Geopolitical assessments: {steps.geopolitical-risk.output}
+      ESG assessments: {steps.esg-compliance.output}
+      Risk threshold: {input.risk_threshold}
+
+      For each supplier, produce a composite risk profile:
+
+      1. **Composite Risk Score** (1-100) using weighted dimensions:
+         - Financial health: 35% weight
+         - Geopolitical risk: 35% weight
+         - ESG compliance: 30% weight
+      2. **Risk classification** - Critical / High / Medium / Low based on composite score
+      3. **Risk trend** - Improving, Stable, or Deteriorating (infer from available signals)
+      4. **Top 3 risk factors** - the most material risks for each supplier, ranked
+      5. **Interdependency map** - identify suppliers that share risk factors (e.g. same
+         region, same sub-tier supplier, correlated financial exposure)
+      6. **Threshold flags** - highlight all suppliers exceeding the {input.risk_threshold}
+         threshold with specific justification
+
+      Create a portfolio-level summary showing:
+      - Distribution of suppliers across risk tiers
+      - Total spend exposure per risk tier (estimated)
+      - Correlated risk clusters that could amplify portfolio impact
+      - Single points of failure in the supplier network
+    model: sonnet
+    max_turns: 10
+
+  - id: alternative-suppliers
+    depends_on: [risk-synthesis]
+    prompt: |
+      Identify alternative suppliers for each high-risk supplier flagged in the synthesis.
+
+      Risk synthesis: {steps.risk-synthesis.output}
+      Industry: {input.industry}
+      Risk threshold: {input.risk_threshold}
+
+      For each supplier classified at or above the {input.risk_threshold} level:
+
+      1. **Alternative candidates** - suggest 2-3 alternative suppliers that could
+         provide equivalent products or components. For each alternative, provide:
+         - Company name, headquarters, and key facilities
+         - Relevant product capabilities and certifications
+         - Estimated lead time for qualification and onboarding
+         - Known advantages and disadvantages vs the current supplier
+      2. **Diversification strategy** - recommend a dual-sourcing or multi-sourcing
+         approach with suggested allocation percentages
+      3. **Transition risk** - assess the risk and cost of switching, including
+         qualification timelines, tooling changes, and minimum order requirements
+      4. **Near-shoring opportunities** - identify alternatives in lower-risk geographies
+         that could reduce logistics and geopolitical exposure
+
+      Conclude with a prioritized action plan:
+      - Immediate actions (30 days): critical risk mitigation steps
+      - Short-term (90 days): supplier qualification and pilot orders
+      - Medium-term (6 months): diversification implementation
+      - Ongoing: monitoring cadence and reassessment triggers
+    model: sonnet
+    max_turns: 10
+
+  - id: risk-dashboard
+    depends_on: [risk-synthesis, alternative-suppliers]
+    prompt: |
+      Compile all findings into an executive-ready supplier risk intelligence dashboard.
+
+      Risk synthesis: {steps.risk-synthesis.output}
+      Alternative suppliers: {steps.alternative-suppliers.output}
+      Industry: {input.industry}
+
+      Produce a comprehensive report formatted for executive and procurement leadership:
+
+      **Executive Summary** (1 paragraph)
+      - Portfolio health snapshot, key findings, and most urgent actions
+
+      **Risk Heat Map** (text-based matrix)
+      - Rows: suppliers, Columns: Financial | Geopolitical | ESG | Composite
+      - Color-coded ratings: Critical (red), High (orange), Medium (yellow), Low (green)
+
+      **Critical Alerts**
+      - Suppliers requiring immediate intervention with specific recommended actions
+
+      **Portfolio Metrics**
+      - Total suppliers assessed, risk distribution, concentration analysis
+      - Year-over-year risk trend (if inferrable)
+
+      **Mitigation Roadmap**
+      - Prioritized list of actions from the alternative supplier analysis
+      - Estimated timeline, resource requirements, and expected risk reduction
+
+      **Monitoring Recommendations**
+      - KPIs to track per supplier (financial ratios, news alerts, ESG scores)
+      - Suggested reassessment frequency per risk tier
+      - Early warning indicators that should trigger ad-hoc review
+
+      Format the entire report in clean markdown with clear section headers,
+      tables where appropriate, and a professional tone suitable for board-level
+      presentation.
+    model: sonnet
+    max_turns: 10

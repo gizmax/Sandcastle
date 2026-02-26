@@ -1,0 +1,297 @@
+# name: Social Media Repurposer
+# description: Take any blog post URL, extract key points, generate optimized posts for Twitter/X, LinkedIn, Instagram, and TikTok with image prompts
+# tags: [Social, Content, Repurpose, Multi-platform]
+# category: marketing
+
+name: social-repurposer
+description: Take any blog post URL, extract key points, generate optimized posts for Twitter/X, LinkedIn, Instagram, and TikTok with image prompts
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["blog_url"]
+  properties:
+    blog_url:
+      type: string
+      description: "URL of the blog post to repurpose into social media content"
+    brand_voice:
+      type: string
+      description: "Brand voice guidelines - e.g. 'professional but approachable, avoid jargon, use data-driven claims'"
+    target_platforms:
+      type: string
+      description: "Comma-separated platforms to generate for - 'twitter, linkedin, instagram, tiktok' (default: all)"
+      default: "twitter, linkedin, instagram, tiktok"
+    cta_url:
+      type: string
+      description: "Call-to-action URL to include in posts (e.g., landing page URL). Defaults to the blog URL."
+    hashtag_strategy:
+      type: string
+      description: "Hashtag preferences - e.g. 'industry-specific, max 5 per post, include branded hashtag #AcmeTech'"
+
+steps:
+  - id: extract-content
+    prompt: |
+      Analyze the blog post and extract the essential content for social media repurposing.
+
+      Blog URL: {input.blog_url}
+
+      Read and analyze the blog post thoroughly. Extract:
+
+      1. **Core message:** the single most important takeaway in one sentence.
+         This will anchor all social variations.
+
+      2. **Key points:** 3-5 main arguments, data points, or insights from the article.
+         For each, note:
+         - The point itself (concise statement)
+         - Supporting evidence (statistic, quote, example)
+         - Emotional hook (why should the reader care?)
+
+      3. **Quotable moments:** 2-3 sentences from the article that work well
+         as standalone quotes or tweet-sized statements. Look for:
+         - Surprising statistics or data points
+         - Contrarian or provocative statements
+         - Concise wisdom or actionable tips
+
+      4. **Visual content opportunities:**
+         - Any data/charts that could be turned into infographics
+         - Concepts that could be illustrated
+         - Before/after or comparison scenarios
+         - Process flows or step-by-step visuals
+
+      5. **Content metadata:**
+         - Article title and subtitle
+         - Author name
+         - Publication date
+         - Word count estimate
+         - Primary topic/category
+         - Target audience inference
+
+      6. **SEO context:** keywords, topic cluster, and content angle for
+         platform-specific hashtag selection.
+
+      Return structured JSON with all extracted elements.
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        core_message: { type: string }
+        key_points: { type: array }
+        quotable_moments: { type: array }
+        visual_opportunities: { type: array }
+        title: { type: string }
+        author: { type: string }
+
+  - id: generate-twitter
+    depends_on: [extract-content]
+    prompt: |
+      Generate optimized Twitter/X content from the blog post analysis.
+
+      Extracted content: {steps.extract-content.output}
+      Brand voice: {input.brand_voice}
+      CTA URL: {input.cta_url}
+      Blog URL: {input.blog_url}
+      Hashtag strategy: {input.hashtag_strategy}
+      Target platforms: {input.target_platforms}
+
+      Skip this step if 'twitter' is not in the target platforms.
+
+      Generate a Twitter/X content package:
+
+      **1. Main tweet (announcement):**
+      - Max 280 characters (leave room for link)
+      - Lead with the hook or most surprising insight
+      - Include the CTA URL ({input.cta_url} or {input.blog_url})
+      - Apply hashtag strategy: {input.hashtag_strategy}
+      - End with a clear call to action
+
+      **2. Thread version (5-7 tweets):**
+      - Tweet 1: Hook - the most compelling insight or question. Use a pattern
+        interrupt. End with "Thread" or the thread emoji.
+      - Tweets 2-5: One key point per tweet with supporting evidence.
+        Use short sentences, line breaks for readability. Include data points.
+      - Tweet 6: Summary/synthesis of the main argument
+      - Tweet 7: CTA with link to full article + relevant hashtags
+      - Each tweet must stand alone (someone might see only one via retweet)
+
+      **3. Quote tweet options (2-3):**
+      - Designed to work when quote-tweeting the main announcement
+      - Add personal perspective, hot take, or additional context
+      - Different angles: agree, add nuance, share experience
+
+      **4. Image prompt for Twitter card:**
+      - Describe an eye-catching image (1200x675px ratio) that could accompany
+        the main tweet. Focus on bold text overlay with key stat or quote.
+
+      Apply brand voice guidelines throughout: {input.brand_voice}
+    model: sonnet
+    max_turns: 8
+
+  - id: generate-linkedin
+    depends_on: [extract-content]
+    prompt: |
+      Generate optimized LinkedIn content from the blog post analysis.
+
+      Extracted content: {steps.extract-content.output}
+      Brand voice: {input.brand_voice}
+      CTA URL: {input.cta_url}
+      Blog URL: {input.blog_url}
+      Hashtag strategy: {input.hashtag_strategy}
+      Target platforms: {input.target_platforms}
+
+      Skip this step if 'linkedin' is not in the target platforms.
+
+      Generate a LinkedIn content package:
+
+      **1. Long-form post (primary):**
+      - 1200-1500 characters (LinkedIn's engagement sweet spot)
+      - Opening hook: first 2 lines visible before "see more" - make them count.
+        Use a bold statement, surprising stat, or provocative question.
+      - Body: share 2-3 key insights with professional framing. Use short
+        paragraphs (1-2 sentences each) with line breaks between them.
+        LinkedIn rewards white space and readability.
+      - Personal angle: frame insights through professional experience or
+        industry observation. LinkedIn favors authentic perspective.
+      - CTA: ask a question to drive comments (LinkedIn algorithm rewards comments
+        more than likes). E.g., "What's been your experience with...?"
+      - Link: place the article URL in the first comment (not in the post body)
+        to avoid algorithm penalty. Note this in the output.
+      - Hashtags: 3-5 relevant hashtags at the end
+
+      **2. Short-form post (alternative):**
+      - 500-700 characters for quick engagement
+      - Single insight or data point with professional commentary
+      - Question or poll prompt to drive engagement
+
+      **3. Article reshare commentary:**
+      - Brief commentary (200-300 characters) for sharing the article link directly
+      - Adds the poster's perspective rather than just sharing
+
+      **4. Image prompt for LinkedIn:**
+      - Professional visual (1200x627px) - clean design, data visualization,
+        or quote card with professional styling. No memes or overly casual graphics.
+
+      Tone for LinkedIn: {input.brand_voice} with an additional layer of
+      professional authority and thought leadership positioning.
+    model: sonnet
+    max_turns: 8
+
+  - id: generate-visual-social
+    depends_on: [extract-content]
+    prompt: |
+      Generate optimized Instagram and TikTok content from the blog post analysis.
+
+      Extracted content: {steps.extract-content.output}
+      Brand voice: {input.brand_voice}
+      CTA URL: {input.cta_url}
+      Blog URL: {input.blog_url}
+      Hashtag strategy: {input.hashtag_strategy}
+      Target platforms: {input.target_platforms}
+
+      **INSTAGRAM (skip if not in target platforms):**
+
+      1. **Carousel post concept (up to 10 slides):**
+         - Slide 1: Bold title/hook that stops the scroll. Large text, minimal design.
+         - Slides 2-8: One key point per slide. Mix of text-heavy and visual slides.
+           Use bullet points, numbered lists, or single impactful statements.
+         - Slide 9: Summary or actionable takeaway
+         - Slide 10: CTA ("Save this post", "Follow for more", "Link in bio")
+         - For each slide, describe the visual layout and text content
+
+      2. **Caption:**
+         - 150-200 words with a strong opening line
+         - Expand on the carousel content with personal touch
+         - Include CTA: "Save this for later" (saves boost algorithm reach)
+         - Hashtags: up to 30, mix of broad (500K-5M posts) and niche (10K-500K)
+         - Apply hashtag strategy: {input.hashtag_strategy}
+
+      3. **Stories sequence (3-5 stories):**
+         - Story 1: Teaser question or poll related to the topic
+         - Stories 2-4: Key insights as text-on-background or quote cards
+         - Story 5: Swipe-up/link sticker to the blog post
+
+      4. **Reel concept:**
+         - 30-60 second script for a talking-head or text-overlay reel
+         - Hook in first 3 seconds (the scroll-stopper)
+         - 3 key points delivered with visual transitions
+         - Trending audio suggestion (describe the vibe: upbeat, informative, dramatic)
+
+      **TIKTOK (skip if not in target platforms):**
+
+      1. **Short video script (15-30 seconds):**
+         - Hook: "Here's what nobody tells you about [topic]..." or similar pattern
+         - 3 rapid-fire points from the article
+         - Surprise ending or counterintuitive conclusion
+         - Text overlay descriptions for each segment
+
+      2. **Longer video script (60-90 seconds):**
+         - Storytelling format: problem, insight, solution
+         - More depth on the most compelling point from the article
+         - Include specific data or examples that make it credible
+         - End with a question to drive comments
+
+      3. **Trending format adaptation:**
+         - Suggest 1-2 trending TikTok formats that could work for this content
+         - e.g., "Things I wish I knew about [topic]", "POV: you just learned [insight]"
+         - Describe how to adapt the blog content to fit each format
+
+      4. **Caption and hashtags:**
+         - Short, punchy caption (under 150 characters)
+         - Relevant hashtags including trending ones for the topic
+    model: sonnet
+    max_turns: 10
+
+  - id: compile-package
+    depends_on: [generate-twitter, generate-linkedin, generate-visual-social]
+    prompt: |
+      Compile all generated social content into a ready-to-publish content package
+      with a publishing schedule.
+
+      Twitter content: {steps.generate-twitter.output}
+      LinkedIn content: {steps.generate-linkedin.output}
+      Instagram/TikTok content: {steps.generate-visual-social.output}
+      Source article: {steps.extract-content.output}
+
+      Create a comprehensive content package:
+
+      **1. Publishing schedule:**
+      Recommend optimal posting times for each platform based on general
+      best practices:
+      - LinkedIn: Tuesday-Thursday, 8-10 AM or 12-1 PM (business audience)
+      - Twitter/X: Monday-Friday, multiple times per day
+      - Instagram: Tuesday-Friday, 11 AM-1 PM or 7-9 PM
+      - TikTok: Tuesday-Thursday, 7-9 PM
+      Suggest a 1-week distribution plan that maximizes reach without
+      audience fatigue.
+
+      **2. Content calendar view:**
+      | Day | Platform | Content Type | Status |
+      Spread content across the week with platform-appropriate cadence.
+
+      **3. Asset checklist:**
+      List all visual assets needed with exact specifications:
+      - Image dimensions per platform
+      - Image prompts for design team or AI generation
+      - Video scripts with timing notes
+      - Any additional assets (polls, questions, carousel text)
+
+      **4. Cross-platform consistency check:**
+      Verify that all content variations:
+      - Convey the same core message
+      - Maintain consistent brand voice: {input.brand_voice}
+      - Include appropriate CTAs pointing to {input.cta_url}
+      - Use platform-appropriate formatting and length
+
+      **5. Performance tracking recommendations:**
+      For each post, suggest which metrics to track:
+      - Twitter: impressions, engagement rate, link clicks, retweets
+      - LinkedIn: impressions, engagement rate, comments, shares
+      - Instagram: reach, saves, shares, profile visits
+      - TikTok: views, completion rate, shares, comments
+
+      Output the complete package organized by platform, ready for the
+      social media manager to review and schedule.
+    model: haiku
+    max_turns: 5

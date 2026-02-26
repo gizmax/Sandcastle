@@ -1,0 +1,1080 @@
+# name: Course Creator
+# description: Generate complete online course content from a topic - outline, lesson scripts, quizzes, assignments, and platform-ready export
+# tags: [Education, Course-Design, E-Learning, Content]
+# category: general_ai
+
+name: course-creator
+description: Generate complete online course content from a topic - outline, lesson scripts, quizzes, assignments, and platform-ready export
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["course_topic", "target_audience", "difficulty_level", "course_length"]
+  properties:
+    course_topic:
+      type: string
+      description: "The subject of the course (e.g. 'Machine Learning for Product Managers', 'Advanced SQL for Data Engineers', 'Introduction to UX Research')"
+    target_audience:
+      type: string
+      description: "Who the course is designed for (e.g. 'junior developers with 1-2 years experience', 'marketing professionals transitioning to data analytics', 'complete beginners with no technical background')"
+    difficulty_level:
+      type: string
+      description: "Course difficulty: 'beginner', 'intermediate', or 'advanced'"
+    course_length:
+      type: string
+      description: "Target course duration in hours (e.g. '4', '10', '20')"
+    platform:
+      type: string
+      description: "Target learning platform: 'udemy', 'coursera', 'teachable', 'skillshare', 'general' (default: 'general')"
+      default: "general"
+
+steps:
+  - id: curriculum-design
+    prompt: |
+      Design a comprehensive curriculum and learning architecture for this online course.
+
+      Course topic: {input.course_topic}
+      Target audience: {input.target_audience}
+      Difficulty level: {input.difficulty_level}
+      Course length: {input.course_length} hours
+      Target platform: {input.platform}
+
+      You are a senior instructional designer with expertise in adult learning theory,
+      curriculum architecture, and online education. Your task is to create a rigorous,
+      pedagogically sound curriculum that maximizes learning outcomes for the target audience.
+
+      --- AUDIENCE ANALYSIS ---
+
+      Before designing anything, deeply analyze the target audience:
+
+      1. **Prior knowledge assessment**:
+         - What does "{input.target_audience}" likely already know?
+         - What are common misconceptions this audience holds about {input.course_topic}?
+         - What prerequisite knowledge is assumed vs. what needs to be covered?
+         - What is the expected variance in skill level within this audience?
+         - Create a "learner persona" with demographics, goals, pain points, and learning context
+
+      2. **Motivation analysis**:
+         - Why would this audience want to learn {input.course_topic}?
+         - What career or personal outcomes are they seeking?
+         - What is their likely attention span and time commitment pattern?
+         - Are they learning voluntarily or as a job requirement?
+         - What competing priorities might pull them away from the course?
+
+      3. **Learning context**:
+         - When and where will they likely consume the content? (commute, desk, evening)
+         - What devices will they use? (laptop, tablet, phone)
+         - Do they have access to practice environments?
+         - Are they learning alone or in a cohort?
+         - Cultural considerations for global audiences?
+
+      --- BLOOM'S TAXONOMY APPLICATION ---
+
+      Map the entire course against Bloom's revised taxonomy to ensure progressive
+      cognitive development. For the "{input.difficulty_level}" level, the distribution
+      should be:
+
+      **Beginner courses:**
+      - Remember (20%): terminology, definitions, facts, foundational concepts
+      - Understand (35%): explanations, examples, paraphrasing, classification
+      - Apply (30%): guided exercises, simple real-world scenarios, tool usage
+      - Analyze (10%): comparing approaches, identifying patterns
+      - Evaluate (4%): basic critique of solutions, preference justification
+      - Create (1%): simple original work, combining learned elements
+
+      **Intermediate courses:**
+      - Remember (5%): recall of advanced terminology and frameworks
+      - Understand (15%): deeper conceptual understanding, nuanced explanations
+      - Apply (30%): independent problem-solving, real-world project work
+      - Analyze (25%): breaking down complex problems, identifying root causes
+      - Evaluate (15%): assessing tradeoffs, critiquing approaches, decision-making
+      - Create (10%): designing solutions, building projects, original analysis
+
+      **Advanced courses:**
+      - Remember (2%): specialized terminology and cutting-edge concepts
+      - Understand (8%): deep theoretical understanding, research literacy
+      - Apply (20%): complex multi-step problem solving
+      - Analyze (25%): systems thinking, decomposition, pattern recognition
+      - Evaluate (25%): critical assessment, research evaluation, trade-off analysis
+      - Create (20%): original projects, novel solutions, thought leadership
+
+      For each module and lesson, specify which Bloom's level(s) it targets and how.
+
+      --- LEARNING OBJECTIVES FRAMEWORK ---
+
+      Write learning objectives using the ABCD method:
+      - **A**udience: who the learner is
+      - **B**ehavior: what the learner will be able to do (use action verbs from Bloom's)
+      - **C**ondition: under what circumstances
+      - **D**egree: to what standard of performance
+
+      Create two tiers of learning objectives:
+      1. **Course-level objectives** (5-8 objectives): what the student can do after
+         completing the entire course
+      2. **Module-level objectives** (2-4 per module): what the student can do after
+         each module
+
+      Example format: "Given [condition], the learner will be able to [action verb]
+      [subject] to [degree/standard]."
+
+      --- COURSE STRUCTURE ---
+
+      Design the course architecture within the {input.course_length}-hour constraint.
+      Allocate time across these content types:
+
+      - Video lessons: 50-60% of total time
+      - Hands-on exercises/labs: 20-25% of total time
+      - Quizzes and assessments: 10-15% of total time
+      - Reading materials and resources: 5-10% of total time
+
+      Create the module structure:
+
+      **For each module (aim for 4-8 modules depending on course length):**
+
+      1. **Module title**: clear, descriptive, benefit-oriented
+      2. **Module description**: 2-3 sentences explaining what this module covers and why
+      3. **Module learning objectives**: 2-4 specific, measurable objectives
+      4. **Bloom's level focus**: primary taxonomy level(s) for this module
+      5. **Estimated duration**: minutes allocated to this module
+      6. **Lessons within the module** (3-6 lessons per module):
+         - Lesson title
+         - Lesson type: concept, demonstration, hands-on, case study, discussion
+         - Duration: 5-15 minutes per video lesson
+         - Key topics covered
+         - Bloom's level for this specific lesson
+      7. **Module assessment**: quiz or assignment that validates module objectives
+      8. **Module resources**: additional reading, tools, reference materials
+
+      --- SCAFFOLDING AND SEQUENCING ---
+
+      Apply these instructional design principles to lesson sequencing:
+
+      1. **Prerequisite mapping**: ensure every concept has its prerequisites covered
+         in an earlier lesson. Create a dependency graph.
+
+      2. **Spiral curriculum**: revisit key concepts at increasing depth across modules.
+         Identify 3-5 "thread concepts" that appear in multiple modules.
+
+      3. **Cognitive load management**:
+         - Intrinsic load: manage complexity by breaking hard topics into sub-concepts
+         - Extraneous load: minimize by clear structure and consistent formatting
+         - Germane load: maximize by using worked examples, analogies, and retrieval practice
+         - No lesson should introduce more than 3 new concepts
+
+      4. **Interleaving**: strategically mix practice types to improve long-term retention
+         rather than massed practice of a single skill
+
+      5. **Spacing**: design review touchpoints that revisit material from earlier modules
+         to leverage spaced repetition for memory consolidation
+
+      6. **Zone of proximal development**: each lesson should be just beyond the learner's
+         current capability but achievable with the provided instruction
+
+      --- ENGAGEMENT ARCHITECTURE ---
+
+      Design engagement hooks for each module:
+
+      1. **Opening hook** (first 60 seconds of each module):
+         - Compelling question, surprising fact, real-world problem, or story
+         - Must create curiosity gap that the module will resolve
+
+      2. **Active learning checkpoints** (every 5-7 minutes):
+         - Pause-and-reflect questions
+         - Quick polls or self-assessment prompts
+         - "Try this now" micro-exercises
+
+      3. **Milestone celebrations**:
+         - Module completion badges or progress indicators
+         - "You can now do X" empowerment statements
+         - Preview of what they will learn next (curiosity hook for continuation)
+
+      4. **Social learning elements** (if platform supports):
+         - Discussion prompts for each module
+         - Peer review opportunities
+         - Share-your-work challenges
+
+      --- ACCESSIBILITY AND INCLUSIVITY ---
+
+      Ensure the curriculum design accounts for:
+      - Multiple learning modalities (visual, auditory, reading, kinesthetic)
+      - Closed captions and transcripts for all video content
+      - Color-blind-friendly visual design
+      - Screen reader compatibility for text materials
+      - Multiple timezone considerations for any live elements
+      - Cultural sensitivity in examples and case studies
+      - Varying internet bandwidth (downloadable resources, audio-only option)
+
+      --- PLATFORM-SPECIFIC CONSIDERATIONS for {input.platform} ---
+
+      Adjust the curriculum structure to the platform's strengths and constraints:
+      - Udemy: optimize for 5-10 min lessons, heavy use of sections, completion certificates
+      - Coursera: weekly module structure, peer-graded assignments, honor code quizzes
+      - Teachable: flexible format, drip scheduling support, community integration
+      - Skillshare: project-based, shorter format, community-driven engagement
+      - General: platform-agnostic structure with maximum portability
+
+      Produce the complete curriculum as a structured document with module hierarchy,
+      lesson breakdowns, learning objectives at every level, time allocations, and
+      the pedagogical rationale behind sequencing decisions.
+    model: sonnet
+    max_turns: 10
+
+  - id: lesson-scripting
+    depends_on: [curriculum-design]
+    prompt: |
+      Write detailed lesson scripts for every lesson in the curriculum, optimized for
+      video recording and learner engagement.
+
+      Curriculum design: {steps.curriculum-design.output}
+      Course topic: {input.course_topic}
+      Target audience: {input.target_audience}
+      Difficulty level: {input.difficulty_level}
+
+      You are a professional course content writer and video scriptwriter. Your task
+      is to write production-ready scripts for every lesson that an instructor can
+      use directly for recording. The scripts must be engaging, clear, and pedagogically
+      effective.
+
+      --- SCRIPT FORMAT STANDARD ---
+
+      For each lesson, produce a script with these sections:
+
+      1. **Lesson metadata header**:
+         ```
+         Module: [module number and name]
+         Lesson: [lesson number and title]
+         Duration: [target duration in minutes]
+         Type: [concept / demonstration / hands-on / case study]
+         Bloom's Level: [remember / understand / apply / analyze / evaluate / create]
+         Learning Objectives: [1-3 specific objectives this lesson achieves]
+         Visual Requirements: [slides, screen recording, diagram, animation, etc.]
+         ```
+
+      2. **Opening hook** (30-60 seconds):
+         - Start with a compelling question, real-world scenario, or surprising fact
+         - NEVER start with "In this lesson, we will learn about..."
+         - Instead: "Imagine you're [scenario]..." or "What if I told you that [surprising fact]..."
+         - Connect to the learner's goals or pain points immediately
+         - Create a curiosity gap that the lesson will resolve
+
+      3. **Context bridge** (30-45 seconds):
+         - Connect this lesson to what was covered previously
+         - State what the learner will be able to do by the end of this lesson
+         - Set expectations for the lesson format (lecture, demo, hands-on)
+
+      4. **Core content** (structured by teaching segments):
+         For each concept or skill within the lesson:
+
+         a. **Explain**: clear, jargon-appropriate explanation of the concept
+            - Use analogies drawn from the target audience's existing knowledge
+            - Define new terms immediately when introduced
+            - Use concrete examples before abstract principles
+            - Speak in second person ("you") to maintain personal connection
+
+         b. **Demonstrate**: show the concept in action
+            - Step-by-step walkthrough with narration
+            - Call out common mistakes and how to avoid them
+            - Explain the "why" behind each step, not just the "how"
+            - [SCREEN: describe what should be on screen at this point]
+            - [HIGHLIGHT: describe what to visually emphasize]
+
+         c. **Practice prompt**: give the learner something to try
+            - "Pause the video and try [specific task]"
+            - Provide clear success criteria
+            - Offer a hint or partial solution for those who are stuck
+
+         d. **Check understanding**: quick comprehension verification
+            - "The answer to why we do X is..." (reveal after a pause)
+            - Address the most common misconception at this point
+
+      5. **Summary and transition** (30-45 seconds):
+         - Recap the 2-3 key takeaways from the lesson (rule of three)
+         - Connect to the next lesson: "Now that you know X, in the next lesson
+           we'll build on that to explore Y"
+         - End with an empowerment statement or a motivating forward look
+
+      --- SCRIPT WRITING GUIDELINES ---
+
+      1. **Tone and voice**:
+         - Conversational but professional (not academic or stiff)
+         - Confident but not condescending
+         - Encouraging but not patronizing
+         - Use contractions naturally ("you'll", "it's", "don't")
+         - Match complexity to {input.difficulty_level}:
+           - Beginner: simple sentences, lots of analogies, no assumed knowledge
+           - Intermediate: moderate complexity, some technical depth, fewer analogies
+           - Advanced: technical depth, industry jargon acceptable, peer-to-peer tone
+
+      2. **Pacing and rhythm**:
+         - Vary sentence length to maintain listener attention
+         - Use pauses strategically: [PAUSE] markers for emphasis or reflection
+         - No more than 3 minutes of continuous lecture without a visual change,
+           example, or interaction point
+         - Target word count: approximately 130-150 words per minute of lesson time
+
+      3. **Visual cues and directions**:
+         - [SLIDE: description of what slide should show]
+         - [SCREEN: description of screen recording content]
+         - [DIAGRAM: description of diagram or illustration]
+         - [ANIMATION: description of animated transition or build]
+         - [CODE: specific code snippet to display]
+         - [HIGHLIGHT: what to visually emphasize]
+         - [CUT TO: camera/screen transition]
+
+      4. **Active learning integration**:
+         - Include at least one "pause and think" moment per 5 minutes of content
+         - Frame questions before giving answers to activate retrieval
+         - Use the "predict, observe, explain" pattern for demonstrations
+         - Include "challenge questions" that push beyond the lesson scope (optional depth)
+
+      5. **Storytelling elements**:
+         - Use running examples or case studies that build across lessons
+         - Introduce characters or scenarios that the audience can relate to
+         - Create narrative arcs within modules (problem introduced -> skills built -> problem solved)
+
+      --- LESSON-SPECIFIC CONTENT ---
+
+      For each lesson in the curriculum, write the full script including:
+
+      - Complete spoken narration text (every word the instructor will say)
+      - Visual cue markers throughout
+      - Transition language between segments
+      - Specific examples, code snippets, or demonstrations relevant to {input.course_topic}
+      - Common mistakes and misconceptions specific to this topic and audience
+      - Real-world applications and "when would I use this?" context
+
+      --- QUALITY CRITERIA ---
+
+      Each script must satisfy these quality checks:
+      - [ ] Opening hook creates genuine curiosity within 30 seconds
+      - [ ] Learning objectives are addressed and met by the end
+      - [ ] No more than 3 new concepts introduced per lesson
+      - [ ] At least one real-world example per key concept
+      - [ ] Active learning checkpoint every 5-7 minutes
+      - [ ] Summary accurately reflects what was covered
+      - [ ] Transition to next lesson creates forward momentum
+      - [ ] Language complexity matches {input.difficulty_level}
+      - [ ] Total word count aligns with target duration
+      - [ ] All visual cues are specific enough for a production team to execute
+
+      Write every lesson script in full. Do not abbreviate or summarize - produce
+      the complete, production-ready script for the entire course.
+    model: sonnet
+    max_turns: 10
+
+  - id: quiz-generation
+    depends_on: [curriculum-design]
+    prompt: |
+      Generate a comprehensive assessment suite including quizzes for every module and
+      a final exam, applying rigorous assessment design principles.
+
+      Curriculum design: {steps.curriculum-design.output}
+      Course topic: {input.course_topic}
+      Target audience: {input.target_audience}
+      Difficulty level: {input.difficulty_level}
+
+      You are an assessment design specialist with expertise in educational measurement,
+      item writing, and alignment to learning objectives. Your task is to create a
+      complete quiz and exam suite that accurately measures learning outcomes.
+
+      --- ASSESSMENT DESIGN PRINCIPLES ---
+
+      All assessments must adhere to these principles:
+
+      1. **Alignment**: every question must map to a specific learning objective from
+         the curriculum. No question should test content not covered in the lessons.
+
+      2. **Bloom's level matching**: question difficulty must match the Bloom's taxonomy
+         level specified for the corresponding module and lesson.
+
+      3. **Validity**: questions measure what they claim to measure (the learning objective),
+         not reading comprehension, trick interpretation, or test-taking skill.
+
+      4. **Reliability**: if the same student took the quiz twice, they would get a
+         similar score. This means avoiding ambiguous questions.
+
+      5. **Fairness**: questions should not advantage or disadvantage students based on
+         factors unrelated to the learning objectives (cultural knowledge, language
+         fluency beyond what is required for the subject matter).
+
+      6. **Discrimination power**: questions should differentiate between students who
+         have mastered the material and those who have not. Avoid questions that
+         everyone gets right or everyone gets wrong.
+
+      --- MODULE QUIZ DESIGN ---
+
+      For each module in the curriculum, create a quiz with these specifications:
+
+      **Quiz structure per module:**
+      - 8-12 questions per module quiz
+      - Question type distribution:
+        - Multiple choice (4 options): 40-50% of questions
+        - Multiple select (choose all that apply): 15-20%
+        - True/False with justification: 10-15%
+        - Fill-in-the-blank or short answer: 10-15%
+        - Code/practical completion (if applicable): 10-15%
+        - Scenario-based questions: 10-15%
+      - Bloom's level distribution matching the module's taxonomy focus
+      - Passing threshold: 70% (beginner), 75% (intermediate), 80% (advanced)
+
+      **For each multiple choice question, provide:**
+
+      1. **Question stem**:
+         - Clear, concise, and unambiguous
+         - Contains all information needed to answer (no "gotcha" omissions)
+         - Written as a complete question or statement with a clear blank
+         - Avoids negatives when possible; if used, bold/underline "NOT" or "EXCEPT"
+         - Avoids "all of the above" and "none of the above"
+
+      2. **Answer options (4 choices)**:
+         - All options are plausible to someone who has not mastered the material
+         - Options are mutually exclusive and collectively exhaustive for the question
+         - All options are similar in length and grammatical structure
+         - Options are in logical order (alphabetical, numerical, chronological)
+         - Distractors are based on common misconceptions, not random wrong answers
+
+      3. **Correct answer**: clearly identified
+
+      4. **Explanation**:
+         - Why the correct answer is correct (with reference to lesson content)
+         - Why each distractor is wrong (specific misconception it targets)
+         - Reference to the specific lesson where this concept was taught
+
+      5. **Metadata**:
+         - Learning objective tested
+         - Bloom's taxonomy level
+         - Difficulty estimate (easy/medium/hard)
+         - Expected time to answer (seconds)
+
+      **For scenario-based questions:**
+      - Present a realistic situation relevant to {input.target_audience}
+      - Require application of multiple concepts from the module
+      - Include enough context to answer without external knowledge
+      - May have multiple parts that build on each other
+      - Test higher-order thinking (analyze, evaluate, create levels)
+
+      **For code/practical questions (if applicable to {input.course_topic}):**
+      - Provide code snippet with a specific task to complete
+      - Include clear expected output or behavior
+      - Test understanding, not syntax memorization
+      - Include edge cases that reveal deep vs superficial understanding
+
+      --- FINAL EXAM DESIGN ---
+
+      Create a comprehensive final exam that assesses course-level learning objectives:
+
+      1. **Exam structure**:
+         - 25-40 questions (scaled to course length)
+         - Covers all modules with weighted representation (more questions from
+           later/harder modules)
+         - 60% new questions (not seen in module quizzes)
+         - 40% questions similar to (but not identical to) module quiz questions
+         - Time limit: approximately 2 minutes per question
+         - Passing threshold: 70% (beginner), 75% (intermediate), 80% (advanced)
+
+      2. **Question type distribution for final exam**:
+         - Multiple choice: 35%
+         - Scenario-based multi-part questions: 25%
+         - Multiple select: 15%
+         - Short answer / code completion: 15%
+         - True/False with justification: 10%
+
+      3. **Difficulty curve**:
+         - Start with 3-5 confidence-building questions (easy, from early modules)
+         - Gradually increase difficulty through the middle section
+         - Include 3-5 challenge questions that test deep understanding
+         - End with a medium-difficulty question (leave on a positive note)
+
+      4. **Integration questions** (at least 5):
+         - Questions that require synthesizing knowledge from multiple modules
+         - These are the most valuable for assessing true course mastery
+         - Example: a scenario that requires concepts from modules 2, 4, and 6 together
+
+      --- FORMATIVE ASSESSMENT ELEMENTS ---
+
+      In addition to graded quizzes, design formative (ungraded) assessments:
+
+      1. **Lesson-level knowledge checks** (1-2 per lesson):
+         - Quick, low-stakes questions embedded within the lesson flow
+         - Immediate feedback with explanation
+         - Purpose: retrieval practice for memory consolidation, not grading
+
+      2. **Module pre-assessments** (optional, for intermediate/advanced courses):
+         - 3-5 questions at the start of each module
+         - Help learners identify what they already know vs what to focus on
+         - Can inform adaptive learning paths (if platform supports)
+
+      3. **Self-reflection prompts** (end of each module):
+         - "Rate your confidence in [objective] from 1-5"
+         - "What concept from this module would you most like to review?"
+         - "How would you explain [key concept] to a colleague?"
+
+      --- ANTI-CHEATING CONSIDERATIONS ---
+
+      Design assessments that are resistant to simple cheating:
+      - Scenario-based questions are harder to look up than factoid questions
+      - Application questions require understanding, not just recall
+      - Randomize question order and option order where platform supports
+      - Create question pools (3 variants per question) for randomized exams
+      - Time-limited questions prevent extended lookup
+      - Open-book friendly: design questions that test understanding, not memory
+
+      Produce the complete assessment suite with all questions, answers, explanations,
+      and metadata in a structured format ready for import into {input.platform}.
+    model: haiku
+    max_turns: 10
+
+  - id: assignment-design
+    depends_on: [curriculum-design]
+    prompt: |
+      Design hands-on assignments, projects, and practical exercises for every module
+      that reinforce learning through authentic application.
+
+      Curriculum design: {steps.curriculum-design.output}
+      Course topic: {input.course_topic}
+      Target audience: {input.target_audience}
+      Difficulty level: {input.difficulty_level}
+      Course length: {input.course_length} hours
+
+      You are a project-based learning designer who creates authentic, engaging
+      assignments that bridge the gap between theory and real-world application.
+      Your task is to design a complete set of hands-on assignments that progressively
+      build skills toward a capstone project.
+
+      --- ASSIGNMENT PHILOSOPHY ---
+
+      Assignments in this course follow these design principles:
+
+      1. **Authenticity**: every assignment mirrors a real-world task that {input.target_audience}
+         would actually encounter in their work or life. No artificial academic exercises.
+
+      2. **Progressive complexity**: assignments build on each other, with earlier assignments
+         producing artifacts used in later ones (portfolio-building approach).
+
+      3. **Scaffolded independence**: early assignments provide more structure and guidance;
+         later assignments give less scaffolding as the learner gains confidence.
+
+      4. **Multiple valid solutions**: assignments should have clear success criteria but
+         allow for creative approaches. There is rarely one "right answer" in the real world.
+
+      5. **Immediate relevance**: learners should finish each assignment feeling they have
+         created something useful - a tool, analysis, document, or artifact they could
+         actually use.
+
+      --- MODULE ASSIGNMENTS ---
+
+      For each module, design 1-2 hands-on assignments with the following structure:
+
+      **Assignment template:**
+
+      1. **Assignment title**: descriptive, action-oriented (e.g., "Build a Customer
+         Segmentation Dashboard" not "Assignment 3")
+
+      2. **Context and scenario** (3-5 sentences):
+         - Set up a realistic scenario relevant to {input.target_audience}
+         - Explain why this task matters in the real world
+         - Connect to the module's learning objectives
+         - Example: "You've just been hired as a data analyst at a mid-sized e-commerce
+           company. The marketing team needs to understand customer segments to personalize
+           their campaigns. Using the techniques from this module, you'll analyze a
+           customer dataset and present actionable segments."
+
+      3. **Learning objectives assessed** (list specific objectives from curriculum):
+         - Map each assignment task to one or more learning objectives
+         - Ensure all module-level objectives are covered across the module's assignments
+
+      4. **Prerequisites**:
+         - Which lessons must be completed before attempting this assignment
+         - Required tools, software, or accounts
+         - Required datasets or resources (provide or specify where to obtain)
+
+      5. **Detailed instructions** (step-by-step with appropriate scaffolding):
+         - For beginner level: very detailed steps with screenshots/examples
+         - For intermediate level: clear steps with room for interpretation
+         - For advanced level: high-level requirements, minimal guidance
+         - Each step should reference the relevant lesson concepts
+         - Include "hints" as collapsible/optional sections for those who need them
+
+      6. **Deliverables** (specific, concrete outputs):
+         - Exactly what the learner must submit
+         - File formats, naming conventions
+         - Required sections or elements
+         - Example: "Submit a Jupyter notebook (.ipynb) containing your analysis with
+           at least 3 visualizations and a written summary of your findings (minimum
+           200 words)."
+
+      7. **Success criteria / rubric** (detailed grading criteria):
+         - Completeness: all required elements present (40%)
+         - Correctness: technical accuracy of the work (30%)
+         - Quality: clarity, organization, and presentation (20%)
+         - Creativity/depth: going beyond minimum requirements (10%)
+         - Each criterion has 4 levels: Excellent / Proficient / Developing / Beginning
+
+      8. **Estimated time**: how long this assignment should take
+
+      9. **Stretch goals** (optional challenges for advanced learners):
+         - Additional features or analysis beyond the base requirements
+         - More complex scenarios or edge cases to handle
+         - Integration with external tools or datasets
+
+      10. **Common pitfalls**:
+          - Mistakes learners frequently make on this assignment
+          - Debugging tips and troubleshooting guidance
+          - "If you're stuck, try [specific suggestion]"
+
+      --- CAPSTONE PROJECT ---
+
+      Design a comprehensive capstone project that integrates skills from across the
+      entire course:
+
+      1. **Project overview** (1 paragraph):
+         - A substantial, portfolio-worthy project that demonstrates mastery of
+           {input.course_topic}
+         - Should take approximately 15-25% of the total {input.course_length} hours
+         - Must require skills from at least 4 different modules
+
+      2. **Project options** (provide 3 options at different difficulty levels):
+         - Option A: guided project with detailed structure and milestones
+         - Option B: semi-guided project with requirements but open approach
+         - Option C: open-ended project where learner defines their own scope
+         - All options should result in a portfolio-worthy artifact
+
+      3. **Project phases** (for the guided option):
+         - Phase 1: Planning and research (define scope, gather requirements)
+         - Phase 2: Implementation (build the core deliverable)
+         - Phase 3: Testing/validation (verify correctness, handle edge cases)
+         - Phase 4: Polish and presentation (documentation, README, demo)
+         - Each phase has specific deliverables and checkpoints
+
+      4. **Peer review component** (if platform supports):
+         - Structured peer review rubric
+         - What to look for in a peer's project
+         - How to give constructive feedback
+         - Each learner reviews 2-3 peers' projects
+
+      5. **Capstone rubric** (comprehensive grading):
+         - Technical execution (35%)
+         - Problem-solving approach (20%)
+         - Code/work quality and organization (15%)
+         - Documentation and presentation (15%)
+         - Creativity and going beyond requirements (15%)
+
+      --- PRACTICE EXERCISES (MICRO-ASSIGNMENTS) ---
+
+      For each lesson, design 1-2 quick practice exercises (5-15 minutes each):
+
+      1. **Exercise type** (varied across the course):
+         - Fill-in-the-blank code/text completion
+         - Fix the bug / find the error
+         - Match concepts to examples
+         - Reorder steps in a process
+         - Compare and contrast two approaches
+         - Mini-challenge with time constraint
+         - "Explain to a 5-year-old" simplification exercise
+
+      2. **Solution provided**: full solution with step-by-step explanation
+      3. **Common mistakes**: what learners often get wrong and why
+      4. **Extension**: "If you want to go further, try [harder variant]"
+
+      --- RESOURCE REQUIREMENTS ---
+
+      For each assignment, specify:
+      - Datasets needed (provide links or include as course resources)
+      - Software/tools required (with free alternatives where possible)
+      - API keys or accounts needed (with setup instructions)
+      - Template files or starter code (include as downloads)
+      - Reference materials and documentation links
+
+      --- ACCESSIBILITY ---
+
+      Ensure all assignments can be completed with:
+      - Free tools and software (no paid requirements)
+      - Reasonable hardware (no GPU required for beginner/intermediate)
+      - Available on Windows, macOS, and Linux
+      - Alternative approaches for learners with disabilities
+      - Text-based alternatives for any visual-only assignments
+
+      Produce the complete assignment suite with detailed instructions, rubrics,
+      datasets, and starter materials for every module plus the capstone project.
+    model: sonnet
+    max_turns: 10
+
+  - id: assessment-rubrics
+    depends_on: [quiz-generation, assignment-design]
+    prompt: |
+      Create a unified assessment framework with detailed rubrics, grading policies,
+      and learner progression tracking for the entire course.
+
+      Quizzes: {steps.quiz-generation.output}
+      Assignments: {steps.assignment-design.output}
+      Curriculum: {steps.curriculum-design.output}
+      Course topic: {input.course_topic}
+      Difficulty level: {input.difficulty_level}
+
+      You are an educational assessment architect specializing in outcomes-based
+      education and competency frameworks. Your task is to create a cohesive
+      assessment system that accurately measures and certifies learner achievement.
+
+      --- GRADING POLICY ---
+
+      Design the overall grading structure:
+
+      1. **Assessment weight distribution**:
+         - Module quizzes: [X]% of final grade
+         - Hands-on assignments: [X]% of final grade
+         - Capstone project: [X]% of final grade
+         - Final exam: [X]% of final grade
+         - Participation/engagement: [X]% (if applicable based on platform)
+         - Total: 100%
+         - Adjust weights based on {input.difficulty_level}:
+           - Beginner: heavier weight on quizzes and guided assignments
+           - Intermediate: balanced across all categories
+           - Advanced: heavier weight on capstone and practical work
+
+      2. **Grading scale**:
+         - Define letter grades or pass/fail thresholds
+         - Distinction/honors criteria (if applicable)
+         - Minimum passing score per assessment type
+         - Policy on retakes: how many attempts, score kept (highest, latest, average)
+
+      3. **Late submission policy**:
+         - Self-paced: no penalty but completion required for certificate
+         - Cohort-based: X% deduction per day, maximum Y days late
+         - Extension request process
+
+      --- COMPETENCY MAPPING ---
+
+      Create a competency matrix that maps every learning objective to assessments:
+
+      | Learning Objective | Quiz Questions | Assignment Tasks | Capstone Elements |
+      |---|---|---|---|
+      | [Objective 1] | Q1.3, Q1.7 | A1 Task 2 | Phase 2 |
+      | [Objective 2] | Q2.1, Q2.5 | A2 Task 1-3 | Phase 3 |
+      | ... | ... | ... | ... |
+
+      For each objective, verify:
+      - It is assessed by at least 2 different assessment types (triangulation)
+      - The assessment Bloom's level matches or exceeds the objective's Bloom's level
+      - Both formative and summative assessments cover it
+
+      --- DETAILED RUBRICS ---
+
+      For each assignment and the capstone project, create detailed rubrics using
+      this format:
+
+      **Rubric structure (per criterion):**
+
+      | Criterion | Excellent (4) | Proficient (3) | Developing (2) | Beginning (1) |
+      |---|---|---|---|---|
+      | [Criterion name] | [Specific observable indicators] | [Specific indicators] | [Specific indicators] | [Specific indicators] |
+      | Weight: X% | Full mastery demonstrated | Solid understanding shown | Partial understanding, gaps | Fundamental misunderstanding |
+
+      Rubric quality requirements:
+      - Each level must describe specific, observable behaviors (not vague judgments)
+      - The difference between adjacent levels must be clear and unambiguous
+      - Criteria must be independent (scoring one criterion should not depend on another)
+      - Language must be objective, not subjective ("includes 3+ examples" not "good examples")
+      - Include exemplars: specific examples of what work at each level looks like
+
+      --- FEEDBACK TEMPLATES ---
+
+      Create structured feedback templates for each assessment type:
+
+      1. **Quiz feedback** (per question):
+         - Correct: "Well done! [Brief reinforcement of the concept]"
+         - Incorrect: "Not quite. [Explain the misconception]. Review [lesson reference]."
+         - Additional resource links for struggling concepts
+
+      2. **Assignment feedback** (per criterion):
+         - Strengths: what the student did well (be specific, not just "good job")
+         - Areas for improvement: what to work on (with specific suggestions)
+         - Next steps: how to build on this work
+         - Growth indicators: compare to previous assignments if applicable
+
+      3. **Capstone feedback** (comprehensive):
+         - Executive summary of performance
+         - Criterion-by-criterion assessment with rubric scores
+         - Highlight of strongest aspect
+         - Priority improvement area with specific resources
+         - Career/next-steps recommendations based on demonstrated strengths
+
+      --- PEER REVIEW FRAMEWORK ---
+
+      If the platform supports peer review, design the process:
+
+      1. **Reviewer training**: brief guide on how to give constructive feedback
+         - Use the SBI model: Situation, Behavior, Impact
+         - Focus on the work, not the person
+         - Be specific: "The visualization on slide 3 effectively highlights the trend"
+           vs "Nice charts"
+         - Always include at least one strength and one suggestion
+
+      2. **Peer review rubric** (simplified version of instructor rubric):
+         - 3-4 criteria (reduced from full rubric to make peer review manageable)
+         - Simple scale (1-3 or thumbs up/thumbs down per criterion)
+         - Mandatory written comment per criterion (minimum 2 sentences)
+
+      3. **Review calibration**:
+         - Provide 2-3 sample submissions at different quality levels
+         - Learners practice reviewing these before reviewing peers
+         - Helps establish consistent standards
+
+      4. **Dispute resolution**:
+         - Process if a learner disagrees with peer feedback
+         - Instructor review as escalation path
+
+      --- CERTIFICATION CRITERIA ---
+
+      Define what constitutes course completion and certification:
+
+      1. **Completion certificate** (participation-based):
+         - Requirements: complete all video lessons (80%+ watch time),
+           attempt all quizzes, submit all assignments
+         - No minimum score required
+         - Certificate text: "Certificate of Completion"
+
+      2. **Achievement certificate** (mastery-based):
+         - Requirements: pass all module quizzes (above threshold),
+           pass final exam, submit capstone with minimum score
+         - Overall course grade above [threshold]%
+         - Certificate text: "Certificate of Achievement" with grade
+
+      3. **Distinction certificate** (excellence-based):
+         - Requirements: score above 90% on all assessments,
+           capstone rated "Excellent" on all criteria
+         - Certificate text: "Certificate of Achievement with Distinction"
+
+      --- LEARNER PROGRESSION DASHBOARD ---
+
+      Design the learner-facing progress tracking interface:
+
+      1. **Progress bar**: overall course completion percentage
+      2. **Module status**: completed / in progress / locked for each module
+      3. **Score history**: visualization of quiz and assignment scores over time
+      4. **Competency radar**: spider chart showing strength per learning objective area
+      5. **Time tracking**: estimated vs actual time spent per module
+      6. **Streak and consistency**: login/study streak tracker for motivation
+      7. **Recommendations**: "Based on your scores, review [topic]" suggestions
+
+      --- ANALYTICS FOR INSTRUCTORS ---
+
+      Design the instructor-facing analytics dashboard:
+
+      1. **Question-level analytics**: which questions have the lowest/highest scores
+         (indicates bad questions or hard topics)
+      2. **Score distributions**: histogram of scores per assessment
+      3. **Drop-off analysis**: where students stop progressing
+      4. **Time analysis**: average time per lesson and per assessment
+      5. **Correlation analysis**: which module scores predict final exam success
+      6. **Cohort comparison**: how this group compares to previous cohorts
+
+      Produce the complete assessment framework as a structured document with all
+      rubrics, grading policies, feedback templates, certification criteria, and
+      analytics specifications ready for implementation.
+    model: sonnet
+    max_turns: 10
+
+  - id: platform-export
+    depends_on: [assessment-rubrics]
+    prompt: |
+      Compile all course content into a platform-ready export package with complete
+      technical specifications, file structure, and launch checklist.
+
+      Assessment framework: {steps.assessment-rubrics.output}
+      Lesson scripts: {steps.lesson-scripting.output}
+      Quizzes: {steps.quiz-generation.output}
+      Assignments: {steps.assignment-design.output}
+      Curriculum: {steps.curriculum-design.output}
+      Course topic: {input.course_topic}
+      Target audience: {input.target_audience}
+      Difficulty level: {input.difficulty_level}
+      Course length: {input.course_length} hours
+      Target platform: {input.platform}
+
+      You are an e-learning production specialist who packages course content for
+      deployment on learning platforms. Your task is to compile everything into a
+      ready-to-upload package with all metadata, formatting, and platform-specific
+      optimizations.
+
+      --- COURSE METADATA ---
+
+      Generate the complete course listing metadata:
+
+      1. **Course title** (multiple variants):
+         - Primary title (50-80 characters, SEO-optimized)
+         - Subtitle (100-120 characters, value proposition)
+         - URL slug (lowercase, hyphenated)
+
+      2. **Course description** (multiple lengths):
+         - Short description (150 characters for cards/previews)
+         - Medium description (500 characters for search results)
+         - Full description (2000+ characters for course landing page):
+           - Opening hook (what problem does this course solve?)
+           - What you'll learn (bullet list of 6-8 key outcomes)
+           - Who this course is for (target audience description)
+           - Prerequisites (what they need to know before starting)
+           - What's included (stats: X hours video, Y quizzes, Z assignments)
+           - Instructor credibility (placeholder for instructor to fill)
+           - Guarantee/promise (what they can do after completing)
+
+      3. **SEO and discovery**:
+         - Primary keywords (5-10 terms for search optimization)
+         - Secondary keywords (10-20 long-tail terms)
+         - Category and subcategory (based on platform taxonomy)
+         - Tags (10-15 relevant tags)
+         - Language: English (or as appropriate)
+         - Skill level: {input.difficulty_level}
+
+      4. **Visual assets specifications**:
+         - Course thumbnail: 1280x720px, high contrast, readable text
+           - Design brief: what the thumbnail should convey
+           - Color palette recommendation based on course topic
+         - Promotional video: 2-3 minute course trailer script
+         - Section/module images: 400x225px per module
+         - Instructor headshot specifications
+
+      --- FILE STRUCTURE ---
+
+      Generate the complete file organization:
+
+      ```
+      course-{slug}/
+      |-- course-metadata.json          # Platform metadata
+      |-- README.md                      # Course overview for instructors
+      |
+      |-- modules/
+      |   |-- 01-{module-slug}/
+      |   |   |-- module-info.json       # Module metadata
+      |   |   |-- lessons/
+      |   |   |   |-- 01-{lesson-slug}/
+      |   |   |   |   |-- script.md      # Lesson script
+      |   |   |   |   |-- slides.md      # Slide content
+      |   |   |   |   |-- notes.md       # Supplementary notes
+      |   |   |   |   |-- resources.md   # Links and references
+      |   |   |   |-- 02-{lesson-slug}/
+      |   |   |   |   |-- ...
+      |   |   |-- quiz/
+      |   |   |   |-- questions.json     # Quiz questions in platform format
+      |   |   |-- assignment/
+      |   |       |-- brief.md           # Assignment instructions
+      |   |       |-- rubric.md          # Grading rubric
+      |   |       |-- starter-files/     # Template/starter code
+      |   |       |-- solution/          # Solution files (instructor only)
+      |   |-- 02-{module-slug}/
+      |   |   |-- ...
+      |
+      |-- capstone/
+      |   |-- brief.md                   # Capstone project brief
+      |   |-- rubric.md                  # Capstone rubric
+      |   |-- peer-review-guide.md       # Peer review instructions
+      |   |-- options/                   # Different project options
+      |
+      |-- assessments/
+      |   |-- final-exam.json            # Final exam questions
+      |   |-- grading-policy.md          # Overall grading policy
+      |   |-- rubrics/                   # All rubrics compiled
+      |
+      |-- resources/
+      |   |-- datasets/                  # Required datasets
+      |   |-- templates/                 # Downloadable templates
+      |   |-- cheatsheets/               # Quick reference guides
+      |   |-- glossary.md                # Course glossary
+      |   |-- bibliography.md            # References and further reading
+      |
+      |-- marketing/
+      |   |-- thumbnail-brief.md         # Thumbnail design specifications
+      |   |-- trailer-script.md          # Promotional video script
+      |   |-- social-posts.md            # Social media copy for promotion
+      |   |-- landing-page-copy.md       # Long-form sales page copy
+      |
+      |-- production/
+          |-- recording-checklist.md      # Checklist for video recording
+          |-- editing-notes.md           # Post-production instructions
+          |-- captions/                  # Caption/subtitle files
+      ```
+
+      --- PLATFORM-SPECIFIC EXPORT ---
+
+      Generate export configurations for {input.platform}:
+
+      **Udemy format:**
+      - Curriculum organized in Sections (modules) and Lectures (lessons)
+      - Quiz format: Udemy's native quiz JSON schema
+      - Assignment format: Udemy's coding exercise or practice test format
+      - Promotional video requirements (2 min minimum, specific aspect ratio)
+      - Pricing tier recommendation based on course length and topic
+
+      **Coursera format:**
+      - Weekly module structure with clear learning goals
+      - Peer-graded assignment specifications
+      - Honor code quiz format
+      - Mentor/TA discussion forum prompts
+      - Specialization/series considerations
+
+      **Teachable format:**
+      - Drip schedule configuration
+      - Compliance page templates
+      - Checkout page copy
+      - Community post templates
+      - Email automation sequences for student engagement
+
+      **Skillshare format:**
+      - Project-based structure emphasis
+      - Class trailer script (30-60 seconds)
+      - Community engagement prompts
+      - Project gallery setup
+
+      **General (platform-agnostic):**
+      - SCORM 2004 or xAPI compatible structure
+      - LTI integration specifications
+      - Standard quiz import formats (QTI, CSV, JSON)
+      - Markdown-based content for maximum portability
+
+      --- SUPPLEMENTARY MATERIALS ---
+
+      Generate these additional course materials:
+
+      1. **Course glossary**: all key terms introduced in the course with definitions
+      2. **Quick reference cheatsheets**: one per module, single-page summaries
+      3. **Resource library**: curated list of books, articles, tools, and communities
+      4. **FAQ document**: anticipated student questions with answers
+      5. **Discussion prompts**: 2-3 discussion questions per module for cohort engagement
+      6. **Course completion certificate template**: design specifications
+
+      --- LAUNCH CHECKLIST ---
+
+      Comprehensive pre-launch verification:
+
+      - [ ] All lesson scripts reviewed and proofread
+      - [ ] All quiz questions tested for accuracy and clarity
+      - [ ] All assignment instructions tested end-to-end
+      - [ ] Rubrics reviewed for consistency and completeness
+      - [ ] All links and resources verified as accessible
+      - [ ] Course metadata optimized for search and discovery
+      - [ ] Visual assets created and platform-compliant
+      - [ ] Captions/transcripts generated for all video content
+      - [ ] Accessibility audit completed (WCAG 2.1 AA)
+      - [ ] Beta test with 3-5 representative learners completed
+      - [ ] Pricing strategy finalized
+      - [ ] Marketing materials prepared (social, email, landing page)
+      - [ ] Student support workflow established
+      - [ ] Analytics and tracking configured
+      - [ ] Feedback collection mechanism set up
+      - [ ] Update/maintenance schedule defined
+
+      --- POST-LAUNCH OPTIMIZATION PLAN ---
+
+      1. **Week 1-2**: Monitor completion rates, quiz scores, and student questions
+      2. **Week 3-4**: First content revision based on student feedback and analytics
+      3. **Month 2**: Add bonus content based on most-requested topics
+      4. **Month 3**: Full course review with updated examples and resources
+      5. **Quarterly**: Refresh content for relevance (especially for fast-moving topics)
+      6. **Annually**: Major course revision or version 2.0 planning
+
+      Produce the complete export package specification with all files, metadata,
+      platform configurations, and the launch checklist ready for a production team
+      to execute.
+    model: haiku
+    max_turns: 10

@@ -13,20 +13,27 @@ const WAREHOUSE = process.env.TOOL_SNOWFLAKE_WAREHOUSE || "";
 const BASE = `https://${ACCOUNT}.snowflakecomputing.com/api/v2`;
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
       "Authorization": `Basic ${Buffer.from(`${USERNAME}:${PASSWORD}`).toString("base64")}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Snowflake API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Snowflake API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function execute_query(sql, database = "", schema = "", limit = 100) {

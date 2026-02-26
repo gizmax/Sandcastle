@@ -19,43 +19,218 @@ input_schema:
 
 steps:
   - id: parse-changes
-    prompt: >
-      Parse the following git diff or changelog and categorize each change into one of:
-      features (new capabilities), fixes (bug corrections), improvements (enhancements to
-      existing features), breaking changes (backwards-incompatible modifications), or
-      internal (refactoring, dependencies, CI). For each change, extract a short summary,
-      affected components, and severity. Changes: {input.changelog}
+    prompt: |
+      Parse the following git diff or changelog and categorize every change using the
+      Keep a Changelog standard (https://keepachangelog.com/) combined with semantic
+      versioning awareness.
+
+      CATEGORIZATION (Keep a Changelog standard):
+      - **Added**: New features, new endpoints, new CLI commands, new configuration options
+      - **Changed**: Changes to existing functionality, API behavior changes, UI modifications
+      - **Deprecated**: Features marked for removal in a future version
+      - **Removed**: Features or capabilities that have been removed
+      - **Fixed**: Bug fixes, error corrections, crash fixes
+      - **Security**: Vulnerability patches, dependency security updates, auth fixes
+
+      ADDITIONAL INTERNAL CATEGORIES:
+      - **Performance**: Optimizations, caching improvements, query tuning
+      - **Infrastructure**: CI/CD changes, deployment configs, Docker updates, dependency bumps
+      - **Refactored**: Code restructuring with no behavior change (internal only)
+
+      FOR EACH CHANGE, EXTRACT:
+      - Short summary (1 line, imperative mood: "Add X" not "Added X" or "Adds X")
+      - Detailed description (2-3 sentences explaining the what and why)
+      - Affected components/modules (e.g., "API", "Dashboard", "CLI", "Database")
+      - PR or commit reference if identifiable from the diff
+      - Severity: major (breaking or high-impact), minor (new feature), patch (fix/improvement)
+
+      SEMANTIC VERSIONING ASSESSMENT:
+      Based on the changes, recommend the version bump:
+      - MAJOR (X.0.0): if any breaking changes are present
+      - MINOR (0.X.0): if new features added with no breaking changes
+      - PATCH (0.0.X): if only fixes and non-functional improvements
+      Explain the reasoning for the version recommendation.
+
+      BREAKING CHANGE DETECTION:
+      For each change, explicitly check:
+      - Does it change an API endpoint URL, method, or response schema?
+      - Does it rename or remove a configuration option or environment variable?
+      - Does it change default behavior that users may depend on?
+      - Does it require database migration or data transformation?
+      - Does it drop support for a previously supported platform, runtime, or browser?
+      Flag any breaking change with a "BREAKING:" prefix and severity assessment.
+
+      Changes: {input.changelog}
     model: sonnet
     max_turns: 5
 
   - id: user-release-notes
     depends_on: [parse-changes]
-    prompt: >
-      Write user-facing release notes from the categorized changes. Use friendly, non-technical
-      language. Lead with the most impactful features, include before/after examples where
-      helpful, clearly call out breaking changes with migration steps, and close with a
-      thank-you note. Format with markdown headings and bullet points.
+    prompt: |
+      Write polished, user-facing release notes designed for a product blog post
+      or in-app changelog. Write for a non-technical audience - the user who wants
+      to know "what's new and why should I care?"
+
+      FORMAT STRUCTURE:
+
+      # [Product Name] [Version] Release Notes
+
+      > One-sentence TL;DR of the most exciting change in this release.
+
+      ## Highlights
+      Lead with the 2-3 most impactful user-facing changes. For each:
+      - Clear benefit statement (what the user can now do, not what we changed)
+      - Before/after comparison if the change modifies existing behavior
+      - Screenshot or GIF placeholder note if visual change: [Screenshot: description]
+
+      ## New Features (Added)
+      - Each feature as a bullet with benefit-oriented description
+      - Include usage example or quick start tip where helpful
+      - Link placeholder to documentation: [Learn more](docs-link)
+
+      ## Improvements (Changed)
+      - Focus on user-visible improvements
+      - Quantify where possible ("Dashboard loads 40% faster")
+
+      ## Bug Fixes (Fixed)
+      - Group by affected area (e.g., "Dashboard", "API", "CLI")
+      - Describe the symptom that was fixed, not the technical root cause
+      - "Fixed an issue where..." format
+
+      ## Breaking Changes (if any)
+      Use a prominent callout format:
+      > **Action Required**: [Description of what changed]
+      > **What to do**: Step-by-step migration instructions in plain language
+      > **Deadline**: When the old behavior will stop working (if applicable)
+
+      Include a MIGRATION GUIDE section if any breaking changes require user action:
+      - Step 1, Step 2, Step 3 format
+      - Include before/after code snippets for config or API changes
+      - Estimated migration time
+      - Link to detailed migration documentation: [Full guide](migration-link)
+
+      ## Deprecation Notices
+      - What is being deprecated and when it will be removed
+      - What to use instead (replacement path)
+
+      Close with:
+      - Thank you note to community contributors if applicable
+      - Link to full changelog for technical details
+      - Feedback/questions link
+
+      TONE: Friendly, professional, celebratory for big features, transparent about
+      breaking changes. No jargon. Write as if explaining to a smart colleague who
+      is not an engineer.
+
       Categorized changes: {steps.parse-changes.output}
     model: sonnet
     max_turns: 10
 
   - id: internal-changelog
     depends_on: [parse-changes]
-    prompt: >
-      Write a technical internal changelog for the engineering team. Include detailed
-      descriptions of each change with PR/commit references, migration notes for breaking
-      changes with code examples, infrastructure and dependency updates, performance
-      impact notes, and known issues or follow-up tasks.
+    prompt: |
+      Write a detailed technical changelog for the engineering team following the
+      Keep a Changelog format with additional engineering-specific sections.
+
+      FORMAT:
+
+      ## [Version] - [Date]
+
+      ### Added
+      - [PR #XX] Description with technical detail
+        - Implementation approach and key design decisions
+        - New dependencies introduced (name, version, reason)
+
+      ### Changed
+      - [PR #XX] Description
+        - What behavior changed and why
+        - Backward compatibility notes
+
+      ### Fixed
+      - [PR #XX] Description
+        - Root cause analysis (1-2 sentences)
+        - Regression risk assessment
+
+      ### Security
+      - [PR #XX] Description
+        - CVE reference if applicable
+        - Attack vector and severity (CVSS score if known)
+
+      ### Infrastructure
+      - CI/CD changes, deployment configuration updates
+      - Dependency version bumps with changelog links
+      - Docker image changes, base image updates
+
+      ### Performance
+      - Optimization description with benchmark results
+        - Before: [metric], After: [metric], Improvement: [%]
+
+      ### Breaking Changes - MIGRATION GUIDE
+      For each breaking change, provide:
+      ```
+      WHAT CHANGED: [precise description]
+      WHY: [reasoning]
+      MIGRATION:
+        Before:
+          [old code/config example]
+        After:
+          [new code/config example]
+      DATABASE MIGRATION: [yes/no, if yes provide migration command]
+      ROLLBACK PLAN: [how to revert if issues arise]
+      ```
+
+      ### Known Issues
+      - [ISSUE-XXX] Description and workaround
+      - Expected fix timeline
+
+      ### Follow-up Tasks
+      - Technical debt items to address in next sprint
+      - Monitoring to watch post-deployment
+      - A/B tests or feature flags to evaluate
+
+      ### Deployment Notes
+      - Required environment variable changes
+      - Database migration steps (run order, estimated duration)
+      - Feature flags to enable/disable
+      - Rollback procedure and criteria
+      - Post-deployment verification checklist
+
       Categorized changes: {steps.parse-changes.output}
     model: sonnet
     max_turns: 10
 
   - id: social-announcement
     depends_on: [user-release-notes]
-    prompt: >
-      Draft a short, engaging social media announcement for this release. Highlight the
-      top 2-3 user-facing improvements, keep it under 280 characters for the main post,
-      include relevant hashtags, and suggest an optional longer thread format for platforms
-      that support it. Release notes: {steps.user-release-notes.output}
+    prompt: |
+      Draft social media announcements for this release across multiple formats.
+
+      TWITTER/X POST (primary, under 280 characters):
+      - Lead with the single most exciting user benefit
+      - Use an attention-grabbing opening (question, stat, or bold claim)
+      - Include 2-3 relevant hashtags
+      - End with a CTA (link placeholder)
+      - No emojis overload - 1-2 max for emphasis
+
+      TWITTER/X THREAD (4-6 tweets for deeper engagement):
+      - Tweet 1: Hook - the headline announcement with version number
+      - Tweet 2-3: Top 2 features with brief benefit descriptions
+      - Tweet 4: Notable fix or improvement users have been asking for
+      - Tweet 5: Breaking change notice (if any) or migration nudge
+      - Tweet 6: CTA - link to full release notes, feedback request
+
+      LINKEDIN POST (professional, 150-300 words):
+      - Professional tone, focus on business impact and product evolution
+      - Mention the team effort and engineering culture
+      - Include relevant industry context (why these changes matter now)
+      - End with engagement question to drive comments
+
+      DISCORD/SLACK COMMUNITY POST:
+      - More casual, developer-friendly tone
+      - Highlight technical improvements developers care about
+      - Include a "try it now" quick command or code snippet
+      - Ask for feedback and bug reports
+
+      For each format, provide the ready-to-post text.
+      Release notes: {steps.user-release-notes.output}
     model: haiku
     max_turns: 3

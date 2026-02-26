@@ -1,0 +1,210 @@
+# name: Regulatory Change Analyzer
+# description: Monitor regulatory changes, assess compliance gaps, and generate remediation plans
+# tags: [Compliance, Regulatory, Legal, Risk]
+# category: hr_legal
+
+name: regulatory-change-analyzer
+description: Monitor regulatory changes, assess compliance gaps, and generate remediation plans
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [notion]
+
+input_schema:
+  required: ["jurisdiction", "industry"]
+  properties:
+    jurisdiction:
+      type: string
+      description: "Primary jurisdiction to monitor (e.g. US, EU, UK, APAC)"
+    industry:
+      type: string
+      description: "Industry sector (e.g. financial-services, healthcare, technology, manufacturing)"
+    regulatory_bodies:
+      type: string
+      description: "Comma-separated list of regulatory bodies to monitor"
+      default: "SEC,FINRA,GDPR"
+
+steps:
+  - id: regulatory-scan
+    prompt: |
+      Perform a comprehensive scan of recent and upcoming regulatory changes for the
+      {input.industry} sector in the {input.jurisdiction} jurisdiction.
+
+      Monitor the following regulatory bodies: {input.regulatory_bodies}
+
+      For each regulatory body, identify:
+      1. Recently enacted regulations (last 90 days) that affect {input.industry} companies
+      2. Proposed rules currently in comment or review period with expected effective dates
+      3. Enforcement actions and guidance documents that signal regulatory priorities
+      4. Cross-border regulatory developments that may have extraterritorial impact
+      5. Industry-specific exemptions, safe harbors, or phase-in provisions
+
+      For each identified change, capture:
+      - Regulation name and reference number
+      - Issuing body and jurisdiction
+      - Effective date or expected timeline
+      - Brief description of requirements
+      - Affected business functions (e.g. operations, finance, IT, HR, legal)
+      - Severity assessment (major overhaul, significant update, minor amendment)
+
+      Prioritize changes by effective date and business impact.
+    model: haiku
+    max_turns: 10
+
+  - id: change-classification
+    depends_on: [regulatory-scan]
+    prompt: |
+      Classify each identified regulatory change by type, urgency, and organizational impact.
+
+      Regulatory scan results: {steps.regulatory-scan.output}
+
+      Classify each change along these dimensions:
+
+      1. Change type:
+         - New regulation (entirely new compliance requirement)
+         - Amendment (modification to existing regulation)
+         - Guidance update (interpretive guidance or FAQ)
+         - Enforcement shift (change in enforcement priorities or approach)
+         - Deregulation (relaxation or removal of requirements)
+
+      2. Urgency tier:
+         - Tier 1 (Immediate): Already effective or effective within 30 days
+         - Tier 2 (Near-term): Effective within 90 days, preparation needed now
+         - Tier 3 (Planning): Effective within 6-12 months, strategic planning required
+         - Tier 4 (Monitoring): Proposed or under review, track for developments
+
+      3. Functional impact mapping:
+         - Which departments are affected (compliance, legal, IT, operations, finance, HR)
+         - Estimated resource requirements (hours, budget, technology changes)
+         - Whether external counsel or specialist expertise is needed
+         - Dependencies on third-party vendors or service providers
+
+      4. Risk classification:
+         - Penalty exposure (fines, sanctions, license revocation)
+         - Reputational risk if non-compliant
+         - Operational disruption potential
+    model: sonnet
+    max_turns: 10
+
+  - id: policy-mapping
+    depends_on: [change-classification]
+    prompt: |
+      Map each classified regulatory change to existing organizational policies,
+      procedures, and controls.
+
+      Classified changes: {steps.change-classification.output}
+
+      For each regulatory change, determine:
+      1. Existing policies that partially or fully address the new requirements
+         - Identify the specific policy sections that are relevant
+         - Assess whether current policy language meets the new standard
+         - Note any policies that conflict with or contradict new requirements
+
+      2. Current controls and procedures:
+         - Map regulatory requirements to existing control frameworks (SOC2, ISO 27001, etc.)
+         - Identify controls that already satisfy portions of the new requirements
+         - Highlight control gaps where no current mechanism exists
+
+      3. Documentation and reporting:
+         - Current reporting obligations and how they change
+         - New record-keeping requirements
+         - Audit trail and evidence collection needs
+         - Board or committee reporting requirements
+
+      4. Technology and systems:
+         - Systems that need configuration changes
+         - New monitoring or alerting capabilities required
+         - Data collection, storage, or retention changes
+         - Integration points with compliance management tools
+
+      Use the Notion tool to document the policy mapping in a structured database
+      for ongoing tracking and reference.
+    model: sonnet
+    max_turns: 10
+    tools: [notion]
+
+  - id: gap-analysis
+    depends_on: [policy-mapping]
+    prompt: |
+      Perform a detailed gap analysis comparing current compliance posture against
+      new regulatory requirements for the {input.industry} sector.
+
+      Policy mapping: {steps.policy-mapping.output}
+      Classified changes: {steps.change-classification.output}
+
+      For each regulatory change, produce a gap assessment:
+
+      1. Compliance gap inventory:
+         - Requirement description (what the regulation mandates)
+         - Current state (what we do today)
+         - Gap description (what is missing or inadequate)
+         - Gap severity (Critical / Major / Minor / Cosmetic)
+         - Estimated effort to close (days/weeks/months)
+
+      2. Interdependency analysis:
+         - Gaps that depend on other gaps being closed first
+         - Shared remediation opportunities (one fix addresses multiple gaps)
+         - Conflicts between different regulatory requirements
+
+      3. Risk-weighted prioritization:
+         - Combine gap severity with regulatory urgency tier
+         - Factor in penalty exposure and enforcement likelihood
+         - Consider reputational and operational impact
+         - Rank all gaps in a unified priority matrix
+
+      4. Quick wins identification:
+         - Gaps that can be closed with minimal effort (policy language updates, configuration changes)
+         - Gaps already partially addressed by in-flight projects
+         - Gaps that can leverage existing vendor capabilities
+    model: sonnet
+    max_turns: 10
+
+  - id: remediation-plan
+    depends_on: [gap-analysis]
+    prompt: |
+      Generate a comprehensive remediation plan to address all identified compliance gaps
+      for {input.industry} operations in {input.jurisdiction}.
+
+      Gap analysis: {steps.gap-analysis.output}
+      Regulatory bodies: {input.regulatory_bodies}
+
+      Structure the remediation plan as follows:
+
+      1. Executive Summary:
+         - Total gaps identified by severity
+         - Estimated total remediation effort and budget
+         - Key deadlines and regulatory milestones
+         - Top 3 risks if remediation is delayed
+
+      2. Phased Remediation Roadmap:
+         - Phase 1 (0-30 days): Critical gaps and quick wins
+         - Phase 2 (30-90 days): Major gaps requiring process changes
+         - Phase 3 (90-180 days): Structural changes, technology implementations
+         - Phase 4 (180+ days): Long-term compliance program enhancements
+
+      3. For each remediation action:
+         - Gap reference and regulatory requirement
+         - Specific action items with clear deliverables
+         - Responsible team or role (RACI matrix)
+         - Resource requirements (headcount, budget, tools)
+         - Success criteria and verification method
+         - Dependencies and prerequisites
+         - Target completion date
+
+      4. Governance and Monitoring:
+         - Progress tracking cadence and metrics
+         - Escalation procedures for at-risk items
+         - Regulatory communication strategy
+         - Ongoing compliance monitoring recommendations
+         - Annual review and refresh cycle
+
+      5. Budget Summary:
+         - Cost breakdown by phase and category
+         - Resource allocation recommendations
+         - ROI analysis comparing remediation cost vs. non-compliance penalties
+
+      The plan should be actionable and suitable for presentation to senior leadership
+      and the compliance committee.
+    model: sonnet
+    max_turns: 10

@@ -1,0 +1,302 @@
+# name: API Docs Generator
+# description: Generate comprehensive API documentation from code repositories or OpenAPI specs
+# tags: [Engineering, GitHub, Documentation, API]
+# category: engineering
+
+name: api-docs-generator
+description: Generate comprehensive API documentation from code repositories or OpenAPI specs
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [github]
+
+input_schema:
+  required: ["repo"]
+  properties:
+    repo:
+      type: string
+      description: "GitHub repository in 'owner/repo' format (e.g. 'acme/payments-api')"
+    branch:
+      type: string
+      description: "Branch to generate docs from (default: 'main')"
+      default: "main"
+    path_filter:
+      type: string
+      description: "Path filter for API source files (e.g. 'src/api/', 'routes/')"
+    doc_style:
+      type: string
+      description: "Documentation style: 'reference', 'tutorial', or 'both' (default: 'reference')"
+      default: "reference"
+
+steps:
+  - id: fetch-specs
+    prompt: |
+      Fetch API source files and specs from the GitHub repository.
+
+      Use the GitHub tool:
+        node /home/user/tools/github.mjs get_contents '{input.repo}' '{input.branch}' '{input.path_filter}'
+
+      Repository: {input.repo}
+      Branch: {input.branch}
+      Path filter: {input.path_filter}
+
+      Look for and retrieve the following categories of files, ordered by priority:
+
+      1. **OpenAPI/Swagger specs** - any .yaml/.json files matching openapi*, swagger*, api-spec*.
+         If found, determine the OpenAPI version (2.0/Swagger vs 3.0 vs 3.1) and validate
+         structural completeness. Check for $ref resolution issues, missing schema definitions,
+         and undocumented endpoints that exist in code but not in the spec.
+      2. **Route definitions** - files containing API route/endpoint definitions:
+         - Python: FastAPI routers (@app.get/post), Flask blueprints, Django urls.py + views.py
+         - Node.js: Express routes (router.get/post), Fastify routes, NestJS controllers (@Get/@Post)
+         - Go: HTTP handlers (http.HandleFunc), gin/echo route groups
+         - Ruby: Rails routes.rb + corresponding controllers
+         - Java/Kotlin: Spring @RestController, @RequestMapping annotations
+      3. **Data models/schemas** - request/response type definitions, Pydantic models,
+         TypeScript interfaces, Go structs, Java DTOs, Marshmallow schemas, Zod validators
+      4. **Middleware and configuration** - authentication middleware (JWT, OAuth, API key validation),
+         rate limiting config (express-rate-limit, slowapi, token bucket params),
+         CORS configuration, request validation, error handling middleware
+      5. **Error definitions** - custom error classes, error code enums, HTTP exception handlers,
+         problem detail (RFC 7807) implementations
+      6. **README or existing docs** - any existing documentation, CHANGELOG, API versioning notes
+
+      Return structured data with file paths and contents for each category found.
+      If an OpenAPI spec exists, prioritize it as the source of truth but cross-reference
+      against actual route definitions to detect spec drift (undocumented endpoints).
+    model: sonnet
+    max_turns: 8
+    output_schema:
+      type: object
+      properties:
+        has_openapi_spec: { type: boolean }
+        source_files:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              category: { type: string }
+              content: { type: string }
+        framework: { type: string }
+        language: { type: string }
+
+  - id: parse-endpoints
+    depends_on: [fetch-specs]
+    prompt: |
+      Parse all API endpoints from the source files into a structured catalog.
+
+      Source files: {steps.fetch-specs.output}
+
+      For each endpoint discovered, extract the following with maximum precision:
+
+      1. **Method** - GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+      2. **Path** - URL path with parameter placeholders using OpenAPI syntax (e.g. /users/{id})
+         Include any path prefix from router mounting or API versioning (e.g. /api/v2/users/{id})
+      3. **Summary** - one-line description of what the endpoint does
+      4. **Description** - detailed explanation from comments, docstrings, or decorators.
+         If no description exists, infer from function name, parameter names, and return types.
+      5. **Parameters:**
+         - Path parameters: name, type (string/integer/uuid), required=true, description, format
+         - Query parameters: name, type, required flag, default value, description, enum values
+         - Header parameters: custom headers, Accept/Content-Type variants, API version headers
+      6. **Request body** - full schema with field names, types, required flags, constraints
+         (min/max, pattern, enum), nested object schemas, and realistic example values.
+         Note content type: application/json, multipart/form-data, application/x-www-form-urlencoded
+      7. **Response schemas** - for EVERY status code the endpoint can return:
+         - 2xx success responses (200 OK, 201 Created, 204 No Content) with body schema
+         - 400 Bad Request: validation error format (field-level errors, error codes)
+         - 401 Unauthorized: missing/invalid authentication response format
+         - 403 Forbidden: insufficient permissions response
+         - 404 Not Found: resource not found response format
+         - 409 Conflict: duplicate resource or state conflict
+         - 422 Unprocessable Entity: business logic validation errors
+         - 429 Too Many Requests: rate limit exceeded response with Retry-After header
+         - 500 Internal Server Error: generic error envelope format
+         For each, provide the response body schema AND a realistic example.
+      8. **Authentication requirements:**
+         - Method: Bearer JWT, API key (header/query), OAuth 2.0 (which flows), session cookie
+         - Required scopes or permissions (e.g. "users:read", "admin")
+         - Whether endpoint is publicly accessible or requires auth
+      9. **Rate limiting:**
+         - Requests per window (e.g. 100/minute, 1000/hour)
+         - Rate limit headers (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset)
+         - Whether limits are per-key, per-IP, or per-user
+      10. **Tags/Groups** - logical grouping (users, billing, admin, etc.)
+      11. **Deprecation** - flag any deprecated endpoints with sunset date if available
+
+      Organize endpoints by group/tag. Within each group, order by path then method.
+      Flag any endpoints with incomplete documentation (missing descriptions, no response schema).
+      Track documentation completeness percentage per endpoint.
+
+      Return a comprehensive JSON catalog of all endpoints.
+    model: sonnet
+    max_turns: 10
+    output_schema:
+      type: object
+      properties:
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              method: { type: string }
+              path: { type: string }
+              summary: { type: string }
+              group: { type: string }
+              auth_required: { type: boolean }
+        groups:
+          type: array
+          items: { type: string }
+        total_endpoints: { type: integer }
+
+  - id: generate-docs
+    depends_on: [parse-endpoints]
+    prompt: |
+      Generate comprehensive API documentation from the parsed endpoint catalog.
+
+      Endpoint catalog: {steps.parse-endpoints.output}
+      Documentation style: {input.doc_style}
+      Repository: {input.repo}
+
+      Generate documentation in Markdown format with precise, production-quality content.
+
+      **For 'reference' style, include:**
+
+      # API Reference - <repo name>
+
+      ## Overview
+      - Base URL and versioning strategy (URL path, header, or query parameter)
+      - Authentication methods with step-by-step credential setup:
+        - How to obtain API keys or OAuth tokens
+        - Example Authorization header format
+        - Token refresh workflow (if OAuth)
+      - Rate limiting policies: limits per tier, response headers, backoff strategy
+      - Common error response envelope format with example:
+        ```json
+        {"error": {"code": "VALIDATION_ERROR", "message": "...", "details": [...]}}
+        ```
+      - Pagination conventions: cursor-based vs offset, page size limits, example
+      - Request ID tracking: how to use X-Request-ID for debugging
+      - API stability and deprecation policy
+
+      ## Authentication
+      Dedicated section with working examples for each auth method:
+      - API Key: header placement, example request
+      - Bearer Token: JWT structure, expiration handling, refresh flow
+      - OAuth 2.0: authorization URL, token endpoint, scopes, PKCE flow example
+
+      ## Endpoints
+      For each endpoint group, create a section with:
+
+      ### <Group Name>
+
+      #### <METHOD> <path>
+      <summary>
+
+      **Parameters:**
+      | Name | In | Type | Required | Default | Description |
+      |------|-----|------|----------|---------|-------------|
+
+      **Request Body** (`application/json`):
+      ```json
+      <example with realistic, coherent data>
+      ```
+      | Field | Type | Required | Constraints | Description |
+      |-------|------|----------|-------------|-------------|
+
+      **Responses:**
+      | Status | Description |
+      |--------|-------------|
+
+      Success response:
+      ```json
+      <example 2xx response>
+      ```
+
+      Error response (4xx):
+      ```json
+      <example error with field-level validation details>
+      ```
+
+      **For 'tutorial' style, also include:**
+      - **Quick Start** guide: install SDK / get API key / make first call in under 5 minutes
+      - **Authentication Setup** with copy-paste examples for each method
+      - **Common Workflow Examples** demonstrating full CRUD lifecycle:
+        1. Create a resource (POST) with all required fields
+        2. List resources (GET) with filtering and pagination
+        3. Get single resource (GET by ID)
+        4. Update resource (PATCH) with partial update
+        5. Delete resource (DELETE) with confirmation
+      - **Code examples** in three languages with working, runnable snippets:
+        - curl (with proper header formatting and jq for response parsing)
+        - Python (using requests library, with error handling)
+        - JavaScript (using fetch API, with async/await)
+      - **Error handling guide**: common errors, retry strategies, exponential backoff
+      - **Webhook integration** guide (if webhooks are present)
+
+      **For 'both', include all of the above.**
+
+      Use realistic example data (not lorem ipsum). Generate coherent examples
+      that tell a story across related endpoints - e.g., create a user, then use that
+      user's ID to create an order, then query order status. IDs, timestamps, and
+      names should be consistent across all examples.
+    model: sonnet
+    max_turns: 10
+
+  - id: format-output
+    depends_on: [generate-docs, parse-endpoints]
+    prompt: |
+      Finalize and format the API documentation for delivery.
+
+      Generated docs: {steps.generate-docs.output}
+      Endpoint catalog: {steps.parse-endpoints.output}
+      Repository: {input.repo}
+
+      Polish the documentation to production-ready quality:
+
+      1. **Table of Contents** - add a linked, hierarchical TOC at the top with:
+         - Top-level sections (Overview, Authentication, Endpoints by group, etc.)
+         - Individual endpoint entries (METHOD /path - summary) under each group
+         - Quick-reference anchor links for navigation
+
+      2. **Consistency and quality check:**
+         - Verify all endpoints from the catalog are documented (flag any missing)
+         - Validate all example request/response JSON is syntactically correct
+         - Check parameter tables are complete: no missing types, descriptions, or required flags
+         - Ensure consistent formatting: heading levels, table alignment, code block language tags
+         - Verify all cross-references and links are valid
+         - Check that example data is coherent across related endpoints (same user IDs, etc.)
+         - Ensure status codes are documented for every endpoint (at minimum 200 and primary error)
+
+      3. **Error reference section** - consolidated error code reference:
+         - Table of all error codes used across the API with descriptions
+         - Common error response envelope format with field explanations
+         - Troubleshooting guide for each error code (what caused it, how to fix)
+
+      4. **Changelog placeholder** - add a versioned changelog section template:
+         - Format: date, version, changes (added/changed/deprecated/removed)
+         - Include current version as initial entry
+
+      5. **Coverage report** (at the end of the document):
+         - Total endpoints documented: <count>/<total>
+         - Endpoints with complete request examples: <count>
+         - Endpoints with complete response examples: <count>
+         - Endpoints with all error codes documented: <count>
+         - Endpoints with missing descriptions (list them with paths)
+         - Authentication documentation: complete / partial / missing
+         - Rate limiting documentation: complete / partial / missing
+         - Overall documentation completeness score: <percentage>
+
+      6. **Metadata header** (at the very top):
+         - Generated from: {input.repo}/{input.branch}
+         - Generated at: <ISO 8601 timestamp>
+         - Endpoints documented: <count>
+         - Documentation style: {input.doc_style}
+         - Auto-generated notice: "This documentation was auto-generated. Manual review recommended."
+
+      Output the final documentation as a single well-formatted Markdown document.
+      Also output a structured summary object with coverage metrics and identified gaps.
+    model: sonnet
+    max_turns: 8

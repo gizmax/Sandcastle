@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,6 @@ from typing import Any
 
 from sandcastle.engine.dag import (
     ExecutionPlan,
-    NON_LLM_TYPES,
     StepDefinition,
     WorkflowDefinition,
 )
@@ -159,6 +159,7 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
 
     if parts[0] == "memory":
         from sandcastle.engine.memory import format_memories_for_prompt
+
         return format_memories_for_prompt(context.memories)
 
     if var_path == "run_id":
@@ -192,13 +193,15 @@ def resolve_templates(
             return json.dumps(value)
         return str(value)
 
-    resolved = re.sub(r"\{([^}]+)\}", _replace, template)
+    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date)\}", _replace, template)
 
     # Auto-inject unreferenced dependency outputs
     if depends_on:
         missing = [
-            dep for dep in depends_on
-            if f"steps.{dep}." not in template and f"steps.{dep}}}" not in template
+            dep
+            for dep in depends_on
+            if f"steps.{dep}." not in template
+            and f"steps.{dep}}}" not in template
             and dep in context.step_outputs
         ]
         if missing:
@@ -269,10 +272,7 @@ async def _save_run_step(
 
         now = datetime.now(timezone.utc)
         db_status = status_map.get(status, StepStatus.PENDING)
-        output_data = (
-            output if isinstance(output, dict)
-            else {"result": output} if output else None
-        )
+        output_data = output if isinstance(output, dict) else {"result": output} if output else None
 
         async with async_session() as session:
             # Try to find existing step record (from the "running" INSERT)
@@ -314,10 +314,7 @@ async def _save_run_step(
                     error=error,
                     model=model,
                     started_at=now if status == "running" else None,
-                    completed_at=(
-                        now if status in ("completed", "failed", "skipped")
-                        else None
-                    ),
+                    completed_at=(now if status in ("completed", "failed", "skipped") else None),
                 )
                 session.add(step)
             await session.commit()
@@ -346,6 +343,49 @@ async def _save_checkpoint(
             await session.commit()
     except Exception as e:
         logger.warning(f"Could not save checkpoint for step {step_id}: {e}")
+
+
+# Browser action cache for self-healing selectors
+_browser_action_cache: dict[str, list[dict]] = {}
+
+
+def _cache_key(url: str, intent: str) -> str:
+    """Generate cache key from URL pattern and intent."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    # Normalize to domain + path pattern
+    return f"{parsed.netloc}{parsed.path}:{intent[:100]}"
+
+
+def _get_cached_actions(url: str, intent: str) -> list[dict] | None:
+    """Get cached action sequence for a URL+intent pair."""
+    key = _cache_key(url, intent)
+    return _browser_action_cache.get(key)
+
+
+def _save_cached_actions(url: str, intent: str, actions: list[dict]) -> None:
+    """Save successful action sequence to cache."""
+    key = _cache_key(url, intent)
+    _browser_action_cache[key] = actions
+    # Keep cache bounded
+    if len(_browser_action_cache) > 500:
+        # Remove oldest entries (first added)
+        oldest = list(_browser_action_cache.keys())[:100]
+        for k in oldest:
+            del _browser_action_cache[k]
+
+
+def _escape_js_string(text: str) -> str:
+    """Escape a string for safe embedding in JavaScript single-quoted strings inside shell."""
+    return (
+        text.replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
 
 
 # In-memory cancel flags for local mode (no Redis)
@@ -426,7 +466,8 @@ def _write_csv_output(
         if not directory.is_relative_to(sandbox):
             logger.warning(
                 "csv_output directory %s is outside sandbox root %s - skipping",
-                directory, sandbox,
+                directory,
+                sandbox,
             )
             return
 
@@ -511,56 +552,49 @@ _PDF_REPORT_INSTRUCTIONS: dict[str, str] = {
         "Use markdown headings (## and ###), bullet points, numbered lists, "
         "bold for emphasis, and tables where data is tabular. "
         "Organize content into logical sections with descriptive headings. "
-        "Be thorough but concise."
-        + _PDF_REPORT_VISUAL
+        "Be thorough but concise." + _PDF_REPORT_VISUAL
     ),
     "cs": (
         "FORMATOVANI: Strukturuj svou odpoved jako prehledny report v cestine. "
         "Pouzij markdown nadpisy (## a ###), odrazky, cislovane seznamy, "
         "tucne pismo pro dulezite informace a tabulky pro tabulkova data. "
         "Organizuj obsah do logickych sekci s popisnymi nadpisy. "
-        "Bud dustkladny, ale strucny."
-        + _PDF_REPORT_VISUAL
+        "Bud dustkladny, ale strucny." + _PDF_REPORT_VISUAL
     ),
     "de": (
         "FORMATIERUNG: Strukturiere deine Antwort als gut organisierten Bericht auf Deutsch. "
         "Verwende Markdown-Uberschriften (## und ###), Aufzahlungszeichen, nummerierte Listen, "
         "Fettdruck fur Hervorhebungen und Tabellen fur tabellarische Daten. "
         "Organisiere den Inhalt in logische Abschnitte mit beschreibenden Uberschriften. "
-        "Sei grundlich, aber pragnant."
-        + _PDF_REPORT_VISUAL
+        "Sei grundlich, aber pragnant." + _PDF_REPORT_VISUAL
     ),
     "es": (
         "FORMATO: Estructura tu respuesta como un informe bien organizado en espanol. "
         "Usa encabezados markdown (## y ###), puntos, listas numeradas, "
         "negrita para enfasis y tablas donde los datos sean tabulares. "
         "Organiza el contenido en secciones logicas con encabezados descriptivos. "
-        "Se minucioso pero conciso."
-        + _PDF_REPORT_VISUAL
+        "Se minucioso pero conciso." + _PDF_REPORT_VISUAL
     ),
     "fr": (
         "FORMATAGE: Structurez votre reponse comme un rapport bien organise en francais. "
         "Utilisez les titres markdown (## et ###), les puces, les listes numerotees, "
         "le gras pour l'emphase et les tableaux pour les donnees tabulaires. "
         "Organisez le contenu en sections logiques avec des titres descriptifs. "
-        "Soyez complet mais concis."
-        + _PDF_REPORT_VISUAL
+        "Soyez complet mais concis." + _PDF_REPORT_VISUAL
     ),
     "ja": (
         "FORMATTING: Structure your response as a well-organized report in Japanese. "
         "Use markdown headings (## and ###), bullet points, numbered lists, "
         "bold for emphasis, and tables where data is tabular. "
         "Organize content into logical sections with descriptive headings. "
-        "Be thorough but concise."
-        + _PDF_REPORT_VISUAL
+        "Be thorough but concise." + _PDF_REPORT_VISUAL
     ),
     "zh": (
         "FORMATTING: Structure your response as a well-organized report in Chinese. "
         "Use markdown headings (## and ###), bullet points, numbered lists, "
         "bold for emphasis, and tables where data is tabular. "
         "Organize content into logical sections with descriptive headings. "
-        "Be thorough but concise."
-        + _PDF_REPORT_VISUAL
+        "Be thorough but concise." + _PDF_REPORT_VISUAL
     ),
 }
 
@@ -600,7 +634,8 @@ def _write_pdf_report(
         if not directory.is_relative_to(sandbox):
             logger.warning(
                 "pdf_report directory %s is outside sandbox root %s - skipping",
-                directory, sandbox,
+                directory,
+                sandbox,
             )
             return None
 
@@ -624,13 +659,16 @@ def _write_pdf_report(
     if not markdown_text.strip():
         logger.warning(
             "PDF report skipped for step '%s': empty output (type=%s)",
-            step.id, type(output).__name__,
+            step.id,
+            type(output).__name__,
         )
         return None
 
     logger.info(
         "PDF report for step '%s': %d chars of markdown (output type=%s)",
-        step.id, len(markdown_text), type(output).__name__,
+        step.id,
+        len(markdown_text),
+        type(output).__name__,
     )
 
     base_name = cfg.filename or step.id
@@ -657,38 +695,14 @@ async def execute_step_with_retry(
     step_overrides: dict | None = None,
 ) -> StepResult:
     """Execute a step with retry logic and exponential backoff."""
-    # Apply step overrides for fork
+    # Apply step overrides for fork (use dataclasses.replace to preserve all fields)
     if step_overrides:
-        if "prompt" in step_overrides:
-            step = StepDefinition(
-                id=step.id,
-                prompt=step_overrides["prompt"],
-                depends_on=step.depends_on,
-                model=step_overrides.get("model", step.model),
-                max_turns=step_overrides.get("max_turns", step.max_turns),
-                timeout=step_overrides.get("timeout", step.timeout),
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-            )
-        elif "model" in step_overrides:
-            step = StepDefinition(
-                id=step.id,
-                prompt=step.prompt,
-                depends_on=step.depends_on,
-                model=step_overrides["model"],
-                max_turns=step_overrides.get("max_turns", step.max_turns),
-                timeout=step_overrides.get("timeout", step.timeout),
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry,
-                fallback=step.fallback,
-                csv_output=step.csv_output,
-                pdf_report=step.pdf_report,
-            )
+        override_fields = {}
+        for key in ("prompt", "model", "max_turns", "timeout"):
+            if key in step_overrides:
+                override_fields[key] = step_overrides[key]
+        if override_fields:
+            step = dataclasses.replace(step, **override_fields)
 
     # AutoPilot: pick variant if configured
     autopilot_experiment = None
@@ -716,9 +730,7 @@ async def execute_step_with_retry(
                 if variant:
                     autopilot_variant = variant
                     step = apply_variant(step, variant)
-                    logger.info(
-                        f"AutoPilot: step '{step.id}' using variant '{variant.id}'"
-                    )
+                    logger.info(f"AutoPilot: step '{step.id}' using variant '{variant.id}'")
         except Exception as e:
             logger.warning(f"AutoPilot variant selection failed, using baseline: {e}")
 
@@ -734,16 +746,17 @@ async def execute_step_with_retry(
     )
 
     # Broadcast step.started event
-    event_bus.publish("step.started", {
-        "run_id": context.run_id,
-        "step_name": step.id,
-        "workflow": context.workflow_name,
-    })
+    event_bus.publish(
+        "step.started",
+        {
+            "run_id": context.run_id,
+            "step_name": step.id,
+            "workflow": context.workflow_name,
+        },
+    )
 
     for attempt in range(1, max_attempts + 1):
-        result = await _execute_step_once(
-            step, context, sandbox, storage, parallel_index, attempt
-        )
+        result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
 
         if result.status == "completed":
             # AutoPilot: evaluate and save sample
@@ -816,13 +829,16 @@ async def execute_step_with_retry(
             )
 
             # Broadcast step.completed event
-            event_bus.publish("step.completed", {
-                "run_id": context.run_id,
-                "step_name": step.id,
-                "status": "completed",
-                "cost_usd": result.cost_usd,
-                "duration_seconds": result.duration_seconds,
-            })
+            event_bus.publish(
+                "step.completed",
+                {
+                    "run_id": context.run_id,
+                    "step_name": step.id,
+                    "status": "completed",
+                    "cost_usd": result.cost_usd,
+                    "duration_seconds": result.duration_seconds,
+                },
+            )
 
             return result
 
@@ -849,8 +865,17 @@ async def execute_step_with_retry(
                     )
                     return fallback_result
 
-            logger.warning(
-                f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}"
+            logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
+            from sandcastle.engine.telemetry import capture_step_error
+
+            capture_step_error(
+                Exception(result.error or "Step failed after retries"),
+                step_id=step.id,
+                step_type=step.type,
+                model=step.model,
+                workflow_name=context.workflow_name,
+                run_id=context.run_id,
+                attempt=attempt,
             )
             # Record step failure
             await _save_run_step(
@@ -866,18 +891,19 @@ async def execute_step_with_retry(
             )
 
             # Broadcast step.failed event
-            event_bus.publish("step.failed", {
-                "run_id": context.run_id,
-                "step_name": step.id,
-                "error": result.error,
-            })
+            event_bus.publish(
+                "step.failed",
+                {
+                    "run_id": context.run_id,
+                    "step_name": step.id,
+                    "error": result.error,
+                },
+            )
 
             return result
 
         delay = _backoff_delay(attempt, backoff)
-        logger.info(
-            f"Step '{step.id}' attempt {attempt} failed, retrying in {delay}s..."
-        )
+        logger.info(f"Step '{step.id}' attempt {attempt} failed, retrying in {delay}s...")
         await asyncio.sleep(delay)
 
     return result  # Should not reach here
@@ -913,7 +939,7 @@ async def _execute_fallback(
             if text.startswith("```"):
                 first_nl = text.find("\n")
                 if first_nl >= 0:
-                    text = text[first_nl + 1:]
+                    text = text[first_nl + 1 :]
                 if text.endswith("```"):
                     text = text[:-3].rstrip()
             try:
@@ -936,6 +962,16 @@ async def _execute_fallback(
     except Exception as e:
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
         logger.error(f"Fallback for step '{step.id}' also failed: {e}")
+        from sandcastle.engine.telemetry import capture_step_error
+
+        capture_step_error(
+            e,
+            step_id=step.id,
+            step_type=step.type,
+            model=step.model,
+            workflow_name=context.workflow_name,
+            run_id=context.run_id,
+        )
         return StepResult(
             step_id=step.id,
             parallel_index=parallel_index,
@@ -1138,24 +1174,23 @@ async def _execute_step_once(
         _step_reads_memory = (
             context._memory_config
             and context._memory_scope_id
-            and (
-                context._memory_config.auto_inject
-                or (step.memory and step.memory.read)
-            )
+            and (context._memory_config.auto_inject or (step.memory and step.memory.read))
         )
+
+        # Resolve template variables first (cheap string interpolation) so the
+        # cache key reflects the actual inputs, not the raw template string.
+        prompt = resolve_templates(step.prompt, context, step.depends_on)
 
         # Step result cache - check before executing (skip for memory steps)
         cache_key = ""
         if not _step_reads_memory:
             cache_key = _compute_cache_key(
-                context.workflow_name, step.id, step.prompt, effective_model or step.model
+                context.workflow_name, step.id, prompt, effective_model or step.model
             )
             cached = await _get_cached_result(cache_key)
             if cached:
                 duration = (datetime.now(timezone.utc) - started_at).total_seconds()
-                logger.info(
-                    f"Step '{step.id}' cache HIT (key={cache_key[:12]}...)"
-                )
+                logger.info(f"Step '{step.id}' cache HIT (key={cache_key[:12]}...)")
                 return StepResult(
                     step_id=step.id,
                     parallel_index=parallel_index,
@@ -1165,31 +1200,49 @@ async def _execute_step_once(
                     status="completed",
                     attempt=attempt,
                 )
-
-        prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
 
         # Inject agent memories into the prompt (semantic search with step prompt)
         if _step_reads_memory:
             try:
+                from sandcastle.config import settings as _mem_read_settings
                 from sandcastle.engine.memory import (
+                    apply_decay,
                     format_memories_for_prompt,
                     load_memories,
                 )
+
                 step_memories = await load_memories(
                     context._memory_scope_id,
                     query=prompt[:500],
                     limit=context._memory_config.max_inject,
                 )
+                # Apply decay
+                max_age = (
+                    context._memory_config.max_age_days
+                    if (
+                        context._memory_config
+                        and context._memory_config.max_age_days > 0
+                    )
+                    else _mem_read_settings.memory_max_age_days
+                )
+                if max_age > 0:
+                    step_memories = apply_decay(
+                        step_memories, max_age_days=max_age
+                    )
+
                 mem_block = format_memories_for_prompt(step_memories)
                 if mem_block:
                     prompt = mem_block + "\n\n" + prompt
                     logger.info(
                         "Injected %d memories into step '%s'",
-                        len(step_memories), step.id,
+                        len(step_memories),
+                        step.id,
                     )
             except Exception as e:
-                logger.warning(f"Memory injection failed for step '{step.id}': {e}")
+                logger.warning(
+                    f"Memory injection failed for step '{step.id}': {e}"
+                )
 
         if step.pdf_report:
             # PDF report steps need verbose, structured output - skip the terse
@@ -1218,19 +1271,14 @@ async def _execute_step_once(
 
         idx_str = f" [{parallel_index}]" if parallel_index is not None else ""
         logger.info(
-            f"Executing step '{step.id}'{idx_str} attempt {attempt} "
-            f"(model={effective_model})"
+            f"Executing step '{step.id}'{idx_str} attempt {attempt} (model={effective_model})"
         )
-        logger.info(
-            f"Step '{step.id}' prompt length: {len(prompt)} chars"
-        )
+        logger.info(f"Step '{step.id}' prompt length: {len(prompt)} chars")
         result = await sandbox.query(request)
 
         # Save routing decision to DB
         if routing_decision:
-            await _save_routing_decision(
-                context.run_id, step.id, routing_decision, step.slo
-            )
+            await _save_routing_decision(context.run_id, step.id, routing_decision, step.slo)
 
         output = result.structured_output if result.structured_output else result.text
         logger.info(
@@ -1246,7 +1294,7 @@ async def _execute_step_once(
             if text.startswith("```"):
                 first_nl = text.find("\n")
                 if first_nl >= 0:
-                    text = text[first_nl + 1:]
+                    text = text[first_nl + 1 :]
                 if text.endswith("```"):
                     text = text[:-3].rstrip()
             try:
@@ -1261,19 +1309,23 @@ async def _execute_step_once(
         if effective_tools:
             try:
                 from sandcastle.engine.policy import create_tool_credential_policy
+
                 cred_policy = create_tool_credential_policy(effective_tools)
                 if cred_policy:
                     from sandcastle.engine.policy import PolicyEngine as _CredPE
+
                     cred_engine = _CredPE([cred_policy])
                     cred_result = await cred_engine.evaluate(
-                        step_id=step.id, output=output,
+                        step_id=step.id,
+                        output=output,
                         context={"step_id": step.id, "run_id": context.run_id},
                     )
                     if cred_result.violations:
                         output = cred_result.modified_output
                         logger.warning(
                             "Step '%s': redacted %d credential pattern(s) from output",
-                            step.id, len(cred_result.violations),
+                            step.id,
+                            len(cred_result.violations),
                         )
             except Exception as e:
                 logger.warning("Credential redaction failed for step '%s': %s", step.id, e)
@@ -1319,6 +1371,7 @@ async def _execute_step_once(
                         from sandcastle.models.db import (
                             async_session as db_session,
                         )
+
                         config = eval_result.approval_config or {}
                         async with db_session() as session:
                             approval = ApprovalRequest(
@@ -1326,21 +1379,19 @@ async def _execute_step_once(
                                 step_id=step.id,
                                 status=ApprovalStatus.PENDING,
                                 request_data=(
-                                    output if isinstance(output, dict)
-                                    else {"result": output}
+                                    output if isinstance(output, dict) else {"result": output}
                                 ),
-                                message=config.get(
-                                    "message", "Policy requires approval"
-                                ),
+                                message=config.get("message", "Policy requires approval"),
                                 timeout_at=None,
                                 on_timeout=config.get("on_timeout", "abort"),
                                 allow_edit=False,
                             )
                             if config.get("timeout_hours"):
                                 from datetime import timedelta
-                                approval.timeout_at = datetime.now(
-                                    timezone.utc
-                                ) + timedelta(hours=config["timeout_hours"])
+
+                                approval.timeout_at = datetime.now(timezone.utc) + timedelta(
+                                    hours=config["timeout_hours"]
+                                )
                             session.add(approval)
                             run = await session.get(Run, uuid.UUID(context.run_id))
                             if run:
@@ -1348,9 +1399,7 @@ async def _execute_step_once(
                             await session.commit()
                             await session.refresh(approval)
                             approval_id = str(approval.id)
-                        raise WorkflowPaused(
-                            approval_id=approval_id, run_id=context.run_id
-                        )
+                        raise WorkflowPaused(approval_id=approval_id, run_id=context.run_id)
 
                     # Use modified output (after redactions)
                     output = eval_result.modified_output
@@ -1370,29 +1419,80 @@ async def _execute_step_once(
                 cost_usd=result.total_cost_usd,
             )
         elif not _step_reads_memory:
-            logger.info(
-                f"Step '{step.id}' output not cached (empty or failed)"
-            )
+            logger.info(f"Step '{step.id}' output not cached (empty or failed)")
 
         # Write step output to agent memory if configured
-        if (
-            context._memory_scope_id
-            and step.memory
-            and step.memory.write
-            and output
-        ):
+        if context._memory_scope_id and step.memory and step.memory.write and output:
             try:
-                from sandcastle.engine.memory import save_memory
-                content = json.dumps(output) if isinstance(output, (dict, list)) else str(output)
-                await save_memory(
-                    context._memory_scope_id,
-                    content,
-                    metadata={"step_id": step.id, "workflow": context.workflow_name},
-                    run_id=context.run_id,
+                from sandcastle.config import settings as _mem_write_settings
+                from sandcastle.engine.memory import (
+                    enrich_memory,
+                    save_memory,
+                    should_admit,
                 )
-                logger.info("Saved memory from step '%s'", step.id)
+
+                content = (
+                    json.dumps(output)
+                    if isinstance(output, (dict, list))
+                    else str(output)
+                )
+
+                # Admission control
+                threshold = (
+                    step.memory.admit_threshold
+                    or (
+                        context._memory_config.admit_threshold
+                        if context._memory_config
+                        else 0
+                    )
+                    or _mem_write_settings.memory_admit_threshold
+                )
+                admitted, score, reason = should_admit(
+                    content, context.memories, threshold=threshold
+                )
+                if not admitted:
+                    logger.info(
+                        "Memory admission rejected for step '%s' "
+                        "(score=%.2f, reason=%s)",
+                        step.id,
+                        score,
+                        reason,
+                    )
+                else:
+                    # Enrich with keywords/tags if configured
+                    meta: dict = {
+                        "step_id": step.id,
+                        "workflow": context.workflow_name,
+                    }
+                    if (
+                        context._memory_config
+                        and context._memory_config.enrich
+                    ):
+                        enriched = enrich_memory(
+                            content, metadata=meta
+                        )
+                        meta = enriched.get("metadata", meta)
+                        meta["keywords"] = enriched.get(
+                            "keywords", []
+                        )
+                        meta["tags"] = enriched.get("tags", [])
+
+                    await save_memory(
+                        context._memory_scope_id,
+                        content,
+                        metadata=meta,
+                        run_id=context.run_id,
+                    )
+                    logger.info(
+                        "Saved memory from step '%s' "
+                        "(importance=%.2f)",
+                        step.id,
+                        score,
+                    )
             except Exception as e:
-                logger.warning(f"Memory write failed for step '{step.id}': {e}")
+                logger.warning(
+                    f"Memory write failed for step '{step.id}': {e}"
+                )
 
         return StepResult(
             step_id=step.id,
@@ -1452,6 +1552,7 @@ async def _execute_approval_step(
     timeout_at = None
     if step.approval_config and step.approval_config.timeout_hours:
         from datetime import timedelta
+
         timeout_at = datetime.now(timezone.utc) + timedelta(
             hours=step.approval_config.timeout_hours
         )
@@ -1528,9 +1629,7 @@ async def _execute_sub_workflow_step(
     started_at = datetime.now(timezone.utc)
 
     if not step.sub_workflow or not step.sub_workflow.workflow:
-        return StepResult(
-            step_id=step.id, status="failed", error="Missing sub_workflow config"
-        )
+        return StepResult(step_id=step.id, status="failed", error="Missing sub_workflow config")
 
     # Depth check
     max_depth = settings.max_workflow_depth
@@ -1577,9 +1676,7 @@ async def _execute_sub_workflow_step(
         sub_plan = build_plan(sub_workflow)
 
     except Exception as e:
-        return StepResult(
-            step_id=step.id, status="failed", error=f"Sub-workflow load error: {e}"
-        )
+        return StepResult(step_id=step.id, status="failed", error=f"Sub-workflow load error: {e}")
 
     # Resolve input mapping
     sub_input = {}
@@ -1608,10 +1705,7 @@ async def _execute_sub_workflow_step(
                     depth=depth + 1,
                 )
 
-        tasks = [
-            asyncio.create_task(run_sub(item, i))
-            for i, item in enumerate(items)
-        ]
+        tasks = [asyncio.create_task(run_sub(item, i)) for i, item in enumerate(items)]
         sub_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Aggregate outputs
@@ -1774,7 +1868,7 @@ async def _execute_llm_step(
         if output.startswith("```"):
             first_nl = output.find("\n")
             if first_nl >= 0:
-                output = output[first_nl + 1:]
+                output = output[first_nl + 1 :]
             if output.endswith("```"):
                 output = output[:-3].rstrip()
         try:
@@ -1786,13 +1880,18 @@ async def _execute_llm_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=output, cost_usd=cost,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=output,
+            cost_usd=cost,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -1814,8 +1913,7 @@ async def _execute_http_step(
     try:
         url = resolve_templates(cfg.url, context, step.depends_on)
         headers = {
-            k: resolve_templates(v, context, step.depends_on)
-            for k, v in cfg.headers.items()
+            k: resolve_templates(v, context, step.depends_on) for k, v in cfg.headers.items()
         }
 
         # Auth handling
@@ -1825,6 +1923,7 @@ async def _execute_http_step(
                 headers["Authorization"] = f"Bearer {auth_resolved[7:]}"
             else:
                 import os
+
                 token = os.environ.get(auth_resolved, auth_resolved)
                 headers["Authorization"] = f"Bearer {token}"
 
@@ -1851,13 +1950,18 @@ async def _execute_http_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=output, cost_usd=0.0,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=output,
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -1880,13 +1984,32 @@ async def _execute_code_step(
         # Inject context: _input and _steps
         exec_globals: dict[str, Any] = {
             "__builtins__": {
-                "len": len, "int": int, "float": float, "str": str,
-                "bool": bool, "list": list, "dict": dict, "set": set,
-                "tuple": tuple, "range": range, "enumerate": enumerate,
-                "zip": zip, "map": map, "filter": filter, "sorted": sorted,
-                "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
-                "isinstance": isinstance, "type": type, "print": print,
-                "None": None, "True": True, "False": False,
+                "len": len,
+                "int": int,
+                "float": float,
+                "str": str,
+                "bool": bool,
+                "list": list,
+                "dict": dict,
+                "set": set,
+                "tuple": tuple,
+                "range": range,
+                "enumerate": enumerate,
+                "zip": zip,
+                "map": map,
+                "filter": filter,
+                "sorted": sorted,
+                "min": min,
+                "max": max,
+                "sum": sum,
+                "abs": abs,
+                "round": round,
+                "isinstance": isinstance,
+                "type": type,
+                "print": print,
+                "None": None,
+                "True": True,
+                "False": False,
             },
             "_input": context.input,
             "_steps": context.step_outputs,
@@ -1900,13 +2023,18 @@ async def _execute_code_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=output, cost_usd=0.0,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=output,
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -1929,8 +2057,14 @@ async def _execute_condition_step(
         # Restricted eval namespace
         eval_ns: dict[str, Any] = {
             "__builtins__": {
-                "len": len, "int": int, "float": float, "str": str,
-                "bool": bool, "True": True, "False": False, "None": None,
+                "len": len,
+                "int": int,
+                "float": float,
+                "str": str,
+                "bool": bool,
+                "True": True,
+                "False": False,
+                "None": None,
             },
             "steps": context.step_outputs,
             "input": context.input,
@@ -1954,7 +2088,9 @@ async def _execute_condition_step(
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -1985,7 +2121,8 @@ async def _execute_classify_step(
 
         categories_str = ", ".join(cfg.categories)
         classify_prompt = (
-            f"Classify the following text into exactly one of these categories: {categories_str}\n\n"
+            "Classify the following text into exactly one"
+            f" of these categories: {categories_str}\n\n"
             f"Text: {input_text}\n\n"
             f"Respond with ONLY the category name, nothing else."
         )
@@ -2068,7 +2205,9 @@ async def _execute_classify_step(
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -2097,7 +2236,7 @@ async def _execute_loop_step(
             items = [items]
 
         # Limit iterations
-        items = items[:cfg.max_iterations]
+        items = items[: cfg.max_iterations]
 
         results = []
         total_cost = 0.0
@@ -2112,7 +2251,10 @@ async def _execute_loop_step(
                     continue
 
                 sub_result = await execute_step_with_retry(
-                    sub_step, child_context, sandbox, storage,
+                    sub_step,
+                    child_context,
+                    sandbox,
+                    storage,
                 )
                 child_context.step_outputs[sub_step_id] = sub_result.output
                 total_cost += sub_result.cost_usd
@@ -2126,8 +2268,14 @@ async def _execute_loop_step(
             if cfg.until:
                 eval_ns: dict[str, Any] = {
                     "__builtins__": {
-                        "len": len, "int": int, "float": float, "str": str,
-                        "bool": bool, "True": True, "False": False, "None": None,
+                        "len": len,
+                        "int": int,
+                        "float": float,
+                        "str": str,
+                        "bool": bool,
+                        "True": True,
+                        "False": False,
+                        "None": None,
                     },
                     "output": iteration_output,
                     "index": i,
@@ -2137,13 +2285,394 @@ async def _execute_loop_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=results, cost_usd=total_cost,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=results,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_race_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+) -> StepResult:
+    """Execute a race step - run branches in parallel, take first valid result."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.race_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing race_config")
+
+    try:
+
+        async def run_branch(branch_steps: list[str]) -> dict:
+            """Execute a sequence of steps and return the last output."""
+            branch_context = RunContext(
+                run_id=context.run_id,
+                input=dict(context.input),
+                step_outputs=dict(context.step_outputs),
+                costs=list(context.costs),
+                workflow_name=context.workflow_name,
+                default_tools=context.default_tools,
+            )
+            branch_cost = 0.0
+            last_output = None
+            for sub_step_id in branch_steps:
+                try:
+                    sub_step = workflow.get_step(sub_step_id)
+                except ValueError:
+                    continue
+                sub_result = await execute_step_with_retry(
+                    sub_step,
+                    branch_context,
+                    sandbox,
+                    storage,
+                )
+                branch_context.step_outputs[sub_step_id] = sub_result.output
+                branch_cost += sub_result.cost_usd
+                last_output = sub_result.output
+                if sub_result.status == "failed":
+                    raise RuntimeError(f"Branch step '{sub_step_id}' failed: {sub_result.error}")
+            return {"output": last_output, "cost": branch_cost}
+
+        # Run all branches in parallel
+        tasks = [asyncio.create_task(run_branch(branch)) for branch in cfg.branches]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect successful results
+        total_cost = 0.0
+        winning_output = None
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            total_cost += result["cost"]
+            # Validate if validator expression is set
+            if cfg.validator:
+                eval_ns: dict[str, Any] = {
+                    "__builtins__": {
+                        "len": len,
+                        "int": int,
+                        "float": float,
+                        "str": str,
+                        "bool": bool,
+                        "True": True,
+                        "False": False,
+                        "None": None,
+                    },
+                    "output": result["output"],
+                }
+                try:
+                    if bool(eval(cfg.validator, eval_ns)):  # noqa: S307
+                        winning_output = result["output"]
+                        break
+                except Exception:
+                    continue
+            else:
+                # No validator - take first non-error result
+                winning_output = result["output"]
+                break
+
+        if winning_output is None:
+            # No branch produced a valid result - use first non-error output anyway
+            for result in results:
+                if not isinstance(result, Exception):
+                    winning_output = result["output"]
+                    break
+
+        duration = time.monotonic() - started_at
+        if winning_output is None:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="All race branches failed",
+                cost_usd=total_cost,
+                duration_seconds=duration,
+            )
+
+        return StepResult(
+            step_id=step.id,
+            output=winning_output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_sensor_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a sensor step - poll URL until condition is met or timeout."""
+    import time
+
+    import httpx
+
+    started_at = time.monotonic()
+    cfg = step.sensor_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing sensor_config")
+
+    try:
+        url = resolve_templates(cfg.url, context, step.depends_on)
+        headers = {
+            k: resolve_templates(v, context, step.depends_on) for k, v in cfg.headers.items()
+        }
+        deadline = time.monotonic() + cfg.timeout
+
+        while time.monotonic() < deadline:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.request(
+                        method=cfg.method.upper(),
+                        url=url,
+                        headers=headers,
+                    )
+                try:
+                    response_data = resp.json()
+                except Exception:
+                    response_data = {"status_code": resp.status_code, "text": resp.text[:5000]}
+
+                # Evaluate condition
+                eval_ns: dict[str, Any] = {
+                    "__builtins__": {
+                        "len": len,
+                        "int": int,
+                        "float": float,
+                        "str": str,
+                        "bool": bool,
+                        "True": True,
+                        "False": False,
+                        "None": None,
+                    },
+                    "response": response_data,
+                    "status_code": resp.status_code,
+                }
+                condition_met = bool(eval(cfg.condition, eval_ns))  # noqa: S307
+
+                if condition_met:
+                    duration = time.monotonic() - started_at
+                    return StepResult(
+                        step_id=step.id,
+                        output=response_data,
+                        cost_usd=0.0,
+                        duration_seconds=duration,
+                        status="completed",
+                    )
+            except Exception as poll_err:
+                logger.debug(f"Sensor poll error for step '{step.id}': {poll_err}")
+
+            await asyncio.sleep(cfg.check_interval)
+
+        # Timeout reached
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Sensor timed out after {cfg.timeout}s",
+            duration_seconds=duration,
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _execute_gate_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Execute a gate step - iterate through approval strategies."""
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.gate_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing gate_config")
+
+    try:
+        for strategy in cfg.strategies:
+            strategy_type = strategy.get("type", "")
+            strategy_config = strategy.get("config", {})
+
+            if strategy_type == "llm_eval":
+                # LLM-based evaluation (similar to classify step pattern)
+                import httpx
+
+                from sandcastle.engine.providers import get_api_key, resolve_model
+
+                eval_prompt = strategy_config.get(
+                    "prompt", "Evaluate this input and respond with 'approved' or 'rejected'."
+                )
+                eval_input = strategy_config.get("input", "")
+                if eval_input:
+                    eval_input = resolve_templates(eval_input, context, step.depends_on)
+                    eval_prompt = f"{eval_prompt}\n\nInput: {eval_input}"
+
+                model_name = strategy_config.get("model", "haiku")
+                model_info = resolve_model(model_name)
+                api_key = get_api_key(model_info)
+
+                if model_info.provider == "claude":
+                    async with httpx.AsyncClient(timeout=step.timeout) as client:
+                        resp = await client.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key": api_key,
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": model_info.api_model_id,
+                                "max_tokens": 256,
+                                "messages": [{"role": "user", "content": eval_prompt}],
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        llm_response = data["content"][0]["text"].strip().lower()
+                        usage = data.get("usage", {})
+                        in_tok = usage.get("input_tokens", 0)
+                        out_tok = usage.get("output_tokens", 0)
+                else:
+                    base_url = model_info.api_base_url or "https://api.openai.com/v1"
+                    async with httpx.AsyncClient(timeout=step.timeout) as client:
+                        resp = await client.post(
+                            f"{base_url}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": model_info.api_model_id,
+                                "max_tokens": 256,
+                                "messages": [{"role": "user", "content": eval_prompt}],
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        llm_response = data["choices"][0]["message"]["content"].strip().lower()
+                        usage = data.get("usage", {})
+                        in_tok = usage.get("prompt_tokens", 0)
+                        out_tok = usage.get("completion_tokens", 0)
+
+                cost = (
+                    in_tok * model_info.input_price_per_m / 1_000_000
+                    + out_tok * model_info.output_price_per_m / 1_000_000
+                )
+                approved = "approved" in llm_response or "approve" in llm_response
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    output={
+                        "decision": "approved" if approved else "rejected",
+                        "reason": llm_response,
+                        "strategy": "llm_eval",
+                    },
+                    cost_usd=cost,
+                    duration_seconds=duration,
+                    status="completed",
+                )
+
+            elif strategy_type == "human":
+                # Create approval request and pause workflow (reuse existing mechanism)
+                from sandcastle.models.db import (
+                    ApprovalRequest,
+                    ApprovalStatus,
+                    Run,
+                    RunStatus,
+                    async_session,
+                )
+
+                message = strategy_config.get("message", "Gate requires human approval")
+                timeout_hours = strategy_config.get("timeout_hours")
+                on_timeout = strategy_config.get("on_timeout", "abort")
+
+                async with async_session() as session:
+                    approval = ApprovalRequest(
+                        run_id=uuid.UUID(context.run_id),
+                        step_id=step.id,
+                        status=ApprovalStatus.PENDING,
+                        request_data={"gate_strategy": "human"},
+                        message=message,
+                        timeout_at=None,
+                        on_timeout=on_timeout,
+                        allow_edit=False,
+                    )
+                    if timeout_hours:
+                        approval.timeout_at = datetime.now(timezone.utc) + timedelta(
+                            hours=timeout_hours
+                        )
+                    session.add(approval)
+                    run = await session.get(Run, uuid.UUID(context.run_id))
+                    if run:
+                        run.status = RunStatus.AWAITING_APPROVAL
+                    await session.commit()
+                    await session.refresh(approval)
+                    approval_id = str(approval.id)
+
+                raise WorkflowPaused(approval_id=approval_id, run_id=context.run_id)
+
+            elif strategy_type == "timeout":
+                # Auto-approve or reject after a delay
+                delay = strategy_config.get("seconds", 60)
+                action = strategy_config.get("action", "approve")
+                await asyncio.sleep(delay)
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    output={
+                        "decision": "approved" if action == "approve" else "rejected",
+                        "reason": f"Auto-{action} after {delay}s timeout",
+                        "strategy": "timeout",
+                    },
+                    cost_usd=0.0,
+                    duration_seconds=duration,
+                    status="completed",
+                )
+
+        # No strategy matched
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="No gate strategy matched or all strategies failed",
+            duration_seconds=duration,
+        )
+    except WorkflowPaused:
+        raise
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -2197,13 +2726,18 @@ async def _execute_transform_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=output, cost_usd=0.0,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=output,
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -2226,7 +2760,10 @@ async def _execute_notify_step(
 
         logger.info(
             "Notify step '%s': service=%s channel=%s message=%s",
-            step.id, cfg.service, channel, message[:200],
+            step.id,
+            cfg.service,
+            channel,
+            message[:200],
         )
 
         output = {
@@ -2238,13 +2775,18 @@ async def _execute_notify_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=output, cost_usd=0.0,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=output,
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
 
@@ -2253,7 +2795,6 @@ async def _execute_delegate_step(
     step: StepDefinition,
     context: RunContext,
     storage: StorageBackend,
-    workflow_loader: Any = None,
     depth: int = 0,
 ) -> StepResult:
     """Execute a delegate step - run another workflow as a sub-workflow."""
@@ -2266,16 +2807,23 @@ async def _execute_delegate_step(
 
     try:
         task_description = resolve_templates(
-            cfg.task_description, context, step.depends_on,
+            cfg.task_description,
+            context,
+            step.depends_on,
         )
 
-        # Try to load and execute the target workflow (same pattern as sub_workflow)
+        # Try to load and execute the target workflow
         try:
-            from sandcastle.engine.dag import parse as parse_workflow
-            from sandcastle.config import settings
             from pathlib import Path
 
-            workflows_dir = Path(settings.workflows_dir) if hasattr(settings, "workflows_dir") else Path("workflows")
+            from sandcastle.config import settings
+            from sandcastle.engine.dag import parse as parse_workflow
+
+            workflows_dir = (
+                Path(settings.workflows_dir)
+                if hasattr(settings, "workflows_dir")
+                else Path("workflows")
+            )
             wf_path = workflows_dir / f"{cfg.workflow}.yaml"
 
             if wf_path.exists():
@@ -2288,7 +2836,9 @@ async def _execute_delegate_step(
                 )
 
                 sub_result = await execute_workflow(
-                    sub_wf, sub_context.input, storage,
+                    sub_wf,
+                    sub_context.input,
+                    storage,
                     max_cost_usd=context.max_cost_usd,
                     depth=depth + 1,
                 )
@@ -2314,15 +2864,895 @@ async def _execute_delegate_step(
 
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, output=output, cost_usd=0.0,
-            duration_seconds=duration, status="completed",
+            step_id=step.id,
+            output=output,
+            cost_usd=0.0,
+            duration_seconds=duration,
+            status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
-            step_id=step.id, status="failed", error=str(e),
+            step_id=step.id,
+            status="failed",
+            error=str(e),
             duration_seconds=duration,
         )
+
+
+async def _execute_browser_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+) -> StepResult:
+    """Execute a browser automation step.
+
+    Supports three modes:
+    - playwright: Agent writes and executes Playwright scripts inside the
+      sandbox via the standard agent loop. The step prompt is augmented with
+      browser tool instructions, viewport config, and start URL context.
+    - computer_use: Screenshot-action loop via the Anthropic computer_use
+      beta API. Takes screenshots of a headless browser running inside the
+      sandbox, sends them to Claude, and executes returned mouse/keyboard
+      actions. Loops until the task is complete or the timeout is reached.
+    - dom: Uses the accessibility tree instead of screenshots for faster and
+      cheaper data extraction from known page layouts.
+    """
+    import os
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.browser_config
+    if not cfg:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="Missing browser_config",
+        )
+
+    prompt = resolve_templates(step.prompt, context, step.depends_on)
+    prompt = await resolve_storage_refs(prompt, storage)
+
+    # Resolve credentials from environment if configured
+    credentials_json = None
+    if cfg.credentials_env:
+        credentials_json = os.environ.get(cfg.credentials_env)
+
+    # Feature F: execution replay - collect screenshots across modes
+    replay_screenshots: list[dict] = []
+
+    try:
+        if cfg.mode == "dom":
+            result = await _browser_dom_mode(
+                step,
+                cfg,
+                sandbox,
+                context.run_id,
+                context.input,
+                context=context,
+                storage=storage,
+            )
+        elif cfg.mode == "computer_use":
+            result = await _browser_computer_use_mode(
+                step,
+                cfg,
+                prompt,
+                credentials_json,
+                context,
+                sandbox,
+                storage,
+                started_at,
+                replay_screenshots,
+            )
+        elif cfg.mode == "playwright":
+            result = await _browser_playwright_mode(
+                step,
+                cfg,
+                prompt,
+                credentials_json,
+                context,
+                sandbox,
+                storage,
+                started_at,
+            )
+        else:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Unknown browser mode: {cfg.mode}",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        # Feature F: attach replay data to the result output
+        if replay_screenshots and result.status == "completed":
+            output = result.output
+            if isinstance(output, dict):
+                output["replay"] = replay_screenshots
+                output["replay_count"] = len(replay_screenshots)
+            else:
+                output = {
+                    "result": output,
+                    "replay": replay_screenshots,
+                    "replay_count": len(replay_screenshots),
+                }
+            result = StepResult(
+                step_id=result.step_id,
+                parallel_index=result.parallel_index,
+                output=output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                status=result.status,
+                attempt=result.attempt,
+            )
+
+        return result
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        logger.error(f"Browser step '{step.id}' failed: {e}")
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(e),
+            duration_seconds=duration,
+        )
+
+
+async def _browser_playwright_mode(
+    step: StepDefinition,
+    cfg: Any,
+    prompt: str,
+    credentials_json: str | None,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    started_at: float,
+) -> StepResult:
+    """Playwright mode: augment the step prompt with browser tool instructions
+    and delegate to the standard sandbox agent execution.
+    """
+    # Build augmented prompt with browser context
+    browser_instructions = (
+        "You have access to a headless Chromium browser via Playwright.\n"
+        "Playwright and Chromium are pre-installed in the sandbox.\n\n"
+        "## Browser Tools\n"
+        "Write and execute Node.js scripts using Playwright to automate "
+        "the browser. Use the Bash tool to run scripts like:\n\n"
+        "```bash\n"
+        'node -e "\n'
+        "const { chromium } = require('playwright');\n"
+        "(async () => {\n"
+        f"  const browser = await chromium.launch("
+        f"{{ headless: {'true' if cfg.headless else 'false'} }});\n"
+        f"  const page = await browser.newPage("
+        f"{{ viewport: {{ width: {cfg.viewport_width}, "
+        f"height: {cfg.viewport_height} }} }});\n"
+    )
+
+    if cfg.start_url:
+        start_url = resolve_templates(
+            cfg.start_url,
+            context,
+            step.depends_on,
+        )
+        browser_instructions += f"  await page.goto('{start_url}');\n"
+
+    browser_instructions += (
+        "  // ... your automation code here ...\n"
+        "  await browser.close();\n"
+        "})();\n"
+        '"\n'
+        "```\n\n"
+        "## Available Playwright Actions\n"
+        "- **Navigate:** `await page.goto(url)`\n"
+        "- **Click:** `await page.click(selector)` or "
+        "`await page.locator(text).click()`\n"
+        "- **Type:** `await page.fill(selector, text)` or "
+        "`await page.type(selector, text)`\n"
+        "- **Screenshot:** "
+        "`await page.screenshot({ path: 'screenshot.png' })`\n"
+        "- **Wait:** `await page.waitForSelector(selector)` or "
+        "`await page.waitForTimeout(ms)`\n"
+        "- **Get text:** `await page.textContent(selector)` or "
+        "`await page.innerText(selector)`\n"
+        "- **Evaluate:** "
+        "`await page.evaluate(() => document.title)`\n"
+        "- **Select:** `await page.selectOption(selector, value)`\n"
+        "- **Check/Uncheck:** `await page.check(selector)` / "
+        "`await page.uncheck(selector)`\n"
+        "- **Press key:** `await page.keyboard.press('Enter')`\n\n"
+        f"Wait {cfg.wait_after_action}s between major actions for page "
+        "stability.\n"
+    )
+
+    if credentials_json:
+        browser_instructions += (
+            "\n## Credentials\n"
+            "Credentials are available as environment variables in the sandbox. "
+            "Use process.env.VARIABLE_NAME to access them. "
+            f"Available variables: {', '.join(credentials_json.split(','))}\n"
+            "Use these for any login forms or authentication.\n"
+        )
+
+    if cfg.screenshot_on_error:
+        browser_instructions += (
+            "\n## Error Handling\n"
+            "If an action fails, take a screenshot for debugging:\n"
+            "`await page.screenshot({ path: 'error-screenshot.png' })`\n"
+        )
+
+    augmented_prompt = f"{browser_instructions}\n## Task\n{prompt}\n"
+
+    # Feature A: inject cached action hints for self-healing selectors
+    cached = _get_cached_actions(cfg.start_url, step.prompt)
+    if cached:
+        cache_hint = "\n\nPreviously successful actions for similar pages:\n"
+        for act in cached[:10]:
+            cache_hint += (
+                f"  - {act.get('action', 'unknown')}: selector={act.get('selector', 'N/A')}\n"
+            )
+        augmented_prompt += (
+            cache_hint + "\nTry these selectors first. If they fail, find the correct elements.\n"
+        )
+
+    # Install playwright in sandbox (idempotent)
+    try:
+        runtime = get_sandshore_runtime()
+        await runtime.sandbox_exec(
+            sandbox,
+            "bash",
+            [
+                "-c",
+                "command -v npx && "
+                "npx playwright install chromium 2>/dev/null || "
+                "(npm install -g playwright && "
+                "npx playwright install chromium)",
+            ],
+            timeout=60,
+        )
+    except Exception as install_err:
+        logger.warning(f"Playwright install warning (may already be present): {install_err}")
+
+    # Create a modified step with the browser-augmented prompt and
+    # delegate to the standard agent execution path.
+    from sandcastle.engine.dag import StepDefinition as _StepDef
+
+    browser_step = _StepDef(
+        id=step.id,
+        prompt=augmented_prompt,
+        depends_on=step.depends_on,
+        model=step.model,
+        max_turns=step.max_turns,
+        timeout=max(step.timeout, cfg.timeout_seconds),
+        output_schema=step.output_schema,
+        retry=step.retry,
+        fallback=step.fallback,
+        type="standard",
+        tools=step.tools,
+    )
+
+    result = await execute_step_with_retry(
+        browser_step,
+        context,
+        sandbox,
+        storage,
+    )
+    result.step_id = step.id
+    return result
+
+
+async def _browser_dom_mode(
+    step: StepDefinition,
+    cfg: Any,
+    sandbox: Any,
+    run_id: str,
+    input_data: dict,
+    context: RunContext | None = None,
+    storage: StorageBackend | None = None,
+) -> StepResult:
+    """DOM extraction mode - uses accessibility tree instead of screenshots.
+
+    Faster and cheaper than vision-based modes. Best for structured data
+    extraction from known page layouts.
+    """
+    import time
+
+    time.monotonic()
+    logger.info("Browser DOM mode: %s -> %s", step.id, cfg.start_url)
+
+    runtime = get_sandshore_runtime()
+
+    # Install playwright in sandbox
+    try:
+        await runtime.sandbox_exec(
+            sandbox,
+            "bash",
+            [
+                "-c",
+                "command -v npx && "
+                "npx playwright install chromium 2>/dev/null || "
+                "(npm install -g playwright && "
+                "npx playwright install chromium)",
+            ],
+            timeout=60,
+        )
+    except Exception as install_err:
+        logger.warning(f"Playwright install warning (may already be present): {install_err}")
+
+    # Navigate to URL
+    safe_url = _escape_js_string(cfg.start_url)
+    nav_script = (
+        "const { chromium } = require('playwright');\n"
+        "(async () => {\n"
+        "  const browser = await chromium.launch({ headless: true });\n"
+        f"  const page = await browser.newPage({{ viewport: "
+        f"{{ width: {cfg.viewport_width}, height: {cfg.viewport_height} }} }});\n"
+        f"  await page.goto('{safe_url}');\n"
+        "  // Get interactive elements\n"
+        "  const elements = await page.evaluate(() => {\n"
+        "    const items = [];\n"
+        "    const selectors = 'a, button, input, select, "
+        "textarea, [role=\"button\"], [onclick]';\n"
+        "    document.querySelectorAll(selectors).forEach((el, i) => {\n"
+        "      items.push({\n"
+        "        index: i,\n"
+        "        tag: el.tagName.toLowerCase(),\n"
+        "        type: el.getAttribute('type') || '',\n"
+        "        text: (el.textContent || '').trim().slice(0, 100),\n"
+        "        placeholder: el.getAttribute('placeholder') || '',\n"
+        "        name: el.getAttribute('name') || '',\n"
+        "        href: el.getAttribute('href') || '',\n"
+        "        role: el.getAttribute('role') || '',\n"
+        "      });\n"
+        "    });\n"
+        "    return items;\n"
+        "  });\n"
+        "  // Get page info\n"
+        "  const title = await page.title();\n"
+        "  const url = page.url();\n"
+        "  const text = await page.evaluate(() => document.body.innerText.slice(0, 5000));\n"
+        "  console.log(JSON.stringify({\n"
+        "    elements: elements,\n"
+        "    page_info: { title: title, url: url, body_text: text }\n"
+        "  }));\n"
+        "  await browser.close();\n"
+        "})();\n"
+    )
+
+    try:
+        result = await runtime.sandbox_exec(
+            sandbox,
+            "bash",
+            [
+                "-c",
+                f"cat > /tmp/dom_extract.js << 'SCRIPT_EOF'\n"
+                f"{nav_script}\nSCRIPT_EOF\nnode /tmp/dom_extract.js",
+            ],
+            timeout=30,
+        )
+        dom_output = result.get("stdout", "") if isinstance(result, dict) else str(result)
+    except Exception as e:
+        dom_output = f"DOM extraction failed: {e}"
+
+    # Build context for the LLM
+    dom_context = f"Page: {cfg.start_url}\n{dom_output}"
+
+    # Build augmented prompt
+    augmented_prompt = (
+        "You are a browser automation agent working in DOM mode. "
+        "You can interact with elements by their index number or CSS selector.\n\n"
+        "Available tools:\n"
+        "- click(selector) - click an element\n"
+        "- type_text(selector, text) - type into an element\n"
+        "- select_option(selector, value) - select dropdown option\n"
+        "- get_text(selector) - get element text\n"
+        "- navigate(url) - go to a URL\n\n"
+        f"Current page state:\n{dom_context}\n\n"
+        f"Task: {step.prompt}"
+    )
+
+    if cfg.output_schema:
+        augmented_prompt += (
+            f"\n\nExtract data matching this schema:\n"
+            f"{json.dumps(cfg.output_schema, indent=2)}\n"
+            f"Return the extracted data as valid JSON."
+        )
+
+    # Execute as a standard LLM step with browser context
+    dom_step = StepDefinition(
+        id=step.id,
+        prompt=augmented_prompt,
+        depends_on=step.depends_on,
+        model=step.model or "sonnet",
+        max_turns=step.max_turns or 5,
+        timeout=max(step.timeout, cfg.timeout_seconds),
+        output_schema=step.output_schema,
+        type="standard",
+    )
+
+    # Use the standard sandbox execution path
+    ctx = (
+        context
+        if context is not None
+        else RunContext(
+            run_id=run_id,
+            input=input_data,
+        )
+    )
+
+    # Use provided storage or create a minimal local storage
+    if storage is None:
+        from sandcastle.engine.storage import LocalStorage
+
+        storage = LocalStorage("/tmp/sandcastle_dom_storage")
+
+    result = await execute_step_with_retry(
+        dom_step,
+        ctx,
+        sandbox,
+        storage,
+    )
+    result.step_id = step.id
+    return result
+
+
+async def _browser_computer_use_mode(
+    step: StepDefinition,
+    cfg: Any,
+    prompt: str,
+    credentials_json: str | None,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    started_at: float,
+    replay_screenshots: list[dict] | None = None,
+) -> StepResult:
+    """Computer use mode: screenshot-action loop via Anthropic API.
+
+    Launches a headless browser in the sandbox, takes screenshots, sends
+    them to Claude with the computer_use tool, and executes returned
+    mouse/keyboard actions until task completion or timeout.
+    """
+    import time
+
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_model
+
+    if replay_screenshots is None:
+        replay_screenshots = []
+
+    model_info = resolve_model(step.model)
+    api_key = get_api_key(model_info)
+
+    runtime = get_sandshore_runtime()
+    deadline = time.monotonic() + cfg.timeout_seconds
+    total_cost = 0.0
+    action_count = 0
+    max_actions = 200  # Safety limit
+    iteration = 0
+
+    # Resolve start URL
+    start_url = cfg.start_url
+    if start_url:
+        start_url = resolve_templates(start_url, context, step.depends_on)
+
+    # Build and run browser launch script in sandbox
+    safe_start_url = _escape_js_string(start_url) if start_url else ""
+    launch_script = (
+        "const { chromium } = require('playwright');\n"
+        "const fs = require('fs');\n"
+        "(async () => {\n"
+        "  const browser = await chromium.launch({ headless: true });\n"
+        f"  const page = await browser.newPage({{ viewport: "
+        f"{{ width: {cfg.viewport_width}, "
+        f"height: {cfg.viewport_height} }} }});\n"
+    )
+    if start_url:
+        launch_script += f"  await page.goto('{safe_start_url}');\n"
+    launch_script += (
+        "  await page.screenshot({ path: '/tmp/screenshot.png' });\n"
+        "  console.log('BROWSER_READY');\n"
+        "  // Keep browser alive for actions\n"
+        "  global._page = page;\n"
+        "  global._browser = browser;\n"
+        "})();\n"
+    )
+
+    # Install playwright and launch browser
+    await runtime.sandbox_exec(
+        sandbox,
+        "bash",
+        [
+            "-c",
+            "command -v npx && "
+            "npx playwright install chromium 2>/dev/null || "
+            "(npm install -g playwright && "
+            "npx playwright install chromium)",
+        ],
+        timeout=60,
+    )
+
+    await runtime.sandbox_exec(
+        sandbox,
+        "bash",
+        [
+            "-c",
+            f"cat > /tmp/browser_launch.js << 'SCRIPT_EOF'\n"
+            f"{launch_script}\nSCRIPT_EOF\nnode /tmp/browser_launch.js",
+        ],
+        timeout=30,
+    )
+
+    # Build conversation for computer_use loop
+    task_prompt = f"You are controlling a browser to complete a task.\n\nTask: {prompt}"
+    if credentials_json:
+        task_prompt += (
+            "\n\nCredentials are available as environment variables in the sandbox. "
+            "Use process.env.VARIABLE_NAME to access them. "
+            f"Available variables: {', '.join(credentials_json.split(','))}"
+        )
+
+    messages: list[dict] = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": task_prompt},
+            ],
+        }
+    ]
+
+    # Take initial screenshot
+    screenshot_data = await _take_sandbox_screenshot(runtime, sandbox)
+    if screenshot_data:
+        messages[0]["content"].append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": screenshot_data,
+                },
+            }
+        )
+
+    last_result = None
+
+    while time.monotonic() < deadline and action_count < max_actions:
+        iteration += 1
+        # Call Claude with computer_use tool
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "anthropic-beta": "computer-use-2025-01-24",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 4096,
+                        "system": (
+                            "You are a browser automation agent. Use the "
+                            "computer tool to interact with the browser. "
+                            "When the task is complete, respond with a "
+                            "text block containing ONLY the result."
+                        ),
+                        "tools": [
+                            {
+                                "type": "computer_20250124",
+                                "name": "computer",
+                                "display_width_px": cfg.viewport_width,
+                                "display_height_px": cfg.viewport_height,
+                                "display_number": 1,
+                            }
+                        ],
+                        "messages": messages,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as api_err:
+            logger.error(f"Computer use API call failed: {api_err}")
+            break
+
+        # Track cost
+        usage = data.get("usage", {})
+        in_tok = usage.get("input_tokens", 0)
+        out_tok = usage.get("output_tokens", 0)
+        total_cost += (
+            in_tok * model_info.input_price_per_m / 1_000_000
+            + out_tok * model_info.output_price_per_m / 1_000_000
+        )
+
+        # Process response
+        content_blocks = data.get("content", [])
+        stop_reason = data.get("stop_reason", "")
+
+        # Feature E: CAPTCHA detection in AI response
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_lower = block.get("text", "").lower()
+                if any(
+                    kw in text_lower
+                    for kw in [
+                        "captcha",
+                        "recaptcha",
+                        "hcaptcha",
+                        "verify you're human",
+                        "turnstile",
+                    ]
+                ):
+                    if cfg.captcha_strategy == "pause":
+                        logger.warning(
+                            "CAPTCHA detected in step %s - pausing for human intervention",
+                            step.id,
+                        )
+                        return StepResult(
+                            step_id=step.id,
+                            output={
+                                "status": "captcha_detected",
+                                "message": "CAPTCHA detected. Human intervention required.",
+                                "iterations": iteration,
+                                "captcha_type": "detected_by_ai",
+                                "requires_approval": True,
+                            },
+                            cost_usd=total_cost,
+                            duration_seconds=time.monotonic() - started_at,
+                            status="completed",
+                        )
+                    elif cfg.captcha_strategy == "fail":
+                        return StepResult(
+                            step_id=step.id,
+                            output={
+                                "status": "failed",
+                                "message": "CAPTCHA detected and captcha_strategy is 'fail'.",
+                                "iterations": iteration,
+                            },
+                            cost_usd=total_cost,
+                            duration_seconds=time.monotonic() - started_at,
+                            status="failed",
+                            error="CAPTCHA detected and captcha_strategy is 'fail'.",
+                        )
+                    # "skip" strategy: continue and hope it resolves
+                    break
+
+        has_tool_use = any(b.get("type") == "tool_use" for b in content_blocks)
+        if stop_reason == "end_turn" and not has_tool_use:
+            text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]
+            last_result = "\n".join(text_parts) if text_parts else "Task completed"
+            break
+
+        # Process tool calls
+        assistant_content = content_blocks
+        tool_results = []
+
+        for block in content_blocks:
+            if block.get("type") != "tool_use":
+                continue
+
+            tool_input = block.get("input", {})
+            action_type = tool_input.get("action", "")
+            action_count += 1
+
+            action_script = _build_computer_use_action_script(
+                action_type,
+                tool_input,
+                cfg,
+            )
+
+            try:
+                exec_result = await runtime.sandbox_exec(
+                    sandbox,
+                    "bash",
+                    ["-c", f"node -e '{action_script}'"],
+                    timeout=15,
+                )
+                action_output = (
+                    exec_result.get("stdout", "")
+                    if isinstance(exec_result, dict)
+                    else str(exec_result)
+                )
+            except Exception as exec_err:
+                action_output = f"Action failed: {exec_err}"
+
+            await asyncio.sleep(cfg.wait_after_action)
+
+            # Take screenshot after action
+            screenshot_data = await _take_sandbox_screenshot(
+                runtime,
+                sandbox,
+            )
+
+            tool_result_content: list[dict] = []
+            if action_output:
+                tool_result_content.append(
+                    {
+                        "type": "text",
+                        "text": action_output[:2000],
+                    }
+                )
+            if screenshot_data:
+                tool_result_content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": screenshot_data,
+                        },
+                    }
+                )
+            if not tool_result_content:
+                tool_result_content.append(
+                    {
+                        "type": "text",
+                        "text": "Action executed",
+                    }
+                )
+
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block["id"],
+                    "content": tool_result_content,
+                }
+            )
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": assistant_content,
+            }
+        )
+        messages.append({"role": "user", "content": tool_results})
+
+        # Feature B: Post-action validation - store screenshots for replay
+        if cfg.capture_screenshots or cfg.screenshot_on_error:
+            try:
+                validation_screenshot = await _take_sandbox_screenshot(
+                    runtime,
+                    sandbox,
+                )
+                if validation_screenshot:
+                    # Store for execution replay
+                    if cfg.capture_screenshots:
+                        replay_screenshots.append(
+                            {
+                                "iteration": iteration,
+                                "action": action_type if tool_results else "unknown",
+                                "screenshot_b64": validation_screenshot,
+                            }
+                        )
+            except Exception:
+                pass
+
+    duration = time.monotonic() - started_at
+
+    if last_result is None:
+        if action_count >= max_actions:
+            last_result = f"Browser automation stopped after {max_actions} actions (safety limit)"
+        else:
+            last_result = f"Browser automation timed out after {cfg.timeout_seconds}s"
+
+    # Try to parse result as JSON
+    output: Any = last_result
+    try:
+        parsed = json.loads(last_result)
+        if isinstance(parsed, (dict, list)):
+            output = parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return StepResult(
+        step_id=step.id,
+        output=output,
+        cost_usd=total_cost,
+        duration_seconds=duration,
+        status="completed",
+    )
+
+
+def _build_computer_use_action_script(
+    action: str,
+    tool_input: dict,
+    cfg: Any,
+) -> str:
+    """Build a Node.js script to execute a computer_use action in the
+    sandbox browser.
+
+    All text values are escaped via _escape_js_string to prevent shell
+    injection when the script is passed through ``node -e '...'``.
+    """
+    coordinate = tool_input.get("coordinate", [0, 0])
+    x = coordinate[0] if len(coordinate) > 0 else 0
+    y = coordinate[1] if len(coordinate) > 1 else 0
+    text = _escape_js_string(tool_input.get("text", ""))
+
+    if action == "screenshot":
+        return "const fs = require('fs'); console.log('screenshot_taken');"
+    elif action in ("click", "left_click"):
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.click({x}, {y}); "
+            f"console.log('clicked {x},{y}'); }})();"
+        )
+    elif action == "right_click":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.click("
+            f"{x}, {y}, {{button: 'right'}}); "
+            f"console.log('right_clicked {x},{y}'); }})();"
+        )
+    elif action == "double_click":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.dblclick({x}, {y}); "
+            f"console.log('double_clicked {x},{y}'); }})();"
+        )
+    elif action == "type":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.keyboard.type('{text}'); "
+            "console.log('typed text'); }})();"
+        )
+    elif action == "key":
+        key = _escape_js_string(tool_input.get("text", "Enter"))
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.keyboard.press('{key}'); "
+            f"console.log('pressed {_escape_js_string(key)}'); }})();"
+        )
+    elif action == "scroll":
+        scroll_dir = tool_input.get("coordinate", [0, 0])
+        scroll_y = scroll_dir[1] if len(scroll_dir) > 1 else -100
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.wheel(0, {scroll_y}); "
+            f"console.log('scrolled {scroll_y}'); }})();"
+        )
+    elif action == "mouse_move":
+        return (
+            "const page = global._page; "
+            f"(async () => {{ await page.mouse.move({x}, {y}); "
+            f"console.log('moved to {x},{y}'); }})();"
+        )
+    else:
+        safe_action = _escape_js_string(action)
+        return f"console.log('Unknown action: {safe_action}');"
+
+
+async def _take_sandbox_screenshot(
+    runtime: Any,
+    sandbox: Any,
+) -> str | None:
+    """Take a screenshot in the sandbox and return base64-encoded PNG."""
+    try:
+        script = (
+            "const page = global._page; "
+            "(async () => { "
+            "  await page.screenshot({ path: '/tmp/screenshot.png' }); "
+            "  const fs = require('fs'); "
+            "  const data = fs.readFileSync('/tmp/screenshot.png'); "
+            "  console.log(data.toString('base64')); "
+            "})();"
+        )
+        result = await runtime.sandbox_exec(
+            sandbox,
+            "bash",
+            ["-c", f"node -e '{script}'"],
+            timeout=10,
+        )
+        output = (
+            result.get("stdout", "").strip() if isinstance(result, dict) else str(result).strip()
+        )
+        if output and len(output) > 100:
+            return output
+    except Exception as e:
+        logger.debug(f"Screenshot failed: {e}")
+    return None
 
 
 async def _prepare_and_run_step(
@@ -2338,37 +3768,17 @@ async def _prepare_and_run_step(
     """Execute one step, update context in place. Raises on abort failure."""
     step = workflow.get_step(step_id)
     overrides = (step_overrides or {}).get(step_id)
-    use_dead_letter = (
-        workflow.on_failure and workflow.on_failure.dead_letter
-    )
+    use_dead_letter = workflow.on_failure and workflow.on_failure.dead_letter
 
-    # Resolve policies
+    # Resolve policies (use dataclasses.replace to preserve all fields)
     if global_policies and step.policies is None:
-        step = StepDefinition(
-            id=step.id, prompt=step.prompt, depends_on=step.depends_on,
-            model=step.model, max_turns=step.max_turns, timeout=step.timeout,
-            parallel_over=step.parallel_over, output_schema=step.output_schema,
-            retry=step.retry, fallback=step.fallback, type=step.type,
-            approval_config=step.approval_config, autopilot=step.autopilot,
-            sub_workflow=step.sub_workflow, csv_output=step.csv_output,
-            pdf_report=step.pdf_report, policies=global_policies,
-        )
+        step = dataclasses.replace(step, policies=global_policies)
     elif global_policies and step.policies:
         try:
             from sandcastle.engine.policy import resolve_step_policies
+
             resolved = resolve_step_policies(step.policies, global_policies)
-            step = StepDefinition(
-                id=step.id, prompt=step.prompt, depends_on=step.depends_on,
-                model=step.model, max_turns=step.max_turns,
-                timeout=step.timeout,
-                parallel_over=step.parallel_over,
-                output_schema=step.output_schema,
-                retry=step.retry, fallback=step.fallback, type=step.type,
-                approval_config=step.approval_config,
-                autopilot=step.autopilot,
-                sub_workflow=step.sub_workflow, csv_output=step.csv_output,
-                pdf_report=step.pdf_report, policies=resolved,
-            )
+            step = dataclasses.replace(step, policies=resolved)
         except Exception as e:
             logger.warning(f"Could not resolve step policies: {e}")
 
@@ -2376,8 +3786,10 @@ async def _prepare_and_run_step(
     if step_id in context.branch_skip_steps:
         context.step_outputs[step_id] = None
         await _save_run_step(
-            run_id=context.run_id, step_id=step.id,
-            status="skipped", output=None,
+            run_id=context.run_id,
+            step_id=step.id,
+            status="skipped",
+            output=None,
         )
         return
 
@@ -2393,16 +3805,16 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 model=step.model,
             )
         else:
-            raise StepExecutionError(
-                f"LLM step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"LLM step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "http":
@@ -2411,15 +3823,15 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=0.0,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"HTTP step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"HTTP step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "code":
@@ -2428,15 +3840,15 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=0.0,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Code step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"Code step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "condition":
@@ -2445,15 +3857,15 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=0.0,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Condition step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"Condition step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "classify":
@@ -2462,34 +3874,97 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Classify step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"Classify step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "loop":
         result = await _execute_loop_step(
-            step, context, sandbox, storage, workflow, depth,
+            step,
+            context,
+            sandbox,
+            storage,
+            workflow,
+            depth,
         )
         context.costs.append(result.cost_usd)
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Loop step '{step_id}' failed: {result.error}"
+            raise StepExecutionError(f"Loop step '{step_id}' failed: {result.error}")
+        return
+
+    if step.type == "race":
+        result = await _execute_race_step(
+            step,
+            context,
+            sandbox,
+            storage,
+            workflow,
+            depth,
+        )
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
             )
+        else:
+            raise StepExecutionError(f"Race step '{step_id}' failed: {result.error}")
+        return
+
+    if step.type == "sensor":
+        result = await _execute_sensor_step(step, context)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
+                cost_usd=0.0,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(f"Sensor step '{step_id}' failed: {result.error}")
+        return
+
+    if step.type == "gate":
+        result = await _execute_gate_step(step, context, storage)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+            )
+        else:
+            raise StepExecutionError(f"Gate step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "transform":
@@ -2498,15 +3973,15 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=0.0,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Transform step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"Transform step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "notify":
@@ -2515,54 +3990,78 @@ async def _prepare_and_run_step(
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=0.0,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Notify step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"Notify step '{step_id}' failed: {result.error}")
         return
 
     if step.type == "delegate":
         result = await _execute_delegate_step(
-            step, context, storage, depth=depth,
+            step,
+            context,
+            storage,
+            depth=depth,
         )
         context.costs.append(result.cost_usd)
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Delegate step '{step_id}' failed: {result.error}"
+            raise StepExecutionError(f"Delegate step '{step_id}' failed: {result.error}")
+        return
+
+    if step.type == "browser":
+        result = await _execute_browser_step(step, context, sandbox, storage)
+        context.costs.append(result.cost_usd)
+        if result.status == "completed":
+            context.step_outputs[step_id] = result.output
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=result.output,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                model=step.model,
             )
+        else:
+            raise StepExecutionError(f"Browser step '{step_id}' failed: {result.error}")
         return
 
     # Sub-workflow
     if step.type == "sub_workflow":
         sub_result = await _execute_sub_workflow_step(
-            step, context, storage, depth=depth,
+            step,
+            context,
+            storage,
+            depth=depth,
         )
         context.costs.append(sub_result.cost_usd)
         if sub_result.status == "completed":
             context.step_outputs[step_id] = sub_result.output
             await _save_run_step(
-                run_id=context.run_id, step_id=step.id,
-                status="completed", output=sub_result.output,
+                run_id=context.run_id,
+                step_id=step.id,
+                status="completed",
+                output=sub_result.output,
                 cost_usd=sub_result.cost_usd,
                 duration_seconds=sub_result.duration_seconds,
             )
         else:
-            raise StepExecutionError(
-                f"Sub-workflow step '{step_id}' failed: {sub_result.error}"
-            )
+            raise StepExecutionError(f"Sub-workflow step '{step_id}' failed: {sub_result.error}")
         return
 
     # Fan-out
@@ -2576,8 +4075,12 @@ async def _prepare_and_run_step(
         tasks = [
             asyncio.create_task(
                 execute_step_with_retry(
-                    step, context.with_item(item, i), sandbox, storage,
-                    parallel_index=i, step_overrides=overrides,
+                    step,
+                    context.with_item(item, i),
+                    sandbox,
+                    storage,
+                    parallel_index=i,
+                    step_overrides=overrides,
                 )
             )
             for i, item in enumerate(items)
@@ -2588,23 +4091,27 @@ async def _prepare_and_run_step(
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 result = StepResult(
-                    step_id=step_id, status="failed", error=str(result),
+                    step_id=step_id,
+                    status="failed",
+                    error=str(result),
                 )
             context.costs.append(result.cost_usd)
             if result.status == "failed":
                 on_fail = step.retry.on_failure if step.retry else "abort"
                 if use_dead_letter:
-                    await _send_to_dead_letter(
-                        run_id=context.run_id, step_id=step_id,
+                    dlq_ok = await _send_to_dead_letter(
+                        run_id=context.run_id,
+                        step_id=step_id,
                         error=result.error,
                         input_data={"_item_index": i},
-                        attempts=result.attempt, parallel_index=i,
+                        attempts=result.attempt,
+                        parallel_index=i,
                     )
+                    if not dlq_ok:
+                        logger.warning(f"DLQ persist failed for step '{step_id}' item {i}")
                     fan_out_items.append(None)
                 elif on_fail == "abort":
-                    raise StepExecutionError(
-                        f"Step '{step_id}' item {i} failed: {result.error}"
-                    )
+                    raise StepExecutionError(f"Step '{step_id}' item {i} failed: {result.error}")
                 else:
                     fan_out_items.append(None)
             else:
@@ -2614,22 +4121,28 @@ async def _prepare_and_run_step(
 
     # Regular step
     result = await execute_step_with_retry(
-        step, context, sandbox, storage, step_overrides=overrides,
+        step,
+        context,
+        sandbox,
+        storage,
+        step_overrides=overrides,
     )
     context.costs.append(result.cost_usd)
     if result.status == "failed":
         on_fail = step.retry.on_failure if step.retry else "abort"
         if use_dead_letter:
-            await _send_to_dead_letter(
-                run_id=context.run_id, step_id=step_id,
-                error=result.error, input_data=context.input,
+            dlq_ok = await _send_to_dead_letter(
+                run_id=context.run_id,
+                step_id=step_id,
+                error=result.error,
+                input_data=context.input,
                 attempts=result.attempt,
             )
+            if not dlq_ok:
+                logger.warning(f"DLQ persist failed for step '{step_id}'")
             context.step_outputs[step_id] = None
         elif on_fail == "abort":
-            raise StepExecutionError(
-                f"Step '{step_id}' failed: {result.error}"
-            )
+            raise StepExecutionError(f"Step '{step_id}' failed: {result.error}")
         else:
             context.step_outputs[step_id] = None
     else:
@@ -2692,27 +4205,56 @@ async def execute_workflow(
     merged_input.update(input_data)
 
     context = RunContext(
-        run_id=run_id, input=merged_input, max_cost_usd=max_cost_usd,
+        run_id=run_id,
+        input=merged_input,
+        max_cost_usd=max_cost_usd,
         workflow_name=workflow.name,
         default_tools=getattr(workflow, "default_tools", []),
+    )
+
+    # Set telemetry context for this workflow run
+    from sandcastle.engine.telemetry import set_workflow_context
+
+    set_workflow_context(
+        workflow_name=workflow.name,
+        run_id=run_id,
+        sandbox_backend=getattr(settings, "sandbox_backend", ""),
     )
 
     # Initialize agent memory if configured
     if workflow.memory:
         try:
             from sandcastle.config import settings as _mem_settings
+
             if _mem_settings.memory_enabled:
-                from sandcastle.engine.memory import load_memories, resolve_scope_id
+                from sandcastle.engine.memory import (
+                    apply_decay,
+                    load_memories,
+                    resolve_scope_id,
+                )
+
                 context._memory_config = workflow.memory
                 context._memory_scope_id = resolve_scope_id(
-                    workflow.memory, workflow.name,
+                    workflow.memory,
+                    workflow.name,
                 )
                 context.memories = await load_memories(
-                    context._memory_scope_id, limit=workflow.memory.max_inject,
+                    context._memory_scope_id,
+                    limit=workflow.memory.max_inject,
                 )
+                # Apply memory decay (TTL filtering)
+                max_age = (
+                    workflow.memory.max_age_days
+                    or _mem_settings.memory_max_age_days
+                )
+                if max_age > 0:
+                    context.memories = apply_decay(
+                        context.memories, max_age_days=max_age
+                    )
                 logger.info(
                     "Loaded %d memories for scope '%s'",
-                    len(context.memories), context._memory_scope_id,
+                    len(context.memories),
+                    context._memory_scope_id,
                 )
         except Exception as e:
             logger.warning(f"Failed to initialize memory: {e}")
@@ -2738,6 +4280,7 @@ async def execute_workflow(
             from sandcastle.engine.policy import (
                 PolicyTrigger as PEPolicyTrigger,
             )
+
             for gp in workflow.policies:
                 # Convert DAG dataclasses to policy engine dataclasses
                 pe_trigger = PEPolicyTrigger(
@@ -2745,7 +4288,9 @@ async def execute_workflow(
                     patterns=[
                         PEPolicyPattern(type=p.type, pattern=p.pattern)
                         for p in (gp.trigger.patterns or [])
-                    ] if gp.trigger.patterns else None,
+                    ]
+                    if gp.trigger.patterns
+                    else None,
                     expression=gp.trigger.expression,
                 )
                 pe_action = PEPolicyAction(
@@ -2756,13 +4301,15 @@ async def execute_workflow(
                     message=gp.action.message,
                     notify=gp.action.notify,
                 )
-                global_policies.append(PEPolicyDefinition(
-                    id=gp.id,
-                    trigger=pe_trigger,
-                    action=pe_action,
-                    description=gp.description,
-                    severity=gp.severity,
-                ))
+                global_policies.append(
+                    PEPolicyDefinition(
+                        id=gp.id,
+                        trigger=pe_trigger,
+                        action=pe_action,
+                        description=gp.description,
+                        severity=gp.severity,
+                    )
+                )
         except Exception as e:
             logger.warning(f"Could not load global policies: {e}")
 
@@ -2783,10 +4330,13 @@ async def execute_workflow(
     )
 
     # Broadcast run.started event
-    event_bus.publish("run.started", {
-        "run_id": run_id,
-        "workflow": workflow.name,
-    })
+    event_bus.publish(
+        "run.started",
+        {
+            "run_id": run_id,
+            "workflow": workflow.name,
+        },
+    )
 
     # Dependency-based scheduler: start steps as soon as deps complete
     all_step_ids = [s.id for s in workflow.steps]
@@ -2800,7 +4350,8 @@ async def execute_workflow(
 
     def _find_ready() -> list[str]:
         return sorted(
-            sid for sid in all_step_ids
+            sid
+            for sid in all_step_ids
             if sid not in done_steps
             and sid not in running
             and step_deps[sid].issubset(done_steps | context.branch_skip_steps)
@@ -2831,10 +4382,7 @@ async def execute_workflow(
                 _cancel_running()
                 cost = context.total_cost
                 limit = context.max_cost_usd
-                logger.warning(
-                    f"Run {run_id} budget exceeded "
-                    f"(${cost:.4f} / ${limit:.4f})"
-                )
+                logger.warning(f"Run {run_id} budget exceeded (${cost:.4f} / ${limit:.4f})")
                 return WorkflowResult(
                     run_id=run_id,
                     outputs=context.step_outputs,
@@ -2855,8 +4403,14 @@ async def execute_workflow(
             for sid in _find_ready():
                 running[sid] = asyncio.create_task(
                     _prepare_and_run_step(
-                        sid, workflow, context, sandbox, storage,
-                        global_policies, step_overrides, depth,
+                        sid,
+                        workflow,
+                        context,
+                        sandbox,
+                        storage,
+                        global_policies,
+                        step_overrides,
+                        depth,
                     )
                 )
 
@@ -2892,7 +4446,10 @@ async def execute_workflow(
                         context.step_outputs.setdefault(skip_sid, None)
                 checkpoint_counter += 1
                 await _save_checkpoint(
-                    run_id, sid, checkpoint_counter, context,
+                    run_id,
+                    sid,
+                    checkpoint_counter,
+                    context,
                 )
 
         completed_at = datetime.now(timezone.utc)
@@ -2904,13 +4461,16 @@ async def execute_workflow(
 
         # Broadcast run.completed event
         duration = (completed_at - started_at).total_seconds()
-        event_bus.publish("run.completed", {
-            "run_id": run_id,
-            "status": "completed",
-            "workflow": workflow.name,
-            "duration_seconds": duration,
-            "total_cost_usd": context.total_cost,
-        })
+        event_bus.publish(
+            "run.completed",
+            {
+                "run_id": run_id,
+                "status": "completed",
+                "workflow": workflow.name,
+                "duration_seconds": duration,
+                "total_cost_usd": context.total_cost,
+            },
+        )
 
         return WorkflowResult(
             run_id=run_id,
@@ -2934,11 +4494,14 @@ async def execute_workflow(
 
     except StepBlocked as e:
         completed_at = datetime.now(timezone.utc)
-        event_bus.publish("run.failed", {
-            "run_id": run_id,
-            "workflow": workflow.name,
-            "error": f"Policy blocked: {e}",
-        })
+        event_bus.publish(
+            "run.failed",
+            {
+                "run_id": run_id,
+                "workflow": workflow.name,
+                "error": f"Policy blocked: {e}",
+            },
+        )
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -2951,11 +4514,14 @@ async def execute_workflow(
 
     except StepExecutionError as e:
         completed_at = datetime.now(timezone.utc)
-        event_bus.publish("run.failed", {
-            "run_id": run_id,
-            "workflow": workflow.name,
-            "error": str(e),
-        })
+        event_bus.publish(
+            "run.failed",
+            {
+                "run_id": run_id,
+                "workflow": workflow.name,
+                "error": str(e),
+            },
+        )
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -2969,11 +4535,14 @@ async def execute_workflow(
     except Exception as e:
         completed_at = datetime.now(timezone.utc)
         logger.error(f"Workflow '{workflow.name}' failed: {e}")
-        event_bus.publish("run.failed", {
-            "run_id": run_id,
-            "workflow": workflow.name,
-            "error": str(e),
-        })
+        event_bus.publish(
+            "run.failed",
+            {
+                "run_id": run_id,
+                "workflow": workflow.name,
+                "error": str(e),
+            },
+        )
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -3070,8 +4639,11 @@ async def _send_to_dead_letter(
     input_data: dict | None,
     attempts: int,
     parallel_index: int | None = None,
-) -> None:
-    """Insert a failed step into the dead letter queue."""
+) -> bool:
+    """Insert a failed step into the dead letter queue.
+
+    Returns True if the item was persisted, False on failure.
+    """
     try:
         from sandcastle.models.db import DeadLetterItem, async_session
 
@@ -3088,15 +4660,20 @@ async def _send_to_dead_letter(
             await session.commit()
 
         # Broadcast dlq.new event
-        event_bus.publish("dlq.new", {
-            "run_id": run_id,
-            "step_name": step_id,
-            "error": error,
-        })
+        event_bus.publish(
+            "dlq.new",
+            {
+                "run_id": run_id,
+                "step_name": step_id,
+                "error": error,
+            },
+        )
 
         logger.info(f"Step '{step_id}' sent to dead letter queue")
+        return True
     except Exception as e:
         logger.error(f"Failed to insert into dead letter queue: {e}")
+        return False
 
 
 class StepExecutionError(Exception):

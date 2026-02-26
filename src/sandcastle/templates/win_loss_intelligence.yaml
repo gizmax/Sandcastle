@@ -1,0 +1,263 @@
+# name: Win-Loss Intelligence
+# description: Ingest CRM deal data, extract win/loss signals, identify patterns, and generate strategic recommendations with updated battlecards
+# tags: [Sales, Win-Loss, CRM, Strategy]
+# category: sales_crm
+
+name: win-loss-intelligence
+description: Ingest CRM deal data, extract win/loss signals, identify patterns, and generate strategic recommendations with updated battlecards
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [salesforce]
+
+input_schema:
+  required: ["crm_source"]
+  properties:
+    crm_source:
+      type: string
+      description: "CRM data source identifier (e.g. 'Salesforce', 'HubSpot') or pipeline name"
+    time_period:
+      type: string
+      description: "Time period to analyze (default: last quarter)"
+      default: "last quarter"
+    deal_stages:
+      type: string
+      description: "Comma-separated deal stages to include (default: Closed Won,Closed Lost)"
+      default: "Closed Won,Closed Lost"
+
+steps:
+  - id: data-ingestion
+    prompt: |
+      Fetch and normalize closed deal data from the CRM for win/loss analysis.
+
+      CRM source: {input.crm_source}
+      Time period: {input.time_period}
+      Deal stages: {input.deal_stages}
+
+      Use the Salesforce tool to query deal records:
+        node /home/user/tools/salesforce.mjs query_deals '{input.deal_stages}' '{input.time_period}'
+
+      For each closed deal, extract:
+      1. Deal name, amount, and close date
+      2. Win or loss outcome
+      3. Competitor involved (if noted in the CRM)
+      4. Deal stage progression and timestamps (how long in each stage)
+      5. Number of stakeholders and their roles
+      6. Sales rep owner and their notes
+      7. Loss reason (if Closed Lost and recorded)
+      8. Win reason or champion notes (if Closed Won)
+      9. Industry, company size, and segment of the prospect
+      10. Lead source and initial engagement channel
+      11. Number of meetings, calls, and emails logged
+      12. Discount applied (if any) and pricing tier sold
+
+      Normalize the data into a consistent format. Flag deals with incomplete data
+      that may limit analysis accuracy. Calculate basic win rate metrics:
+      overall win rate, win rate by segment, win rate by competitor, and average
+      deal cycle length for wins vs losses.
+
+      Return structured JSON with the normalized deal dataset and summary metrics.
+    model: haiku
+    max_turns: 10
+
+  - id: signal-extraction
+    depends_on: [data-ingestion]
+    prompt: |
+      Extract win and loss signals from the deal data, focusing on patterns in
+      deal behavior, timing, and stakeholder dynamics.
+
+      Deal data: {steps.data-ingestion.output}
+      Time period: {input.time_period}
+
+      For each deal, extract behavioral signals:
+
+      **Win signals (present more in wins):**
+      - Multi-threading: deals with 3+ stakeholders engaged
+      - Executive sponsor involvement (VP+ level in meetings)
+      - Technical evaluation completed (POC, trial, or demo)
+      - Short stage progression (momentum indicators)
+      - Champion identified and active (internal advocate)
+      - Business case documented (ROI analysis shared)
+      - Mutual action plan established
+
+      **Loss signals (present more in losses):**
+      - Single-threaded deal (only one contact)
+      - Stalled stages (weeks without progression)
+      - No technical evaluation or POC abandoned
+      - Competitor entered late but won (displacement)
+      - Price objection raised but not resolved
+      - Decision delayed multiple times
+      - Ghosting after proposal (no response pattern)
+      - Procurement involved late or budget not confirmed
+
+      For each deal, tag all applicable signals. Then aggregate:
+      - Which signals appear most frequently in wins vs losses
+      - Signal correlation strength (how predictive is each signal)
+      - Signal combinations that are especially predictive
+
+      Return per-deal signal tags and aggregate signal statistics.
+    model: haiku
+    max_turns: 10
+
+  - id: pattern-analysis
+    depends_on: [signal-extraction]
+    prompt: |
+      Analyze win/loss patterns across dimensions to identify systematic strengths
+      and weaknesses in the sales process.
+
+      Signal extraction: {steps.signal-extraction.output}
+      Deal data: {steps.data-ingestion.output}
+
+      Perform multi-dimensional pattern analysis:
+
+      1. **By competitor** - Win rate against each competitor. Which competitors do
+         we consistently beat and why? Which do we lose to and what signals predict
+         the loss? What is the average discount required per competitor?
+
+      2. **By segment** - Win rate by company size, industry, and geography. Where is
+         our sweet spot? Where are we weak? Are there segments we should avoid?
+
+      3. **By deal size** - Win rate by deal value bands. Is there a deal size where
+         win rate drops significantly? Does discounting improve win rate or not?
+
+      4. **By sales cycle** - Average cycle length for wins vs losses. At what point
+         in the cycle do most losses become unrecoverable? Is speed correlated with winning?
+
+      5. **By lead source** - Which lead sources produce the highest win rates and
+         deal values? Which produce volume but low conversion?
+
+      6. **By sales rep** - Win rate variance across the team. What do top performers
+         do differently (based on deal signals, not subjective judgment)?
+
+      7. **Temporal trends** - Is win rate improving or declining over the analysis
+         period? Are certain competitors becoming more or less dangerous?
+
+      For each pattern identified, calculate statistical significance where possible.
+      Flag patterns that are based on small sample sizes.
+    model: sonnet
+    max_turns: 10
+
+  - id: root-cause
+    depends_on: [pattern-analysis]
+    prompt: |
+      Conduct root cause analysis on the most significant win/loss patterns
+      to understand the underlying drivers.
+
+      Pattern analysis: {steps.pattern-analysis.output}
+      Signal data: {steps.signal-extraction.output}
+      Time period: {input.time_period}
+
+      For the top 5 most impactful patterns identified:
+
+      1. **State the pattern clearly** - e.g., "We lose 78% of deals against Competitor X
+         when deal size exceeds $50K"
+
+      2. **Hypothesize root causes** - Generate 3-5 plausible explanations:
+         - Product gaps (missing features the competitor has)
+         - Process gaps (sales methodology weaknesses)
+         - Positioning gaps (messaging that does not resonate)
+         - Pricing gaps (perceived as too expensive or confusing)
+         - People gaps (skill or resource constraints)
+
+      3. **Evaluate evidence** - Which hypothesis is best supported by the deal signal
+         data? Reference specific deals and signals that support or contradict each
+         hypothesis.
+
+      4. **Determine root cause** - Select the most likely root cause with confidence
+         level (High/Medium/Low). Explain the causal chain.
+
+      5. **Quantify impact** - Estimate the revenue impact of fixing this root cause.
+         If win rate on affected deals improved by X%, how much additional revenue
+         would result?
+
+      Present root causes ranked by revenue impact, with clear causal reasoning.
+    model: sonnet
+    max_turns: 10
+
+  - id: recommendations
+    depends_on: [root-cause, pattern-analysis]
+    prompt: |
+      Generate strategic recommendations to improve win rates based on the root
+      cause analysis.
+
+      Root cause analysis: {steps.root-cause.output}
+      Pattern analysis: {steps.pattern-analysis.output}
+      CRM source: {input.crm_source}
+
+      Produce actionable recommendations organized by function:
+
+      **Sales Process Improvements:**
+      - Specific changes to deal qualification criteria (e.g., require multi-threading
+        before advancing to proposal stage)
+      - Stage gate requirements to prevent common failure patterns
+      - Deal review cadence adjustments for at-risk segments
+      - Coaching priorities for the team based on signal gaps
+
+      **Product and Feature Priorities:**
+      - Feature gaps that directly caused losses (with deal count and revenue impact)
+      - Competitive feature parity items ranked by win rate impact
+      - Product positioning adjustments to address perception gaps
+
+      **Pricing and Packaging:**
+      - Pricing changes suggested by win/loss data (discount effectiveness, tier gaps)
+      - Competitive pricing adjustments for specific segments or competitors
+      - Packaging changes to address common objections
+
+      **Go-to-Market Adjustments:**
+      - Segments to double down on (high win rate, growing)
+      - Segments to deprioritize (low win rate, not improving)
+      - Lead source investment rebalancing based on quality metrics
+      - Competitive messaging adjustments
+
+      For each recommendation:
+      - Expected win rate improvement (percentage points)
+      - Revenue impact estimate
+      - Implementation effort (Low/Medium/High)
+      - Owner (Sales, Product, Marketing, Leadership)
+      - Priority (P0/P1/P2)
+
+      Rank all recommendations by ROI (revenue impact / implementation effort).
+    model: sonnet
+    max_turns: 10
+
+  - id: battlecard-refinement
+    depends_on: [recommendations, root-cause]
+    prompt: |
+      Refine competitive battlecards based on win/loss intelligence findings.
+
+      Recommendations: {steps.recommendations.output}
+      Root cause analysis: {steps.root-cause.output}
+      Pattern analysis: {steps.pattern-analysis.output}
+
+      For each competitor identified in the analysis, update the battlecard:
+
+      **1. Updated win/loss stats**
+      - Win rate for the period with trend arrow
+      - Average deal size won vs lost against them
+      - Most common loss scenarios and win scenarios
+
+      **2. What is working (keep doing)**
+      - Strategies and tactics that correlate with wins against this competitor
+      - Proof points and case studies that resonate
+      - Objection handling approaches that succeed
+
+      **3. What to change (new intelligence)**
+      - Root cause findings that affect competitive positioning
+      - New competitor strengths or weaknesses identified
+      - Updated trap questions and landmines based on recent deal patterns
+
+      **4. Deal qualification signals**
+      - Early indicators that predict a win against this competitor
+      - Early indicators that predict a loss (disengage or change strategy)
+      - Minimum deal requirements for high win probability
+
+      **5. Recommended talk track**
+      - Opening positioning statement (updated)
+      - Key differentiators to lead with (ranked by effectiveness from data)
+      - Objection handling scripts for top 3 objections
+
+      Format battlecards for immediate use by the sales team. Use clear headers,
+      bullet points, and bold key phrases for quick scanning during live calls.
+    model: sonnet
+    max_turns: 10

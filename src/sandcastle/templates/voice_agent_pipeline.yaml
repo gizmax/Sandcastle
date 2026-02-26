@@ -1,0 +1,908 @@
+# name: Voice Agent Pipeline
+# description: Process call recordings with transcription, sentiment analysis, coaching insights, compliance checks, and agent performance scoring
+# tags: [Support, Call-Center, QA, Coaching, Compliance]
+# category: support
+
+name: voice-agent-pipeline
+description: Process call recordings with transcription, sentiment analysis, coaching insights, compliance checks, and agent performance scoring
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: []
+
+input_schema:
+  required: ["call_source", "team_name"]
+  properties:
+    call_source:
+      type: string
+      description: "Call recording source or batch identifier (e.g. 'five9-queue-support', 'genesys-inbound-jan', 'nice-batch-2024Q1', or a direct transcript paste)"
+    team_name:
+      type: string
+      description: "Team or department name for reporting context (e.g. 'Tier 1 Support', 'Retention', 'Sales Development')"
+    evaluation_criteria:
+      type: string
+      description: "Custom evaluation criteria or focus areas beyond defaults (e.g. 'upsell effectiveness, product knowledge depth, de-escalation handling')"
+      default: "standard QA evaluation"
+    compliance_requirements:
+      type: string
+      description: "Regulatory and compliance frameworks to check against (e.g. 'PCI-DSS, TCPA, HIPAA, MiFID II, GDPR consent')"
+      default: "general best practices"
+    scoring_rubric:
+      type: string
+      description: "Custom scoring weights or rubric description (e.g. '40% resolution, 30% compliance, 20% empathy, 10% efficiency')"
+      default: "balanced scorecard"
+
+steps:
+  - id: transcription-processing
+    prompt: |
+      Process and structure call recording data from the source: {input.call_source}
+      Team context: {input.team_name}
+
+      You are a specialized call transcription processor. Your job is to take raw call
+      recordings, transcripts, or audio-to-text output and produce a clean, structured,
+      and analytically enrichable transcript document for each call in the batch.
+
+      ## TRANSCRIPTION PROCESSING FRAMEWORK
+
+      ### Step 1: Raw Input Normalization
+
+      For each call in the batch, extract or normalize the following metadata fields:
+      1. **Call ID** - unique identifier from the source system
+      2. **Agent name and ID** - the support representative handling the call
+      3. **Customer identifier** - anonymized or tokenized customer reference
+      4. **Call start timestamp** - ISO 8601 format with timezone
+      5. **Call end timestamp** - and calculate total duration in MM:SS format
+      6. **Call direction** - inbound, outbound, or transferred
+      7. **Queue or skill group** - which routing queue the call arrived through
+      8. **IVR path** - if available, the menu selections the customer made before reaching the agent
+      9. **Hold events** - timestamps and durations of any hold periods
+      10. **Transfer events** - if the call was transferred, to whom and when
+      11. **Disposition code** - the wrap-up code assigned by the agent
+      12. **CRM ticket reference** - any linked support ticket or case number
+
+      ### Step 2: Speaker Diarization and Turn Segmentation
+
+      Parse the transcript into discrete conversational turns. For each turn, capture:
+      - **Speaker label**: AGENT or CUSTOMER (resolve any ambiguous labeling)
+      - **Timestamp**: start time of the utterance relative to call start
+      - **Duration**: how long the speaker talked in that turn (seconds)
+      - **Text content**: the verbatim transcribed speech
+      - **Confidence score**: if ASR confidence is available, retain it per segment
+      - **Overlapping speech flag**: mark turns where both speakers talked simultaneously
+
+      If the source provides raw unsegmented text, apply these heuristics to identify
+      speaker transitions:
+      - Greeting patterns ("Thank you for calling..." = AGENT opener)
+      - Question-answer flow patterns
+      - Name introductions and role statements
+      - Shift in vocabulary register (formal/scripted vs. casual/emotional)
+
+      ### Step 3: Conversation Structure Mapping
+
+      Segment each call into canonical phases and label each turn with its phase:
+      1. **Opening/Greeting** - first 30-90 seconds, agent identification and welcome
+      2. **Issue Discovery** - customer describes their problem, agent asks clarifying questions
+      3. **Troubleshooting/Resolution** - active problem-solving, instructions, hold periods
+      4. **Verification** - confirming the issue is resolved or next steps are clear
+      5. **Closing** - wrap-up, satisfaction check, goodbye
+
+      For each phase, record:
+      - Start and end timestamps
+      - Number of turns per speaker
+      - Phase duration as percentage of total call
+      - Any phase that was skipped or abnormally short/long
+
+      ### Step 4: Acoustic and Paralinguistic Feature Extraction
+
+      Even from text transcripts, extract implied acoustic signals:
+      - **ALL CAPS or exclamation marks** - flag as elevated emotion indicators
+      - **Filler words** ("um", "uh", "like", "you know") - count per speaker per minute
+      - **Silence gaps** - periods of 5+ seconds with no speech (often indicates confusion,
+        system lookups, or customer frustration)
+      - **Interruptions** - instances where one speaker's turn begins before the other finishes
+      - **Repetition patterns** - customer repeating the same issue multiple times (frustration signal)
+      - **Agent scripted phrases** - identify verbatim script adherence vs. natural conversation
+
+      ### Step 5: Conversation Metrics Calculation
+
+      For each processed call, compute these raw metrics:
+      - **Total call duration** (seconds)
+      - **Agent talk time** vs. **Customer talk time** (seconds and percentage)
+      - **Talk-to-listen ratio** for the agent (agent talk time / customer talk time)
+      - **Average turn length** per speaker (words per turn)
+      - **Longest monologue** per speaker (flag turns exceeding 60 seconds)
+      - **Number of holds** and **total hold duration**
+      - **Dead air instances** (silences > 5 seconds, excluding holds)
+      - **Words per minute** for each speaker (speech rate)
+      - **Question count** per speaker (sentences ending in ?)
+      - **Agent question-to-statement ratio** (higher = more consultative approach)
+
+      ### Step 6: Topic and Intent Extraction
+
+      For each call, identify:
+      - **Primary issue category** (billing, technical, account, shipping, returns, etc.)
+      - **Secondary issues** (if the customer raised additional concerns)
+      - **Customer intent** (resolve issue, file complaint, cancel service, request refund, etc.)
+      - **Resolution type** (resolved on call, escalated, callback scheduled, unresolved)
+      - **Products or services mentioned** (extract all product names, plan types, features)
+      - **Key entities** (order numbers, account IDs, dates, amounts, error codes)
+
+      ### Output Format
+
+      Return a structured JSON array with one object per call containing:
+      ```
+      {
+        "call_id": "...",
+        "metadata": { ... all fields from Step 1 ... },
+        "transcript": [ ... turn objects from Step 2 ... ],
+        "phases": [ ... phase segments from Step 3 ... ],
+        "paralinguistic_signals": { ... from Step 4 ... },
+        "metrics": { ... from Step 5 ... },
+        "topics": { ... from Step 6 ... },
+        "processing_notes": "any data quality issues or ambiguities encountered"
+      }
+      ```
+
+      Flag any calls with fewer than 5 turns or under 30 seconds duration as potentially
+      incomplete recordings that should be excluded from downstream analysis.
+    model: haiku
+    max_turns: 10
+
+  - id: sentiment-analysis
+    depends_on: [transcription-processing]
+    prompt: |
+      Perform deep sentiment and emotional intelligence analysis on the processed call transcripts.
+
+      Processed transcripts: {steps.transcription-processing.output}
+      Team: {input.team_name}
+
+      You are an expert conversation analyst specializing in customer service interactions.
+      Your goal is to extract granular emotional dynamics, sentiment trajectories, and
+      interpersonal quality signals from each call.
+
+      ## SENTIMENT ANALYSIS FRAMEWORK
+
+      ### Dimension 1: Turn-Level Sentiment Scoring
+
+      For every conversational turn in each call, assign:
+      - **Valence score** (-1.0 to +1.0): negative to positive emotional tone
+      - **Arousal score** (0.0 to 1.0): calm to agitated/excited intensity
+      - **Dominance score** (0.0 to 1.0): submissive/helpless to confident/in-control
+      - **Primary emotion label**: one of [neutral, happy, grateful, frustrated, angry,
+        confused, anxious, disappointed, relieved, satisfied, resigned, hostile]
+      - **Confidence**: your confidence in the emotion label (high/medium/low)
+
+      Score based on these textual cues:
+      - Word choice and vocabulary intensity ("annoyed" vs. "furious" vs. "livid")
+      - Sentence structure (short clipped sentences = frustration, long rambling = confusion)
+      - Punctuation and capitalization patterns
+      - Explicit emotion statements ("I'm so frustrated", "That's great news")
+      - Implicit emotional signals (sarcasm, passive aggression, genuine warmth)
+      - Politeness markers and their authenticity
+
+      ### Dimension 2: Sentiment Trajectory Mapping
+
+      For each call, plot the emotional arc by tracking sentiment scores across the
+      conversation phases:
+      - **Opening sentiment** - baseline emotional state at call start
+      - **Peak negative** - the lowest sentiment point (when and what triggered it)
+      - **Inflection point** - the moment sentiment began improving (what caused the shift)
+      - **Closing sentiment** - emotional state at call end
+      - **Net sentiment change** - closing minus opening (positive = improved, negative = worsened)
+
+      Classify each call's emotional trajectory into one of these archetypes:
+      1. **Resolution Arc** - starts negative, agent resolves issue, ends positive (ideal)
+      2. **Steady Positive** - customer was not upset, smooth interaction throughout
+      3. **Escalation Arc** - sentiment deteriorates throughout the call (red flag)
+      4. **Roller Coaster** - multiple sentiment swings, unstable interaction
+      5. **Flat Negative** - customer starts and ends frustrated, no improvement
+      6. **Recovery Arc** - dips significantly but agent manages to recover
+      7. **Plateau** - initial improvement that stalls at neutral, never reaches positive
+
+      ### Dimension 3: Agent Emotional Intelligence Assessment
+
+      Evaluate the agent's emotional competency on each call across these sub-dimensions:
+
+      **Empathy Signals (score 1-10):**
+      - Verbal acknowledgment of customer emotions ("I understand that's frustrating")
+      - Emotional mirroring without mimicking negativity
+      - Personalization (using customer's name, referencing their specific situation)
+      - Validation statements ("You're right to be concerned about that")
+      - Avoiding dismissive language ("It's just...", "You should have...", "That's not a big deal")
+      - Appropriate emotional matching (serious tone for serious issues)
+
+      **Active Listening Indicators (score 1-10):**
+      - Paraphrasing customer statements back ("So what you're saying is...")
+      - Asking follow-up questions that build on what the customer said
+      - Not asking the customer to repeat information already provided
+      - Referencing specific details the customer mentioned earlier in the call
+      - Minimal encouragers ("I see", "Right", "Go on") used naturally
+
+      **De-escalation Effectiveness (score 1-10):**
+      - Response to hostile or angry customer turns:
+        * Does the agent lower their intensity or match it?
+        * Does the agent acknowledge the emotion before problem-solving?
+        * Does the agent offer concrete next steps to restore control?
+        * Does the agent avoid defensive or argumentative responses?
+      - Time from peak negative sentiment to first positive turn (recovery speed)
+      - Whether the agent uses "we" language to build partnership
+      - Appropriate apology usage (genuine vs. robotic "I'm sorry for the inconvenience")
+
+      **Rapport Building (score 1-10):**
+      - Natural conversational flow vs. robotic script reading
+      - Appropriate use of humor or lightness (when the situation allows)
+      - Building trust through transparency ("Let me be honest with you...")
+      - Ownership language ("I will personally make sure...", "Let me handle this")
+      - Warm closing that feels genuine, not perfunctory
+
+      ### Dimension 4: Customer Effort and Frustration Signals
+
+      For each call, assess the Customer Effort Score (CES) through these proxies:
+      - **Repeat contact signals** - customer says "I called before", "This is the third time"
+      - **Channel switching** - customer references attempts via chat, email, or self-service
+      - **Information repetition** - customer has to re-explain their issue (count instances)
+      - **Process friction** - customer expresses confusion about steps, policies, or procedures
+      - **Wait frustration** - complaints about hold time, transfer time, or callback delays
+      - **Escalation requests** - customer asks for supervisor or manager
+      - **Churn signals** - customer mentions canceling, switching providers, or competitor names
+      - **Resolution confidence** - does the customer sound confident the issue is truly resolved?
+
+      Score Customer Effort on a 1-7 scale (1 = very low effort/smooth, 7 = very high effort/painful).
+
+      ### Dimension 5: Interaction Quality Composite Score
+
+      For each call, calculate an overall Interaction Quality Score (IQS) using:
+      - Sentiment trajectory type (Resolution Arc = highest, Escalation Arc = lowest)
+      - Agent empathy score (weighted 30%)
+      - Agent active listening score (weighted 20%)
+      - De-escalation effectiveness (weighted 20%, higher weight if call had negative sentiment)
+      - Customer effort score (weighted 15%, inverted - lower effort = higher quality)
+      - Rapport building (weighted 15%)
+
+      Normalize to a 0-100 scale.
+
+      ### Output Format
+
+      Return for each call:
+      ```
+      {
+        "call_id": "...",
+        "turn_sentiments": [ ... per-turn scores ... ],
+        "trajectory": { "type": "...", "opening": X, "peak_negative": X, "inflection": X, "closing": X, "net_change": X },
+        "agent_ei": { "empathy": X, "active_listening": X, "de_escalation": X, "rapport": X },
+        "customer_effort": { "score": X, "signals": [...], "churn_risk": "low/medium/high" },
+        "interaction_quality_score": X,
+        "key_moments": [ ... notable positive/negative moments with timestamps ... ],
+        "flags": [ ... any red flags requiring immediate attention ... ]
+      }
+      ```
+
+      Also produce a batch summary:
+      - Average IQS across all calls
+      - Sentiment trajectory distribution (% of calls in each archetype)
+      - Top 3 calls with highest IQS (exemplars for coaching)
+      - Top 3 calls with lowest IQS (priority for coaching intervention)
+      - Most common customer frustration signals across the batch
+    model: sonnet
+    max_turns: 10
+
+  - id: compliance-check
+    depends_on: [transcription-processing]
+    prompt: |
+      Perform comprehensive compliance and regulatory adherence checking on the processed
+      call transcripts.
+
+      Processed transcripts: {steps.transcription-processing.output}
+      Compliance requirements: {input.compliance_requirements}
+      Team: {input.team_name}
+
+      You are a compliance auditor specializing in contact center regulatory requirements.
+      Your job is to systematically check every call against applicable regulations, company
+      policies, and industry best practices. Flag violations with severity levels and
+      provide evidence citations from the transcript.
+
+      ## COMPLIANCE AUDIT FRAMEWORK
+
+      ### Category 1: Required Disclosures and Statements
+
+      Check whether the agent delivered all mandatory statements. Score each as
+      PASS (delivered correctly), PARTIAL (delivered but incomplete or unclear),
+      FAIL (missing entirely), or N/A (not applicable to this call type):
+
+      **Opening disclosures:**
+      - Agent identified themselves by name
+      - Agent identified the company name
+      - Call recording disclosure ("This call may be recorded for quality assurance")
+      - Verification of customer identity before discussing account details
+      - Purpose of call confirmed (for outbound calls)
+
+      **Regulatory-specific disclosures (based on {input.compliance_requirements}):**
+
+      *If PCI-DSS applies:*
+      - Agent did NOT ask customer to read full credit card number aloud
+      - Agent used secure payment portal or masked entry method
+      - Agent did not ask for CVV/CVC in a way that could be recorded
+      - Agent did not read back full card numbers
+      - Hold or mute was used during payment information entry
+      - No credit card numbers appear in the transcript text
+
+      *If TCPA applies:*
+      - Proper consent verification before any marketing discussion
+      - Do-not-call list check confirmation for outbound calls
+      - Opt-out mechanism clearly communicated
+      - Call time within permitted hours (8am-9pm local time)
+
+      *If HIPAA applies:*
+      - Patient identity verified with minimum two identifiers
+      - No protected health information disclosed to unauthorized parties
+      - Minimum necessary information standard followed
+      - Authorization confirmed before discussing records with third parties
+
+      *If GDPR applies:*
+      - Lawful basis for data processing stated or implied
+      - Data subject rights acknowledged if customer inquires
+      - Purpose limitation respected (not using data for undisclosed purposes)
+      - Cross-border transfer disclosures if applicable
+
+      *If MiFID II applies:*
+      - Suitability assessment completed for financial advice
+      - Risk disclosures delivered for product recommendations
+      - Best execution obligations met
+      - Conflict of interest disclosures made
+
+      **Closing requirements:**
+      - Recap of actions taken and commitments made
+      - Next steps and timeline communicated clearly
+      - Customer given opportunity to ask additional questions
+      - Proper goodbye and professional closing
+
+      ### Category 2: Prohibited Behaviors and Language
+
+      Scan the entire transcript for these violations:
+
+      **Hard violations (immediate escalation required):**
+      - Discriminatory language based on race, gender, age, disability, religion
+      - Threats or intimidation tactics
+      - Sharing other customers' personal information
+      - Providing false or misleading information about products, services, or policies
+      - Unauthorized promises (discounts, credits, policy exceptions without authority)
+      - Discussion of confidential company information not relevant to the call
+
+      **Soft violations (coaching opportunity):**
+      - Using jargon or acronyms the customer does not understand
+      - Making assumptions about customer demographics or preferences
+      - Expressing personal opinions about company policies ("I know it's a dumb rule but...")
+      - Sharing personal information about themselves that is inappropriate
+      - Using informal language that may be perceived as unprofessional
+      - Discussing competitor products in a way that could be seen as disparagement
+
+      ### Category 3: Process and Protocol Adherence
+
+      Check adherence to standard operating procedures:
+
+      **Identity verification:**
+      - Was identity verification completed BEFORE account access?
+      - Were the correct verification questions used (name, DOB, last 4 SSN, security question)?
+      - Did verification happen within the first 2 minutes of the call?
+      - If verification failed, was the appropriate escalation path followed?
+
+      **Hold and transfer protocol:**
+      - Was the customer told WHY they were being placed on hold?
+      - Was estimated hold time communicated?
+      - Did the agent check back within 2 minutes during holds?
+      - For transfers, was the receiving agent briefed (warm transfer vs. cold transfer)?
+      - Did the customer have to repeat their issue after a transfer?
+
+      **Escalation protocol:**
+      - If the customer requested a supervisor, was the request acknowledged?
+      - Was the escalation handled within company policy timeframes?
+      - Did the agent attempt to resolve before escalating (appropriate first-attempt resolution)?
+      - Was the escalation reason documented?
+
+      **Documentation and wrap-up:**
+      - Did the agent summarize the issue and resolution?
+      - Were all commitments captured (promised callbacks, credits, follow-ups)?
+      - Was the disposition code appropriate for the call outcome?
+
+      ### Category 4: Data Privacy and Security
+
+      Scan for potential data exposure incidents:
+      - Full social security numbers spoken or transcribed
+      - Full credit card numbers in the transcript
+      - Passwords or PINs communicated verbally
+      - Medical information discussed without proper authorization
+      - Financial account numbers read in full
+      - Customer information shared that was not necessary for the interaction
+
+      ### Severity Classification
+
+      For each violation found, classify severity:
+      - **CRITICAL** - Regulatory violation that could result in fines or legal action.
+        Requires immediate escalation to compliance officer. Examples: PCI data exposure,
+        HIPAA breach, discriminatory language.
+      - **HIGH** - Policy violation with significant customer impact or legal risk.
+        Requires supervisor review within 24 hours. Examples: failed identity verification
+        before account access, unauthorized promises, missing recording disclosure.
+      - **MEDIUM** - Process deviation that increases risk but did not cause harm.
+        Address in next coaching session. Examples: incomplete hold protocol, missing
+        recap at closing, jargon usage.
+      - **LOW** - Minor deviation from best practices. Track for patterns.
+        Examples: slightly informal language, missed opportunity to use customer's name.
+
+      ### Output Format
+
+      Return for each call:
+      ```
+      {
+        "call_id": "...",
+        "overall_compliance_score": X (0-100),
+        "pass_fail": "PASS/CONDITIONAL_PASS/FAIL",
+        "violations": [
+          {
+            "category": "...",
+            "item": "...",
+            "severity": "CRITICAL/HIGH/MEDIUM/LOW",
+            "evidence": "exact transcript excerpt",
+            "timestamp": "MM:SS",
+            "recommendation": "..."
+          }
+        ],
+        "disclosure_checklist": { ... PASS/PARTIAL/FAIL/NA for each required item ... },
+        "data_exposure_incidents": [ ... if any ... ],
+        "requires_escalation": true/false,
+        "escalation_reason": "..."
+      }
+      ```
+
+      Also produce a batch compliance summary:
+      - Overall compliance rate (% of calls passing)
+      - Most common violation types across the batch
+      - Agents with the most violations (for targeted coaching)
+      - Any CRITICAL violations requiring immediate attention
+      - Trend indicators if historical data is available
+    model: haiku
+    max_turns: 10
+
+  - id: coaching-insights
+    depends_on: [sentiment-analysis, compliance-check]
+    prompt: |
+      Generate personalized coaching insights and development plans by synthesizing
+      sentiment analysis and compliance check results.
+
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Compliance results: {steps.compliance-check.output}
+      Processed transcripts: {steps.transcription-processing.output}
+      Team: {input.team_name}
+      Evaluation criteria: {input.evaluation_criteria}
+
+      You are a senior call center quality manager and coach. Your role is to transform
+      raw analysis data into actionable, empathetic, and specific coaching recommendations
+      that will measurably improve agent performance. Avoid generic advice - every
+      recommendation must cite specific call evidence.
+
+      ## COACHING INSIGHTS FRAMEWORK
+
+      ### Section 1: Individual Agent Performance Profiles
+
+      For each agent in the batch, create a comprehensive profile:
+
+      **Strengths Identification (cite specific calls and moments):**
+      - What does this agent do exceptionally well?
+      - Which emotional intelligence dimensions scored highest?
+      - Identify their "signature moves" - unique phrases, techniques, or approaches
+        that produce positive customer responses
+      - Note any calls that should be used as exemplar recordings for team training
+      - Identify skills that are above team average
+
+      **Development Areas (cite specific calls and moments):**
+      - What patterns of weakness appear across multiple calls?
+      - Which compliance items were most frequently missed?
+      - Where does the sentiment trajectory most often stall or decline?
+      - Are there specific call types or customer emotions the agent struggles with?
+      - Differentiate between skill gaps (need training) and will gaps (need motivation)
+
+      **Coaching Priority Matrix:**
+      For each agent, identify the single highest-impact coaching focus using this matrix:
+      - Impact (how much would improvement affect customer satisfaction): High/Medium/Low
+      - Frequency (how often does this issue occur across their calls): High/Medium/Low
+      - Coachability (how easily can this be improved with targeted coaching): High/Medium/Low
+
+      Select the item with the highest combined score as the primary coaching focus.
+
+      ### Section 2: Skill-Specific Coaching Modules
+
+      Based on the most common development areas across the team, generate detailed
+      coaching modules:
+
+      **Module: Empathy and Emotional Acknowledgment**
+      If agents scored low on empathy:
+      - Provide 5 specific empathy statement templates with examples from the analyzed calls
+      - Show the "LEAP" framework: Listen, Empathize, Apologize/Acknowledge, Problem-solve
+      - Provide before/after examples using actual transcript excerpts:
+        * "Bad" response the agent gave
+        * "Better" response they could have given
+        * "Best" response for maximum empathy impact
+      - Practice scenarios based on the most common negative sentiment triggers in the batch
+
+      **Module: De-escalation Mastery**
+      If agents struggled with angry or hostile customers:
+      - Break down the de-escalation sequence: Pause - Acknowledge - Validate - Redirect
+      - Identify specific trigger phrases from transcripts that escalated situations
+      - Provide alternative phrasing for each identified trigger
+      - Map the "Anger Curve" showing where agents typically lose control vs. where they
+        should intervene
+      - Role-play scenarios based on the hardest calls in the batch
+
+      **Module: Active Listening and Discovery**
+      If agents scored low on active listening:
+      - Identify instances where the agent missed key information the customer provided
+      - Show how the call could have been shorter with better upfront discovery
+      - Teach the "3 Before Me" technique (ask 3 clarifying questions before offering a solution)
+      - Provide paraphrasing templates: "Let me make sure I understand...", "So what I'm hearing is..."
+      - Track how many times the customer had to repeat information (quantify the problem)
+
+      **Module: Efficient Call Handling**
+      If calls are running too long or have excessive holds:
+      - Identify the phases where the most time is wasted
+      - Map out an ideal time allocation per phase for this call type
+      - Provide system navigation shortcuts or knowledge base search tips
+      - Show how confident language reduces call time ("Here's what I'll do for you" vs.
+        "Let me see if maybe I can possibly...")
+      - Balance efficiency with quality (never sacrifice empathy for speed)
+
+      **Module: Compliance and Process Adherence**
+      If compliance scores are low:
+      - Create a "must-say" checklist for each call type
+      - Provide natural-sounding compliance statement alternatives (avoid robotic delivery)
+      - Show how to weave disclosures into natural conversation flow
+      - Identify the specific compliance items this agent misses most
+      - Provide mnemonic devices for remembering required steps
+
+      ### Section 3: Conversation Engineering Recommendations
+
+      Based on patterns across all calls, recommend structural improvements:
+
+      **Opening optimization:**
+      - Analyze which opening approaches correlated with higher closing sentiment
+      - Recommend the optimal greeting structure (length, elements, tone)
+      - A/B test suggestions for opening variations
+
+      **Question frameworks:**
+      - Identify the most effective diagnostic question sequences
+      - Map which question types (open vs. closed) work best at each call phase
+      - Note missed discovery opportunities that led to longer calls
+
+      **Objection and resistance handling:**
+      - Catalog the most common customer objections from the batch
+      - Score how effectively agents handled each objection type
+      - Provide best-practice response frameworks for the top 5 objections
+      - Include the "Feel, Felt, Found" and "Acknowledge, Bridge, Convert" frameworks
+        with call-specific examples
+
+      **Closing effectiveness:**
+      - Analyze which closing techniques correlated with resolved calls
+      - Identify calls where the resolution was ambiguous or the customer left uncertain
+      - Recommend a closing checklist: summarize, confirm, set expectations, warm goodbye
+
+      ### Section 4: Behavioral Micro-Patterns
+
+      Identify subtle behavioral patterns that have outsized impact:
+      - **First 30 seconds correlation** - how does the agent's opening energy predict
+        the entire call outcome?
+      - **Recovery speed** - after a negative customer turn, how many turns does it take
+        the agent to shift the trajectory? Compare top vs. bottom performers.
+      - **Silence usage** - do top performers use strategic pauses more effectively?
+      - **Language mirroring** - do agents who mirror customer vocabulary score higher
+        on rapport?
+      - **Ownership language** - correlation between "I will" vs. "We can" vs. "You need to"
+        and customer satisfaction
+
+      ### Output Format
+
+      Structure the output as:
+      1. Team-level executive summary (2-3 paragraphs)
+      2. Individual agent profiles with priority coaching focuses
+      3. Recommended coaching modules (in priority order for the team)
+      4. Specific call excerpts to use in coaching sessions (positive and negative examples)
+      5. 30-day coaching action plan with weekly focus areas
+      6. Metrics to track coaching effectiveness (leading indicators)
+    model: sonnet
+    max_turns: 10
+
+  - id: performance-scoring
+    depends_on: [coaching-insights]
+    prompt: |
+      Calculate comprehensive agent performance scores using a multi-dimensional
+      scoring model that integrates all upstream analysis.
+
+      Coaching insights: {steps.coaching-insights.output}
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Compliance results: {steps.compliance-check.output}
+      Processed transcripts: {steps.transcription-processing.output}
+      Scoring rubric: {input.scoring_rubric}
+      Team: {input.team_name}
+
+      You are a workforce analytics specialist building agent performance scorecards.
+      Your scoring model must be fair, transparent, defensible, and aligned with both
+      customer outcomes and business objectives.
+
+      ## PERFORMANCE SCORING MODEL
+
+      ### Scorecard Dimension 1: Customer Experience (CX) Score - Weight varies by rubric
+
+      Calculate from sentiment and interaction data:
+
+      **Customer Satisfaction Proxy (0-100):**
+      - Closing sentiment score normalized to 0-100 (weight: 40%)
+      - Net sentiment change during call (weight: 20%)
+        * Positive change = bonus points, negative change = deduction
+      - Customer effort score inverted (7 minus CES, then normalized, weight: 20%)
+      - Resolution achieved on first contact (binary: +20 or +0, weight: 20%)
+
+      **Experience Quality Indicators:**
+      - Was the customer thanking the agent at the end? (+5 bonus)
+      - Did the customer express satisfaction explicitly? (+5 bonus)
+      - Did the customer mention they would call back about the same issue? (-10 penalty)
+      - Did the customer ask for a supervisor? (-15 penalty, unless properly handled: -5)
+      - Did the customer mention competitor or cancellation? (-10 penalty, less if recovered)
+
+      ### Scorecard Dimension 2: Technical Proficiency Score - Weight varies by rubric
+
+      Evaluate the agent's knowledge and problem-solving ability:
+
+      **Issue Resolution Effectiveness (0-100):**
+      - Was the correct solution identified? (based on issue category and resolution, weight: 40%)
+      - How quickly was the root cause identified? (time to first accurate diagnosis, weight: 20%)
+      - Was the solution explained clearly to the customer? (jargon-free, step-by-step, weight: 20%)
+      - Were alternative solutions offered when the primary approach failed? (weight: 10%)
+      - Was proactive information provided beyond the immediate issue? (weight: 10%)
+
+      **Knowledge Indicators:**
+      - Number of holds taken for information lookup (fewer = better knowledge)
+      - Confidence of language ("I know that..." vs. "I think maybe...")
+      - Accuracy of information provided (cross-reference with known correct procedures)
+      - Appropriate use of knowledge base and tools
+      - Transfer necessity (was the transfer truly needed or could agent have resolved?)
+
+      ### Scorecard Dimension 3: Communication Score - Weight varies by rubric
+
+      Evaluate verbal communication effectiveness:
+
+      **Clarity and Structure (0-100):**
+      - Organized call flow following expected phases (weight: 25%)
+      - Clear, concise explanations without unnecessary tangents (weight: 25%)
+      - Appropriate pacing - not rushing the customer, not dragging (weight: 25%)
+      - Professional language and tone throughout (weight: 25%)
+
+      **Conversational Dynamics:**
+      - Talk-to-listen ratio (ideal range: 0.4-0.6 for support calls)
+        * Below 0.3 = too passive, not enough guidance
+        * Above 0.7 = talking too much, not listening enough
+        * Score on bell curve centered at 0.5
+      - Average turn length in appropriate range (not monologuing, not too terse)
+      - Appropriate question usage (2-4 discovery questions before problem-solving)
+      - Interruption count (each interruption of the customer = -2 points)
+
+      ### Scorecard Dimension 4: Compliance Score - Weight varies by rubric
+
+      Directly from compliance analysis:
+      - Overall compliance check score (0-100)
+      - Binary deductions for CRITICAL violations (-25 per occurrence)
+      - Graduated deductions for HIGH (-10), MEDIUM (-5), LOW (-2) violations
+      - Floor at 0 (cannot go negative)
+      - Cap at 100 if all checks pass
+
+      ### Scorecard Dimension 5: Efficiency Score - Weight varies by rubric
+
+      Evaluate operational efficiency without sacrificing quality:
+
+      **Time Management (0-100):**
+      - Call duration relative to team average for same issue type (weight: 30%)
+        * Within +/- 15% of average = 100 points
+        * Each 10% over average = -10 points (up to -40)
+        * Under average with positive outcome = bonus points
+      - Hold time as percentage of total call (weight: 25%)
+        * 0-5% = 100, 5-10% = 80, 10-20% = 60, 20%+ = 40
+      - After-call work time if available (weight: 20%)
+      - First-contact resolution rate (weight: 25%)
+        * Resolved without callback or follow-up = 100
+        * Required one follow-up = 70
+        * Multiple follow-ups or unresolved = 40
+
+      ### Scorecard Dimension 6: Emotional Intelligence Score - Weight varies by rubric
+
+      From sentiment analysis agent EI scores:
+      - Empathy score (from coaching insights, weight: 30%)
+      - Active listening score (weight: 25%)
+      - De-escalation effectiveness (weight: 25%)
+      - Rapport building (weight: 20%)
+      All normalized to 0-100 scale.
+
+      ### Composite Score Calculation
+
+      Apply the scoring rubric weights ({input.scoring_rubric}):
+      - If "balanced scorecard": CX=20%, Technical=20%, Communication=15%, Compliance=20%, Efficiency=10%, EI=15%
+      - If custom weights provided, parse and apply accordingly
+      - Calculate weighted composite score (0-100)
+
+      ### Performance Tier Classification
+
+      Based on composite score:
+      - **Exceptional (90-100):** Top performer, mentor candidate, eligible for recognition
+      - **Proficient (80-89):** Meets all standards, minor development areas
+      - **Developing (70-79):** Meets most standards, requires targeted coaching
+      - **Below Expectations (60-69):** Significant gaps, requires coaching plan
+      - **Critical (0-59):** Immediate intervention required, may require PIP
+
+      ### Trend and Peer Comparison
+
+      For each agent:
+      - Rank within the team for each dimension
+      - Identify their strongest and weakest dimension relative to peers
+      - Calculate percentile ranking for composite score
+      - Note any significant changes from previous evaluation periods (if data available)
+      - Identify statistical outliers (agents performing 2+ standard deviations from mean)
+
+      ### Output Format
+
+      Return:
+      1. Individual agent scorecards with all dimension scores, composite score, and tier
+      2. Team ranking table (sorted by composite score)
+      3. Dimension-level team averages and standard deviations
+      4. Score distribution visualization data (histogram bins)
+      5. Calibration notes (any scoring adjustments made for fairness)
+      6. Top performers and their distinguishing characteristics
+      7. Agents requiring immediate intervention with specific reasons
+    model: sonnet
+    max_turns: 10
+
+  - id: team-dashboard
+    depends_on: [performance-scoring]
+    prompt: |
+      Compile all analysis into a comprehensive team performance dashboard report
+      for {input.team_name} leadership.
+
+      Performance scores: {steps.performance-scoring.output}
+      Coaching insights: {steps.coaching-insights.output}
+      Sentiment analysis: {steps.sentiment-analysis.output}
+      Compliance results: {steps.compliance-check.output}
+      Processed transcripts: {steps.transcription-processing.output}
+      Call source: {input.call_source}
+
+      You are a contact center operations director preparing a comprehensive performance
+      review for team leadership. This dashboard must be actionable, data-driven, and
+      immediately useful for making coaching, staffing, and process decisions.
+
+      ## TEAM DASHBOARD REPORT
+
+      ### Section 1: Executive Summary
+
+      Write a 3-4 paragraph executive summary that a VP of Customer Experience would
+      read in 60 seconds. Include:
+      - Overall team health assessment (one sentence verdict)
+      - Key performance highlights (top 2-3 wins)
+      - Critical concerns requiring immediate attention (top 2-3 risks)
+      - Recommended priority actions (top 3 next steps)
+      - Comparison to previous period if baseline data is available
+
+      ### Section 2: Team Performance Overview
+
+      **Key Metrics Dashboard:**
+      Present these metrics in a structured table format:
+
+      | Metric | Value | Target | Status | Trend |
+      |--------|-------|--------|--------|-------|
+      | Average Composite Score | X/100 | 80 | On/Off Track | Up/Down/Flat |
+      | First Contact Resolution | X% | 75% | ... | ... |
+      | Average Handle Time | X:XX | varies | ... | ... |
+      | Compliance Pass Rate | X% | 95% | ... | ... |
+      | Customer Effort Score | X/7 | <3 | ... | ... |
+      | Average Sentiment Improvement | +X | >0 | ... | ... |
+      | Calls Requiring Escalation | X% | <10% | ... | ... |
+      | Critical Compliance Violations | X | 0 | ... | ... |
+
+      **Score Distribution:**
+      - Number and percentage of agents in each performance tier
+      - Tier movement from previous period (if available)
+      - Identification of any bimodal distribution (team splitting into high and low performers)
+
+      ### Section 3: Agent Rankings and Recognition
+
+      **Top Performers (90+ composite):**
+      For each top performer, highlight:
+      - Their composite score and strongest dimension
+      - One specific call moment that exemplifies their excellence
+      - Recommendation for recognition (peer mentor, team lead, award nomination)
+
+      **Most Improved:**
+      - Agents showing the largest positive delta from previous period
+      - What changed in their approach (specific behavioral shifts)
+
+      **Agents Requiring Support:**
+      For each agent below expectations:
+      - Their composite score and weakest dimension
+      - Specific coaching focus from the insights analysis
+      - Recommended coaching cadence (daily, weekly, bi-weekly)
+      - Measurable improvement targets for next evaluation period
+      - Timeline for expected improvement with milestones
+
+      ### Section 4: Compliance and Risk Summary
+
+      **Compliance Scorecard:**
+      - Team-wide compliance pass rate
+      - Breakdown by compliance category
+      - List of all CRITICAL and HIGH violations with agent, call ID, and violation details
+      - Required remediation actions with deadlines
+      - Training recommendations to address systematic compliance gaps
+
+      **Risk Indicators:**
+      - Number of potential data exposure incidents
+      - Calls with churn signals (customers mentioning cancellation or competitors)
+      - Escalation requests and how they were handled
+      - Any regulatory filing requirements triggered by violations
+
+      ### Section 5: Customer Experience Intelligence
+
+      **Voice of Customer Synthesis:**
+      - Most common issue categories and their resolution rates
+      - Most frequent customer complaints and frustration triggers
+      - Products/services generating the most support contacts
+      - Process or policy pain points that customers consistently struggle with
+      - Positive feedback themes (what customers appreciate)
+
+      **Sentiment Patterns:**
+      - Distribution of call trajectory types across the team
+      - Average sentiment improvement score
+      - Calls with the best sentiment recovery (learn from these)
+      - Calls with the worst sentiment decline (prevent these)
+
+      ### Section 6: Operational Insights
+
+      **Efficiency Metrics:**
+      - Average handle time by issue category
+      - Hold time analysis (total time, frequency, longest holds)
+      - Transfer rate and reasons
+      - Peak call volume windows and staffing adequacy
+      - After-call work duration patterns
+
+      **Process Improvement Opportunities:**
+      - Issue categories with consistently long handle times (need better tools or training)
+      - High-transfer topics (need better first-level documentation)
+      - Common customer questions that could be deflected to self-service
+      - Script or process steps that cause confusion for agents
+
+      ### Section 7: Action Plan and Recommendations
+
+      Produce a prioritized action plan organized by timeframe:
+
+      **Immediate (this week):**
+      - Address any CRITICAL compliance violations
+      - Coach agents flagged for immediate intervention
+      - Share exemplar calls with the full team
+
+      **Short-term (next 30 days):**
+      - Deploy targeted coaching modules identified in the insights
+      - Implement process changes for the top efficiency opportunity
+      - Update compliance training materials for most common violations
+
+      **Medium-term (next quarter):**
+      - Strategic training initiatives based on team-wide gaps
+      - Tool or system improvements to reduce customer effort
+      - Self-service deflection strategy for high-volume simple issues
+      - Staffing or scheduling adjustments based on performance patterns
+
+      ### Section 8: Appendix
+
+      Include raw data tables:
+      - Full agent scorecard table with all dimension scores
+      - Call-level detail table with key metrics per call
+      - Compliance violation log
+      - Coaching recommendation registry
+      - Glossary of metrics and scoring methodology
+
+      Format the entire report as clean Markdown with clear sections, tables, and
+      bullet points. Design it to be directly sharable with leadership stakeholders
+      via email, Confluence, or Notion.
+    model: sonnet
+    max_turns: 10

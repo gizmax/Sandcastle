@@ -25,41 +25,231 @@ input_schema:
     pricing_tier:
       type: string
       description: "Pricing tier to use in the proposal"
+    deal_size:
+      type: string
+      description: "Estimated deal size or budget range discussed (e.g. '$50k-$80k ARR')"
+    contract_length:
+      type: string
+      description: "Proposed contract length (e.g. '12 months', '24 months')"
 
 steps:
   - id: extract-requirements
-    prompt: >
-      Analyze the following meeting notes and extract all client requirements,
-      pain points, budget signals, timeline expectations, and any technical
-      constraints mentioned. Organize findings by priority and flag any
-      ambiguous or missing information that should be clarified.
+    prompt: |
+      You are a senior sales engineer who specializes in translating client
+      conversations into precise technical and business requirements. Analyze
+      the following meeting notes with surgical precision.
+
       Meeting notes: {input.meeting_notes}
       Client name: {input.client_name}
+      Estimated deal size: {input.deal_size}
+
+      Extract and organize the following:
+
+      1. STAKEHOLDER MAP: Identify every person mentioned or implied in the
+         meeting. For each, note their:
+         - Role and likely decision-making authority (Champion, Decision Maker,
+           Influencer, Blocker, End User)
+         - Primary concerns or priorities they expressed
+         - Objections or skepticism they raised
+
+      2. PAIN POINTS (ranked by urgency):
+         For each pain point identified, document:
+         - The problem as the client described it (their exact language)
+         - The business impact (revenue loss, efficiency drain, risk exposure)
+         - Current workaround they are using (if mentioned)
+         - How long they've been dealing with this problem
+         - Urgency signal: immediate, next quarter, or exploratory
+
+      3. TECHNICAL REQUIREMENTS:
+         - Must-have features or capabilities explicitly requested
+         - Integration requirements (existing tools, data sources, APIs)
+         - Security, compliance, or regulatory constraints mentioned
+         - Performance requirements (users, volume, latency)
+         - Data migration or onboarding complexity signals
+
+      4. BUDGET & TIMELINE SIGNALS:
+         - Explicit budget mentions or range hints
+         - Fiscal year timing or budget cycle constraints
+         - Procurement process complexity (legal review, security audit, etc.)
+         - Competitive evaluation signals (are they comparing vendors?)
+         - Decision timeline expectations
+
+      5. RISK FLAGS: Note any ambiguous requirements, unrealistic expectations,
+         scope creep indicators, or missing information that MUST be clarified
+         before proposal submission. List specific follow-up questions.
     model: sonnet
     max_turns: 8
 
   - id: match-solutions
     depends_on: [extract-requirements]
-    prompt: >
-      Map each identified client need to our product features and solutions.
-      For each pain point, explain how our offering addresses it, include
-      relevant case studies or metrics where applicable, and note any gaps
-      where custom work or integrations may be needed.
+    prompt: |
+      You are a solutions architect creating a precise mapping between client
+      needs and your product capabilities. Build a solution design that
+      directly addresses every identified pain point.
+
       Client requirements: {steps.extract-requirements.output}
       Product catalog: {input.product_info}
+      Pricing tier: {input.pricing_tier}
+
+      For EACH identified pain point and requirement, provide:
+
+      1. SOLUTION MAPPING TABLE:
+         | Client Need | Our Solution | Feature/Module | Fit Level |
+         For "Fit Level" use: Perfect Match / Strong Match / Partial Match
+         (needs customization) / Gap (needs partner or custom development).
+
+      2. IMPLEMENTATION APPROACH: For each solution component:
+         - Configuration vs. customization required
+         - Estimated implementation effort (hours or days)
+         - Dependencies on other components
+         - Risk level (low/medium/high) with mitigation strategy
+
+      3. CASE STUDY REFERENCES: For the top 3-5 pain points, reference a
+         relevant customer success story (use a template format if no
+         specific case study exists):
+         - Client profile (similar industry/size)
+         - Problem they faced (matching the prospect's pain point)
+         - Solution deployed
+         - Quantified results (e.g. "reduced processing time by 60%",
+           "saved $200K annually", "onboarded in 3 weeks")
+
+      4. GAP ANALYSIS: For any requirements that are only partially met
+         or not met, clearly document:
+         - What the gap is
+         - Proposed workaround or roadmap item (if on product roadmap)
+         - Third-party integration option
+         - Custom development estimate
+         BE HONEST about gaps. Overpromising destroys trust.
+
+      5. COMPETITIVE DIFFERENTIATION: For each major solution area, note
+         1-2 differentiators vs. likely alternatives the client is evaluating.
+         Focus on what we do that others cannot or do not.
     model: sonnet
     max_turns: 10
 
-  - id: write-proposal
-    depends_on: [match-solutions]
-    prompt: >
-      Write a complete business proposal document with the following sections:
-      Executive Summary, Understanding of Needs, Proposed Solution, Implementation
-      Timeline, Pricing and Investment, and Next Steps. Use a professional tone,
-      reference specific client pain points, and highlight ROI where possible.
+  - id: pricing-strategy
+    depends_on: [extract-requirements, match-solutions]
+    prompt: |
+      You are a deal strategist who designs pricing packages that maximize
+      both win probability and deal value. Build a pricing strategy for
+      this proposal.
+
+      Client requirements: {steps.extract-requirements.output}
       Solution mapping: {steps.match-solutions.output}
+      Pricing tier: {input.pricing_tier}
+      Deal size signal: {input.deal_size}
+      Contract length: {input.contract_length}
+
+      Create the following:
+
+      1. PRICING PACKAGE OPTIONS (Good/Better/Best):
+         - OPTION A (Essential): Core solution only. Meets must-have
+           requirements. Lower price point to anchor the conversation.
+         - OPTION B (Recommended - highlight this): Full solution with
+           all matched features. This should be your target close option.
+         - OPTION C (Premium): Full solution + advanced features, priority
+           support, dedicated CSM, expanded usage limits. This makes
+           Option B feel like a reasonable middle ground (anchoring effect).
+
+         For each option, itemize:
+         - Included features/modules
+         - User/seat limits
+         - Support tier (email, chat, phone, dedicated)
+         - Monthly and annual pricing (show annual savings)
+
+      2. ROI CALCULATION: Build a concrete ROI model using:
+         - Current cost of the problem (from pain points: manual labor hours,
+           error rates, lost revenue, tool costs being replaced)
+         - Projected savings/gains with our solution
+         - Implementation cost (one-time)
+         - Ongoing subscription cost (annual)
+         - Payback period in months
+         - 3-year total ROI percentage
+         Use conservative estimates and show your assumptions.
+
+      3. COMMERCIAL TERMS:
+         - Contract length options with pricing incentives for longer terms
+         - Payment terms (net 30, quarterly, annual prepay with discount)
+         - Early termination provisions
+         - Scaling provisions (how pricing adjusts as usage grows)
+         - SLA commitments with financial remedies
+
+      4. NEGOTIATION PLAYBOOK (internal, do not include in proposal):
+         - Walk-away price (minimum acceptable deal value)
+         - Concession sequence: what to offer first, second, third
+         - Trade-offs: if they push back on price, what can we offer
+           instead (extended trial, deferred payment, reduced scope)
+    model: sonnet
+    max_turns: 5
+
+  - id: write-proposal
+    depends_on: [match-solutions, pricing-strategy]
+    prompt: |
+      You are a professional proposal writer who creates winning business
+      proposals. Write the complete proposal document using all prior
+      analysis. The proposal should be client-ready and professionally
+      formatted.
+
+      Solution mapping: {steps.match-solutions.output}
+      Pricing strategy: {steps.pricing-strategy.output}
       Client name: {input.client_name}
       Pricing tier: {input.pricing_tier}
+
+      Structure the proposal with these EXACT sections:
+
+      1. COVER PAGE: Proposal title, "Prepared for [Client Name]",
+         date, confidentiality notice.
+
+      2. EXECUTIVE SUMMARY (1 page max): Open with the client's primary
+         challenge (in their own words from the meeting). State our
+         understanding of their goals. Summarize the proposed solution
+         in 2-3 sentences. Close with expected business impact (reference
+         the ROI calculation). This section is for the executive who will
+         skim only this page - make every sentence count.
+
+      3. UNDERSTANDING YOUR NEEDS (1-2 pages): Demonstrate deep
+         understanding of their challenges. Mirror their language. Group
+         needs by business priority. This builds trust before the pitch.
+
+      4. PROPOSED SOLUTION (2-3 pages): For each need, show the solution.
+         Use a "Challenge > Solution > Outcome" format for each item.
+         Include relevant case study snippets. Add architecture diagrams
+         (describe them textually for now).
+
+      5. IMPLEMENTATION TIMELINE: Present a phased rollout plan:
+         - Phase 1 (Week 1-2): Discovery, technical setup, data migration
+         - Phase 2 (Week 3-4): Configuration, integration, UAT
+         - Phase 3 (Week 5-6): Training, pilot launch, optimization
+         - Phase 4 (Week 7-8): Full rollout, documentation, handoff
+         Include key milestones, deliverables per phase, and client
+         responsibilities at each stage.
+
+      6. INVESTMENT & ROI (1-2 pages): Present the Good/Better/Best
+         pricing options. Highlight the recommended option. Include the
+         ROI model with a simple payback period visualization.
+
+      7. RISK MITIGATION: Address top 3-5 implementation risks with
+         specific mitigation strategies. Show that you've thought about
+         what could go wrong and have plans to prevent it.
+
+      8. TEAM & SUPPORT: Describe the implementation team, ongoing
+         support model, escalation path, and executive sponsor commitment.
+
+      9. NEXT STEPS: Clear 3-step path forward:
+         - Step 1: Proposal review and Q&A call (suggest specific date)
+         - Step 2: Contract finalization
+         - Step 3: Kickoff meeting
+         Include a soft deadline ("valid for 30 days") to create urgency.
+
+      10. APPENDIX: Terms and conditions summary, detailed case studies,
+          team bios, security/compliance certifications.
+
+      WRITING GUIDELINES:
+      - Use "you/your" (client-focused), not "we/our" (vendor-focused)
+      - Lead every section with the client's benefit, not your feature
+      - Keep paragraphs to 3-4 sentences maximum
+      - Use bold for key figures and outcomes
+      - Total length: 8-12 pages equivalent
     model: sonnet
     max_turns: 10
 

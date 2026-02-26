@@ -1,0 +1,1032 @@
+# name: Clinical Notes Processor
+# description: Process clinical encounter data into structured SOAP notes, extract diagnoses with ICD-10 codes, generate billing codes, and flag compliance issues
+# tags: [Healthcare, Clinical, SOAP, ICD-10, Compliance]
+# category: general_ai
+
+name: clinical-notes
+description: Process clinical encounter data into structured SOAP notes, extract diagnoses with ICD-10 codes, generate billing codes, and flag compliance issues
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["encounter_data", "patient_context"]
+  properties:
+    encounter_data:
+      type: string
+      description: "Raw clinical encounter data - can be transcribed dictation, free-text notes, or structured intake form data describing the patient visit"
+    patient_context:
+      type: string
+      description: "Patient context including age, sex, relevant medical history, current medications, allergies, and reason for visit"
+    specialty:
+      type: string
+      description: "Clinical specialty context (e.g. 'general', 'cardiology', 'orthopedics', 'psychiatry', 'pediatrics', 'emergency')"
+      default: "general"
+    documentation_standard:
+      type: string
+      description: "Documentation format standard to follow: 'SOAP', 'H&P', 'progress_note', 'discharge_summary'"
+      default: "SOAP"
+
+steps:
+  - id: encounter-parsing
+    prompt: |
+      You are a clinical documentation specialist with extensive experience in medical
+      record analysis. Your task is to parse raw clinical encounter data into a structured,
+      normalized format that will serve as the foundation for SOAP note generation, diagnosis
+      coding, and compliance review.
+
+      Raw encounter data:
+      {input.encounter_data}
+
+      Patient context:
+      {input.patient_context}
+
+      Specialty: {input.specialty}
+      Documentation standard: {input.documentation_standard}
+
+      IMPORTANT DISCLAIMER: This is an AI-assisted documentation tool. All output must be
+      reviewed and validated by a licensed healthcare provider before being entered into any
+      medical record system. This tool does not provide medical advice or make clinical
+      decisions.
+
+      ---
+
+      ## ENCOUNTER PARSING FRAMEWORK
+
+      ### 1. Patient Demographics Extraction
+      Parse and normalize the following from the provided data:
+      - **Patient identifiers**: Age, sex, date of birth (if provided)
+      - **Visit metadata**: Date of service, visit type (new patient, established, follow-up,
+        urgent, telehealth), referring provider (if any)
+      - **Insurance context**: If mentioned, note payer type (Medicare, Medicaid, commercial,
+        self-pay) as this affects documentation and coding requirements
+      - **Visit duration**: Estimate the complexity and time spent based on documentation depth
+
+      ### 2. Chief Complaint (CC) Extraction
+      - Identify the primary reason for the visit in the patient's own words (if available)
+      - If multiple complaints, rank by clinical priority
+      - Note the onset, duration, and severity as described
+      - Flag if the chief complaint is inconsistent with the visit type or specialty
+
+      ### 3. History Extraction and Categorization
+
+      **History of Present Illness (HPI) Elements:**
+      Parse all HPI elements present in the encounter data. Track which of the 8 HPI elements
+      (per CMS 1995/1997 documentation guidelines) are documented:
+      1. **Location** - Where is the symptom? (e.g. "left knee", "epigastric region")
+      2. **Quality** - What does it feel like? (e.g. "sharp", "dull", "burning", "pressure")
+      3. **Severity** - How bad is it? (e.g. "7/10 pain", "moderate", "severe")
+      4. **Duration** - How long has it been present? (e.g. "3 days", "since last Tuesday")
+      5. **Timing** - When does it occur? (e.g. "constant", "intermittent", "worse at night")
+      6. **Context** - What was happening when it started? (e.g. "after lifting heavy box")
+      7. **Modifying factors** - What makes it better or worse? (e.g. "rest helps", "worse with movement")
+      8. **Associated signs/symptoms** - Other symptoms present (e.g. "with nausea", "no fever")
+
+      Count the number of HPI elements documented (1-3 = brief, 4+ = extended, all 8 = comprehensive).
+      This count directly affects E/M level determination.
+
+      **Review of Systems (ROS):**
+      Parse mentions of the following organ systems. For each, note whether it was:
+      - Positive (symptom reported)
+      - Negative (symptom specifically denied)
+      - Not mentioned (gap in documentation)
+
+      Systems to track (14 organ systems per CMS guidelines):
+      1. Constitutional (fever, weight change, fatigue, malaise)
+      2. Eyes (vision changes, pain, discharge)
+      3. Ears/Nose/Mouth/Throat (hearing loss, congestion, sore throat)
+      4. Cardiovascular (chest pain, palpitations, edema)
+      5. Respiratory (cough, dyspnea, wheezing)
+      6. Gastrointestinal (nausea, vomiting, diarrhea, abdominal pain)
+      7. Genitourinary (dysuria, frequency, hematuria)
+      8. Musculoskeletal (joint pain, stiffness, swelling)
+      9. Integumentary/Skin (rash, lesions, wounds)
+      10. Neurological (headache, dizziness, numbness, weakness)
+      11. Psychiatric (depression, anxiety, sleep disturbance)
+      12. Endocrine (polyuria, polydipsia, heat/cold intolerance)
+      13. Hematologic/Lymphatic (bruising, bleeding, lymphadenopathy)
+      14. Allergic/Immunologic (seasonal allergies, immunodeficiency)
+
+      Count systems reviewed:
+      - 1 system = problem-pertinent ROS
+      - 2-9 systems = extended ROS
+      - 10+ systems = complete ROS
+
+      **Past Medical/Surgical/Family/Social History (PFSH):**
+      Parse mentions of:
+      - Past medical history (chronic conditions, hospitalizations, prior diagnoses)
+      - Past surgical history (procedures, dates if available)
+      - Family history (relevant familial conditions)
+      - Social history (tobacco, alcohol, drug use, occupation, exercise, diet, living situation)
+      - Medication list (current medications with dosages if available)
+      - Allergy list (drug allergies, food allergies, environmental allergies, reaction types)
+
+      Count PFSH areas documented (1 area = pertinent, 2-3 areas = complete).
+
+      ### 4. Physical Examination Extraction
+
+      Parse all examination findings mentioned in the encounter data. Categorize by organ
+      system and body area examined:
+
+      For each system examined, extract:
+      - **System name** (e.g. "Cardiovascular")
+      - **Specific findings** (e.g. "Regular rate and rhythm, no murmurs, no gallops, no rubs")
+      - **Normal vs abnormal** - flag abnormal findings
+      - **Laterality** - left, right, bilateral where applicable
+
+      Body areas/organ systems for exam (per 1997 guidelines):
+      1. Constitutional (general appearance, vital signs)
+      2. Eyes
+      3. Ears, nose, mouth, throat
+      4. Neck
+      5. Respiratory
+      6. Cardiovascular
+      7. Chest/Breasts
+      8. Gastrointestinal/Abdomen
+      9. Genitourinary
+      10. Lymphatic
+      11. Musculoskeletal
+      12. Skin
+      13. Neurological
+      14. Psychiatric
+
+      Count body areas/organ systems examined:
+      - 1 area = problem-focused exam
+      - 2-7 areas with limited elements = expanded problem-focused exam
+      - 2-7 areas with extended elements = detailed exam
+      - 8+ areas or complete single-system = comprehensive exam
+
+      ### 5. Assessment and Plan Extraction
+
+      Parse all clinical assessments and plans mentioned:
+      - **Diagnoses mentioned** - list all conditions assessed, whether new or established
+      - **Differential diagnoses** - any alternatives considered
+      - **Diagnostic orders** - labs, imaging, referrals ordered
+      - **Therapeutic plans** - medications prescribed/changed, procedures performed, therapies ordered
+      - **Patient education** - counseling provided, lifestyle modifications discussed
+      - **Follow-up plan** - return visit timing, conditions for earlier return
+      - **Disposition** - discharged home, admitted, transferred, etc.
+
+      ### 6. Documentation Gap Analysis
+
+      Identify critical gaps in the raw encounter data:
+      - Missing HPI elements that would support a higher E/M level
+      - Organ systems not mentioned in ROS that are clinically relevant
+      - Physical exam findings expected for the chief complaint but not documented
+      - Missing PFSH elements
+      - Assessment without supporting examination findings
+      - Plan items without supporting assessment rationale
+
+      ---
+
+      OUTPUT: Return the complete parsed encounter as a structured document with clear
+      section headers, element counts, and gap flags. This parsed data will feed directly
+      into SOAP structuring, diagnosis coding, and compliance review steps.
+    model: haiku
+    max_turns: 10
+
+  - id: soap-structuring
+    depends_on: [encounter-parsing]
+    prompt: |
+      You are a board-certified physician with expertise in clinical documentation
+      improvement (CDI). Using the parsed encounter data, construct a properly structured
+      clinical note following the {input.documentation_standard} format for the
+      {input.specialty} specialty.
+
+      Parsed encounter data:
+      {steps.encounter-parsing.output}
+
+      Patient context: {input.patient_context}
+      Specialty: {input.specialty}
+      Documentation standard: {input.documentation_standard}
+
+      IMPORTANT DISCLAIMER: This is an AI-assisted documentation tool. All output must be
+      reviewed and validated by a licensed healthcare provider before being entered into any
+      medical record system.
+
+      ---
+
+      ## SOAP NOTE STRUCTURING FRAMEWORK
+
+      ### SUBJECTIVE (S)
+
+      **Chief Complaint (CC):**
+      - State the chief complaint concisely in the patient's own words when possible
+      - Format: "[Symptom/concern] for [duration]"
+      - If multiple complaints, list in order of clinical priority
+
+      **History of Present Illness (HPI):**
+      Write a narrative HPI paragraph that naturally incorporates all documented HPI elements.
+      Follow these clinical writing principles:
+      - Begin with patient demographics and chief complaint: "[Age]-year-old [sex] presenting with..."
+      - Use chronological narrative flow from onset to present
+      - Incorporate all 8 HPI elements that were documented in the parsed data
+      - Use precise medical terminology while maintaining readability
+      - Include pertinent positives AND pertinent negatives
+      - If the patient has multiple complaints, address each with a separate HPI paragraph
+      - For {input.specialty} encounters, emphasize specialty-relevant history elements:
+        - Cardiology: chest pain characteristics, exertional tolerance, NYHA class
+        - Orthopedics: mechanism of injury, functional limitations, prior treatments
+        - Psychiatry: mood, affect, suicidal/homicidal ideation screening, sleep, appetite
+        - Pediatrics: developmental milestones, growth parameters, vaccination status
+        - Emergency: mechanism, timeline, interventions prior to arrival
+        - General: comprehensive history appropriate to presenting complaint
+
+      **Review of Systems (ROS):**
+      - List each system reviewed with positive and negative findings
+      - Use standard format: "CONSTITUTIONAL: Denies fever, chills, weight changes."
+      - Only include systems that were actually reviewed (do not fabricate)
+      - Highlight positive findings that support or expand the differential diagnosis
+      - Use "All other systems reviewed and negative" only if the encounter data supports
+        a complete ROS
+
+      **Past Medical History (PMH):**
+      - List active chronic conditions
+      - Include relevant resolved conditions
+
+      **Past Surgical History (PSH):**
+      - List prior surgeries with approximate dates if available
+
+      **Medications:**
+      - List current medications with dose, route, and frequency when documented
+      - Flag any medications relevant to the current complaint
+
+      **Allergies:**
+      - Drug allergies with reaction type (e.g. "Penicillin - rash", "Sulfa - anaphylaxis")
+      - NKDA if no known drug allergies documented
+
+      **Family History:**
+      - Pertinent family history related to the presenting complaint
+      - Note significant familial conditions (cancer, heart disease, diabetes, mental health)
+
+      **Social History:**
+      - Tobacco: current/former/never, pack-years if applicable
+      - Alcohol: frequency, quantity, CAGE if relevant
+      - Drugs: current/former/never, substances if applicable
+      - Occupation, exercise habits, living situation as documented
+
+      ### OBJECTIVE (O)
+
+      **Vital Signs:**
+      - List all vital signs documented: BP, HR, RR, Temp, SpO2, Weight, Height, BMI
+      - Flag any vital signs outside normal ranges with the specific abnormality
+        (e.g. "BP 158/94 - Stage 2 hypertension", "HR 112 - tachycardic")
+
+      **Physical Examination:**
+      Write the physical exam in standard medical documentation format:
+      - Use organ system headers consistent with the parsed data
+      - For each system, document specific findings using proper medical terminology
+      - Clearly distinguish normal from abnormal findings
+      - Use standard exam documentation conventions:
+        - GENERAL: "Well-appearing, in no acute distress" or describe distress
+        - HEENT: Head, Eyes, Ears, Nose, Throat findings
+        - NECK: Supple, no lymphadenopathy, thyroid assessment
+        - CARDIOVASCULAR: Rate, rhythm, murmurs, gallops, rubs, peripheral pulses, edema
+        - RESPIRATORY: Breath sounds, effort, adventitious sounds
+        - ABDOMEN: Inspection, auscultation, palpation findings
+        - MUSCULOSKELETAL: ROM, strength, stability, tenderness, deformity
+        - NEUROLOGICAL: Mental status, cranial nerves, motor, sensory, reflexes, coordination
+        - PSYCHIATRIC: Appearance, behavior, mood, affect, thought process/content, insight/judgment
+        - SKIN: Color, turgor, lesions, wounds
+      - For {input.specialty} encounters, ensure the specialty-specific exam is detailed:
+        - Cardiology: JVD, S3/S4, murmur grading, peripheral vascular exam
+        - Orthopedics: specific joint exam, special tests (Lachman, McMurray, etc.), neurovascular status
+        - Psychiatry: full mental status examination (MSE)
+        - Pediatrics: developmental assessment, growth percentiles
+        - Emergency: primary and secondary survey format
+
+      **Diagnostic Results:**
+      - Lab values if available, with normal ranges and flagged abnormals
+      - Imaging results and interpretations
+      - EKG, spirometry, or other test results
+
+      ### ASSESSMENT (A)
+
+      **Primary Diagnosis:**
+      - State the primary diagnosis or most likely working diagnosis
+      - Include severity qualifier (mild, moderate, severe) when clinically appropriate
+      - Note whether this is a new or established condition
+      - Provide brief clinical reasoning linking subjective and objective findings to the diagnosis
+
+      **Secondary Diagnoses:**
+      - List all additional diagnoses addressed during the encounter
+      - For each, note whether new, established, stable, worsening, or improved
+      - Include chronic conditions managed during the visit
+
+      **Differential Diagnosis:**
+      - List reasonable alternative diagnoses considered
+      - For each, note what evidence supports or argues against it
+      - Explain the clinical reasoning for the primary diagnosis over alternatives
+
+      **Clinical Decision-Making Complexity:**
+      Document the medical decision-making (MDM) elements:
+      - **Number and complexity of problems addressed:**
+        - Minimal (1 self-limited problem)
+        - Low (2 self-limited problems OR 1 stable chronic condition)
+        - Moderate (1 acute uncomplicated illness OR 2+ stable chronic conditions OR 1 acute illness with systemic symptoms)
+        - High (1 acute complex illness OR chronic illness with severe exacerbation OR threat to life/limb)
+      - **Amount and complexity of data reviewed:**
+        - Minimal/None
+        - Limited (review of prior external notes or ordering a test)
+        - Moderate (review of external records, ordering and reviewing tests, independent interpretation)
+        - Extensive (independent interpretation of complex test, discussion with external physician)
+      - **Risk of complications, morbidity, or mortality:**
+        - Minimal
+        - Low (OTC drug management, minor surgery)
+        - Moderate (prescription drug management, minor surgery with risk factors, IV fluids)
+        - High (drug therapy requiring intensive monitoring, emergency major surgery, DNR decision)
+
+      ### PLAN (P)
+
+      **Diagnostic Plan:**
+      - Ordered labs with clinical indication for each
+      - Ordered imaging with clinical indication
+      - Referrals with reason and urgency
+      - Other diagnostic tests
+
+      **Therapeutic Plan:**
+      - Medications prescribed (name, dose, route, frequency, duration, #dispensed, refills)
+      - Medications changed (what changed and why)
+      - Procedures performed during the visit
+      - Therapies ordered (PT, OT, etc.)
+      - Durable medical equipment ordered
+
+      **Patient Education and Counseling:**
+      - Topics discussed with the patient
+      - Risk/benefit discussions for medications or procedures
+      - Lifestyle modification recommendations
+      - Time spent on counseling (important for time-based billing)
+      - Written instructions or educational materials provided
+
+      **Follow-up:**
+      - Return visit timing and conditions
+      - Conditions warranting earlier return or emergency care
+      - Coordination of care instructions
+      - Pending results to be communicated
+
+      **Disposition:**
+      - Patient disposition (discharged home, admitted, transferred, AMA)
+      - Condition at discharge/transfer if applicable
+
+      ---
+
+      OUTPUT: Return the complete, properly formatted SOAP note ready for provider review.
+      Flag any sections where documentation was insufficient with [DOCUMENTATION GAP] markers
+      and suggest what additional information the provider should add.
+    model: sonnet
+    max_turns: 12
+
+  - id: diagnosis-coding
+    depends_on: [encounter-parsing]
+    prompt: |
+      You are a certified medical coder (CPC/CCS) with deep expertise in ICD-10-CM coding.
+      Using the parsed encounter data, extract all diagnoses and assign appropriate ICD-10-CM
+      codes with full specificity.
+
+      Parsed encounter data:
+      {steps.encounter-parsing.output}
+
+      Patient context: {input.patient_context}
+      Specialty: {input.specialty}
+
+      IMPORTANT DISCLAIMER: This is an AI-assisted coding suggestion tool. All codes must be
+      validated by a certified medical coder or billing specialist before submission. Incorrect
+      coding can result in claim denials, audits, and compliance penalties.
+
+      ---
+
+      ## ICD-10-CM DIAGNOSIS CODING FRAMEWORK
+
+      ### 1. Primary Diagnosis Selection
+
+      Identify the primary (first-listed) diagnosis following these ICD-10-CM Official Guidelines:
+
+      **Outpatient/Ambulatory Coding Rules:**
+      - Code the diagnosis, condition, problem, or other reason shown in the medical record
+        to be chiefly responsible for the services provided
+      - Code to the highest degree of specificity documented
+      - If the encounter is for a symptom and the definitive diagnosis has not been established,
+        code the symptom (do NOT code "rule out", "suspected", or "probable" diagnoses in
+        outpatient settings)
+      - If the encounter is for a sign or symptom and the provider has established a definitive
+        diagnosis, code the definitive diagnosis, NOT the symptom
+
+      **Inpatient Coding Rules (if applicable):**
+      - The principal diagnosis is "the condition established after study to be chiefly
+        responsible for occasioning the admission"
+      - "Uncertain" or "probable" diagnoses MAY be coded as if confirmed in inpatient settings
+
+      **Primary Diagnosis Selection Criteria:**
+      - Directly supported by the history, examination, and assessment
+      - Documented by the provider as the primary reason for the encounter
+      - Coded to the highest specificity level available (3-7 characters)
+      - Laterality specified when applicable (right, left, bilateral, unspecified)
+      - Episode of care specified when applicable (initial, subsequent, sequela)
+
+      Provide the selected primary diagnosis with:
+      - **ICD-10-CM code** (full code with all characters)
+      - **Code description** (official tabular description)
+      - **Clinical justification** (which specific findings support this code)
+      - **Specificity assessment** (is the documentation sufficient for maximum specificity?)
+      - **Alternative codes considered** and why they were not selected
+
+      ### 2. Secondary Diagnosis Extraction
+
+      Identify ALL additional diagnoses that meet coding criteria:
+
+      **Conditions to Code:**
+      - All conditions actively treated or managed during the encounter
+      - Chronic conditions that affect the current treatment plan
+      - Conditions that increase nursing care, monitoring, or treatment
+      - Conditions addressed by the provider in the assessment/plan
+      - Comorbidities relevant to the clinical picture
+      - Social determinants of health (Z codes) that affect care
+
+      **Conditions NOT to Code:**
+      - Conditions mentioned only in the history that do not affect current care
+      - Conditions fully resolved with no current impact
+      - Conditions the provider documented as "rule out" (outpatient)
+      - Incidental findings not addressed during the encounter
+
+      For each secondary diagnosis, provide:
+      - **ICD-10-CM code** (full specificity)
+      - **Code description**
+      - **Clinical justification** (what documentation supports this code)
+      - **Relationship to primary diagnosis** (comorbidity, complication, contributing factor)
+      - **Sequencing rationale** (why it's sequenced in this position)
+
+      ### 3. ICD-10-CM Coding Specificity Checks
+
+      For EACH code assigned, verify:
+
+      **Laterality:**
+      - Does the code require laterality specification?
+      - Is laterality documented? (right, left, bilateral)
+      - If not documented, use "unspecified" code but flag for provider query
+
+      **Episode of Care:**
+      - For injury codes: Is this initial encounter (A), subsequent encounter (D), or sequela (S)?
+      - For fractures: Is this initial (A), subsequent with routine healing (D), subsequent with
+        delayed healing (G), subsequent with nonunion (K), subsequent with malunion (P), or sequela (S)?
+
+      **Combination Codes:**
+      - Are there combination codes that capture multiple conditions in a single code?
+        (e.g. diabetes with complications, hypertension with heart disease)
+      - Use combination codes when available rather than coding conditions separately
+
+      **Excludes Notes:**
+      - Check Excludes1 notes (conditions that cannot be coded together)
+      - Check Excludes2 notes (conditions not included but CAN be coded together if documented)
+      - Flag any potential coding conflicts
+
+      **Code Also / Code First / Use Additional Code:**
+      - Check if any selected code requires an additional code ("use additional code")
+      - Check if any code must be sequenced as secondary ("code first")
+      - Ensure all mandatory additional codes are included
+
+      ### 4. Specialty-Specific Coding Considerations
+
+      For {input.specialty}, apply these specialty-specific coding rules:
+
+      **General/Family Practice:**
+      - Z codes for preventive encounters (Z00.00, Z00.01)
+      - Chronic disease management codes (E11.x for diabetes, I10 for HTN, etc.)
+      - Screening codes when appropriate
+
+      **Cardiology:**
+      - I20-I25 for ischemic heart disease (specify native/graft, with/without angina)
+      - I50.x for heart failure (specify systolic/diastolic, acute/chronic, laterality)
+      - I48.x for atrial fibrillation (paroxysmal, persistent, chronic, unspecified)
+      - Combination codes for hypertensive heart disease (I11.x)
+
+      **Orthopedics:**
+      - M codes require site specificity (which joint, which bone)
+      - Injury codes (S codes) require laterality and episode of care
+      - External cause codes (W, X, Y) for injuries where applicable
+      - Place of occurrence (Y93) and activity codes when documented
+
+      **Psychiatry:**
+      - F codes with full specificity (F32.x MDD episode severity, F41.x anxiety types)
+      - Z codes for counseling encounters
+      - Substance use codes require current use vs dependence vs abuse distinction
+
+      **Pediatrics:**
+      - Age-specific codes where applicable
+      - Growth and developmental codes (R62.x, F80.x-F89)
+      - Well-child visit codes (Z00.12x)
+
+      **Emergency Medicine:**
+      - Injury codes with external cause (7th character for episode)
+      - Symptom codes when diagnosis not yet established
+      - High-acuity condition codes with full specificity
+
+      ### 5. Hierarchical Condition Category (HCC) Impact
+
+      For each diagnosis, assess HCC relevance:
+      - Does this diagnosis map to an HCC category?
+      - If yes, which HCC and what is its risk adjustment weight?
+      - Is the documentation sufficient to support HCC capture?
+      - Flag diagnoses that could be HCC-relevant with additional documentation specificity
+      - This is especially important for Medicare Advantage and ACA marketplace patients
+
+      ### 6. Coding Summary Table
+
+      Produce a final coding summary:
+
+      | Seq | ICD-10-CM Code | Description | Specificity | HCC | Flags |
+      |-----|---------------|-------------|-------------|-----|-------|
+      | 1   | [primary]     | [desc]      | [full/partial] | [Y/N] | [any issues] |
+      | 2   | [secondary]   | [desc]      | [full/partial] | [Y/N] | [any issues] |
+      | ... | ...           | ...         | ...         | ... | ...   |
+
+      ### 7. Provider Query Recommendations
+
+      If documentation does not support full coding specificity, generate specific
+      provider queries:
+      - What additional information is needed?
+      - Which specific code would change with the additional documentation?
+      - Frame as a clinical documentation improvement (CDI) query, not a coding directive
+
+      ---
+
+      OUTPUT: Return the complete diagnosis coding analysis with all codes, justifications,
+      specificity assessments, and provider queries. This output feeds into compliance review
+      and the final documentation package.
+    model: sonnet
+    max_turns: 12
+
+  - id: procedure-coding
+    depends_on: [encounter-parsing]
+    prompt: |
+      You are a certified professional coder (CPC) specializing in CPT and HCPCS coding.
+      Using the parsed encounter data, determine all billable procedures and services with
+      appropriate CPT/HCPCS codes.
+
+      Parsed encounter data:
+      {steps.encounter-parsing.output}
+
+      Patient context: {input.patient_context}
+      Specialty: {input.specialty}
+
+      IMPORTANT DISCLAIMER: This is an AI-assisted coding suggestion tool. All codes must be
+      validated by a certified medical coder or billing specialist before claim submission.
+
+      ---
+
+      ## CPT/HCPCS PROCEDURE CODING FRAMEWORK
+
+      ### 1. Evaluation and Management (E/M) Level Determination
+
+      This is the most critical coding decision for most encounters. Follow the 2021+ E/M
+      guidelines (AMA/CMS revised framework) which allow coding based on EITHER medical
+      decision-making (MDM) OR total time.
+
+      **Method 1: Medical Decision-Making (MDM) Based Selection**
+
+      Determine the MDM level using the 2021+ three-element table:
+
+      | E/M Level | Problems | Data | Risk |
+      |-----------|----------|------|------|
+      | 99211 (Level 1) | N/A - may not require physician presence | N/A | N/A |
+      | 99212/99202 (Level 2) | Minimal - 1 self-limited problem | Minimal or none | Minimal risk |
+      | 99213/99203 (Level 3) | Low - 2+ self-limited OR 1 stable chronic | Limited | Low risk |
+      | 99214/99204 (Level 4) | Moderate - 1+ chronic with exacerbation OR 2+ stable chronic OR 1 undiagnosed new problem OR 1 acute illness with systemic symptoms | Moderate | Moderate risk |
+      | 99215/99205 (Level 5) | High - 1+ chronic with severe exacerbation OR 1 acute/chronic threat to life/function | Extensive | High risk |
+
+      Assess EACH element separately:
+      - **Number and complexity of problems:** [Evaluate from parsed assessment data]
+      - **Amount and complexity of data:** [Evaluate from parsed diagnostic orders, review of records]
+      - **Risk of complications, morbidity, mortality:** [Evaluate from parsed treatment plan]
+
+      The final MDM level is determined by the MIDDLE of the three elements (2 of 3 must meet
+      or exceed the level).
+
+      **Method 2: Time-Based Selection**
+      If total time on the date of encounter is documented:
+      - 99202/99212: 15-29 min / 10-19 min
+      - 99203/99213: 30-44 min / 20-29 min
+      - 99204/99214: 45-59 min / 30-39 min
+      - 99205/99215: 60-74 min / 40-54 min
+      - Add-on 99417: each additional 15 min beyond 99205/99215
+
+      Time includes: reviewing records, obtaining history, performing exam, counseling,
+      ordering tests, documenting, care coordination. Does NOT include separately reported
+      procedures.
+
+      **New vs Established Patient:**
+      - New patient (992x2-992x5): No professional service from the same provider or
+        same-specialty provider in the same group within 3 years
+      - Established patient (992x1-992x5): Previous professional service within 3 years
+
+      **Selected E/M Code:** [Provide the code with full justification showing which elements
+      support the level, and whether MDM or time method was used]
+
+      ### 2. Procedure Codes (CPT 10000-69999)
+
+      Identify all procedures performed during the encounter:
+
+      For EACH procedure:
+      - **CPT code** with full description
+      - **Clinical indication** linking to a specific diagnosis
+      - **Documentation requirements met** (Y/N with details)
+      - **Modifier requirements:**
+        - -25: Significant, separately identifiable E/M service on same day as procedure
+        - -59: Distinct procedural service
+        - -LT/-RT: Left/right laterality
+        - -76: Repeat procedure by same physician
+        - -77: Repeat procedure by another physician
+        - -22: Increased procedural services (requires documentation of unusual circumstances)
+        - -52: Reduced services
+        - -50: Bilateral procedure
+      - **Global period** (0, 10, or 90 day) and implications for follow-up coding
+      - **Bundling considerations** - is this procedure bundled with another code?
+        Check CCI (Correct Coding Initiative) edits
+
+      ### 3. HCPCS Level II Codes
+
+      Identify applicable HCPCS codes for:
+      - Drugs and biologicals administered (J codes)
+      - Durable medical equipment ordered (E codes)
+      - Supplies used (A codes)
+      - Telehealth modifiers if applicable (95, GT, -FQ)
+      - Other services not covered by CPT
+
+      ### 4. Modifier Analysis
+
+      Provide comprehensive modifier assessment:
+      - **-25 modifier justification**: If both an E/M and a procedure are billed, document
+        why the E/M was a significant, separately identifiable service
+      - **Modifier stacking rules**: Ensure modifiers are applied in correct order (pricing
+        modifiers before informational modifiers)
+      - **Place of service code**: 11 (office), 21 (inpatient), 23 (ER), 02 (telehealth), etc.
+
+      ### 5. National Correct Coding Initiative (NCCI) Edit Check
+
+      For all code combinations, verify:
+      - No column 1/column 2 edit conflicts (bundled procedures)
+      - Mutually exclusive procedure conflicts
+      - Appropriate use of modifiers to bypass edits when clinically justified
+      - Per-day limits on specific codes
+      - Gender and age appropriateness
+
+      ### 6. Charge Capture Summary
+
+      Produce the final charge summary:
+
+      | Line | CPT/HCPCS | Modifier(s) | Description | Dx Pointer | Units | POS |
+      |------|-----------|-------------|-------------|------------|-------|-----|
+      | 1    | [E/M code] | [-25 if applicable] | [desc] | [1,2] | 1 | [POS] |
+      | 2    | [proc code] | [modifiers] | [desc] | [dx pointer] | [units] | [POS] |
+
+      ### 7. Reimbursement Estimate
+
+      Provide estimated reimbursement context:
+      - Medicare physician fee schedule (MPFS) RVU values for each code
+      - Total work RVUs for the encounter
+      - Common denial reasons for these code combinations
+      - Documentation elements most likely to be scrutinized in an audit
+
+      ---
+
+      OUTPUT: Return the complete procedure coding analysis with E/M level justification,
+      all CPT/HCPCS codes, modifiers, NCCI edit analysis, and the charge capture summary.
+    model: haiku
+    max_turns: 10
+
+  - id: compliance-review
+    depends_on: [diagnosis-coding, procedure-coding]
+    prompt: |
+      You are a healthcare compliance officer and certified coding auditor with expertise
+      in CMS documentation requirements, OIG compliance guidelines, and payer-specific
+      audit criteria. Review the diagnosis codes, procedure codes, and clinical documentation
+      for compliance issues, audit risks, and documentation improvement opportunities.
+
+      Diagnosis coding analysis:
+      {steps.diagnosis-coding.output}
+
+      Procedure coding analysis:
+      {steps.procedure-coding.output}
+
+      SOAP note structure:
+      {steps.soap-structuring.output}
+
+      Patient context: {input.patient_context}
+      Specialty: {input.specialty}
+
+      IMPORTANT DISCLAIMER: This compliance review is an AI-assisted tool and does not
+      constitute legal or regulatory advice. All findings should be reviewed by qualified
+      compliance personnel.
+
+      ---
+
+      ## COMPLIANCE REVIEW FRAMEWORK
+
+      ### 1. Documentation Supports Coding (DSC) Audit
+
+      Perform a line-by-line audit verifying that every code is supported by documentation:
+
+      **E/M Level Validation:**
+      - Does the documented history (HPI, ROS, PFSH) support the E/M level selected?
+      - Does the physical examination scope support the E/M level?
+      - Does the medical decision-making complexity align with the E/M level?
+      - If time-based billing was used, is the total time documented and does it match the level?
+      - Common upcoding patterns to check:
+        - 99215 with minimal problems addressed
+        - 99214 without clear moderate-complexity MDM documentation
+        - New patient codes used for established patients
+        - Level 5 visits without high-risk treatment or complex diagnosis
+      - Common downcoding patterns to check:
+        - 99213 when documentation supports 99214 (leaving revenue on the table)
+        - Missing documentation of data review that was performed
+        - Inadequate risk documentation for managed conditions
+
+      **Diagnosis Code Validation:**
+      - For EACH ICD-10-CM code:
+        - Is the condition documented in the clinical note? (not just coded)
+        - Does the provider's assessment explicitly state or clearly imply this diagnosis?
+        - Is the code specificity supported by documentation?
+        - Are laterality, episode, and severity codes supported by documented findings?
+        - Is the code sequencing correct (primary diagnosis first)?
+
+      **Procedure Code Validation:**
+      - For EACH CPT/HCPCS code:
+        - Is the procedure documented with sufficient detail?
+        - Does documentation include: indication, technique, findings, complications (or lack thereof)?
+        - Are time records adequate for time-based codes?
+        - Is the -25 modifier justified by a separate, identifiable E/M service?
+        - Are NCCI edits respected or properly bypassed with documentation?
+
+      ### 2. Medical Necessity Assessment
+
+      Evaluate whether services meet medical necessity criteria:
+
+      **CMS Medical Necessity Standard:**
+      Every service billed must be:
+      1. Safe and effective
+      2. Not experimental or investigational
+      3. Appropriate in terms of type, frequency, extent, site, and duration
+      4. Furnished in accordance with accepted standards of medical practice
+      5. Required for the diagnosis or treatment of the patient's condition
+
+      **Per-Service Medical Necessity Check:**
+      - Does each diagnostic test have a documented clinical indication?
+      - Does each procedure have a documented medical reason?
+      - Are medications prescribed consistent with documented diagnoses?
+      - Are referrals clinically justified based on documented findings?
+      - Would a medical director reviewer find the services reasonable and necessary?
+
+      **LCD/NCD Compliance:**
+      - Check if any ordered tests or procedures have Local Coverage Determinations (LCDs)
+        or National Coverage Determinations (NCDs) with specific documentation requirements
+      - Flag services that commonly require prior authorization
+      - Note diagnosis codes that are covered vs non-covered for specific services
+
+      ### 3. Fraud, Waste, and Abuse (FWA) Risk Assessment
+
+      Screen for patterns that could trigger OIG or MAC audit flags:
+
+      **Red Flags to Check:**
+      - **Upcoding indicators:**
+        - E/M level distribution skewed toward 99215/99205 (should follow bell curve)
+        - All encounters coded at the same level regardless of complexity
+        - E/M level inconsistent with the documented assessment
+      - **Unbundling indicators:**
+        - Separately billing components of a comprehensive service
+        - Using modifier -59 excessively to bypass bundling edits
+        - Billing for individual tests when a panel code is available
+      - **Duplicate billing indicators:**
+        - Same service billed twice on the same date
+        - Similar services billed on consecutive days without clear clinical justification
+      - **Phantom billing indicators:**
+        - Services coded without supporting documentation
+        - Templated notes that appear copy-pasted without patient-specific details
+      - **Medical identity concerns:**
+        - Documentation inconsistencies (e.g. male patient with female-specific exam)
+        - Age-inappropriate services or diagnoses
+
+      **Audit Risk Score:**
+      Calculate an overall audit risk score (Low/Medium/High/Critical) based on:
+      - Number of coding anomalies identified
+      - Severity of documentation gaps
+      - Presence of known audit trigger patterns
+      - Dollar value of services (higher value = more scrutiny)
+
+      ### 4. HIPAA Documentation Compliance
+
+      Verify the clinical note meets HIPAA documentation standards:
+      - Minimum necessary standard - does the note contain only clinically relevant information?
+      - Is patient consent for treatment documented?
+      - Are psychotherapy notes (if applicable) separated from the medical record?
+      - Is there evidence of appropriate information sharing and release practices?
+
+      ### 5. Specialty-Specific Compliance Checks
+
+      For {input.specialty}, verify:
+
+      **General Practice:**
+      - AWV (Annual Wellness Visit) vs routine physical coding accuracy
+      - Chronic care management (CCM) documentation requirements
+      - Preventive vs diagnostic service distinction
+
+      **Cardiology:**
+      - Stress test interpretation and facility/professional component billing
+      - Cardiac catheterization documentation requirements
+      - Pacemaker/ICD follow-up coding compliance
+
+      **Orthopedics:**
+      - Global surgical package compliance (no separate E/M within global period without -24/-25)
+      - Fracture care coding (initial treatment vs subsequent)
+      - DME documentation requirements
+
+      **Psychiatry:**
+      - Psychotherapy add-on codes (+90833, +90836, +90838) properly paired with E/M
+      - Crisis intervention documentation requirements
+      - Medication management documentation
+
+      **Pediatrics:**
+      - Well-child visit (preventive) vs problem visit coding
+      - Immunization administration coding accuracy
+      - Developmental screening documentation
+
+      **Emergency Medicine:**
+      - Critical care time documentation (99291/99292)
+      - Observation care coding accuracy
+      - Trauma activation fee documentation
+
+      ### 6. Clinical Documentation Improvement (CDI) Opportunities
+
+      Identify documentation improvements that would:
+      - Support a more accurate (potentially higher) E/M level
+      - Enable more specific ICD-10-CM coding (especially HCC capture)
+      - Reduce audit risk
+      - Improve quality measure reporting
+
+      For each opportunity:
+      - What documentation is missing or insufficient?
+      - What should the provider document?
+      - What is the estimated financial impact?
+      - What is the compliance risk if not addressed?
+
+      ### 7. Compliance Summary Report
+
+      Produce a final compliance scorecard:
+
+      | Category | Status | Risk Level | Issues Found | Recommendations |
+      |----------|--------|------------|--------------|-----------------|
+      | E/M Level | [Pass/Warning/Fail] | [Low/Med/High] | [count] | [summary] |
+      | Dx Coding | [Pass/Warning/Fail] | [Low/Med/High] | [count] | [summary] |
+      | Procedure Coding | [Pass/Warning/Fail] | [Low/Med/High] | [count] | [summary] |
+      | Medical Necessity | [Pass/Warning/Fail] | [Low/Med/High] | [count] | [summary] |
+      | FWA Risk | [Pass/Warning/Fail] | [Low/Med/High] | [count] | [summary] |
+      | HIPAA | [Pass/Warning/Fail] | [Low/Med/High] | [count] | [summary] |
+
+      Overall Compliance Score: [X/100]
+      Audit Risk Assessment: [Low/Medium/High/Critical]
+
+      ---
+
+      OUTPUT: Return the complete compliance review with all findings, risk assessments,
+      and CDI recommendations. This is a critical quality gate before final documentation
+      output.
+    model: sonnet
+    max_turns: 12
+
+  - id: documentation-output
+    depends_on: [soap-structuring, compliance-review]
+    prompt: |
+      You are a clinical documentation specialist producing the final, provider-ready
+      documentation package. Integrate the SOAP note with compliance findings to produce
+      a polished, audit-ready clinical document.
+
+      Structured SOAP note:
+      {steps.soap-structuring.output}
+
+      Compliance review findings:
+      {steps.compliance-review.output}
+
+      Diagnosis codes:
+      {steps.diagnosis-coding.output}
+
+      Procedure codes:
+      {steps.procedure-coding.output}
+
+      Patient context: {input.patient_context}
+      Specialty: {input.specialty}
+      Documentation standard: {input.documentation_standard}
+
+      IMPORTANT DISCLAIMER: This is an AI-assisted documentation tool. ALL content must be
+      reviewed, verified, and signed by the treating provider before entry into the electronic
+      health record (EHR). This output does not constitute a medical record until provider
+      attestation.
+
+      ---
+
+      ## FINAL DOCUMENTATION OUTPUT FRAMEWORK
+
+      ### 1. Finalized Clinical Note
+
+      Produce the complete clinical note incorporating all compliance recommendations.
+      Address every [DOCUMENTATION GAP] identified in the SOAP structuring step with:
+      - A suggested text addition (clearly marked as [PROVIDER TO VERIFY])
+      - An explanation of why this documentation is needed
+
+      The final note should follow {input.documentation_standard} format with:
+      - Clean, professional medical writing
+      - Proper use of medical terminology
+      - No abbreviations that could be ambiguous (use only approved abbreviation list)
+      - All findings appropriately qualified (e.g. "no apparent" vs making definitive statements
+        that exceed the examination performed)
+
+      ### 2. Coding Summary Attachment
+
+      Produce a clean coding summary suitable for the billing department:
+
+      **Diagnosis Codes:**
+      | Seq | ICD-10-CM | Description | New/Est | HCC |
+      |-----|-----------|-------------|---------|-----|
+      [List all diagnosis codes from the coding analysis]
+
+      **Procedure Codes:**
+      | CPT/HCPCS | Modifier(s) | Description | Dx Pointer | Units |
+      |-----------|-------------|-------------|------------|-------|
+      [List all procedure codes from the coding analysis]
+
+      **Billing Notes:**
+      - Place of service code
+      - Special billing considerations (e.g. modifier justifications, time documentation)
+      - Prior authorization requirements flagged
+      - Expected reimbursement range
+
+      ### 3. Compliance Attestation Checklist
+
+      Produce a checklist for the provider to verify before signing:
+
+      - [ ] All diagnoses listed are accurate and supported by my examination
+      - [ ] The E/M level reflects the complexity of this encounter
+      - [ ] All procedures documented were performed as described
+      - [ ] Medications prescribed are accurate with correct dosages
+      - [ ] Patient education and counseling are accurately described
+      - [ ] Follow-up plan is complete and accurate
+      - [ ] No copied-forward text from prior encounters that does not apply today
+      - [ ] Time spent (if time-based billing) is accurate
+      - [ ] Medical necessity is established for all ordered tests and procedures
+
+      ### 4. Quality Measure Extraction
+
+      Identify any quality measures (HEDIS, MIPS, star ratings) that apply to this encounter:
+      - Which quality measures were addressed?
+      - Were they documented sufficiently to count for reporting?
+      - What additional documentation would capture quality measure credit?
+      - Specific measure IDs and performance criteria met/not met
+
+      ### 5. Follow-Up Action Items
+
+      Generate a structured action list:
+
+      **For the Provider:**
+      - Documentation gaps to address before signing
+      - CDI queries requiring clinical clarification
+      - Pending diagnostic results to follow up on
+
+      **For the Billing Team:**
+      - Codes ready for submission
+      - Codes requiring additional documentation before submission
+      - Prior authorizations to obtain
+      - Appeals to prepare (if relevant for known denial patterns)
+
+      **For the Care Coordination Team:**
+      - Referrals to schedule
+      - Follow-up appointments to book
+      - Patient education materials to send
+      - Prescription coordination items
+
+      ### 6. Risk and Liability Documentation
+
+      Flag any elements that warrant attention for risk management:
+      - Were informed consent elements documented for procedures?
+      - Was shared decision-making documented for significant treatment decisions?
+      - Were medication allergies checked and documented?
+      - Were safety screenings performed (fall risk, depression screen, suicide screen) as
+        applicable to the encounter type and specialty?
+      - Were abnormal findings followed up with an appropriate plan?
+
+      ---
+
+      ## FINAL OUTPUT STRUCTURE
+
+      Present the complete documentation package in this order:
+      1. **CLINICAL NOTE** - The finalized, provider-ready note
+      2. **CODING SUMMARY** - Clean table of all diagnosis and procedure codes
+      3. **COMPLIANCE SCORECARD** - Summary of the compliance review
+      4. **PROVIDER CHECKLIST** - Items requiring provider verification
+      5. **ACTION ITEMS** - Follow-up tasks by team
+      6. **DOCUMENTATION IMPROVEMENT NOTES** - Suggestions for future encounters
+
+      ---
+
+      OUTPUT: Deliver the complete, production-ready documentation package. Format in clean
+      markdown with clear section separation. This is the final deliverable that the provider
+      will review, verify, and attest to before entry into the EHR system.
+    model: sonnet
+    max_turns: 12

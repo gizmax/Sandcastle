@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --color-background: #FAFAF9;
+  --color-background: #FAFAFA;
   --color-surface: #FFFFFF;
-  --color-border: #E7E5E4;
-  --color-foreground: #1C1917;
-  --color-muted: #78716C;
-  --color-muted-foreground: #A8A29E;
+  --color-border: #E5E5E5;
+  --color-foreground: #171717;
+  --color-muted: #737373;
+  --color-muted-foreground: #A3A3A3;
   --color-accent: #F59E0B;
   --color-accent-hover: #D97706;
   --color-accent-foreground: #FFFFFF;
@@ -18,26 +18,26 @@
   --color-warning: #F59E0B;
   --color-running: #3B82F6;
   --color-queued: #A78BFA;
-  --color-input: #E7E5E4;
+  --color-input: #E5E5E5;
   --color-ring: #F59E0B;
 
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
 .dark {
-  --color-background: #1C1917;
-  --color-surface: #292524;
-  --color-border: #44403C;
-  --color-foreground: #FAFAF9;
-  --color-muted: #A8A29E;
-  --color-muted-foreground: #78716C;
+  --color-background: #0A0A0A;
+  --color-surface: #171717;
+  --color-border: #262626;
+  --color-foreground: #FAFAFA;
+  --color-muted: #A3A3A3;
+  --color-muted-foreground: #737373;
   --color-accent: #FBBF24;
   --color-accent-hover: #F59E0B;
-  --color-accent-foreground: #1C1917;
-  --color-input: #44403C;
+  --color-accent-foreground: #171717;
+  --color-input: #262626;
   --color-ring: #FBBF24;
 }
 
@@ -45,6 +45,23 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   min-height: 100vh;
+}
+
+/* Utility: monospace for data values */
+.font-data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Utility: amber glow for featured elements */
+.glow-accent {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.15), 0 0 40px rgba(245, 158, 11, 0.05);
+}
+
+/* Utility: grid dot pattern background */
+.bg-grid {
+  background-image: radial-gradient(circle, var(--color-border) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 ::-webkit-scrollbar {
@@ -88,6 +105,29 @@ body {
   fill: inherit !important;
 }
 
+/* Pulse glow animation for loading spinner */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.35);
+  }
+}
+
+/* Pulsing amber border glow for running step nodes */
+@keyframes step-running-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 12px 2px rgba(245, 158, 11, 0.4);
+  }
+}
+.step-running-glow {
+  animation: step-running-pulse 2s ease-in-out infinite;
+}
+
 /* Toast fade-in animation */
 @keyframes fadeIn {
   from {
@@ -97,5 +137,208 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ──── Onboarding wizard animations ──── */
+
+@keyframes wizard-step-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in-bounce {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.15); }
+  80%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+@keyframes fade-in-left {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes connector-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes stroke-draw {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes step-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.25); }
+  50%      { box-shadow: 0 0 8px 3px rgba(245, 158, 11, 0.3); }
+}
+
+@keyframes shimmer-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes terminal-glow {
+  0%, 100% { box-shadow: inset 0 0 20px rgba(245, 158, 11, 0.03), 0 0 8px rgba(245, 158, 11, 0.05); }
+  50%      { box-shadow: inset 0 0 20px rgba(245, 158, 11, 0.06), 0 0 12px rgba(245, 158, 11, 0.1); }
+}
+
+@keyframes terminal-success-flash {
+  0%   { box-shadow: inset 0 0 30px rgba(34, 197, 94, 0.08); }
+  100% { box-shadow: inset 0 0 0px rgba(34, 197, 94, 0); }
+}
+
+@keyframes terminal-error-flash {
+  0%   { box-shadow: inset 0 0 30px rgba(239, 68, 68, 0.08); }
+  100% { box-shadow: inset 0 0 0px rgba(239, 68, 68, 0); }
+}
+
+@keyframes log-line-enter {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes confetti-fall {
+  0%   { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0; scale: 0.5; }
+}
+
+@keyframes ambient-glow {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%      { opacity: 0.8; transform: scale(1.05); }
+}
+
+@keyframes ring-appear {
+  from { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  to   { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }
+}
+
+/* Step entrance */
+.wizard-step-enter {
+  animation: wizard-step-enter 0.35s ease-out both;
+}
+
+/* Stagger children (top-to-bottom) */
+.stagger-children > *:nth-child(1) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 360ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 420ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 480ms; }
+.stagger-children > * {
+  animation: fade-in-up 0.35s ease-out both;
+}
+
+/* Stagger children (left-to-right) */
+.stagger-left > *:nth-child(1) { animation-delay: 100ms; }
+.stagger-left > *:nth-child(2) { animation-delay: 200ms; }
+.stagger-left > *:nth-child(3) { animation-delay: 300ms; }
+.stagger-left > * {
+  animation: fade-in-left 0.35s ease-out both;
+}
+
+/* Button shimmer sweep */
+.btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.btn-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+  animation: shimmer-sweep 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Terminal border states */
+.terminal-running {
+  animation: terminal-glow 2s ease-in-out infinite;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+.terminal-success {
+  animation: terminal-success-flash 0.8s ease-out both;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.terminal-error {
+  animation: terminal-error-flash 0.8s ease-out both;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* SVG checkmark stroke draw */
+.checkmark-draw {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: stroke-draw 0.4s ease-out 0.15s both;
+}
+
+/* Elastic scale entrance */
+.scale-in-bounce {
+  animation: scale-in-bounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Background glow pulse */
+.ambient-glow {
+  animation: ambient-glow 3s ease-in-out infinite;
+}
+
+/* Progress bar current step pulse */
+.step-indicator-pulse {
+  animation: step-pulse 2s ease-in-out infinite;
+}
+
+/* Card hover lift */
+.card-hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+/* Card selected ring */
+.card-selected {
+  animation: ring-appear 0.3s ease-out both;
+  transform: scale(1.02);
+}
+
+/* Accessibility: disable animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .wizard-step-enter,
+  .stagger-children > *,
+  .stagger-left > *,
+  .scale-in-bounce,
+  .checkmark-draw,
+  .ambient-glow,
+  .step-indicator-pulse,
+  .card-selected,
+  .terminal-running,
+  .terminal-success,
+  .terminal-error {
+    animation: none !important;
+  }
+  .btn-shimmer::after {
+    animation: none !important;
+  }
+  .card-hover-lift:hover {
+    transform: none;
+  }
+}
+
+/* Mobile: disable resource-heavy effects */
+@media (max-width: 640px) {
+  .ambient-glow {
+    animation: none !important;
+  }
+  .btn-shimmer::after {
+    animation: none !important;
   }
 }

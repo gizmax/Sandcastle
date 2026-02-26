@@ -1,0 +1,612 @@
+# name: Vendor Renewal Negotiator
+# description: Monitor SaaS and vendor contract renewals, analyze usage vs terms, benchmark pricing against market rates, identify leverage points, and draft counter-proposals
+# tags: [Procurement, SaaS, Negotiation, Vendor, Cost Optimization]
+# category: hr_legal
+
+name: vendor-renewal-negotiator
+description: Monitor SaaS and vendor contract renewals, analyze usage vs terms, benchmark pricing against market rates, identify leverage points, and draft counter-proposals
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["vendor_list", "company_name"]
+  properties:
+    vendor_list:
+      type: string
+      description: "Comma-separated list of vendor/SaaS products up for renewal (e.g. 'Salesforce, Snowflake, Datadog, Slack, Zoom')"
+    company_name:
+      type: string
+      description: "Your company name for the negotiation context"
+    contract_data:
+      type: string
+      description: "Contract details: renewal dates, current annual spend per vendor, contract length, payment terms (e.g. 'Salesforce: $240k/yr, renews June 2026, 3yr term; Datadog: $180k/yr, renews Aug 2026, 1yr term')"
+    usage_metrics:
+      type: string
+      description: "Current usage data per vendor: active users, license utilization, feature adoption, storage consumption (e.g. 'Salesforce: 150/200 licenses used, Enterprise tier; Datadog: 80 hosts monitored, 500GB/day ingestion')"
+    negotiation_priority:
+      type: string
+      description: "Primary negotiation objective: cost_reduction, flexibility, feature_upgrade, term_optimization, consolidation"
+      default: "cost_reduction"
+
+steps:
+  - id: contract-analysis
+    prompt: |
+      Perform a comprehensive analysis of each vendor contract to identify terms,
+      obligations, risks, and negotiation-relevant provisions.
+
+      Vendors: {input.vendor_list}
+      Company: {input.company_name}
+      Contract data: {input.contract_data}
+      Usage metrics: {input.usage_metrics}
+      Negotiation priority: {input.negotiation_priority}
+
+      For each vendor in the list, analyze the following:
+
+      **1. Contract Structure Analysis**
+      Dissect the typical contract structure for each vendor:
+      - Master Service Agreement (MSA) terms and conditions
+      - Order form / subscription agreement specifics
+      - Service Level Agreement (SLA) commitments and remedies
+      - Data Processing Agreement (DPA) and privacy terms
+      - Acceptable Use Policy (AUP) implications
+      - Support and maintenance terms (response times, escalation paths)
+
+      For each contract, identify these critical clauses:
+      - Term and renewal provisions:
+        * Initial term length and renewal term length
+        * Auto-renewal clause (is it automatic? what is the notice period?)
+        * CRITICAL: Days remaining before auto-renewal lock-in date
+        * Right to terminate for convenience (with what notice and penalties?)
+        * Right to terminate for cause (what constitutes cause?)
+      - Pricing and payment terms:
+        * Base subscription price and pricing model (per-seat, per-unit, flat fee)
+        * Price escalation clauses (annual increase caps, CPI adjustments)
+        * Overage charges and metering methodology
+        * Volume discount tiers and commitment thresholds
+        * Payment terms (net-30, net-60, annual prepay discounts)
+        * Late payment penalties
+      - Commitment and minimum terms:
+        * Minimum seat/unit commitments
+        * Ramp schedule requirements
+        * True-up and true-down provisions (can you reduce seats mid-term?)
+        * Shelf-ware risk (paying for unused capacity)
+
+      **2. Auto-Renewal Trap Detection**
+      For each vendor, assess the auto-renewal risk:
+      - Exact auto-renewal date and notification deadline
+      - Consequence of missing the notification deadline (locked in for another term?)
+      - Whether the renewal term includes price increases
+      - Whether the renewal term changes other conditions
+      - Calendar the critical dates with 90-day, 60-day, and 30-day warnings
+      - Draft the non-renewal notification letter template (to preserve optionality
+        even if ultimately renewing - always send non-renewal notice to maintain leverage)
+
+      **3. Termination Cost Analysis**
+      Calculate the total cost to exit each vendor:
+      - Early termination fees or penalties
+      - Remaining contract obligation payments
+      - Data migration costs (vendor charges for data export)
+      - Implementation costs to move to an alternative
+      - Training costs for the replacement solution
+      - Productivity loss during transition period
+      - Compare termination cost to remaining contract value
+
+      **4. SLA Performance Review**
+      Assess whether each vendor is meeting their SLA commitments:
+      - Uptime/availability commitments vs. actual performance
+      - Response time commitments vs. actual response times
+      - Resolution time commitments vs. actual resolution times
+      - SLA credit calculations (has the vendor owed credits?)
+      - Documented incidents and outages during the contract period
+      - Support quality assessment (ticket volume, escalation frequency)
+      - Feature delivery commitments (roadmap promises vs. actual delivery)
+
+      **5. Risk Assessment**
+      For each vendor, evaluate:
+      - Vendor financial stability and viability
+      - Market position (leader, challenger, niche, declining)
+      - Lock-in severity (how dependent is {input.company_name} on this vendor?)
+      - Data portability (can data be exported easily in standard formats?)
+      - Integration depth (how many systems connect to this vendor?)
+      - Regulatory compliance status (SOC 2, ISO 27001, GDPR, HIPAA)
+      - Single point of failure risk
+
+      Produce a structured contract analysis for each vendor with risk ratings
+      and critical dates highlighted.
+    model: sonnet
+    max_turns: 10
+
+  - id: usage-audit
+    depends_on: [contract-analysis]
+    prompt: |
+      Conduct a detailed usage audit comparing actual utilization against
+      contracted entitlements for each vendor. The goal is to identify waste,
+      right-sizing opportunities, and usage-based negotiation leverage.
+
+      Contract analysis: {steps.contract-analysis.output}
+      Vendors: {input.vendor_list}
+      Company: {input.company_name}
+      Usage metrics: {input.usage_metrics}
+      Contract data: {input.contract_data}
+
+      Perform the following usage analysis for each vendor:
+
+      **1. License Utilization Analysis**
+      - Total licenses/seats purchased vs. actively used
+      - License utilization rate (percentage)
+      - Identify inactive users (no login in 30/60/90 days)
+      - Identify low-activity users (logged in but minimal feature usage)
+      - License type distribution (are expensive Enterprise licenses being used
+        by people who only need Standard features?)
+      - Seasonal usage patterns (peak months vs. low months)
+      - Department-level usage breakdown
+      - User growth trajectory (are you adding or losing users?)
+
+      **2. Feature Adoption Analysis**
+      - Percentage of purchased features actually used
+      - Features included in the current tier that are never used
+      - Features that drive the most value (most used, most critical)
+      - Features from a lower tier that would satisfy actual needs
+      - Premium features that justify the premium pricing vs. those that do not
+      - Features on the vendor roadmap that {input.company_name} is waiting for
+      - Feature parity with competitors (could a cheaper alternative offer
+        the features actually being used?)
+
+      **3. Consumption and Capacity Analysis**
+      For usage-based or metered services:
+      - Current consumption level vs. contracted capacity
+      - Consumption trend over the past 12 months (growing, stable, declining)
+      - Peak usage periods and whether committed capacity was exceeded
+      - Overage charges incurred during the contract period
+      - Right-sized capacity recommendation based on actual usage patterns
+      - Cost per unit of actual consumption vs. contracted unit price
+      - Reserved capacity vs. on-demand pricing comparison
+
+      **4. Waste Identification**
+      Quantify the total waste for each vendor:
+      - Unused licenses dollar value (number of unused seats x per-seat cost)
+      - Unused features dollar value (difference between current tier and
+        the tier that covers actual feature needs)
+      - Over-provisioned capacity dollar value
+      - Redundant tools (multiple vendors providing overlapping functionality)
+      - Total annual waste across all identified categories
+
+      **5. Right-Sizing Recommendations**
+      For each vendor, recommend the optimal configuration:
+      - Optimal license count (with 10-15% headroom for growth)
+      - Optimal tier/plan (matching actual feature needs)
+      - Optimal capacity commitment (based on actual consumption patterns)
+      - Estimated annual savings from right-sizing
+      - Implementation approach (immediate change vs. gradual reduction)
+      - Risk of right-sizing too aggressively (what if usage grows?)
+
+      **6. Usage-to-License Ratio Benchmarking**
+      Compare {input.company_name}'s utilization against industry benchmarks:
+      - Typical utilization rates for each vendor's product category
+      - Whether {input.company_name} is over-licensed or under-licensed vs. peers
+      - Industry-standard seat-to-employee ratios for each product category
+      - Cost-per-employee benchmarks for each product category
+
+      Produce a usage audit report with quantified waste, right-sizing
+      recommendations, and estimated savings for each vendor.
+    model: haiku
+    max_turns: 10
+
+  - id: market-benchmarking
+    depends_on: [contract-analysis]
+    prompt: |
+      Benchmark each vendor's pricing against market rates, competitive alternatives,
+      and industry standards. This data provides the factual foundation for
+      price-based negotiation leverage.
+
+      Contract analysis: {steps.contract-analysis.output}
+      Vendors: {input.vendor_list}
+      Company: {input.company_name}
+      Contract data: {input.contract_data}
+      Negotiation priority: {input.negotiation_priority}
+
+      Conduct the following market benchmarking analysis:
+
+      **1. Pricing Model Deconstruction**
+      For each vendor, deconstruct their pricing model:
+      - Published list pricing for all tiers (found on pricing pages, G2, vendor docs)
+      - Pricing model type: per-seat, per-unit, consumption-based, flat fee, hybrid
+      - Pricing currency and region-specific pricing variations
+      - Annual vs. monthly pricing discount (typically 15-20% for annual prepay)
+      - Volume discount structure and breakpoints
+      - Bundling options that could reduce overall cost
+      - Add-on pricing for premium features, support, storage, etc.
+
+      Compare {input.company_name}'s contracted price to list price:
+      - Current discount off list price (percentage)
+      - How the discount compares to typical enterprise discounts for this vendor
+      - Whether the discount is competitive for {input.company_name}'s size and spend
+
+      **2. Competitive Alternative Analysis**
+      For each vendor, identify 3-5 competitive alternatives:
+      - Alternative product name and vendor
+      - Feature comparison (must-have features present/absent)
+      - Pricing comparison (published pricing at equivalent scale)
+      - Market positioning (leader, strong performer, contender, emerging)
+      - Migration complexity (easy, moderate, complex, very complex)
+      - Customer references and G2/Gartner ratings
+      - Key advantages over the incumbent
+      - Key disadvantages vs. the incumbent
+      - Estimated total cost of ownership (TCO) including migration costs
+
+      For the best 1-2 alternatives per vendor:
+      - Estimated first-year cost at {input.company_name}'s scale
+      - Estimated 3-year TCO vs. incumbent renewal
+      - Key risks and deal-breakers
+      - Would this vendor realistically serve as a credible negotiation threat?
+
+      **3. Market Rate Benchmarking**
+      Research market pricing data for each product category:
+      - Average price per seat/unit for this product category at {input.company_name}'s scale
+      - Median discount off list price for companies of similar size
+      - Price trends - are prices in this category rising, stable, or falling?
+      - Major pricing changes by vendors in this category in the past 12 months
+      - Impact of AI and new market entrants on pricing dynamics
+      - Open-source or self-hosted alternatives and their TCO
+
+      Data sources to reference:
+      - Vendr, Zylo, Productiv benchmarking data
+      - G2 and TrustRadius pricing data
+      - Gartner and Forrester market reports
+      - Industry analyst pricing surveys
+      - Public pricing pages and vendor documentation
+      - Peer company benchmarks (similar size, similar industry)
+
+      **4. SaaS Category Pricing Benchmarks**
+      For each product category, provide benchmark ranges:
+      - CRM: typical per-seat pricing range for SMB / mid-market / enterprise
+      - Data/Analytics: typical pricing models and cost-per-TB benchmarks
+      - DevOps/Observability: typical per-host/per-GB pricing ranges
+      - Communication/Collaboration: typical per-seat pricing ranges
+      - Security: typical pricing models and cost benchmarks
+      - HR/HCM: typical per-employee pricing ranges
+      - Marketing/Advertising: typical pricing models
+
+      **5. Negotiation Leverage from Market Data**
+      For each vendor, identify pricing-based leverage points:
+      - If paying above market rate: quantify the overpayment ($ and %)
+      - If competitive alternatives are cheaper: document the specific savings
+      - If the market is trending toward lower prices: cite evidence
+      - If the vendor recently raised prices: compare to competitor price stability
+      - If open-source alternatives are viable: quantify the TCO difference
+      - If the vendor has a known discounting playbook: describe common discounts
+        (e.g., Salesforce end-of-quarter deals, multi-year commitment discounts)
+
+      **6. Total Spend Optimization Model**
+      Create a spend optimization model across all vendors:
+      - Current total annual spend across all listed vendors
+      - Optimized annual spend after right-sizing and renegotiation
+      - Projected savings by vendor (conservative, moderate, aggressive scenarios)
+      - Vendor consolidation opportunities (replacing 2-3 tools with one platform)
+      - Multi-year commitment savings vs. flexibility trade-off analysis
+      - Payment term optimization (prepay discounts, quarterly vs. annual)
+      - Total estimated savings potential ($ and % of current spend)
+
+      Produce a market benchmarking report with specific pricing data points
+      that can be used at the negotiation table.
+    model: sonnet
+    max_turns: 10
+
+  - id: leverage-identification
+    depends_on: [contract-analysis]
+    prompt: |
+      Identify all negotiation leverage points for each vendor renewal. Leverage
+      is anything that gives {input.company_name} power in the negotiation.
+
+      Contract analysis: {steps.contract-analysis.output}
+      Vendors: {input.vendor_list}
+      Company: {input.company_name}
+      Contract data: {input.contract_data}
+      Negotiation priority: {input.negotiation_priority}
+
+      Analyze the following categories of leverage:
+
+      **1. Buyer Power Assessment**
+      Evaluate {input.company_name}'s negotiating power with each vendor:
+      - Spend significance: What percentage of the vendor's revenue does
+        {input.company_name} represent? Larger customers have more leverage.
+      - Growth potential: Is {input.company_name} likely to expand usage?
+        Vendors value growth accounts disproportionately.
+      - Reference value: Would {input.company_name} be a valuable logo or case study?
+        Brand names in attractive industries have leverage.
+      - Multi-product potential: Could {input.company_name} expand to other products
+        in the vendor's portfolio? Cross-sell opportunity is powerful leverage.
+      - Competitive deal pressure: Is {input.company_name} evaluating alternatives?
+        Genuine competitive evaluation (not bluffing) is the strongest leverage.
+      - Contract timing: How close to renewal? Early engagement (90+ days out)
+        gives more leverage than last-minute negotiations.
+
+      **2. Vendor Weakness Identification**
+      For each vendor, identify weaknesses that create leverage:
+      - Quarterly/annual revenue pressure: Is the vendor's sales team under pressure
+        to close deals by end of quarter/year? Public companies have predictable
+        pressure periods.
+      - Churn risk perception: How worried is the vendor about losing this account?
+        Vendors in competitive markets are more anxious about churn.
+      - Product gaps: Are there known product deficiencies that the vendor has failed
+        to address? These create ammunition for discount requests.
+      - Service failures: Have there been outages, support failures, or SLA breaches?
+        Documented service failures are powerful leverage.
+      - Leadership changes: Has the vendor had recent exec turnover, layoffs, or
+        organizational changes that signal instability?
+      - Market pressure: Is the vendor facing competitive threats that make retention
+        a strategic priority?
+      - Financial pressure: Is the vendor under investor pressure to demonstrate
+        retention metrics (NRR, churn rate)?
+      - Pricing controversy: Has the vendor faced public backlash for price increases?
+
+      **3. BATNA (Best Alternative to Negotiated Agreement) Development**
+      For each vendor, develop a concrete BATNA:
+      - The best alternative if negotiation fails (which competitor, at what price)
+      - The true cost of switching (migration, retraining, lost productivity)
+      - The timeline for switching (can it be done before renewal?)
+      - Whether the BATNA is credible (would {input.company_name} actually switch?)
+      - How to communicate the BATNA without bluffing (authenticity matters)
+      - Walk-away point: What is the maximum acceptable price? At what point does
+        switching become the rational choice?
+
+      **4. Timing and Process Leverage**
+      - Vendor fiscal year end dates (deals are best near fiscal year end)
+      - Sales rep quota pressure periods
+      - Product launch timing (vendors may offer migration incentives before
+        a major platform update)
+      - Multi-vendor negotiation timing (negotiate with vendors simultaneously
+        to create perceived urgency)
+      - Renewal notice timing (have non-renewal notices been sent? if not, send now)
+
+      **5. Relationship and Organizational Leverage**
+      - Executive sponsor relationships (CSO to CSO conversations signal seriousness)
+      - Customer advisory board membership (offers influence and visibility)
+      - Case study and reference leverage (offer in exchange for concessions)
+      - Community influence (conference speaking, blog posts about the vendor)
+      - Internal champion within the vendor organization (identify allies)
+      - Procurement team authority (does procurement have mandate to demand discounts?)
+
+      **6. Contractual Leverage**
+      - Existing favorable terms that should be preserved (grandfather clauses)
+      - Unfavorable terms that justify renegotiation (price escalation, auto-renewal)
+      - SLA breach history that entitles credits or concessions
+      - Regulatory changes that require contract modifications
+      - Scope changes that warrant pricing adjustments
+      - Mergers or acquisitions (by either party) that trigger change of control clauses
+      - Volume changes that should trigger tier repricing
+
+      **7. Leverage Scoring Matrix**
+      For each vendor, score total leverage on a 1-10 scale:
+      - Buyer power score (1-10)
+      - Vendor weakness score (1-10)
+      - BATNA strength score (1-10)
+      - Timing advantage score (1-10)
+      - Relationship leverage score (1-10)
+      - Contractual leverage score (1-10)
+      - Composite leverage score (weighted average)
+      - Recommended negotiation intensity (light touch / standard / aggressive / hardball)
+
+      Produce a leverage assessment report with specific, actionable leverage
+      points for each vendor ranked by impact potential.
+    model: sonnet
+    max_turns: 10
+
+  - id: counter-proposal-drafting
+    depends_on: [market-benchmarking, leverage-identification]
+    prompt: |
+      Draft detailed counter-proposals for each vendor renewal negotiation,
+      incorporating market benchmarks and identified leverage points.
+
+      Market benchmarking: {steps.market-benchmarking.output}
+      Leverage analysis: {steps.leverage-identification.output}
+      Usage audit: {steps.usage-audit.output}
+      Contract analysis: {steps.contract-analysis.output}
+      Vendors: {input.vendor_list}
+      Company: {input.company_name}
+      Negotiation priority: {input.negotiation_priority}
+
+      For each vendor, produce the following negotiation documents:
+
+      **1. Counter-Proposal Term Sheet**
+      Draft a formal counter-proposal with these elements:
+      - Proposed pricing:
+        * Target price (aggressive but defensible - typically 15-30% below current)
+        * Acceptable price (realistic outcome - typically 5-15% below current)
+        * Walk-away price (maximum you would accept)
+        * Justification for proposed pricing (market data, competitive quotes, usage data)
+      - Proposed term length:
+        * Recommended term (1-year for flexibility, 3-year for deeper discounts)
+        * Term length trade-offs analysis
+      - Proposed seat/unit count:
+        * Right-sized based on usage audit
+        * Growth buffer recommendation
+        * True-down rights (ability to reduce mid-term)
+      - Proposed SLA improvements:
+        * Specific SLA terms to strengthen
+        * Credit mechanisms for SLA breaches
+        * Escalation process improvements
+      - Proposed payment terms:
+        * Payment schedule (quarterly vs. annual, prepay discounts)
+        * Late payment grace period
+        * Invoice dispute process
+
+      **2. Anchor Pricing Strategy**
+      Develop the anchoring approach for each negotiation:
+      - Opening anchor price (set aggressively low to frame the negotiation range)
+      - Supporting data for the anchor (competitive quotes, market benchmarks)
+      - Concession strategy (what to give up and in what order)
+      - Planned concession milestones:
+        * Concession 1: Move from anchor toward target (give X, get Y)
+        * Concession 2: Move from target toward acceptable (give X, get Y)
+        * Final concession: Reach acceptable price (give X, get Y)
+      - Non-price concessions to offer (case study, longer term, reference, advisory board)
+      - Non-price concessions to request (premium support, extra storage, training credits,
+        early access to features, dedicated success manager)
+
+      **3. Negotiation Scripts**
+      Draft specific talking points for key negotiation moments:
+
+      Opening statement script:
+      "We value our partnership with [vendor], and we want to find a renewal structure
+      that works for both sides. However, we need to align our investment with the
+      value we are receiving and the market reality we see..."
+      [Continue with 5-7 key talking points with specific data references]
+
+      Price pushback response script:
+      When the vendor says "this is our best price":
+      [Provide 3-4 scripted responses with market data references]
+
+      Feature/value justification response:
+      When the vendor says "you are getting tremendous value":
+      [Provide 3-4 scripted responses anchoring on actual usage vs. theoretical value]
+
+      Competitive threat script:
+      When introducing the BATNA:
+      [Provide careful, credible language that communicates alternatives without bluffing]
+
+      Escalation script:
+      When negotiations stall:
+      [Provide language for escalating to vendor management while maintaining relationship]
+
+      **4. Concession Tracking Framework**
+      Create a negotiation tracker:
+      - Starting position (our initial ask vs. vendor's initial offer)
+      - Each concession made: what was given, what was received in return
+      - Current gap between positions
+      - Remaining leverage points to deploy
+      - Red lines (terms that cannot be compromised)
+      - Decision point: accept current offer vs. escalate vs. walk away
+
+      **5. Multi-Vendor Bundling Strategy**
+      If applicable, draft a consolidated negotiation approach:
+      - Vendors that could be consolidated (overlapping functionality)
+      - Vendors that could be leveraged against each other
+      - Portfolio discount requests (if negotiating multiple products from same vendor)
+      - Timing strategy for sequential vendor negotiations (use each outcome as leverage
+        for the next negotiation)
+
+      Produce complete counter-proposal packages for each vendor, ready to be
+      presented in the negotiation meeting.
+    model: sonnet
+    max_turns: 10
+
+  - id: negotiation-playbook
+    depends_on: [counter-proposal-drafting]
+    prompt: |
+      Create a comprehensive negotiation playbook that serves as the complete
+      tactical guide for executing all vendor renewal negotiations.
+
+      Counter-proposals: {steps.counter-proposal-drafting.output}
+      Market benchmarks: {steps.market-benchmarking.output}
+      Leverage analysis: {steps.leverage-identification.output}
+      Usage audit: {steps.usage-audit.output}
+      Contract analysis: {steps.contract-analysis.output}
+      Vendors: {input.vendor_list}
+      Company: {input.company_name}
+      Negotiation priority: {input.negotiation_priority}
+
+      **1. Negotiation Sequencing Strategy**
+      Define the optimal order and timing for negotiations:
+      - Negotiation priority ranking (which vendor to negotiate first and why)
+      - Timeline for each negotiation (start date, target completion date)
+      - Dependencies between negotiations (outcomes that affect other negotiations)
+      - Resource allocation (who leads each negotiation - procurement, IT, business owner)
+      - Escalation authority (who can approve final terms at each price threshold)
+
+      **2. Per-Vendor Tactical Playbook**
+      For each vendor, create a complete game plan:
+
+      Pre-negotiation preparation:
+      - Internal alignment meeting agenda (stakeholders, objectives, authority levels)
+      - Data package to prepare (usage reports, competitive quotes, benchmark data)
+      - Non-renewal notice status (sent? if not, send immediately)
+      - Competitive evaluation status (POC, demo, pricing obtained?)
+      - Relationship mapping (who are the key contacts at the vendor? who decides?)
+
+      Meeting 1 - Opening (objectives and script):
+      - Set the frame: partnership renewal, not just price negotiation
+      - Present usage data and right-sizing request
+      - Introduce market benchmark data
+      - State desired outcome without naming a specific price yet
+      - Request vendor to come back with their "best and final" first
+
+      Meeting 2 - Counter-proposal (objectives and script):
+      - Present the formal counter-proposal
+      - Deploy primary leverage points
+      - Introduce competitive alternatives if needed
+      - Negotiate non-price terms simultaneously (SLA, support, flexibility)
+      - Set a deadline for vendor response
+
+      Meeting 3 - Closing (objectives and script):
+      - Review vendor's revised offer against acceptable price range
+      - Make final concessions if needed (always get something in return)
+      - If deal is within acceptable range: close with documented term sheet
+      - If deal is outside acceptable range: escalate or invoke BATNA
+
+      Stall tactics to watch for:
+      - "Let me check with my manager" (response: set a specific callback time)
+      - "This discount requires VP approval" (response: schedule a call with the VP)
+      - "We can only do this if you commit by Friday" (response: call the bluff)
+      - "Our pricing will increase next quarter" (response: show competitor pricing)
+
+      **3. Escalation Framework**
+      Define when and how to escalate:
+      - Level 1: Account executive to sales manager
+      - Level 2: Sales manager to VP of sales / regional director
+      - Level 3: VP level to C-level (CRO, CCO, or CEO for largest accounts)
+      - When to involve {input.company_name}'s executives
+      - When to involve procurement vs. business owner vs. CIO/CFO
+      - Escalation email/letter templates for each level
+
+      **4. Walk-Away Execution Plan**
+      If negotiation fails for any vendor:
+      - Formal communication of non-renewal (template letter)
+      - Migration timeline (detailed project plan)
+      - Data export and preservation steps
+      - Alternative vendor implementation plan
+      - User communication and training plan
+      - Business continuity during transition
+      - Cost tracking for the switch (to validate the walk-away decision)
+
+      **5. Total Savings Projection**
+      Across all vendor negotiations:
+      - Current total annual spend (all vendors combined)
+      - Conservative savings projection (all vendors at walk-away price): $X (Y%)
+      - Moderate savings projection (all vendors at acceptable price): $X (Y%)
+      - Aggressive savings projection (all vendors at target price): $X (Y%)
+      - Multi-year savings projection (3-year cumulative)
+      - Right-sizing savings (separate from negotiation savings)
+      - Consolidation savings (if applicable)
+      - Total addressable savings range
+
+      **6. Post-Negotiation Actions**
+      Once agreements are reached:
+      - Contract redline review checklist (verify all negotiated terms are in the contract)
+      - Approval workflow (who signs, legal review, procurement sign-off)
+      - Implementation of negotiated terms (right-sizing, tier changes, etc.)
+      - Calendar setup for next renewal (start negotiation 120 days before expiry)
+      - Success metrics tracking (actual savings vs. projected savings)
+      - Lessons learned documentation for future negotiations
+      - Vendor relationship repair (if negotiation was contentious)
+      - Internal communication of outcomes (stakeholder update, finance team notification)
+
+      **7. Negotiation Metrics Dashboard**
+      Track these KPIs across all negotiations:
+      - Savings achieved vs. target ($ and %)
+      - Average discount obtained vs. market benchmark
+      - Number of non-price concessions won
+      - Negotiation cycle time (days from start to close)
+      - Vendor satisfaction score (did we maintain the relationship?)
+      - Terms improved vs. previous contract
+      - Cost avoidance from right-sizing
+      - Year-over-year spend trend
+
+      This playbook should be comprehensive enough that any member of
+      {input.company_name}'s procurement or IT team can execute the
+      negotiations successfully. Write it as a practical field guide,
+      not an academic exercise.
+    model: sonnet
+    max_turns: 10

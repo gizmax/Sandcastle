@@ -1,0 +1,43 @@
+name: AI RAG Pipeline
+description: Retrieve-augment-generate pipeline using Tavily search, Pinecone vector store, and OpenAI for answer synthesis.
+category: general_ai
+tags: [AI, RAG, Search, Vectors]
+default_model: sonnet
+input_schema:
+  type: object
+  required: [question]
+  properties:
+    question:
+      type: string
+      description: The question to answer using RAG
+
+steps:
+  - id: search
+    prompt: |
+      Search the web for relevant information about: {input.question}
+      Use the tavily search tool to find 5 relevant results.
+      Return the results as a JSON array of objects with "title", "url", and "content" fields.
+    tools: [tavily]
+    output_schema:
+      type: object
+      properties:
+        results:
+          type: array
+
+  - id: embed_and_store
+    prompt: |
+      Take the search results and store them in Pinecone for retrieval.
+      For each result, create an embedding using the content text and upsert it into the index
+      with metadata including title and url.
+      Search results: {steps.search.output}
+    tools: [pinecone, openai]
+
+  - id: synthesize
+    prompt: |
+      Based on the retrieved context, provide a comprehensive answer to: {input.question}
+
+      Context from search results:
+      {steps.search.output}
+
+      Provide a well-structured answer with citations to the source URLs.
+    model: sonnet

@@ -1,0 +1,1038 @@
+# name: Client Onboarding Orchestrator
+# description: Orchestrate multi-step client onboarding with CRM updates, welcome sequences, provisioning checklists, and health score tracking
+# tags: [Onboarding, CRM, Customer-Success, Sales]
+# category: sales_crm
+
+name: client-onboarding-orchestrator
+description: Orchestrate multi-step client onboarding with CRM updates, welcome sequences, provisioning checklists, and health score tracking
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["client_name", "client_tier", "product_modules"]
+  properties:
+    client_name:
+      type: string
+      description: "Name of the client being onboarded (e.g. 'Acme Corp', 'TechStart GmbH')"
+    client_tier:
+      type: string
+      description: "Client tier classification: 'enterprise', 'mid-market', or 'smb'"
+    product_modules:
+      type: string
+      description: "Comma-separated list of product modules the client has purchased (e.g. 'analytics, automation, integrations, api-access')"
+    crm_source:
+      type: string
+      description: "CRM system where client data originates (e.g. 'salesforce', 'hubspot', 'pipedrive', 'custom')"
+      default: "salesforce"
+
+steps:
+  - id: client-profiling
+    prompt: |
+      Build a comprehensive client profile and readiness assessment to drive the
+      onboarding strategy for this new client.
+
+      Client name: {input.client_name}
+      Client tier: {input.client_tier}
+      Product modules purchased: {input.product_modules}
+      CRM source: {input.crm_source}
+
+      You are a senior Customer Success strategist specializing in B2B SaaS onboarding.
+      Your task is to construct a detailed client profile that will inform every
+      downstream onboarding decision - from communication cadence to technical complexity
+      to risk factors.
+
+      --- CLIENT TIER ANALYSIS ---
+
+      Based on the tier classification "{input.client_tier}", establish the baseline
+      onboarding parameters:
+
+      **Enterprise tier parameters:**
+      - Expected deal size: $100K+ ARR
+      - Typical stakeholder count: 8-15 across IT, operations, executive, procurement, legal
+      - Decision-making structure: committee-based, multiple approval layers
+      - Technical environment: complex, multi-system integrations, SSO/SAML required,
+        custom security requirements, data residency concerns
+      - Onboarding timeline: 60-90 days to first value, 120-180 days to full deployment
+      - Resource allocation: dedicated CSM, dedicated implementation engineer,
+        executive sponsor alignment, weekly cadence
+      - Success criteria: typically tied to business KPIs, requires ROI documentation
+
+      **Mid-market tier parameters:**
+      - Expected deal size: $25K-$100K ARR
+      - Typical stakeholder count: 3-7 across operations, IT, and management
+      - Decision-making structure: 1-2 key decision makers with team input
+      - Technical environment: moderate complexity, standard integrations,
+        may need SSO, standard security practices
+      - Onboarding timeline: 30-45 days to first value, 60-90 days to full deployment
+      - Resource allocation: shared CSM (1:15-20 ratio), pooled implementation support,
+        bi-weekly cadence
+      - Success criteria: feature adoption metrics, user engagement, time-to-value
+
+      **SMB tier parameters:**
+      - Expected deal size: under $25K ARR
+      - Typical stakeholder count: 1-3 (often a single champion)
+      - Decision-making structure: individual or small team, fast decisions
+      - Technical environment: simple, SaaS-native, minimal custom integrations
+      - Onboarding timeline: 7-14 days to first value, 30 days to full deployment
+      - Resource allocation: tech-touch CSM (1:50+ ratio), self-serve resources,
+        automated email sequences, on-demand support
+      - Success criteria: activation milestones, product usage frequency
+
+      --- PRODUCT MODULE COMPLEXITY ASSESSMENT ---
+
+      For each module in "{input.product_modules}", assess:
+
+      1. **Implementation complexity** (1-10):
+         - Does this module require data migration?
+         - Does it need integration with external systems?
+         - Are there configuration dependencies on other modules?
+         - Does it require custom workflow setup?
+         - Is training required for end users vs just admins?
+
+      2. **Time-to-value characteristics**:
+         - Can the client see value immediately (quick win)?
+         - Or does it require substantial setup before value emerges (slow burn)?
+         - What is the minimum viable configuration for first value?
+
+      3. **Dependency mapping**:
+         - Which modules depend on which? (e.g., "automation" requires "analytics" data)
+         - What is the optimal activation order?
+         - Which modules can be activated in parallel?
+
+      4. **Integration requirements**:
+         - Which third-party systems need to connect for each module?
+         - API keys, webhooks, OAuth connections needed?
+         - Data format and mapping requirements?
+
+      --- STAKEHOLDER MAPPING ---
+
+      Based on the client tier and purchased modules, identify the likely stakeholder
+      roles and their onboarding involvement:
+
+      1. **Executive sponsor** - Who signed off on the purchase?
+         - Involvement: kickoff meeting, quarterly reviews, escalation point
+         - Communication preference: executive summaries, ROI dashboards
+         - Risk: if executive sponsor leaves or disengages, churn risk increases 3x
+
+      2. **Technical champion** - Who will configure and maintain the system?
+         - Involvement: all technical sessions, integration setup, admin training
+         - Communication preference: technical documentation, API references, Slack
+         - Risk: single point of failure if only one technical person
+
+      3. **Business champion** - Who drives daily usage and adoption?
+         - Involvement: user training, workflow design, adoption campaigns
+         - Communication preference: use case examples, best practices, ROI stories
+
+      4. **End users** - Who will use the product daily?
+         - Involvement: training sessions, feedback collection
+         - Adoption risk factors: change resistance, tool fatigue, competing priorities
+
+      5. **IT/Security** - Who must approve technical access?
+         - Involvement: security review, SSO setup, data governance
+         - Blocker risk: security review delays can stall entire onboarding
+
+      --- RISK ASSESSMENT ---
+
+      Evaluate onboarding risk across these dimensions (score each 1-10):
+
+      1. **Technical risk** - complexity of integration, data quality, infrastructure readiness
+      2. **Organizational risk** - change management, stakeholder alignment, competing projects
+      3. **Adoption risk** - user willingness, training capacity, existing workflow disruption
+      4. **Timeline risk** - urgency of go-live, external deadlines, resource availability
+      5. **Champion risk** - strength and stability of internal champion
+      6. **Historical risk** - if this client has a history of churn or support escalations
+
+      Calculate an overall onboarding risk score and classify as:
+      - Green (1-3): standard onboarding, minimal intervention
+      - Yellow (4-6): monitored onboarding, proactive check-ins
+      - Red (7-10): high-touch onboarding, executive involvement required
+
+      --- CRM DATA REQUIREMENTS ---
+
+      Specify the data to extract from {input.crm_source} for onboarding:
+      - Deal history (close date, deal cycle length, discount applied)
+      - Contact roles and communication preferences
+      - Pre-sales technical notes and requirements
+      - Competitor displacement (switching from what?)
+      - Contract terms (renewal date, expansion opportunities)
+      - Support ticket history (if existing customer upgrading)
+
+      Produce the complete client profile as a structured document that the onboarding
+      team can reference throughout the entire engagement lifecycle.
+    model: haiku
+    max_turns: 10
+
+  - id: onboarding-plan
+    depends_on: [client-profiling]
+    prompt: |
+      Design a detailed, milestone-driven onboarding plan for this client based on
+      the profiling analysis.
+
+      Client profile: {steps.client-profiling.output}
+      Client name: {input.client_name}
+      Client tier: {input.client_tier}
+      Product modules: {input.product_modules}
+
+      You are a world-class Customer Success Operations architect. Your task is to
+      create a comprehensive onboarding plan that maximizes time-to-value, minimizes
+      churn risk, and establishes the foundation for long-term expansion.
+
+      --- ONBOARDING PHILOSOPHY ---
+
+      The plan must adhere to these evidence-based onboarding principles:
+
+      1. **Time-to-first-value (TTFV) optimization** - The single most predictive metric
+         for long-term retention. Every day between contract signing and first value
+         realization increases churn probability by ~1.5%. Design for the fastest possible
+         "aha moment" even if full deployment takes longer.
+
+      2. **Progressive complexity** - Start with the simplest, highest-impact module or
+         feature. Build confidence before introducing complexity. Never overwhelm with
+         everything at once.
+
+      3. **Milestone-based progression** - Advance based on achieved outcomes, not
+         calendar dates. Each phase has clear entry/exit criteria.
+
+      4. **Multi-threaded engagement** - Never rely on a single point of contact.
+         Engage at least 3 stakeholders within the first 2 weeks.
+
+      5. **Proactive risk mitigation** - Monitor leading indicators of disengagement
+         and intervene before they become lagging indicators of churn.
+
+      --- PHASE STRUCTURE ---
+
+      Design the onboarding in these phases (adjust timelines per tier):
+
+      **Phase 0: Pre-onboarding (Day -7 to Day 0)**
+      - CRM data extraction and review
+      - Internal handoff from Sales to Customer Success (deal context, promises, concerns)
+      - Pre-onboarding survey sent to client (technical readiness, goals, timeline)
+      - Account provisioning and initial environment setup
+      - Welcome package preparation (customized for tier and modules)
+      - Internal kickoff meeting (CSM, implementation engineer, support lead)
+      - Risk flags from profiling addressed preemptively
+
+      **Phase 1: Foundation (Week 1-2)**
+      - Kickoff call agenda and objectives (customize for {input.client_tier} tier):
+        - Introductions and role alignment
+        - Mutual success plan review (goals, milestones, responsibilities)
+        - Technical environment review
+        - Quick win identification and immediate action items
+      - Account configuration:
+        - User provisioning and role assignment
+        - SSO/authentication setup (if enterprise/mid-market)
+        - Basic settings and preferences
+        - Branding/customization (if applicable)
+      - First module activation (identify the quick-win module from profile)
+      - Admin training session 1: core navigation, settings, user management
+      - Technical integration session 1: connect primary data source
+      - Milestone: at least 3 stakeholders have logged in
+
+      **Phase 2: Activation (Week 2-4)**
+      - Module-by-module activation based on dependency order from profiling
+      - For each module in {input.product_modules}:
+        - Configuration session (settings, rules, thresholds)
+        - Data import/migration (if required)
+        - Integration connection and verification
+        - Functional testing with real data
+        - User training for the module
+        - Quick win documentation (first result/insight achieved)
+      - Weekly check-in cadence established
+      - End-user training program initiated (train-the-trainer for enterprise)
+      - Milestone: first business value demonstrated and documented
+
+      **Phase 3: Adoption (Week 4-8)**
+      - Workflow optimization - help client build their specific use cases
+      - Advanced feature introduction based on usage patterns
+      - User adoption tracking - identify non-adopters and intervene
+      - Cross-team expansion (introduce product to adjacent teams)
+      - Best practice sharing from similar clients (anonymized case studies)
+      - First business review with metrics and ROI indicators
+      - Milestone: 60%+ of provisioned users are active weekly
+
+      **Phase 4: Optimization (Week 8-12)**
+      - Advanced training for power users
+      - Custom reports/dashboards setup
+      - Process automation and workflow refinement
+      - Integration of all remaining modules
+      - Performance benchmarking against goals from kickoff
+      - CSM handoff preparation (from implementation to ongoing success)
+      - Milestone: all purchased modules actively used, KPIs trending positive
+
+      **Phase 5: Graduation and Handoff (Week 12+)**
+      - Formal onboarding completion review
+      - Success metrics documentation
+      - Transition to ongoing Customer Success cadence
+      - First renewal risk assessment
+      - Expansion opportunity identification
+      - NPS/CSAT survey
+      - Internal post-mortem: what went well, what to improve
+
+      --- MILESTONE DEFINITIONS ---
+
+      For each milestone, specify:
+      - **Name**: clear, measurable milestone name
+      - **Success criteria**: specific, quantifiable conditions that must be met
+      - **Owner**: who is responsible (client side and vendor side)
+      - **Target date**: calculated from tier timeline benchmarks
+      - **Blocker indicators**: warning signs that this milestone is at risk
+      - **Escalation path**: what happens if the milestone is missed by 7+ days
+
+      --- CRM UPDATE SCHEDULE ---
+
+      Specify exactly what CRM fields to update at each phase transition:
+      - Onboarding stage (custom field in {input.crm_source})
+      - Phase completion dates (actual vs planned)
+      - Risk score updates
+      - Stakeholder engagement scores
+      - Feature adoption percentages
+      - Next action items and owners
+      - Health score updates
+      - Notes for renewal forecasting
+
+      --- RESOURCE ALLOCATION ---
+
+      Based on the {input.client_tier} tier, specify:
+      - CSM hours per week allocated to this onboarding
+      - Implementation engineer hours per week
+      - Training sessions (count, duration, format)
+      - Executive touchpoint cadence
+      - Support channel configuration (email, chat, phone, Slack)
+
+      --- CONTINGENCY PLANS ---
+
+      For common onboarding derailment scenarios:
+      1. Client champion goes on leave or leaves the company
+      2. Technical integration hits unexpected blockers
+      3. Internal priorities shift and onboarding is deprioritized
+      4. End users resist adoption despite training
+      5. Executive sponsor becomes unreachable
+      6. Data quality issues prevent module activation
+      7. Security review takes longer than 30 days
+
+      For each scenario: early warning signs, intervention protocol, escalation criteria.
+
+      Produce the complete onboarding plan as a structured, actionable document that
+      can be directly loaded into a project management tool with clear tasks, owners,
+      dates, and dependencies.
+    model: sonnet
+    max_turns: 10
+
+  - id: welcome-sequence
+    depends_on: [onboarding-plan]
+    prompt: |
+      Design a comprehensive multi-channel welcome and communication sequence for
+      the entire onboarding journey.
+
+      Onboarding plan: {steps.onboarding-plan.output}
+      Client profile: {steps.client-profiling.output}
+      Client name: {input.client_name}
+      Client tier: {input.client_tier}
+      Product modules: {input.product_modules}
+
+      You are a Customer Communications specialist who understands that onboarding
+      communication is the foundation of long-term retention. Your task is to design
+      every touchpoint in the client's onboarding communication journey.
+
+      --- COMMUNICATION STRATEGY FRAMEWORK ---
+
+      The welcome sequence must balance these competing priorities:
+      - **Momentum**: keep the client engaged and moving forward without delays
+      - **Education**: ensure the client understands what to do and why it matters
+      - **Personalization**: make every communication feel tailored, not templated
+      - **Multi-threading**: engage multiple stakeholders, not just the primary contact
+      - **Value reinforcement**: consistently connect actions to business outcomes
+
+      --- EMAIL SEQUENCE ---
+
+      Design the complete email sequence. For each email, provide:
+      - **Send trigger**: time-based (Day X) or event-based (after milestone Y)
+      - **Recipient(s)**: which stakeholder roles receive this email
+      - **Subject line**: compelling, specific, action-oriented
+      - **Email body outline**: key sections, tone, call-to-action
+      - **Personalization variables**: {{client_name}}, {{csm_name}}, {{module_name}}, etc.
+      - **Goal**: what action or outcome this email should drive
+
+      Minimum email sequence (customize cadence for {input.client_tier}):
+
+      1. **Welcome email** (Day 0 - immediately after contract signing)
+         - Warm, enthusiastic welcome from the CSM (personal, not automated-feeling)
+         - What to expect in the first week
+         - Key contacts with photos and roles
+         - Calendar link for kickoff scheduling
+         - Pre-onboarding survey link
+         - Quick-start guide attachment or link
+
+      2. **Pre-kickoff preparation** (Day 2-3)
+         - Technical prerequisites checklist
+         - Stakeholder identification request
+         - Data preparation guide for the first module
+         - "While you wait" - links to success stories from similar companies
+
+      3. **Post-kickoff summary** (Day of kickoff + 2 hours)
+         - Meeting notes and action items
+         - Mutual success plan (attached or linked)
+         - Recording link (if call was recorded)
+         - Next steps with specific dates
+
+      4. **Quick win celebration** (triggered by first value milestone)
+         - Congratulate the team on first achievement
+         - Share the metric or result with context
+         - "Here's what other clients did next" - progression nudge
+         - Social proof from similar tier/industry clients
+
+      5. **Weekly progress digest** (weekly, automated)
+         - Onboarding progress percentage
+         - Milestones completed this week
+         - Upcoming milestones and tasks
+         - Usage statistics snapshot
+         - Any blockers requiring attention
+
+      6. **Adoption nudge series** (triggered by low engagement)
+         - Gentle reminder to inactive users
+         - Quick tip or use case relevant to their role
+         - Offer of 1:1 training session
+         - Link to relevant help article or video
+
+      7. **Module activation celebration** (per module go-live)
+         - Announcement that new module is ready
+         - Quick-start guide for the specific module
+         - Relevant use cases and templates
+         - Training session invitation
+
+      8. **Executive business review invitation** (Week 6-8)
+         - Invitation to the first formal business review
+         - Preview of metrics and ROI data to be presented
+         - Request for executive sponsor attendance
+
+      9. **Onboarding graduation** (triggered by completion milestone)
+         - Celebration of successful onboarding
+         - Summary of achievements and metrics
+         - Introduction to ongoing support model
+         - NPS survey
+         - Referral program introduction
+         - Expansion opportunity teaser
+
+      --- IN-APP MESSAGING SEQUENCE ---
+
+      Design contextual in-app messages for key onboarding moments:
+
+      1. **First login welcome tour** - guided walkthrough of core navigation
+      2. **Feature discovery tooltips** - progressive disclosure of advanced features
+      3. **Empty state guidance** - helpful prompts when a section has no data yet
+      4. **Milestone celebration banners** - "You've completed X! Here's what's next"
+      5. **Usage tips** - contextual tips based on what the user is doing
+      6. **Checklist widget** - persistent onboarding progress tracker
+      7. **Help beacon** - contextual help based on current page/feature
+
+      For each in-app message:
+      - Trigger condition (first visit, time-based, event-based)
+      - Display format (modal, tooltip, banner, slide-out)
+      - Content (headline, body, CTA)
+      - Dismissal behavior (dismiss once, dismiss for session, don't show again)
+      - Audience targeting (admin only, all users, specific roles)
+
+      --- CALL/MEETING SEQUENCE ---
+
+      Design the structured meeting cadence:
+
+      1. **Kickoff call** (60-90 min for enterprise, 30-45 min for mid-market/SMB)
+         - Detailed agenda with time allocations
+         - Attendee list with expected contributions
+         - Pre-read materials to send in advance
+         - Success criteria for the meeting
+
+      2. **Technical setup sessions** (per module)
+         - Duration and format recommendations
+         - Prerequisites the client must complete before the session
+         - Expected outcomes and deliverables
+
+      3. **Training sessions** (differentiated by audience)
+         - Admin training: configuration, user management, settings
+         - Power user training: advanced features, automation, reporting
+         - End user training: daily workflows, tips, shortcuts
+         - Format: live vs recorded, individual vs group, duration
+
+      4. **Check-in calls** (cadence based on tier)
+         - Enterprise: weekly for first 8 weeks, then bi-weekly
+         - Mid-market: bi-weekly for first 6 weeks, then monthly
+         - SMB: week 1, week 3, week 6 (then automated)
+         - Standard agenda template for check-ins
+         - Metrics to review at each check-in
+
+      5. **Business review** (first one during onboarding)
+         - Slide deck template outline
+         - Metrics and KPIs to present
+         - ROI calculation framework
+         - Next phase planning discussion
+
+      --- PERSONALIZATION RULES ---
+
+      Define how communication adapts based on:
+      - Client tier (enterprise gets white-glove, SMB gets efficient self-serve)
+      - Industry vertical (use industry-specific language and examples)
+      - Module combination (tailor content to purchased modules only)
+      - Engagement level (increase/decrease frequency based on responsiveness)
+      - Risk score (high-risk clients get more frequent, more personal outreach)
+
+      --- CHANNEL ORCHESTRATION ---
+
+      Define which channel to use for what:
+      - Email: formal communications, summaries, documentation
+      - Slack/Teams: quick questions, informal updates, community access
+      - In-app: feature guidance, progress tracking, contextual help
+      - Phone/video: relationship building, complex discussions, escalations
+      - Self-serve portal: knowledge base, training videos, community forums
+
+      Produce the complete communication sequence as a structured playbook with
+      exact timing, content outlines, personalization rules, and success metrics
+      for each touchpoint.
+    model: sonnet
+    max_turns: 10
+
+  - id: provisioning-checklist
+    depends_on: [onboarding-plan]
+    prompt: |
+      Generate a comprehensive technical provisioning checklist for this client's
+      onboarding, covering every system configuration, integration, and verification step.
+
+      Onboarding plan: {steps.onboarding-plan.output}
+      Client profile: {steps.client-profiling.output}
+      Client name: {input.client_name}
+      Client tier: {input.client_tier}
+      Product modules: {input.product_modules}
+      CRM source: {input.crm_source}
+
+      You are a Technical Implementation specialist who ensures zero-defect client
+      provisioning. Your task is to create an exhaustive checklist that leaves nothing
+      to chance during technical setup.
+
+      --- ACCOUNT PROVISIONING ---
+
+      1. **Organization setup**:
+         - [ ] Create organization/tenant in the system
+         - [ ] Configure organization name, logo, branding assets
+         - [ ] Set timezone, locale, currency, date format preferences
+         - [ ] Configure organization-level settings and defaults
+         - [ ] Set up billing integration and subscription plan mapping
+         - [ ] Verify contract terms match system entitlements
+         - [ ] Document the organization ID and API keys generated
+
+      2. **User provisioning** (differentiated by tier):
+         - Enterprise:
+           - [ ] Configure SSO/SAML integration (IdP metadata exchange)
+           - [ ] Set up SCIM provisioning for automated user sync
+           - [ ] Define role-based access control (RBAC) groups
+           - [ ] Map IdP groups to application roles
+           - [ ] Test SSO login flow end-to-end
+           - [ ] Configure MFA policy
+           - [ ] Set up IP allowlisting (if required)
+         - Mid-market:
+           - [ ] Configure SSO if purchased (Google Workspace, Okta, Azure AD)
+           - [ ] Create admin account and send invitation
+           - [ ] Set up basic role structure (admin, manager, user)
+           - [ ] Enable self-registration with domain restriction
+         - SMB:
+           - [ ] Create admin account with email/password
+           - [ ] Send welcome credentials securely
+           - [ ] Configure basic permissions
+
+      3. **Security configuration**:
+         - [ ] Data residency region selection and verification
+         - [ ] Encryption-at-rest configuration confirmation
+         - [ ] Encryption-in-transit (TLS) verification
+         - [ ] API key generation with appropriate scope limitations
+         - [ ] Webhook endpoint security (HMAC signing, IP allowlisting)
+         - [ ] Audit log configuration and retention policy
+         - [ ] Session timeout and password policy settings
+         - [ ] Data retention and purge policy configuration
+
+      --- MODULE-SPECIFIC PROVISIONING ---
+
+      For each module in "{input.product_modules}", create a detailed setup checklist:
+
+      **Generic module provisioning template** (apply to each module):
+      - [ ] Enable module in the organization's feature flags
+      - [ ] Verify license entitlement covers this module
+      - [ ] Configure module-specific settings and defaults
+      - [ ] Set up module-specific roles and permissions
+      - [ ] Import initial configuration data (templates, rules, thresholds)
+      - [ ] Connect required data sources for this module
+      - [ ] Run configuration validation checks
+      - [ ] Perform end-to-end smoke test with sample data
+      - [ ] Document module-specific API endpoints if applicable
+      - [ ] Create module-specific help resources and quick-start guides
+
+      **Common module categories and their specific requirements**:
+
+      Analytics module:
+      - [ ] Configure data ingestion pipelines
+      - [ ] Set up data source connections (database, API, file upload)
+      - [ ] Define custom metrics and calculated fields
+      - [ ] Create initial dashboard templates
+      - [ ] Configure scheduled report delivery
+      - [ ] Set up data refresh schedules
+      - [ ] Verify data accuracy against source of truth
+
+      Automation module:
+      - [ ] Define trigger event types and sources
+      - [ ] Configure action templates and default workflows
+      - [ ] Set up notification channels (email, Slack, webhook)
+      - [ ] Define rate limits and concurrency controls
+      - [ ] Create test automation workflows
+      - [ ] Configure error handling and retry policies
+      - [ ] Set up automation monitoring and alerting
+
+      Integrations module:
+      - [ ] Map all required third-party integrations
+      - [ ] Collect API credentials for each integration
+      - [ ] Configure OAuth flows where applicable
+      - [ ] Set up webhook endpoints and verify connectivity
+      - [ ] Define data sync direction (one-way, bi-directional)
+      - [ ] Map fields between systems
+      - [ ] Configure sync frequency and conflict resolution rules
+      - [ ] Test each integration end-to-end with real data
+      - [ ] Set up integration health monitoring
+
+      API access module:
+      - [ ] Generate API keys with appropriate scopes
+      - [ ] Configure rate limits per API key
+      - [ ] Set up API usage monitoring and alerting
+      - [ ] Provide API documentation and sandbox environment
+      - [ ] Configure CORS settings if browser-based API access needed
+      - [ ] Set up API versioning preferences
+      - [ ] Create sample API requests for common operations
+
+      --- CRM INTEGRATION CHECKLIST ---
+
+      Specific to {input.crm_source} CRM:
+
+      **Salesforce:**
+      - [ ] Install managed package (if applicable)
+      - [ ] Configure connected app with OAuth credentials
+      - [ ] Map Salesforce objects to application entities
+      - [ ] Set up field-level mapping (standard and custom fields)
+      - [ ] Configure sync direction and frequency
+      - [ ] Set up Salesforce triggers/flows for real-time sync
+      - [ ] Verify sandbox testing before production connection
+      - [ ] Configure Salesforce dashboard embed (if applicable)
+
+      **HubSpot:**
+      - [ ] Install from HubSpot Marketplace (if available)
+      - [ ] Configure API key or OAuth connection
+      - [ ] Map HubSpot properties to application fields
+      - [ ] Set up lifecycle stage triggers
+      - [ ] Configure deal pipeline sync
+
+      **Pipedrive:**
+      - [ ] Generate API token from Pipedrive settings
+      - [ ] Configure organization and deal field mapping
+      - [ ] Set up activity sync for onboarding tasks
+      - [ ] Configure custom field mapping for health scores
+
+      --- DATA MIGRATION CHECKLIST ---
+
+      If the client is migrating from a previous system:
+      - [ ] Document source system and export format
+      - [ ] Define data mapping between old and new fields
+      - [ ] Clean and deduplicate source data
+      - [ ] Perform test migration with sample data subset
+      - [ ] Validate migrated data integrity (record counts, field values)
+      - [ ] Verify historical data accessibility
+      - [ ] Plan cutover window with client
+      - [ ] Execute production migration
+      - [ ] Post-migration validation and sign-off
+
+      --- ENVIRONMENT VERIFICATION ---
+
+      - [ ] All provisioned features match contract entitlements
+      - [ ] Admin can log in and access all purchased modules
+      - [ ] SSO/authentication flow works for all user types
+      - [ ] API connectivity verified (if applicable)
+      - [ ] All integrations connected and syncing
+      - [ ] Email notifications delivering correctly
+      - [ ] Webhook endpoints responding successfully
+      - [ ] Data is flowing through all configured pipelines
+      - [ ] Performance baseline measured (page load, API response times)
+      - [ ] Backup and disaster recovery verified for client data
+      - [ ] Compliance requirements verified (GDPR, SOC2, HIPAA as applicable)
+
+      --- HANDOFF DOCUMENTATION ---
+
+      For each provisioning step completed, document:
+      - What was configured and the specific settings chosen
+      - Any deviations from standard setup and the rationale
+      - Credentials and secrets securely stored (reference to vault, never in plaintext)
+      - Known limitations or workarounds implemented
+      - Dependencies on client actions that are still pending
+
+      Produce the complete provisioning checklist as a structured document with
+      checkboxes, owners, estimated time per task, and dependency ordering
+      that can be tracked in a project management tool.
+    model: haiku
+    max_turns: 10
+
+  - id: health-scoring
+    depends_on: [welcome-sequence, provisioning-checklist]
+    prompt: |
+      Design a comprehensive client health scoring model and early warning system
+      for monitoring onboarding progress and predicting long-term success.
+
+      Welcome sequence: {steps.welcome-sequence.output}
+      Provisioning checklist: {steps.provisioning-checklist.output}
+      Onboarding plan: {steps.onboarding-plan.output}
+      Client profile: {steps.client-profiling.output}
+      Client name: {input.client_name}
+      Client tier: {input.client_tier}
+      Product modules: {input.product_modules}
+
+      You are a Customer Health Analytics expert who builds predictive models for
+      client success and churn prevention. Your task is to design a multi-dimensional
+      health scoring system tailored to this client's onboarding journey.
+
+      --- HEALTH SCORE ARCHITECTURE ---
+
+      Design a composite health score (0-100) composed of weighted sub-scores.
+      Each sub-score should be independently trackable and actionable.
+
+      **1. Onboarding Progress Score (weight: 25%)**
+      Measures how on-track the onboarding is relative to the plan:
+
+      Inputs:
+      - Milestone completion rate: (milestones completed / milestones planned) at current date
+      - Schedule adherence: average days ahead/behind per milestone
+      - Phase progression velocity: time spent in each phase vs benchmark
+      - Blocker count and duration: unresolved blockers and their age
+
+      Scoring logic:
+      - 90-100: ahead of schedule, all milestones met or exceeded
+      - 70-89: on track, minor delays (under 5 business days)
+      - 50-69: behind schedule, 1-2 milestones missed or delayed significantly
+      - 30-49: significantly behind, multiple milestones at risk
+      - 0-29: onboarding stalled, critical intervention required
+
+      **2. Product Adoption Score (weight: 30%)**
+      Measures actual product usage and feature adoption:
+
+      Inputs:
+      - DAU/WAU/MAU ratios (daily/weekly/monthly active users)
+      - Feature breadth: percentage of purchased features used at least once
+      - Feature depth: frequency and sophistication of feature usage
+      - Module activation rate: (modules actively used / modules purchased)
+      - Session duration and frequency trends
+      - Core action completion rate (varies by module)
+      - User role coverage: percentage of provisioned user roles actively using the product
+
+      Scoring logic:
+      - 90-100: >80% feature breadth, strong DAU/MAU (>40%), all modules active
+      - 70-89: 60-80% feature breadth, moderate engagement, most modules active
+      - 50-69: 40-60% feature breadth, inconsistent engagement, some modules unused
+      - 30-49: <40% feature breadth, declining engagement trends
+      - 0-29: minimal usage, most modules inactive, single-user dependency
+
+      **3. Engagement Score (weight: 20%)**
+      Measures the quality and frequency of client interactions:
+
+      Inputs:
+      - Meeting attendance rate (scheduled vs attended)
+      - Response time to CSM communications (emails, messages)
+      - Number of stakeholders actively engaged
+      - Training session attendance and completion rates
+      - Support ticket submission patterns (healthy = few but purposeful)
+      - Community/knowledge base engagement
+      - Proactive communication from client (positive signal)
+
+      Scoring logic:
+      - 90-100: multi-threaded engagement, fast responses, proactive communication
+      - 70-89: consistent engagement from primary contacts, reasonable response times
+      - 50-69: engagement from single contact, some missed meetings
+      - 30-49: declining responsiveness, meetings frequently rescheduled
+      - 0-29: ghost client - no responses, meetings missed, single point of failure
+
+      **4. Sentiment Score (weight: 15%)**
+      Measures qualitative satisfaction signals:
+
+      Inputs:
+      - NPS/CSAT survey scores (if available)
+      - Support ticket sentiment analysis (positive/neutral/negative language)
+      - Meeting notes sentiment (CSM's subjective assessment)
+      - Social media mentions (positive/negative)
+      - Escalation frequency and severity
+      - Feature request patterns (engaged clients request features)
+      - Referral willingness indicators
+
+      Scoring logic:
+      - 90-100: vocal advocate, positive references, high NPS
+      - 70-89: satisfied, occasional positive feedback
+      - 50-69: neutral, no strong signals either way
+      - 30-49: some frustration signals, specific complaints
+      - 0-29: actively unhappy, escalation in progress, negative public feedback
+
+      **5. Relationship Score (weight: 10%)**
+      Measures the breadth and depth of the vendor-client relationship:
+
+      Inputs:
+      - Executive sponsor engagement level
+      - Multi-department penetration
+      - Contract expansion signals (feature requests aligned with upsell)
+      - Renewal conversation receptiveness
+      - Reference/case study willingness
+      - Event attendance (webinars, user conference)
+
+      Scoring logic:
+      - 90-100: deep multi-level relationship, expansion discussions active
+      - 70-89: solid relationship with key contacts, open to growth
+      - 50-69: functional relationship, limited depth
+      - 30-49: single-threaded, transactional relationship
+      - 0-29: adversarial or non-existent relationship beyond support tickets
+
+      --- EARLY WARNING SYSTEM ---
+
+      Define specific trigger conditions that should generate alerts:
+
+      **Red alerts (immediate CSM action required):**
+      - Health score drops more than 15 points in a single week
+      - No login from any user in 7+ consecutive days
+      - Executive sponsor contact lost (email bounces, LinkedIn shows new role)
+      - Support escalation to management level
+      - Onboarding milestone missed by more than 10 business days
+      - All engagement concentrated on a single user
+
+      **Yellow alerts (CSM review within 48 hours):**
+      - Health score drops more than 10 points in two weeks
+      - Meeting rescheduled or cancelled twice in a row
+      - Module purchased but not activated within expected timeline
+      - Declining login frequency trend over 3 weeks
+      - Support ticket volume spikes (3x baseline)
+      - CSM emails not responded to within 5 business days
+
+      **Positive signals (expansion opportunity):**
+      - Health score consistently above 85 for 4+ weeks
+      - Unprompted requests for additional modules or features
+      - New departments or teams requesting access
+      - Client shares positive results externally
+      - Usage exceeds license tier limits
+      - Client asks about API access for custom integrations
+
+      --- HEALTH SCORE DASHBOARD SPECIFICATION ---
+
+      Design the health score visualization for the CSM dashboard:
+
+      1. **Summary view**: traffic light indicator (green/yellow/red) with composite score
+      2. **Trend chart**: 30/60/90-day health score trend line with milestone markers
+      3. **Sub-score breakdown**: radar/spider chart showing all 5 dimensions
+      4. **Alert feed**: chronological list of triggered warnings and positive signals
+      5. **Benchmark comparison**: how this client compares to tier cohort average
+      6. **Predicted outcomes**: churn probability, expansion probability, time-to-value estimate
+      7. **Action recommendations**: AI-suggested next actions based on health score patterns
+
+      --- TIER-SPECIFIC THRESHOLDS ---
+
+      Calibrate scoring thresholds differently per tier because baseline expectations differ:
+      - Enterprise: higher engagement expected, longer acceptable timelines
+      - Mid-market: moderate engagement, faster time-to-value expected
+      - SMB: tech-touch focused, product usage is the primary health indicator
+
+      --- SCORING CADENCE ---
+
+      - Real-time: product adoption score (based on usage events)
+      - Daily: engagement score, onboarding progress score
+      - Weekly: sentiment score (after meeting notes analysis)
+      - Monthly: relationship score, full composite recalculation
+      - Quarterly: benchmark recalibration against cohort data
+
+      Produce the complete health scoring specification with formulas, weights,
+      thresholds, alert configurations, and dashboard mockup descriptions that
+      can be directly implemented by an engineering team.
+    model: sonnet
+    max_turns: 10
+
+  - id: success-playbook
+    depends_on: [health-scoring]
+    prompt: |
+      Create a comprehensive Customer Success playbook for managing this client from
+      onboarding through renewal, incorporating health scoring, escalation procedures,
+      and expansion strategies.
+
+      Health scoring model: {steps.health-scoring.output}
+      Onboarding plan: {steps.onboarding-plan.output}
+      Welcome sequence: {steps.welcome-sequence.output}
+      Provisioning checklist: {steps.provisioning-checklist.output}
+      Client profile: {steps.client-profiling.output}
+      Client name: {input.client_name}
+      Client tier: {input.client_tier}
+      Product modules: {input.product_modules}
+
+      You are a VP of Customer Success building the definitive playbook for this
+      client engagement. Your task is to produce an actionable, scenario-driven
+      playbook that a CSM can follow from day one through renewal and beyond.
+
+      --- CSM ENGAGEMENT MODEL ---
+
+      Define the ongoing engagement model post-onboarding for {input.client_tier} tier:
+
+      1. **Touch model**:
+         - Enterprise: high-touch (dedicated CSM, 4-6 hours/week)
+         - Mid-market: mid-touch (shared CSM, 1-2 hours/week)
+         - SMB: tech-touch (automated + on-demand, 15-30 min/week)
+
+      2. **Cadence structure**:
+         - Regular check-in frequency and format
+         - Business review cadence (quarterly for enterprise, semi-annual for mid-market)
+         - Executive alignment cadence
+         - Technical review cadence (for complex implementations)
+
+      3. **Communication channels**:
+         - Primary channel for day-to-day communication
+         - Escalation channel and protocol
+         - Self-serve resources and knowledge base
+         - Community access and peer networking
+
+      --- SCENARIO PLAYBOOKS ---
+
+      For each scenario, provide: trigger condition, immediate actions (first 24 hours),
+      short-term plan (first week), resolution criteria, and escalation path.
+
+      **Scenario 1: Client goes silent (no engagement for 14+ days)**
+      - Trigger: engagement score drops below 30, no login activity, no email responses
+      - Root cause investigation checklist:
+        - Check for organizational changes (acquisitions, layoffs, leadership changes)
+        - Check if champion has changed roles (LinkedIn, email bounce)
+        - Check for competing product evaluations (G2 review activity, competitor visits)
+        - Check for internal project freeze or budget cuts
+      - Outreach sequence:
+        - Day 1: Personal email from CSM with value reminder and "just checking in"
+        - Day 3: Phone call attempt to champion
+        - Day 5: Email to secondary contact with different messaging
+        - Day 7: Executive sponsor outreach from CS leadership
+        - Day 10: "We miss you" in-app message with quick win suggestion
+        - Day 14: Formal escalation to VP CS with save plan
+
+      **Scenario 2: Key champion leaves the company**
+      - Trigger: email bounces, LinkedIn update, client notification
+      - Immediate actions:
+        - Identify and map all remaining contacts
+        - Request introduction to successor from departing champion (if possible)
+        - Schedule emergency stakeholder mapping session with remaining contacts
+        - Brief CS leadership on risk level
+      - Relationship rebuilding plan:
+        - New contact onboarding mini-program
+        - Re-demonstrate value with fresh data and metrics
+        - Executive-to-executive bridge introduction
+        - Expedite wins for the new champion to build advocacy
+
+      **Scenario 3: Client is unhappy / escalation in progress**
+      - Trigger: negative CSAT, support escalation, angry email to leadership
+      - Immediate actions:
+        - Acknowledge the issue within 2 hours (personal, not templated)
+        - Assign a resolution owner and communicate timeline
+        - CS leadership notified and involved if severity warrants
+      - Resolution framework:
+        - Listen session: let the client fully articulate their concerns without defense
+        - Root cause analysis: was this a product failure, a process failure, or a
+          expectations mismatch from sales?
+        - Recovery plan: specific, time-bound actions to address each concern
+        - Follow-up cadence: daily until resolved, then weekly for 4 weeks
+        - Goodwill gesture (if appropriate): free training, extended trial of premium feature
+
+      **Scenario 4: Expansion opportunity identified**
+      - Trigger: health score above 85 for 6+ weeks, usage near limits, feature requests
+      - Qualification criteria:
+        - Current usage justifies additional investment
+        - Internal advocate willing to champion expansion
+        - Budget cycle alignment (not end of fiscal year)
+        - No unresolved support issues
+      - Expansion playbook:
+        - Document ROI from current modules with hard metrics
+        - Map expansion need to specific business outcomes
+        - Identify expansion champion (may differ from original champion)
+        - Coordinate with Account Executive on commercial terms
+        - Time the ask: after a positive business review, after a big win,
+          during strategic planning season
+
+      **Scenario 5: Renewal at risk (90 days before renewal)**
+      - Trigger: health score below 60, low adoption, or explicit signals
+      - Save plan framework:
+        - Quantify the risk: estimated ARR at risk, contract details
+        - Root cause diagnosis: why is the client likely to churn?
+        - Intervention plan: specific actions to address root cause
+        - Escalation: involve executive sponsor, product team, sales as needed
+        - Concession strategy: what can we offer to retain (discounts, free modules,
+          extended support) - with clear approval process
+        - Timeline: must show measurable improvement within 30 days
+
+      **Scenario 6: Client becomes a power user/advocate**
+      - Trigger: health score consistently 90+, proactive positive engagement
+      - Advocacy cultivation:
+        - Case study development (with client approval)
+        - Reference program enrollment
+        - Advisory board invitation
+        - Beta feature access
+        - Speaking opportunity at company events
+        - Co-marketing content creation
+
+      --- EXPANSION REVENUE FRAMEWORK ---
+
+      Design the expansion motion for {input.client_name}:
+
+      1. **Module expansion**: which unpurchased modules would add most value?
+         - Cross-reference client's use cases with available modules
+         - Identify natural next module based on usage patterns
+         - Create a "land and expand" map for the next 12 months
+
+      2. **Seat expansion**: when and how to grow user count
+         - Usage-based triggers for seat expansion conversations
+         - Department-by-department expansion strategy
+
+      3. **Tier upgrade**: when the client outgrows their current tier
+         - Feature gate triggers (hitting limits on current tier)
+         - Value justification framework for tier upgrade
+
+      --- SUCCESS METRICS AND REPORTING ---
+
+      Define the metrics the CSM should track and report:
+
+      1. **Onboarding metrics**:
+         - Time-to-first-value (TTFV) vs benchmark
+         - Onboarding completion rate and duration
+         - Milestone adherence rate
+
+      2. **Adoption metrics**:
+         - Product adoption score trend
+         - Feature adoption breadth and depth
+         - User activation rate
+
+      3. **Relationship metrics**:
+         - NPS score and trend
+         - Stakeholder engagement breadth
+         - Meeting attendance rates
+
+      4. **Business outcome metrics**:
+         - ROI delivered (quantified where possible)
+         - Client-reported value (qualitative)
+         - Time saved, revenue generated, costs reduced
+
+      5. **Revenue metrics**:
+         - Net revenue retention (NRR) tracking
+         - Expansion pipeline and forecast
+         - Renewal probability and timeline
+
+      --- INTERNAL COLLABORATION ---
+
+      Define how the CSM should work with other teams:
+
+      - **Sales**: handoff protocol, expansion coordination, reference requests
+      - **Product**: feature request aggregation, beta feedback, bug escalation
+      - **Support**: escalation paths, ticket context sharing, proactive issue prevention
+      - **Engineering**: custom integration support, performance issue triage
+      - **Marketing**: case study development, event coordination, advocacy programs
+      - **Executive team**: quarterly business review preparation, escalation protocol
+
+      Produce the complete playbook as an actionable, searchable reference document
+      that a CSM can use from their first day managing this account. Include templates,
+      scripts, and checklists wherever possible to reduce ambiguity and ensure
+      consistent execution regardless of which CSM is assigned.
+    model: sonnet
+    max_turns: 10

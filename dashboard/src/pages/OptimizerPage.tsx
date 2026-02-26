@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Gauge, ChevronDown, ChevronUp } from "lucide-react";
+import { Gauge, ChevronDown, ChevronUp, AlertTriangle, Coins } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { formatCost, formatRelativeTime, cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 
@@ -38,6 +40,19 @@ interface OptimizerStats {
   model_distribution: Record<string, number>;
   avg_confidence: number;
   estimated_savings_30d_usd: number;
+  active_alerts: number;
+}
+
+interface DegradationAlert {
+  model: string;
+  step_id: string;
+  workflow_name: string;
+  metric: string;
+  current_value: number;
+  threshold: number;
+  severity: string;
+  recommended_action: string;
+  detected_at: number;
 }
 
 function confidenceColor(c: number): string {
@@ -66,17 +81,24 @@ export default function OptimizerPage() {
   const navigate = useNavigate();
   const [decisions, setDecisions] = useState<OptimizerDecision[]>([]);
   const [stats, setStats] = useState<OptimizerStats | null>(null);
+  const [alerts, setAlerts] = useState<DegradationAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [decRes, statsRes] = await Promise.all([
+      setError(null);
+      const [decRes, statsRes, alertsRes] = await Promise.all([
         api.get<OptimizerDecision[]>("/optimizer/decisions"),
         api.get<OptimizerStats>("/optimizer/stats"),
+        api.get<DegradationAlert[]>("/optimizer/alerts"),
       ]);
       if (decRes.data) setDecisions(decRes.data);
       if (statsRes.data) setStats(statsRes.data);
+      if (alertsRes.data) setAlerts(alertsRes.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -86,10 +108,37 @@ export default function OptimizerPage() {
     void fetchData();
   }, [fetchData]);
 
+  const handleClearAlerts = useCallback(async () => {
+    const res = await api.delete("/optimizer/alerts");
+    if (res.error) {
+      toast.error("Failed to clear alerts");
+      return;
+    }
+    setAlerts([]);
+    toast.success("Alerts cleared");
+  }, []);
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchData(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -102,9 +151,15 @@ export default function OptimizerPage() {
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
 
+      {stats && stats.estimated_savings_30d_usd > 1 && (
+        <ContextBanner variant="info" icon={Coins}>
+          ${stats.estimated_savings_30d_usd.toFixed(2)} in potential savings identified across your workflows this month.
+        </ContextBanner>
+      )}
+
       {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-5">
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Total Decisions (30d)</p>
             <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground">{stats.total_decisions_30d}</p>
@@ -127,6 +182,70 @@ export default function OptimizerPage() {
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Estimated Savings</p>
             <p className="mt-1 text-xl sm:text-2xl font-semibold text-accent">{formatCost(stats.estimated_savings_30d_usd)}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+            <p className="text-xs font-medium text-muted-foreground">Active Alerts</p>
+            <div className="mt-1 flex items-center gap-1.5">
+              {(stats.active_alerts || 0) > 0 ? (
+                <>
+                  <AlertTriangle className="h-5 w-5 text-error" />
+                  <p className="text-xl sm:text-2xl font-semibold text-error">{stats.active_alerts}</p>
+                </>
+              ) : (
+                <p className="text-xl sm:text-2xl font-semibold text-success">0</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Degradation Alerts */}
+      {alerts.length > 0 && (
+        <div className="rounded-xl border border-error/30 bg-error/5 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-error/20">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-error" />
+              <p className="text-sm font-medium text-error">Model Degradation Alerts</p>
+              <span className="rounded-full bg-error/15 px-2 py-0.5 text-xs font-mono font-semibold text-error">
+                {alerts.length}
+              </span>
+            </div>
+            <button
+              onClick={handleClearAlerts}
+              className="text-xs text-muted hover:text-foreground transition-colors"
+            >
+              Clear All
+            </button>
+          </div>
+          <div className="divide-y divide-error/10">
+            {alerts.slice(0, 10).map((alert, idx) => (
+              <div key={idx} className="flex items-start gap-3 px-5 py-3">
+                <span className={cn(
+                  "mt-0.5 h-2 w-2 rounded-full shrink-0",
+                  alert.severity === "critical" ? "bg-error animate-pulse" : "bg-warning"
+                )} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className={cn(
+                      "rounded-full border px-2 py-0.5 text-xs font-semibold capitalize",
+                      MODEL_STYLES[alert.model] || MODEL_STYLES.sonnet
+                    )}>
+                      {alert.model}
+                    </span>
+                    <span className="text-muted">{alert.workflow_name}/{alert.step_id}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted">{alert.recommended_action}</p>
+                  <div className="mt-1 flex items-center gap-3">
+                    <span className="text-xs font-mono text-error">
+                      {alert.metric}: {alert.current_value.toFixed(3)}
+                    </span>
+                    <span className="text-xs text-muted">
+                      threshold: {alert.threshold.toFixed(3)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

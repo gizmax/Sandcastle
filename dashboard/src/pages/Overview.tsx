@@ -5,6 +5,7 @@ import { StatsCards } from "@/components/overview/StatsCards";
 import { RunsChart } from "@/components/overview/RunsChart";
 import { CostChart } from "@/components/overview/CostChart";
 import { RecentRuns } from "@/components/overview/RecentRuns";
+import { HealthHero } from "@/components/overview/HealthHero";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
@@ -94,6 +95,8 @@ export default function Overview() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
+
+      <HealthHero />
 
       <StatsCards
         totalRuns={stats.total_runs_today}

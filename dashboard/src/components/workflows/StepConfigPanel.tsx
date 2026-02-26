@@ -79,7 +79,7 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "transform" | "notify" | "delegate";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
 
 export interface HttpStepConfig {
   url: string;
@@ -113,6 +113,36 @@ export interface LoopStepConfig {
   maxIterations: number;
 }
 
+export interface RaceStepConfig {
+  branches: string;  // textarea: one branch per line, step IDs comma-separated
+  validator: string;
+}
+
+export interface SensorStepConfig {
+  url: string;
+  method: string;
+  headers: string;  // JSON string
+  checkInterval: number;
+  timeout: number;
+  condition: string;
+}
+
+export interface GateStrategy {
+  type: "llm_eval" | "human" | "timeout";
+  prompt: string;
+  input: string;
+  model: string;
+  message: string;
+  timeoutHours: number;
+  seconds: number;
+  action: "approve" | "reject";
+  onTimeout: string;
+}
+
+export interface GateStepConfig {
+  strategies: GateStrategy[];
+}
+
 export interface TransformStepConfig {
   template: string;
 }
@@ -127,6 +157,22 @@ export interface DelegateStepConfig {
   workflow: string;
   taskDescription: string;
   timeout: number;
+}
+
+export interface BrowserStepConfig {
+  mode: string;
+  startUrl: string;
+  viewportWidth: number;
+  viewportHeight: number;
+  timeout: number;
+  waitAfterAction: number;
+  headless: boolean;
+  credentials_env: string;
+  screenshotOnError: boolean;
+  max_actions: number;
+  capture_screenshots: boolean;
+  output_schema: Record<string, unknown> | null;
+  captcha_strategy: string;
 }
 
 export interface StepConfig {
@@ -153,9 +199,13 @@ export interface StepConfig {
   conditionConfig: ConditionStepConfig;
   classifyConfig: ClassifyStepConfig;
   loopConfig: LoopStepConfig;
+  raceConfig: RaceStepConfig;
+  sensorConfig: SensorStepConfig;
+  gateConfig: GateStepConfig;
   transformConfig: TransformStepConfig;
   notifyConfig: NotifyStepConfig;
   delegateConfig: DelegateStepConfig;
+  browserConfig: BrowserStepConfig;
 }
 
 interface StepConfigPanelProps {
@@ -268,9 +318,13 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="condition">Condition (If/Else)</option>
           <option value="classify">Classify (Route)</option>
           <option value="loop">Loop (For Each)</option>
+          <option value="race">Race (Parallel)</option>
+          <option value="sensor">Sensor (Poll)</option>
+          <option value="gate">Gate (Approval)</option>
           <option value="transform">Transform (Template)</option>
           <option value="notify">Notify (Alert)</option>
           <option value="delegate">Delegate (Sub-workflow)</option>
+          <option value="browser">Browser (RPA)</option>
         </select>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
@@ -280,9 +334,13 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           {step.stepType === "condition" && "If/else branching based on expression evaluation."}
           {step.stepType === "classify" && "LLM-based classification into categories, routes to branches."}
           {step.stepType === "loop" && "Iterate over a list, running sub-steps for each item."}
+          {step.stepType === "race" && "Run branches in parallel - first valid result wins."}
+          {step.stepType === "sensor" && "Poll an external URL until a condition is met."}
+          {step.stepType === "gate" && "Multi-strategy approval gate (LLM eval, human, timeout)."}
           {step.stepType === "transform" && "Template-based data transformation - $0 cost, no LLM."}
           {step.stepType === "notify" && "Send notifications via Slack, Teams, Gmail, or webhook - $0 cost."}
           {step.stepType === "delegate" && "Delegate work to another workflow as a sub-task."}
+          {step.stepType === "browser" && "Browser automation via Playwright selectors or Computer Use visual AI."}
         </p>
       </div>
 
@@ -498,6 +556,277 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
         </div>
       )}
 
+      {/* Race Config */}
+      {step.stepType === "race" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Branches (one per line, step IDs comma-separated)</label>
+            <textarea
+              value={step.raceConfig.branches}
+              onChange={(e) => onChange({ ...step, raceConfig: { ...step.raceConfig, branches: e.target.value } })}
+              rows={4}
+              placeholder={"step-a, step-b\nstep-c, step-d"}
+              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Each line is a branch of step IDs to execute sequentially. All branches run in parallel.
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Validator Expression</label>
+            <input
+              type="text"
+              value={step.raceConfig.validator}
+              onChange={(e) => onChange({ ...step, raceConfig: { ...step.raceConfig, validator: e.target.value } })}
+              placeholder="len(output) > 0"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Optional. Python expression to validate branch output. Available: output."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Sensor Config */}
+      {step.stepType === "sensor" && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">URL</label>
+            <input
+              type="text"
+              value={step.sensorConfig.url}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, url: e.target.value } })}
+              placeholder="https://api.example.com/status"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Method</label>
+            <select
+              value={step.sensorConfig.method}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, method: e.target.value } })}
+              className={inputClass}
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Condition</label>
+            <input
+              type="text"
+              value={step.sensorConfig.condition}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, condition: e.target.value } })}
+              placeholder="response.get('status') == 'ready'"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Python expression. Available: response (parsed JSON), status_code."}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Poll Interval (s)</label>
+              <input
+                type="number"
+                value={step.sensorConfig.checkInterval}
+                onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, checkInterval: Number(e.target.value) } })}
+                min={1}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Timeout (s)</label>
+              <input
+                type="number"
+                value={step.sensorConfig.timeout}
+                onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, timeout: Number(e.target.value) } })}
+                min={1}
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Headers (JSON)</label>
+            <input
+              type="text"
+              value={step.sensorConfig.headers}
+              onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, headers: e.target.value } })}
+              placeholder='{"Authorization": "Bearer ..."}'
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Gate Config */}
+      {step.stepType === "gate" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-muted">Strategies</label>
+            <button
+              type="button"
+              onClick={() => {
+                const newStrategy: GateStrategy = {
+                  type: "llm_eval",
+                  prompt: "",
+                  input: "",
+                  model: "haiku",
+                  message: "",
+                  timeoutHours: 24,
+                  seconds: 60,
+                  action: "approve",
+                  onTimeout: "abort",
+                };
+                onChange({
+                  ...step,
+                  gateConfig: {
+                    ...step.gateConfig,
+                    strategies: [...step.gateConfig.strategies, newStrategy],
+                  },
+                });
+              }}
+              className="flex items-center gap-1 text-[11px] text-accent hover:text-accent-hover"
+            >
+              <Plus className="h-3 w-3" /> Add Strategy
+            </button>
+          </div>
+          {step.gateConfig.strategies.map((strategy, idx) => (
+            <div key={idx} className="rounded-lg border border-border p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <select
+                  value={strategy.type}
+                  onChange={(e) => {
+                    const updated = [...step.gateConfig.strategies];
+                    updated[idx] = { ...updated[idx], type: e.target.value as GateStrategy["type"] };
+                    onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                  }}
+                  className={cn(inputClass, "flex-1")}
+                >
+                  <option value="llm_eval">LLM Eval</option>
+                  <option value="human">Human Approval</option>
+                  <option value="timeout">Timeout</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updated = step.gateConfig.strategies.filter((_, i) => i !== idx);
+                    onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                  }}
+                  className="text-muted hover:text-error"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {strategy.type === "llm_eval" && (
+                <>
+                  <input
+                    type="text"
+                    value={strategy.prompt}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], prompt: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    placeholder="Evaluation prompt..."
+                    className={inputClass}
+                  />
+                  <input
+                    type="text"
+                    value={strategy.input}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], input: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    placeholder="{steps.prev.output}"
+                    className={inputClass}
+                  />
+                  <select
+                    value={strategy.model}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], model: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    className={inputClass}
+                  >
+                    <option value="haiku">Haiku</option>
+                    <option value="sonnet">Sonnet</option>
+                  </select>
+                </>
+              )}
+
+              {strategy.type === "human" && (
+                <>
+                  <input
+                    type="text"
+                    value={strategy.message}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], message: e.target.value };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    placeholder="Approval message..."
+                    className={inputClass}
+                  />
+                  <input
+                    type="number"
+                    value={strategy.timeoutHours}
+                    onChange={(e) => {
+                      const updated = [...step.gateConfig.strategies];
+                      updated[idx] = { ...updated[idx], timeoutHours: Number(e.target.value) };
+                      onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                    }}
+                    min={1}
+                    className={inputClass}
+                  />
+                </>
+              )}
+
+              {strategy.type === "timeout" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-0.5 block text-[11px] text-muted">Seconds</label>
+                    <input
+                      type="number"
+                      value={strategy.seconds}
+                      onChange={(e) => {
+                        const updated = [...step.gateConfig.strategies];
+                        updated[idx] = { ...updated[idx], seconds: Number(e.target.value) };
+                        onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                      }}
+                      min={1}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[11px] text-muted">Action</label>
+                    <select
+                      value={strategy.action}
+                      onChange={(e) => {
+                        const updated = [...step.gateConfig.strategies];
+                        updated[idx] = { ...updated[idx], action: e.target.value as "approve" | "reject" };
+                        onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
+                      }}
+                      className={inputClass}
+                    >
+                      <option value="approve">Auto-approve</option>
+                      <option value="reject">Auto-reject</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {step.gateConfig.strategies.length === 0 && (
+            <p className="text-[11px] text-muted-foreground">No strategies yet. Add at least one.</p>
+          )}
+        </div>
+      )}
+
       {/* Transform Config */}
       {step.stepType === "transform" && (
         <div className="space-y-3">
@@ -600,6 +929,250 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               className={inputClass}
             />
           </div>
+        </div>
+      )}
+
+      {/* Browser Config */}
+      {step.stepType === "browser" && (
+        <div className="space-y-3">
+          {/* Mode-specific info box */}
+          <div className={cn(
+            "rounded-lg border p-3",
+            step.browserConfig.mode === "dom"
+              ? "border-success/30 bg-success/5"
+              : step.browserConfig.mode === "computer_use"
+              ? "border-warning/30 bg-warning/5"
+              : "border-running/30 bg-running/5"
+          )}>
+            {step.browserConfig.mode === "playwright" && (
+              <p className="text-xs text-muted">
+                <span className="font-medium text-running">Playwright mode</span> uses CSS/XPath selectors for fast, reliable automation. Best for known page structures. Supports action caching for repeat visits.
+              </p>
+            )}
+            {step.browserConfig.mode === "computer_use" && (
+              <p className="text-xs text-muted">
+                <span className="font-medium text-warning">Computer Use mode</span> uses AI vision to interact with pages via screenshots. Best for legacy systems without stable DOM. Includes CAPTCHA detection and post-action validation.
+              </p>
+            )}
+            {step.browserConfig.mode === "dom" && (
+              <p className="text-xs text-muted">
+                <span className="font-medium text-success">DOM Extraction mode</span> uses the accessibility tree for fast, structured data extraction. 10x cheaper than vision. Best for scraping tables, forms, and structured content.
+              </p>
+            )}
+          </div>
+
+          {/* Mode selection - 3 options */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted">Mode</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: "playwright", label: "Playwright", desc: "Selector-based, fast" },
+                { value: "computer_use", label: "Computer Use", desc: "Visual AI, screenshots" },
+                { value: "dom", label: "DOM Extract", desc: "Accessibility tree, structured" },
+              ].map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, mode: m.value } })}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-lg border p-2.5 text-xs transition-colors",
+                    step.browserConfig.mode === m.value
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-border text-muted hover:border-accent/50"
+                  )}
+                >
+                  <span className="font-medium">{m.label}</span>
+                  <span className="text-[10px] text-muted">{m.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Start URL */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Start URL</label>
+            <input
+              type="text"
+              value={step.browserConfig.startUrl}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, startUrl: e.target.value } })}
+              placeholder="https://example.com/login"
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Initial URL the browser navigates to. Supports {input.url} variables."}
+            </p>
+          </div>
+
+          {/* Viewport */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Viewport</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-0.5 block text-[11px] text-muted">Width</label>
+                <input
+                  type="number"
+                  value={step.browserConfig.viewportWidth}
+                  onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, viewportWidth: Number(e.target.value) } })}
+                  min={320}
+                  max={3840}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[11px] text-muted">Height</label>
+                <input
+                  type="number"
+                  value={step.browserConfig.viewportHeight}
+                  onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, viewportHeight: Number(e.target.value) } })}
+                  min={240}
+                  max={2160}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Timeout */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Timeout (seconds)</label>
+            <input
+              type="number"
+              value={step.browserConfig.timeout}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, timeout: Number(e.target.value) } })}
+              min={10}
+              max={3600}
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Maximum total time for the browser step to complete.</p>
+          </div>
+
+          {/* Wait after action */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Wait After Action (seconds)</label>
+            <input
+              type="number"
+              value={step.browserConfig.waitAfterAction}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, waitAfterAction: Number(e.target.value) } })}
+              min={0}
+              max={30}
+              step={0.1}
+              className={inputClass}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">Delay between browser actions to let pages load.</p>
+          </div>
+
+          {/* Headless */}
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={step.browserConfig.headless}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, headless: e.target.checked } })}
+              className="rounded border-border text-accent focus:ring-accent"
+            />
+            <span className="font-medium">Headless</span>
+            <span className="text-muted-foreground">- Run browser without visible window</span>
+          </label>
+
+          {/* Credentials env var */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Credentials Env Var</label>
+            <input
+              type="text"
+              value={step.browserConfig.credentials_env}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, credentials_env: e.target.value } })}
+              placeholder="BROWSER_CREDENTIALS"
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {"Environment variable name containing login credentials (JSON)."}
+            </p>
+          </div>
+
+          {/* Screenshot on error */}
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={step.browserConfig.screenshotOnError}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, screenshotOnError: e.target.checked } })}
+              className="rounded border-border text-accent focus:ring-accent"
+            />
+            <span className="font-medium">Screenshot on Error</span>
+            <span className="text-muted-foreground">- Capture screenshot when step fails</span>
+          </label>
+
+          {/* Max Actions (Computer Use mode) */}
+          {step.browserConfig.mode === "computer_use" && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted">Max Actions</label>
+              <input
+                type="number"
+                value={step.browserConfig.max_actions || 100}
+                onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, max_actions: parseInt(e.target.value) || 100 } })}
+                min={10}
+                max={500}
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+              />
+              <p className="text-[10px] text-muted">Safety limit for screenshot-action cycles</p>
+            </div>
+          )}
+
+          {/* CAPTCHA Strategy */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted">CAPTCHA Strategy</label>
+            <select
+              value={step.browserConfig.captcha_strategy || "pause"}
+              onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, captcha_strategy: e.target.value } })}
+              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+            >
+              <option value="pause">Pause for human (HITL)</option>
+              <option value="skip">Skip and continue</option>
+              <option value="fail">Fail step</option>
+            </select>
+            <p className="text-[10px] text-muted">What to do when CAPTCHA is detected</p>
+          </div>
+
+          {/* Capture Screenshots (for execution replay) */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-muted">Execution Replay</p>
+              <p className="text-[10px] text-muted">Save screenshots after each action</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange({ ...step, browserConfig: { ...step.browserConfig, capture_screenshots: !step.browserConfig.capture_screenshots } })}
+              className={cn(
+                "relative h-5 w-9 rounded-full transition-colors",
+                step.browserConfig.capture_screenshots ? "bg-accent" : "bg-border"
+              )}
+            >
+              <span className={cn(
+                "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+                step.browserConfig.capture_screenshots ? "translate-x-4" : "translate-x-0.5"
+              )} />
+            </button>
+          </div>
+
+          {/* Output Schema (DOM mode) */}
+          {step.browserConfig.mode === "dom" && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted">Output Schema (JSON)</label>
+              <textarea
+                value={step.browserConfig.output_schema ? JSON.stringify(step.browserConfig.output_schema, null, 2) : ""}
+                onChange={(e) => {
+                  try {
+                    const schema = e.target.value ? JSON.parse(e.target.value) : null;
+                    onChange({ ...step, browserConfig: { ...step.browserConfig, output_schema: schema } });
+                  } catch {
+                    // Invalid JSON, don't update
+                  }
+                }}
+                placeholder='{"type": "object", "properties": {"invoices": {"type": "array"}}}'
+                rows={4}
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs"
+              />
+              <p className="text-[10px] text-muted">Define expected output structure for data extraction</p>
+            </div>
+          )}
         </div>
       )}
 

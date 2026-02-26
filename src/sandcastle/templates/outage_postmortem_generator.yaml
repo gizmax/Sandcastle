@@ -1,0 +1,550 @@
+# name: Outage Postmortem Generator
+# description: Collect incident timeline from monitoring tools, correlate log entries, identify root cause chains, draft blameless postmortem documents, extract action items, and track remediation
+# tags: [Incident-Response, SRE, Postmortem, Reliability, DevOps]
+# category: engineering
+
+name: outage-postmortem-generator
+description: Collect incident timeline from monitoring tools, correlate log entries, identify root cause chains, draft blameless postmortem documents, extract action items, and track remediation
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["incident_id", "incident_description"]
+  properties:
+    incident_id:
+      type: string
+      description: "Unique incident identifier from your ticketing system (e.g. 'INC-2024-0847', 'PD-12345')"
+    incident_description:
+      type: string
+      description: "Detailed description of what happened, including initial symptoms observed and services impacted"
+    monitoring_sources:
+      type: string
+      description: "Comma-separated list of monitoring and alerting tools used (e.g. 'PagerDuty, Datadog, Slack, Grafana, CloudWatch')"
+      default: "PagerDuty, Datadog, Slack"
+    affected_services:
+      type: string
+      description: "Comma-separated list of services, components, or systems affected by the incident (e.g. 'api-gateway, user-auth, payments-service, postgres-primary')"
+    severity:
+      type: string
+      description: "Incident severity level following standard classification: SEV-1 (critical), SEV-2 (major), SEV-3 (minor), SEV-4 (low)"
+      default: "SEV-1"
+
+steps:
+  - id: timeline-reconstruction
+    prompt: |
+      You are an expert Site Reliability Engineer specializing in incident timeline reconstruction. Your task is to build a comprehensive, minute-by-minute timeline of the incident by analyzing information from multiple monitoring sources.
+
+      Incident ID: {input.incident_id}
+      Incident Description: {input.incident_description}
+      Monitoring Sources: {input.monitoring_sources}
+      Affected Services: {input.affected_services}
+      Severity: {input.severity}
+
+      Construct a detailed incident timeline following these steps:
+
+      **Phase 1: Pre-Incident Baseline (T-60 minutes to T-0)**
+      Analyze the state of all affected services before the incident began. Document:
+      - Normal operating metrics for each service (request rate, latency p50/p95/p99, error rate, CPU/memory utilization)
+      - Any subtle anomalies or warning signs that appeared before the main alert fired
+      - Deployment activity in the preceding 24 hours - what changes were pushed to any affected service or shared infrastructure
+      - Scheduled maintenance windows or configuration changes that were active
+      - Background job or batch processing activity that may have contributed load
+      - Dependency health status (databases, caches, message queues, third-party APIs)
+
+      **Phase 2: Detection and Alerting (T-0 to T+first_response)**
+      Document exactly how the incident was detected:
+      - Which monitoring system fired the first alert, and at what exact timestamp
+      - What threshold or condition triggered the alert (specific metric, threshold value, duration)
+      - Time gap between the actual start of degradation and when it was detected (detection lag)
+      - Which on-call responder was paged and their acknowledgment time
+      - Any customer-reported issues that preceded or coincided with the alert
+      - Alert routing path - which escalation policy was invoked, which communication channels were activated
+      - Were there any alert suppression rules or maintenance windows that delayed detection
+
+      **Phase 3: Multi-Source Timeline Merging**
+      For each monitoring source listed in {input.monitoring_sources}, extract and correlate events:
+
+      For PagerDuty or similar alerting platforms:
+      - Alert creation, acknowledgment, escalation, and resolution timestamps
+      - Responder assignments and handoffs
+      - Status page updates and their timing
+
+      For Datadog or similar APM/infrastructure monitoring:
+      - Metric anomaly detection events with exact timestamps
+      - Trace data showing request flow degradation
+      - Log pattern changes and error spike onset
+      - Dashboard snapshot timestamps showing system state
+
+      For Slack or similar communication platforms:
+      - First mention of the issue in any channel
+      - Incident channel creation timestamp
+      - Key decision points discussed by responders
+      - Status update messages to stakeholders
+      - External vendor or dependency team communications
+
+      For CloudWatch, Grafana, or similar tools:
+      - Alarm state changes with exact timestamps
+      - Auto-scaling events triggered by the incident
+      - Resource utilization threshold breaches
+
+      **Phase 4: Response and Mitigation Timeline**
+      Document every significant action taken during the incident:
+      - Each hypothesis that responders investigated (what they checked and what they found)
+      - Diagnostic commands run and their outputs
+      - Mitigation attempts and their outcomes (rollbacks, config changes, scaling actions, failovers)
+      - The specific action that resolved or mitigated the incident
+      - Service recovery sequence - which services recovered first and in what order
+      - Time to detect (TTD), time to mitigate (TTM), and total time to resolve (TTR)
+
+      **Phase 5: Timeline Synthesis**
+      Merge all sources into a single unified timeline:
+      - Use ISO 8601 timestamps with timezone (or relative T+/T- notation if exact times unavailable)
+      - Resolve conflicts between sources (e.g. alert timestamp vs actual degradation start)
+      - Identify gaps in the timeline where no monitoring data is available
+      - Note any clock drift or synchronization issues between systems
+      - Highlight the critical path - the sequence of events that determined the total incident duration
+
+      Output the timeline as a structured table with columns: Timestamp | Source | Event | Impact | Actor
+      Include a brief narrative summary at the top explaining the overall incident flow in 3-5 sentences.
+      Flag any timeline gaps or uncertainties that need follow-up investigation.
+    model: haiku
+    max_turns: 8
+
+  - id: log-correlation
+    depends_on: [timeline-reconstruction]
+    prompt: |
+      You are a senior systems engineer with deep expertise in distributed systems observability and log analysis. Your task is to correlate log entries across all affected services to identify the causal chain of failures.
+
+      Incident Timeline: {steps.timeline-reconstruction.output}
+      Affected Services: {input.affected_services}
+      Incident Description: {input.incident_description}
+
+      Perform a comprehensive log correlation analysis following this methodology:
+
+      **1. Log Source Inventory and Collection Strategy**
+      For each service in {input.affected_services}, identify and catalog:
+      - Application logs (structured JSON logs, unstructured text logs, framework-specific logs)
+      - Infrastructure logs (system logs, kernel messages, container runtime logs, orchestrator events)
+      - Network logs (load balancer access logs, firewall logs, DNS query logs, CDN logs)
+      - Database logs (slow query logs, connection pool events, replication lag, deadlock detection)
+      - Cache logs (eviction events, connection failures, memory pressure)
+      - Message queue logs (consumer lag, dead letter queue events, partition rebalancing)
+      - Authentication and authorization logs (token validation failures, rate limiting events)
+      Define the time window for log collection: from T-30 minutes before first anomaly to T+30 minutes after resolution.
+
+      **2. Error Pattern Analysis**
+      Analyze log entries for error patterns across all services:
+      - Identify the first error log entry across all services (the "patient zero" error)
+      - Map error propagation: how errors cascaded from one service to another
+      - Classify errors by type: transient (timeout, connection reset), permanent (crash, OOM), and intermittent
+      - Calculate error rates over time - identify inflection points where error rates sharply increased
+      - Detect error correlation: which errors always appear together vs independently
+      - Identify novel error messages that have never appeared before this incident
+      - Look for error messages that stopped appearing (services that crashed and stopped logging)
+
+      **3. Request Flow Tracing**
+      If distributed tracing data is available (or can be inferred from logs):
+      - Trace representative failed requests end-to-end through the service graph
+      - Identify where in the request path failures originated
+      - Calculate latency breakdown per service hop during the incident vs baseline
+      - Detect retry storms - services retrying failed requests and amplifying load
+      - Identify circuit breaker activations or lack thereof
+      - Map timeout cascades - where upstream timeouts caused downstream pile-ups
+
+      **4. Resource Exhaustion Correlation**
+      Correlate resource metrics with log events:
+      - Memory usage patterns leading to OOM kills or garbage collection pressure
+      - CPU saturation and thread pool exhaustion events
+      - File descriptor or connection pool exhaustion
+      - Disk I/O saturation or storage capacity issues
+      - Network bandwidth or connection limit breaches
+      - Database connection pool saturation and query queue depth
+
+      **5. Configuration and Deployment Correlation**
+      Cross-reference logs with recent changes:
+      - Feature flag changes and their timing relative to incident onset
+      - Configuration updates pushed via config management systems
+      - Secret rotation or certificate renewal events
+      - Infrastructure-as-code changes (Terraform, CloudFormation, Pulumi)
+      - Container image updates or Kubernetes manifest changes
+      - DNS or routing changes
+
+      **6. Cross-Service Dependency Mapping**
+      Build a dependency failure map:
+      - Which service failed first based on log evidence
+      - How the failure propagated through the service mesh
+      - Which services were directly impacted vs collateral damage
+      - Identify healthy services that were unaffected and why (circuit breakers, bulkheads, graceful degradation)
+      - Map the blast radius - total number of services, endpoints, and user flows affected
+
+      **7. Correlation Summary**
+      Produce a structured correlation report:
+      - Causal chain diagram (text-based): Service A failure -> Service B timeout -> Service C circuit break -> User impact
+      - Confidence level for each link in the causal chain (High/Medium/Low with justification)
+      - Unresolved correlations that need deeper investigation
+      - Log quality assessment - identify services with insufficient logging that hindered analysis
+      - Recommendations for logging improvements to aid future incident analysis
+    model: sonnet
+    max_turns: 10
+
+  - id: root-cause-analysis
+    depends_on: [timeline-reconstruction]
+    prompt: |
+      You are an expert incident analyst specializing in root cause analysis for complex distributed systems. Your task is to identify the root cause and contributing factors using structured analysis methodologies.
+
+      Incident Timeline: {steps.timeline-reconstruction.output}
+      Incident Description: {input.incident_description}
+      Affected Services: {input.affected_services}
+      Severity: {input.severity}
+
+      Conduct a rigorous root cause analysis using multiple complementary frameworks:
+
+      **Framework 1: 5-Whys Analysis**
+      Starting from the customer-visible impact, ask "why" iteratively to drill down to the root cause:
+      - Why 1: Why did customers experience the outage? (proximate cause)
+      - Why 2: Why did [proximate cause] occur? (intermediate cause)
+      - Why 3: Why did [intermediate cause] happen? (deeper cause)
+      - Why 4: Why was [deeper cause] possible? (systemic cause)
+      - Why 5: Why did we not prevent [systemic cause]? (root organizational/process cause)
+
+      For each "why" level, provide:
+      - The specific technical or process explanation
+      - Supporting evidence from the timeline
+      - Confidence level (Confirmed, Likely, Suspected) with justification
+      - Alternative explanations that were considered and ruled out
+
+      Perform at least 2 parallel 5-Whys chains if multiple contributing factors are identified. Not every incident has a single root cause - complex failures often have multiple interacting causes.
+
+      **Framework 2: Contributing Factor Mapping**
+      Classify all contributing factors into these categories:
+
+      Technical factors:
+      - Software bugs (logic errors, race conditions, memory leaks, unhandled edge cases)
+      - Infrastructure issues (hardware failures, capacity limitations, network partitions)
+      - Configuration errors (misconfiguration, stale configs, environment-specific settings)
+      - Dependency failures (third-party service outages, API breaking changes, certificate expiry)
+
+      Process factors:
+      - Change management gaps (insufficient review, missing canary deployment, rollback plan)
+      - Testing gaps (missing integration tests, load tests, chaos engineering coverage)
+      - Monitoring gaps (missing alerts, incorrect thresholds, alert fatigue)
+      - Documentation gaps (outdated runbooks, missing architectural diagrams)
+
+      Human factors (blameless perspective):
+      - Cognitive load during response (too many alerts, unclear dashboards)
+      - Communication breakdowns (delayed escalation, unclear ownership, timezone issues)
+      - Knowledge gaps (tribal knowledge, undocumented system behavior)
+      - Decision-making under pressure (premature mitigation attempts, analysis paralysis)
+
+      Organizational factors:
+      - Staffing and on-call load
+      - Technical debt accumulation
+      - Prioritization decisions that deferred reliability work
+      - Cross-team dependency coordination
+
+      **Framework 3: Failure Mode Analysis**
+      For the primary failure mode identified:
+      - Was this a known failure mode? Was it documented in risk registers or past postmortems?
+      - Was there a defense mechanism that should have prevented it? Why did it fail?
+      - What was the blast radius, and were there isolation mechanisms that limited it?
+      - How does this failure mode compare to industry-known failure patterns (e.g. thundering herd, cascading failure, split-brain, retry storm, cold start, config drift)?
+      - Was this a latent failure that existed for some time before manifesting?
+
+      **Framework 4: SLO/SLA Impact Assessment**
+      Calculate the impact on service level objectives and agreements:
+      - Which SLOs were violated and by how much (error budget consumption)
+      - Total downtime or degradation duration per affected service
+      - Estimated number of affected users/requests/transactions
+      - Revenue impact estimation based on service criticality and duration
+      - SLA breach determination and any contractual notification requirements
+      - Error budget remaining after this incident
+      - Monthly/quarterly reliability trend - is this an isolated event or part of a pattern
+
+      **Framework 5: MTTR Decomposition**
+      Break down the total resolution time into phases:
+      - Time to Detect (TTD): from incident start to first alert
+      - Time to Triage (TTT): from first alert to correct hypothesis identified
+      - Time to Mitigate (TTM): from correct hypothesis to mitigation applied
+      - Time to Resolve (TTR): from mitigation to full service recovery
+      - Identify which phase took the longest and why
+      - Benchmark each phase against team targets and industry standards
+      - Identify specific improvements that would reduce each phase
+
+      **Root Cause Summary**
+      Produce a clear, concise root cause statement following this template:
+      "The [severity] incident affecting [services] was caused by [root cause], which led to [failure mode]. This was exacerbated by [contributing factors]. The incident lasted [duration] and affected approximately [impact scope]."
+
+      Assign a confidence level to the root cause determination: Confirmed, Probable, or Needs Further Investigation.
+      If further investigation is needed, specify exactly what data or analysis is required.
+    model: sonnet
+    max_turns: 10
+
+  - id: postmortem-drafting
+    depends_on: [timeline-reconstruction, log-correlation, root-cause-analysis]
+    prompt: |
+      You are a senior Staff Engineer experienced in writing comprehensive, blameless postmortem documents that drive organizational learning. Your task is to synthesize all analysis into a polished, publication-ready postmortem document.
+
+      Incident Timeline: {steps.timeline-reconstruction.output}
+      Log Correlation Analysis: {steps.log-correlation.output}
+      Root Cause Analysis: {steps.root-cause-analysis.output}
+      Incident ID: {input.incident_id}
+      Severity: {input.severity}
+      Affected Services: {input.affected_services}
+
+      Draft a comprehensive blameless postmortem document following industry best practices (Google SRE, PagerDuty, Atlassian). The document must be suitable for distribution to engineering leadership, affected teams, and stakeholders.
+
+      **BLAMELESS CULTURE PRINCIPLES (MANDATORY):**
+      Before writing any section, internalize these principles:
+      - NEVER name individuals in a negative context. Use role titles (e.g. "the on-call engineer", "the deploying team")
+      - Focus on systemic and process failures, not human errors. Humans make mistakes - systems should be resilient to them
+      - Frame findings as learning opportunities, not blame assignments
+      - Use language like "the system allowed" rather than "engineer X caused"
+      - Assume everyone involved acted with the best information available to them at the time
+      - Highlight what went well during the response, not just what went wrong
+
+      **DOCUMENT STRUCTURE:**
+
+      **1. Title and Metadata**
+      - Title format: "[{input.severity}] [Service Name] - [Brief Description] - {input.incident_id}"
+      - Date of incident, date postmortem drafted
+      - Author (to be filled), reviewers (to be filled)
+      - Status: Draft (pending review)
+
+      **2. Executive Summary (3-5 sentences)**
+      Write a clear, jargon-minimal summary covering:
+      - What happened (customer-visible impact)
+      - How long it lasted (total duration, time to detection, time to resolution)
+      - How many users/services were affected
+      - Root cause in one sentence
+      - Current status (resolved, monitoring, ongoing remediation)
+
+      **3. Impact Assessment**
+      Quantify the incident impact comprehensively:
+      - Duration: total incident time, degradation time vs complete outage time
+      - User impact: number of affected users, percentage of total traffic, geographic scope
+      - Business impact: failed transactions, revenue impact estimate, SLA credits triggered
+      - SLO impact: error budget consumed, remaining error budget for the period
+      - Data impact: any data loss, corruption, or inconsistency (even if none, state explicitly)
+      - Reputational impact: social media mentions, support ticket volume increase, media coverage
+      - Internal impact: number of responders involved, person-hours spent on incident response
+
+      **4. Timeline**
+      Present the unified timeline from the reconstruction, formatted as:
+      - Use UTC timestamps consistently
+      - Group events by phase: Pre-incident, Detection, Response, Mitigation, Recovery, Post-recovery
+      - Bold the critical decision points and turning points
+      - Include both automated system events and human actions
+      - Note timestamps where no data is available (gaps)
+
+      **5. Root Cause and Contributing Factors**
+      Present the root cause analysis findings in accessible language:
+      - State the root cause clearly with supporting evidence
+      - List contributing factors in order of significance
+      - Include the 5-Whys analysis chain
+      - Use a visual causal chain (text-based diagram showing failure propagation)
+      - Distinguish between proximate cause, contributing causes, and root organizational cause
+      - Note any factors that limited the blast radius or aided recovery
+
+      **6. What Went Well**
+      Explicitly call out things that worked during the incident:
+      - Effective monitoring that detected the issue
+      - Good response actions taken by the team
+      - Systems that gracefully degraded rather than failing hard
+      - Communication practices that worked effectively
+      - Existing safeguards that limited the blast radius
+      This section is critical for blameless culture - it recognizes good work and reinforces positive practices.
+
+      **7. What Went Wrong**
+      Document failures and gaps without blame:
+      - Use passive voice or system-focused language
+      - Group by category: Detection, Response, Communication, System Design
+      - For each item, note why the existing process or system was insufficient
+      - Cross-reference with contributing factors from the root cause analysis
+
+      **8. Where We Got Lucky**
+      Identify near-misses and luck factors:
+      - Things that could have made the incident worse but didn't
+      - Workarounds that happened to be available
+      - Timing factors that limited impact (off-peak hours, weekend, etc.)
+      - Known vulnerabilities that were not triggered this time but could be next time
+
+      **9. Lessons Learned**
+      Synthesize insights grouped by theme:
+      - Architectural lessons (system design improvements needed)
+      - Operational lessons (process improvements, monitoring gaps)
+      - Organizational lessons (team structure, knowledge sharing, on-call practices)
+      - For each lesson, tie it back to specific events in the timeline
+
+      **10. Action Items**
+      (Leave as placeholder - will be populated by the next step)
+      "See Action Items section generated by the action item extraction step."
+
+      **11. Appendix**
+      - Glossary of service names and acronyms used
+      - Links to relevant dashboards, runbooks, and documentation (placeholder URLs)
+      - Related past incidents that share similar failure modes
+      - Raw data references for further investigation
+
+      Format the entire document in clean, professional markdown. Use tables, bullet points, and headers consistently. The document should be 2000-4000 words and suitable for a postmortem review meeting.
+    model: sonnet
+    max_turns: 10
+
+  - id: action-item-extraction
+    depends_on: [postmortem-drafting]
+    prompt: |
+      You are a technical program manager experienced in translating postmortem findings into actionable, trackable work items. Your task is to extract every action item from the postmortem and structure them for engineering team execution.
+
+      Postmortem Document: {steps.postmortem-drafting.output}
+      Root Cause Analysis: {steps.root-cause-analysis.output}
+      Affected Services: {input.affected_services}
+      Severity: {input.severity}
+
+      Extract and structure all action items using the following framework:
+
+      **Action Item Classification System:**
+
+      **Category 1: IMMEDIATE (0-48 hours) - Prevent Recurrence**
+      These are urgent actions to prevent the exact same failure from happening again:
+      - Hotfixes or patches for the specific bug or misconfiguration
+      - Rollback of problematic changes that caused the incident
+      - Emergency capacity increases or scaling adjustments
+      - Temporary workarounds or mitigations while permanent fixes are developed
+      - Critical monitoring alerts that must be added immediately
+      For each immediate action, specify: what to do, who owns it (team/role), definition of done, and risk if delayed.
+
+      **Category 2: SHORT-TERM (1-2 weeks) - Strengthen Defenses**
+      Actions to address the contributing factors and close gaps:
+      - New or improved monitoring and alerting rules with specific thresholds
+      - Runbook creation or updates based on lessons learned
+      - Test coverage additions (unit tests, integration tests, load tests) for the failure mode
+      - Configuration management improvements (validation, drift detection)
+      - Deployment process improvements (canary analysis, automated rollback triggers)
+      For each short-term action, specify: acceptance criteria, estimated effort (S/M/L), suggested sprint, dependencies.
+
+      **Category 3: LONG-TERM (1-3 months) - Systemic Improvements**
+      Architectural and organizational changes to address root causes:
+      - System architecture changes (circuit breakers, bulkheads, retry policies, graceful degradation)
+      - Infrastructure reliability improvements (redundancy, failover, capacity planning)
+      - Observability platform enhancements (distributed tracing, log aggregation, SLO dashboards)
+      - Process changes (change management, review requirements, testing standards)
+      - Organizational changes (on-call structure, training programs, knowledge sharing)
+      For each long-term action, specify: business justification, estimated effort, dependencies on other teams, success metrics.
+
+      **Action Item Template:**
+      For EVERY action item, fill in this template:
+      | Field | Value |
+      |-------|-------|
+      | ID | AI-{input.incident_id}-XXX (sequential number) |
+      | Title | Clear, imperative description of the action |
+      | Category | Immediate / Short-term / Long-term |
+      | Priority | P0 (critical) / P1 (high) / P2 (medium) / P3 (low) |
+      | Owner Team | Which team or role should own this |
+      | Description | Detailed description of what needs to be done |
+      | Acceptance Criteria | How to verify the action is complete |
+      | Estimated Effort | Hours or story points estimate |
+      | Deadline | Specific date or relative timeframe |
+      | Dependencies | Other action items or external dependencies |
+      | Risk if Skipped | What could happen if this action is not completed |
+
+      **Cross-referencing and Deduplication:**
+      - Check for overlap with action items from past incidents (reference if known)
+      - Merge similar actions into a single well-scoped work item
+      - Ensure no findings from the postmortem's "What Went Wrong" and "Lessons Learned" sections are left without a corresponding action item
+      - Verify that the root cause has at least one action item that directly addresses it
+
+      **Summary Dashboard:**
+      Produce a summary table:
+      | Category | Count | Total Estimated Effort | Critical Path Items |
+      |----------|-------|----------------------|---------------------|
+      | Immediate | X | Y hours | [list] |
+      | Short-term | X | Y points | [list] |
+      | Long-term | X | Y points | [list] |
+
+      Target at least 8-15 action items total, distributed across all three categories.
+      Flag any action items that are blockers for other items.
+    model: haiku
+    max_turns: 8
+
+  - id: remediation-tracker
+    depends_on: [action-item-extraction]
+    prompt: |
+      You are a reliability program manager responsible for ensuring postmortem action items are tracked, prioritized, and completed. Your task is to create a comprehensive remediation tracking plan with accountability mechanisms.
+
+      Action Items: {steps.action-item-extraction.output}
+      Postmortem Document: {steps.postmortem-drafting.output}
+      Incident ID: {input.incident_id}
+      Severity: {input.severity}
+      Affected Services: {input.affected_services}
+
+      Create a remediation tracking framework covering:
+
+      **1. Remediation Project Plan**
+      Organize all action items into a structured project plan:
+      - Group related action items into workstreams (e.g. "Monitoring Improvements", "Architecture Hardening", "Process Updates")
+      - Define dependencies between action items - which must complete before others can start
+      - Create a Gantt-style text timeline showing parallel and sequential work
+      - Identify the critical path - the longest chain of dependent items
+      - Flag resource conflicts where the same team owns too many critical items
+      - Suggest workload balancing if any team is overloaded
+
+      **2. Progress Tracking Mechanism**
+      Design a tracking system for the remediation effort:
+      - Weekly status report template with fields: Item ID, Status (Not Started/In Progress/Blocked/Done), Percent Complete, Blockers, ETA
+      - Define status meeting cadence (suggest weekly for first month, biweekly after)
+      - Escalation criteria: when an action item is at risk of missing its deadline
+      - Escalation path: who to escalate to and expected response time
+      - Dashboard metrics: total items, completion percentage, items at risk, average days to completion
+
+      **3. Verification and Validation**
+      For each action item, define how to verify it actually prevents the failure:
+      - Testing approach: how to test that the fix works (load test, chaos test, failover drill)
+      - Validation criteria: specific metrics that prove the improvement (e.g. "alert fires within 30 seconds of threshold breach")
+      - Regression detection: monitoring to ensure the fix continues working over time
+      - Game day scenarios: structured tests that simulate the original failure mode
+
+      **4. MTTR Improvement Projections**
+      Based on the action items, estimate the expected improvement in incident response:
+      - Current MTTR breakdown: TTD + TTT + TTM + TTR = total MTTR
+      - Projected MTTR after immediate actions are complete
+      - Projected MTTR after all short-term actions are complete
+      - Projected MTTR after all long-term actions are complete
+      - Target MTTR for this service tier based on severity classification
+      - Specific items that contribute most to MTTR reduction
+
+      **5. Recurrence Prevention Confidence**
+      Assess the confidence level that the remediation plan will prevent recurrence:
+      - Score each action item's contribution to preventing the specific root cause (High/Medium/Low)
+      - Identify any remaining gaps not covered by the action items
+      - Assess the risk of similar (but not identical) failures
+      - Recommend additional chaos engineering experiments to validate resilience
+      - Suggest proactive monitoring that would catch early warning signs of regression
+
+      **6. Communication Plan**
+      Define the communication cadence for remediation progress:
+      - Stakeholder list: who needs to be informed of progress (engineering, product, leadership, customers)
+      - Communication frequency per stakeholder group
+      - Templates for status updates (brief for leadership, detailed for engineering)
+      - Criteria for closing the postmortem: when can we declare the remediation complete
+      - Retrospective date: when to review the effectiveness of the remediation
+
+      **7. Follow-up Postmortem Triggers**
+      Define conditions that would require reopening or creating a new postmortem:
+      - Recurrence of the same root cause despite remediation
+      - Discovery of additional contributing factors not identified initially
+      - Action items that cannot be completed as planned (requires re-scoping)
+      - Related incidents that share failure patterns with this one
+
+      **8. Executive Summary**
+      Produce a one-page executive summary suitable for leadership review:
+      - Incident recap (2 sentences)
+      - Total remediation scope (number of items, estimated total effort, timeline)
+      - Key milestones and dates
+      - Resource requirements and budget implications
+      - Risk assessment: confidence in preventing recurrence
+      - Recommended leadership actions (approvals, resource allocation, priority decisions)
+
+      Format everything in clean markdown with tables and clear section headers.
+    model: sonnet
+    max_turns: 10

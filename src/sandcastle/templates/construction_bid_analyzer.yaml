@@ -1,0 +1,641 @@
+# name: Construction Bid Analyzer
+# description: Ingest construction bid documents, extract scope items and quantities, cross-reference cost databases, flag missing items, and produce structured cost estimates with risk-adjusted ranges
+# tags: [Construction, Estimating, Bidding, Cost-Analysis, Risk]
+# category: general_ai
+
+name: construction-bid-analyzer
+description: Ingest construction bid documents, extract scope items and quantities, cross-reference cost databases, flag missing items, and produce structured cost estimates with risk-adjusted ranges
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["project_type", "bid_documents", "location"]
+  properties:
+    project_type:
+      type: string
+      description: "Type of construction project: 'commercial', 'residential', 'industrial', or 'infrastructure'"
+    bid_documents:
+      type: string
+      description: "Description of bid documents to analyze - paste the full bid package text, scope of work narrative, specifications, and any included cost breakdowns"
+    location:
+      type: string
+      description: "Project location (city, state/province, country) - used for regional cost adjustments and labor rate calibration"
+    project_size:
+      type: string
+      description: "Square footage, acreage, or scope description (e.g. '45,000 SF office building', '2-mile road extension', '150-unit apartment complex')"
+    budget_target:
+      type: string
+      description: "Owner's budget target or not-to-exceed figure, if known (e.g. '$12M', '$85/SF')"
+
+steps:
+  - id: document-parsing
+    prompt: |
+      You are a senior construction document analyst with 20+ years of experience reading bid packages,
+      construction specifications, and project drawings descriptions. Your task is to parse and structure
+      the raw bid documents provided below into a clean, organized format that downstream analysis steps
+      can consume reliably.
+
+      PROJECT CONTEXT:
+      - Project type: {input.project_type}
+      - Location: {input.location}
+      - Project size: {input.project_size}
+      - Budget target: {input.budget_target}
+
+      BID DOCUMENTS TO PARSE:
+      {input.bid_documents}
+
+      PARSING INSTRUCTIONS:
+
+      1. DOCUMENT IDENTIFICATION AND CLASSIFICATION
+         Identify each distinct document or section within the bid package. For each, classify it as:
+         - Invitation to Bid (ITB) / Request for Proposal (RFP)
+         - General Conditions / Supplementary Conditions
+         - Technical Specifications (by CSI division)
+         - Scope of Work narrative
+         - Bill of Quantities (BOQ) or Schedule of Values
+         - Drawings list or drawing descriptions
+         - Addenda or clarifications
+         - Bid form or pricing schedule
+         - Insurance, bonding, or compliance requirements
+         - Schedule / milestone requirements
+         Record the document type, approximate page count or section length, and date if visible.
+
+      2. CSI MASTERFORMAT DIVISION MAPPING
+         Map every scope item, specification reference, and work description to the appropriate
+         CSI MasterFormat 2018 division. Use the full 6-digit numbering where possible:
+         - Division 00: Procurement and Contracting Requirements
+         - Division 01: General Requirements
+         - Division 02: Existing Conditions (demolition, site remediation)
+         - Division 03: Concrete
+         - Division 04: Masonry
+         - Division 05: Metals (structural steel, misc metals)
+         - Division 06: Wood, Plastics, Composites
+         - Division 07: Thermal and Moisture Protection (roofing, insulation, waterproofing)
+         - Division 08: Openings (doors, windows, hardware)
+         - Division 09: Finishes (drywall, flooring, painting, ceilings)
+         - Division 10: Specialties (signage, toilet accessories, fire extinguishers)
+         - Division 11: Equipment (food service, laundry, laboratory)
+         - Division 12: Furnishings
+         - Division 13: Special Construction (clean rooms, pools)
+         - Division 14: Conveying Equipment (elevators, escalators)
+         - Division 21: Fire Suppression
+         - Division 22: Plumbing
+         - Division 23: HVAC
+         - Division 25: Integrated Automation
+         - Division 26: Electrical
+         - Division 27: Communications
+         - Division 28: Electronic Safety and Security
+         - Division 31: Earthwork
+         - Division 32: Exterior Improvements (paving, landscaping)
+         - Division 33: Utilities
+         Create a structured mapping table: [Line Item or Description] -> [CSI Division.Section] -> [Specification Section Reference if available]
+
+      3. SCOPE BOUNDARY EXTRACTION
+         For each identified scope item, extract:
+         - What is explicitly INCLUDED in this bid
+         - What is explicitly EXCLUDED or noted as "by others" or "NIC" (not in contract)
+         - What is AMBIGUOUS - mentioned but not clearly assigned to this contractor
+         - Allowances - fixed dollar amounts for undefined scope
+         - Alternates - optional add/deduct items with pricing requested
+         - Unit prices requested for potential change order work
+
+      4. KEY DATES AND SCHEDULE REQUIREMENTS
+         Extract all schedule-related information:
+         - Bid due date and time
+         - Pre-bid meeting date and mandatory/optional status
+         - Notice to proceed (NTP) assumption
+         - Substantial completion date
+         - Final completion date
+         - Liquidated damages amount per day
+         - Milestone dates or phasing requirements
+         - Weather days or force majeure provisions
+
+      5. COMMERCIAL TERMS EXTRACTION
+         Extract all commercial and contractual terms:
+         - Contract type (lump sum, GMP, cost-plus, unit price, design-build)
+         - Retainage percentage and release conditions
+         - Payment terms (net 30, net 45, progress payments)
+         - Bonding requirements (bid bond, performance bond, payment bond percentages)
+         - Insurance requirements (GL limits, umbrella, professional liability, builder's risk)
+         - Warranty requirements by system
+         - Prevailing wage or Davis-Bacon requirements
+         - MBE/WBE/DBE participation goals
+         - Safety requirements and OSHA compliance specifics
+
+      6. OUTPUT FORMAT
+         Produce a structured JSON-like document with sections for:
+         - document_inventory: list of documents identified
+         - csi_mapping: division-by-division breakdown of scope items
+         - scope_boundaries: included/excluded/ambiguous items
+         - schedule: key dates and durations
+         - commercial_terms: all contractual requirements
+         - flags: any items that are unclear, contradictory, or require clarification via RFI
+
+      Be extremely thorough. Missing a single scope item at this stage propagates errors through
+      the entire bid process. When in doubt about classification, list the item under the most
+      likely division AND flag it for manual review.
+    model: haiku
+    max_turns: 10
+
+  - id: scope-extraction
+    depends_on: [document-parsing]
+    prompt: |
+      You are a chief estimator at a top-tier general contractor. Using the parsed bid documents below,
+      perform a detailed scope extraction that will serve as the foundation for quantity takeoff and
+      cost estimation.
+
+      PARSED DOCUMENT DATA:
+      {steps.document-parsing.output}
+
+      PROJECT CONTEXT:
+      - Project type: {input.project_type}
+      - Location: {input.location}
+      - Project size: {input.project_size}
+
+      SCOPE EXTRACTION METHODOLOGY:
+
+      1. LINE ITEM DECOMPOSITION
+         Break down every CSI division identified in the parsing step into individual estimatable
+         line items. Each line item must have:
+         - Unique identifier (e.g., 03-3000-001 for first concrete line item)
+         - Description: Clear, specific description of the work item
+         - Unit of measure: The appropriate estimating unit (SF, LF, CY, EA, LS, TON, etc.)
+         - Specification reference: Which spec section governs this work
+         - Quality level: Standard, premium, or as-specified grade
+         - Location within building/site: Where this work occurs (all floors, ground floor only, exterior, etc.)
+
+         For a typical {input.project_type} project of this size, you should identify between
+         150-400 individual line items depending on complexity. Do NOT aggregate - keep items granular.
+
+      2. SCOPE GAP ANALYSIS
+         Compare the extracted scope against a standard scope checklist for {input.project_type}
+         projects. Flag any items that are TYPICALLY required but NOT mentioned in these documents:
+
+         Common missing items by project type:
+         - Commercial: temporary facilities, final cleaning, commissioning, LEED documentation,
+           furniture installation, IT/AV rough-in, window washing anchors
+         - Residential: appliance installation, blinds/window treatments, house wrap, attic insulation,
+           garage door operators, landscape irrigation, mailboxes
+         - Industrial: equipment pads, crane rails, dock levelers, explosion-proof fixtures,
+           process piping supports, air makeup units, floor hardeners
+         - Infrastructure: traffic control, utility relocations, environmental monitoring,
+           as-built surveys, erosion control, dewatering
+
+         For each potentially missing item, assess:
+         - Likelihood it is needed (high/medium/low)
+         - Typical cost impact ($)
+         - Whether its absence might be intentional or an oversight
+
+      3. SCOPE OVERLAP AND DOUBLE-COUNT DETECTION
+         Identify any items that appear to be described in multiple specification sections or
+         bid line items that could result in double-counting during estimation:
+         - Mechanical insulation vs. Division 07 insulation
+         - Electrical rough-in for mechanical equipment vs. Division 26
+         - Fire caulking/firestopping responsibility (Division 07 vs. individual trades)
+         - Painting of exposed structure (Division 05 prime paint vs. Division 09)
+         - Temporary power and lighting (Division 01 vs. Division 26)
+         - Dumpster and waste removal (Division 01 vs. individual trades)
+
+      4. SUBCONTRACTOR PACKAGING
+         Recommend how the scope should be divided into subcontractor bid packages:
+         - List each recommended bid package with included CSI divisions
+         - Identify items that fall between typical trade boundaries
+         - Flag items that require coordination between multiple trades
+         - Note any items best self-performed vs. subcontracted based on {input.project_type}
+
+      5. ALLOWANCE AND CONTINGENCY ITEMS
+         Identify items that should carry allowances rather than hard numbers:
+         - Items with incomplete design information
+         - Items subject to owner selection (finishes, fixtures, equipment)
+         - Concealed conditions items (especially for renovation work)
+         - Utility connection fees and permits (municipality-dependent)
+         - Testing and inspection fees
+
+      6. RISK-TAGGED SCOPE ITEMS
+         Tag each scope item with a risk level (low/medium/high) based on:
+         - Clarity of specification (vague specs = higher risk)
+         - Availability of qualified subcontractors in {input.location}
+         - Supply chain volatility for required materials
+         - Coordination complexity with adjacent trades
+         - Historical claim frequency for this type of work
+
+      Produce a comprehensive scope register as a structured table with all fields populated.
+      This register will be the single source of truth for the quantity takeoff and cost estimation steps.
+    model: sonnet
+    max_turns: 10
+
+  - id: quantity-takeoff
+    depends_on: [scope-extraction]
+    prompt: |
+      You are a senior quantity surveyor performing a detailed quantity takeoff based on the
+      extracted scope register. Your quantities must be defensible, auditable, and include
+      appropriate waste factors.
+
+      SCOPE REGISTER:
+      {steps.scope-extraction.output}
+
+      PROJECT CONTEXT:
+      - Project type: {input.project_type}
+      - Location: {input.location}
+      - Project size: {input.project_size}
+
+      QUANTITY TAKEOFF METHODOLOGY:
+
+      1. QUANTITY CALCULATION BY DIVISION
+         For every line item in the scope register, calculate quantities using industry-standard
+         methods. Where exact dimensions are not provided, derive reasonable estimates from the
+         project size ({input.project_size}) and project type ({input.project_type}).
+
+         Use these standard derivation ratios for {input.project_type} projects:
+         - Concrete: Foundation CY based on building perimeter and soil conditions typical for {input.location}
+         - Structural steel: Tonnage based on SF and building height (typically 8-15 PSF for commercial)
+         - Exterior envelope: Calculate from building footprint and floor count, accounting for
+           floor-to-floor height (typically 13-14 ft commercial, 9-10 ft residential)
+         - Interior partitions: LF based on typical space planning ratios
+           (commercial office: ~1 LF of partition per 8-10 SF of floor area)
+         - MEP systems: Size from SF using rule-of-thumb capacities
+           (HVAC: 400-600 SF/ton commercial, Electrical: 15-25 watts/SF, Plumbing: fixture count from occupancy)
+         - Finishes: SF calculations by room/area type with appropriate ceiling heights
+         - Sitework: Quantities from site area, building footprint, parking count
+
+      2. WASTE AND OVERAGE FACTORS
+         Apply appropriate waste factors to each material quantity:
+         - Concrete: 5-8% waste (formed), 10-15% (flatwork with irregular shapes)
+         - Masonry: 3-5% breakage
+         - Drywall: 10-12% waste (standard rooms), 15-20% (complex geometry)
+         - Flooring: 10% waste (carpet/VCT), 15% (tile with patterns), 5% (polished concrete)
+         - Paint: 5-10% overage
+         - Roofing: 5-10% depending on complexity and penetrations
+         - Piping/conduit: 10-15% for fittings, hangers, and routing
+         - Ductwork: 15-20% for fittings, transitions, and field adjustments
+         - Steel: 2-3% for connections, shims, and field cuts
+         Document the waste factor applied to each line item and the justification.
+
+      3. LABOR HOUR ESTIMATION
+         For each line item, estimate installation labor using productivity rates appropriate
+         for {input.location}:
+         - Reference RS Means labor productivity rates as baseline
+         - Adjust for site conditions: congested site (-10 to -20%), easy access (+5 to +10%)
+         - Adjust for building height: high-rise work (-15 to -25% productivity)
+         - Adjust for occupied/operational facility work: (-20 to -30%)
+         - Adjust for weather exposure: exterior work in {input.location} climate considerations
+         - Adjust for complexity: repetitive work (+10%), custom/complex (-15%)
+         Express labor in crew-hours with crew composition (e.g., "2 journeymen + 1 apprentice")
+
+      4. EQUIPMENT AND LOGISTICS QUANTITIES
+         Calculate quantities for temporary and support items:
+         - Crane time: tower crane months or mobile crane days based on steel tonnage and precast pieces
+         - Scaffolding: SF of scaffold based on exterior work scope
+         - Temporary facilities: office trailers, storage containers, temporary power/water
+         - Dumpster pulls: based on demolition volume and construction waste generation rates
+         - Material hoisting: personnel/material hoist months for buildings over 4 stories
+
+      5. QUANTITY VERIFICATION CHECKS
+         Perform cross-checks to validate quantities:
+         - Total concrete CY vs. typical CY/SF ratio for {input.project_type}
+         - Total steel tonnage vs. typical PSF ratio
+         - Total electrical cost as % of building cost (typically 12-18%)
+         - Total HVAC cost as % of building cost (typically 15-22%)
+         - Plumbing fixture count vs. occupancy-based code requirements
+         - Parking ratio vs. zoning requirements for {input.location}
+         Flag any quantities that fall outside typical ranges with explanations.
+
+      6. OUTPUT FORMAT
+         Produce a detailed quantity takeoff schedule organized by CSI division:
+         [Line Item ID] | [Description] | [Quantity] | [Unit] | [Waste Factor] | [Gross Quantity] |
+         [Labor Hours] | [Crew Composition] | [Verification Status: OK/FLAG]
+
+         Include a summary table showing total quantities by major category and the
+         verification cross-check results.
+    model: sonnet
+    max_turns: 10
+
+  - id: cost-estimation
+    depends_on: [scope-extraction]
+    prompt: |
+      You are a construction cost estimator specializing in {input.project_type} projects in the
+      {input.location} market. Develop unit costs and total cost estimates for every scope item
+      using current market pricing.
+
+      SCOPE REGISTER:
+      {steps.scope-extraction.output}
+
+      PROJECT CONTEXT:
+      - Project type: {input.project_type}
+      - Location: {input.location}
+      - Project size: {input.project_size}
+      - Budget target: {input.budget_target}
+
+      COST ESTIMATION METHODOLOGY:
+
+      1. RS MEANS COST DATABASE METHODOLOGY
+         Use RS Means / Gordian cost data methodology to establish baseline unit costs.
+         For each line item, develop pricing using the three-component approach:
+         - Material cost: Base material + sales tax for {input.location} + delivery
+         - Labor cost: Crew rate x productivity rate, using union/prevailing wage rates
+           if required by the contract, or open-shop rates as appropriate for {input.location}
+         - Equipment cost: Owned/rented equipment rates allocated to production output
+
+         Apply the RS Means City Cost Index (CCI) adjustment for {input.location}.
+         National average = 100.0. Adjust all unit costs by the local CCI factor.
+         Major cost index factors to consider:
+         - Materials: typically 95-110% of national average depending on proximity to suppliers
+         - Labor: highly variable (50-160% of national) based on local wage rates and union density
+         - Equipment: typically 90-105% of national average
+
+      2. CURRENT MARKET ADJUSTMENTS
+         Adjust RS Means baseline costs for current market conditions:
+         - Escalation: Apply annual escalation rate (currently 3-6% for most materials)
+         - Supply chain premiums: Add premiums for materials with extended lead times
+           (electrical switchgear: +15-25%, structural steel: +5-10%, roofing: +8-12%)
+         - Labor market conditions: Adjust for local labor availability
+           (tight market: +10-20% premium, normal: baseline, soft market: -5-10%)
+         - Fuel surcharges: Impact on delivery and equipment costs
+         - Seasonal factors: Winter work premiums if applicable for {input.location}
+
+      3. SUBCONTRACTOR PRICING ANALYSIS
+         For each major trade package, develop estimated subcontractor pricing:
+         - Direct cost: materials + labor + equipment for the trade scope
+         - Subcontractor overhead: typically 8-15% of direct cost
+         - Subcontractor profit: typically 5-10% of direct cost
+         - Subcontractor bond cost: if flow-down bonding is required (typically 1-2%)
+
+         Develop a range for each trade package:
+         - Low estimate: competitive market, efficient subcontractor
+         - Mid estimate: expected market conditions
+         - High estimate: limited competition, complex work, tight schedule
+
+      4. GENERAL CONDITIONS AND OVERHEAD
+         Calculate Division 01 General Conditions based on project duration and staffing:
+         - Project management staff (PM, superintendent, assistant super, PE)
+         - Field office expenses (trailers, utilities, internet, copies)
+         - Temporary facilities (fencing, signage, temporary power, water, sanitation)
+         - Safety (safety manager time, PPE, safety equipment, training)
+         - Quality control (testing, inspection, commissioning coordination)
+         - Clean-up (daily cleaning, progress cleaning, final clean)
+         - Weather protection and winter conditions if applicable
+         - As-built documentation, O&M manuals, closeout
+         Typical general conditions: 8-14% of direct costs for {input.project_type}
+
+      5. GENERAL CONTRACTOR MARKUP
+         Apply GC-level costs on top of trade costs:
+         - Home office overhead: typically 3-5% based on company volume
+         - Insurance: GL, umbrella, builder's risk (typically 1.5-3%)
+         - Bonding: Performance and payment bonds (typically 1-2.5% of contract value)
+         - Profit: varies by market conditions and project risk (typically 3-8%)
+         - Contingency: estimating contingency for incomplete design (3-10% based on design stage)
+
+      6. UNIT COST SUMMARY TABLE
+         For each line item produce:
+         [Line Item ID] | [Description] | [Unit] | [Material $/Unit] | [Labor $/Unit] |
+         [Equipment $/Unit] | [Total $/Unit] | [Extended Cost (Qty x Unit)] |
+         [Market Adjustment Factor] | [Adjusted Extended Cost]
+
+         Include subtotals by CSI division, and a grand total showing:
+         - Direct construction cost
+         - General conditions
+         - GC overhead and profit
+         - Bonds and insurance
+         - Design contingency
+         - TOTAL ESTIMATED COST
+         - Cost per SF (or appropriate unit metric)
+
+      Compare the total estimated cost to the budget target ({input.budget_target}) and provide
+      a variance analysis identifying the largest cost drivers and potential value engineering targets.
+    model: haiku
+    max_turns: 10
+
+  - id: risk-adjustment
+    depends_on: [scope-extraction, quantity-takeoff, cost-estimation]
+    prompt: |
+      You are a construction risk manager and senior estimator. Your task is to take the scope,
+      quantities, and cost estimates developed so far and apply a rigorous risk analysis to produce
+      probability-weighted cost ranges.
+
+      SCOPE REGISTER:
+      {steps.scope-extraction.output}
+
+      QUANTITY TAKEOFF:
+      {steps.quantity-takeoff.output}
+
+      COST ESTIMATION:
+      {steps.cost-estimation.output}
+
+      PROJECT CONTEXT:
+      - Project type: {input.project_type}
+      - Location: {input.location}
+      - Project size: {input.project_size}
+      - Budget target: {input.budget_target}
+
+      RISK ADJUSTMENT METHODOLOGY:
+
+      1. RISK REGISTER DEVELOPMENT
+         Create a comprehensive risk register for this project. For each risk item, document:
+         - Risk ID and category
+         - Risk description
+         - Likelihood (1-5 scale: rare, unlikely, possible, likely, almost certain)
+         - Impact on cost (1-5 scale: negligible <1%, minor 1-3%, moderate 3-7%, major 7-15%, severe >15%)
+         - Impact on schedule (days of potential delay)
+         - Risk score = Likelihood x Impact
+         - Risk owner (GC, subcontractor, owner, designer)
+         - Mitigation strategy
+
+         Standard risk categories to evaluate:
+         a) DESIGN RISK
+            - Incomplete or ambiguous specifications
+            - Design errors requiring field changes
+            - Owner-initiated design changes during construction
+            - Coordination conflicts between disciplines (MEP clashes)
+            - Code interpretation differences
+            Typical design risk contingency: 3-8% for {input.project_type} at bid stage
+
+         b) MARKET RISK
+            - Material price escalation beyond current estimates
+            - Labor rate increases during project duration
+            - Subcontractor default or withdrawal
+            - Limited competitive bidding for specialty trades
+            - Currency fluctuation for imported materials
+            Typical market risk contingency: 2-5% depending on project duration
+
+         c) SITE CONDITIONS RISK
+            - Unforeseen subsurface conditions (rock, contaminated soil, high water table)
+            - Existing building conditions (for renovation: hidden asbestos, structural deficiencies)
+            - Utility conflicts and relocations
+            - Access limitations and staging constraints
+            - Adjacent property impacts
+            Typical site conditions contingency: 2-8% based on site investigation completeness
+
+         d) SCHEDULE RISK
+            - Weather delays typical for {input.location} (rain days, snow days, extreme heat)
+            - Permitting delays
+            - Long-lead material procurement delays
+            - Inspection and approval delays
+            - Labor availability during peak construction season
+            Schedule risk cost impact: extended general conditions + potential liquidated damages
+
+         e) REGULATORY AND COMPLIANCE RISK
+            - Building code changes during construction
+            - Environmental compliance requirements
+            - OSHA enforcement actions
+            - Prevailing wage audit findings
+            - Permit condition changes
+            Typical compliance risk contingency: 1-3%
+
+      2. MONTE CARLO-STYLE RANGE ANALYSIS
+         For each major cost category (by CSI division or trade package), establish:
+         - Optimistic estimate (P10): Best-case with favorable conditions
+         - Most likely estimate (P50): Expected conditions
+         - Pessimistic estimate (P90): Worst-case with multiple risk events
+
+         Use these to calculate:
+         - Expected value = (P10 + 4*P50 + P90) / 6 (PERT distribution)
+         - Standard deviation = (P90 - P10) / 6
+
+         Aggregate across all divisions to produce project-level probability ranges:
+         - P10 (optimistic): 10% chance costs will be at or below this
+         - P25 (low confidence): 25% chance
+         - P50 (most likely): 50% chance
+         - P75 (high confidence): 75% chance
+         - P90 (conservative): 90% chance costs will be at or below this
+
+      3. CONTINGENCY RECOMMENDATION
+         Based on the risk analysis, recommend a contingency structure:
+         - Design contingency: % for incomplete design elements
+         - Construction contingency: % for field conditions and execution risk
+         - Escalation contingency: % for time-based cost increases
+         - Owner's contingency: recommended % for owner-directed changes
+
+         Total recommended contingency as a percentage and dollar amount.
+         Compare this to industry benchmarks for {input.project_type} projects at this design stage.
+
+      4. SENSITIVITY ANALYSIS
+         Identify the top 10 cost drivers that have the most impact on the total project cost.
+         For each, show:
+         - Current estimated cost
+         - Cost range (P10 to P90)
+         - Potential swing (P90 - P10)
+         - Percentage of total project cost
+         - Key assumptions driving the range
+         - Recommended risk mitigation action
+
+         Create a tornado diagram description showing which variables have the most
+         influence on the total project cost uncertainty.
+
+      5. BID/NO-BID RISK ASSESSMENT
+         Provide an overall risk assessment to support a bid/no-bid decision:
+         - Overall project risk score (1-10)
+         - Top 5 bid risks that could erode profit
+         - Top 5 bid opportunities that could enhance profit
+         - Recommended markup range given the risk profile
+         - Competitive position assessment: is this a project where aggressive
+           pricing is warranted or should risk premiums be high?
+
+      Produce a structured risk report with the risk register, probability ranges,
+      contingency recommendations, and bid/no-bid assessment.
+    model: sonnet
+    max_turns: 10
+
+  - id: bid-package
+    depends_on: [risk-adjustment]
+    prompt: |
+      You are a VP of Preconstruction preparing the final bid package for executive review and
+      submission. Synthesize all analysis into a professional, submission-ready bid document.
+
+      RISK-ADJUSTED ANALYSIS:
+      {steps.risk-adjustment.output}
+
+      QUANTITY TAKEOFF:
+      {steps.quantity-takeoff.output}
+
+      COST ESTIMATION:
+      {steps.cost-estimation.output}
+
+      SCOPE REGISTER:
+      {steps.scope-extraction.output}
+
+      PROJECT CONTEXT:
+      - Project type: {input.project_type}
+      - Location: {input.location}
+      - Project size: {input.project_size}
+      - Budget target: {input.budget_target}
+
+      BID PACKAGE ASSEMBLY:
+
+      1. EXECUTIVE SUMMARY (1-2 pages)
+         - Project name, location, type, and size
+         - Bid amount: base bid with alternates and unit prices listed separately
+         - Key assumptions and exclusions (top 10)
+         - Schedule commitment: duration from NTP to substantial completion
+         - Risk-adjusted confidence range (P50 bid amount with P25/P75 brackets)
+         - Budget comparison: bid vs. target ({input.budget_target}) with variance explanation
+         - Bid/no-bid recommendation with brief rationale
+
+      2. DETAILED COST SUMMARY
+         Organize by CSI division with subtotals:
+         - Division 01: General Conditions - $X
+         - Division 02-14: Building trades with individual division subtotals
+         - Division 21-28: MEP systems with individual division subtotals
+         - Division 31-33: Sitework with individual subtotals
+         - Direct Cost Subtotal
+         - General Conditions
+         - GC Overhead & Profit
+         - Bonds & Insurance
+         - Contingencies (design, construction, escalation)
+         - TOTAL BID AMOUNT
+
+         Include a pie chart description showing cost distribution by major category.
+
+      3. SCOPE CLARIFICATIONS AND EXCLUSIONS
+         Draft professional scope clarification language for bid submission:
+         - Items included in the bid (comprehensive list)
+         - Items excluded from the bid (with brief reason for each exclusion)
+         - Assumptions that, if changed, would require a change order
+         - Allowances: itemized with dollar amounts
+         - Alternates: Add/deduct amounts for each requested alternate
+         - Unit prices: for potential quantity adjustments
+
+      4. SCHEDULE PROPOSAL
+         Provide a milestone-level schedule:
+         - Mobilization and site preparation
+         - Foundation and structure
+         - Building envelope
+         - MEP rough-in
+         - Interior finishes
+         - Commissioning and punch list
+         - Substantial completion
+         - Final completion and closeout
+         Include critical path items and any early procurement requirements.
+
+      5. VALUE ENGINEERING RECOMMENDATIONS
+         If the bid exceeds the budget target, provide 5-10 value engineering options:
+         - VE item description
+         - Original specified material/system
+         - Proposed alternative
+         - Cost savings ($ and %)
+         - Quality/performance impact assessment
+         - Schedule impact assessment
+         - Owner approval required (yes/no)
+         Prioritize VE options by savings-to-impact ratio.
+
+      6. COMPETITIVE POSITIONING ANALYSIS
+         Based on the cost analysis and market knowledge:
+         - Estimated competitive bid range for this project
+         - Where this bid falls in the likely competitive range
+         - Strategies to differentiate beyond price (schedule, qualifications, approach)
+         - Recommended negotiation positions if this is a negotiated vs. hard-bid project
+
+      7. INTERNAL DECISION MEMORANDUM
+         For executive review before bid submission:
+         - Recommended go/no-go decision
+         - Fee analysis: proposed markup vs. risk-adjusted minimum acceptable markup
+         - Key risks requiring executive awareness
+         - Required pre-bid clarifications (RFIs to submit before bid day)
+         - Subcontractor coverage status: number of bids expected per trade
+         - Bonding capacity impact assessment
+
+      Format the entire bid package as a clean, professional document with clear section headers,
+      tables, and summary callouts. This should be ready for final executive review with minimal editing.
+    model: sonnet
+    max_turns: 10

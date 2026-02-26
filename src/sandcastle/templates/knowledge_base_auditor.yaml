@@ -1,0 +1,738 @@
+# name: Knowledge Base Auditor
+# description: Audit knowledge bases for staleness, contradictions with recent support tickets, coverage gaps, and outdated information, then produce prioritized update recommendations with freshness scores
+# tags: [Support, Knowledge Base, Content Audit, Customer Success, AI Chatbot]
+# category: support
+
+name: knowledge-base-auditor
+description: Audit knowledge bases for staleness, contradictions with recent support tickets, coverage gaps, and outdated information, then produce prioritized update recommendations with freshness scores
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [zendesk]
+
+input_schema:
+  required: ["kb_source"]
+  properties:
+    kb_source:
+      type: string
+      description: "Knowledge base source identifier (e.g. 'zendesk', 'intercom', 'helpscout', 'confluence') or URL to the knowledge base"
+    ticket_source:
+      type: string
+      description: "Support ticket source for contradiction analysis (default: zendesk)"
+      default: "zendesk"
+    audit_period:
+      type: string
+      description: "Time period to analyze for recent tickets and changes (default: last 90 days)"
+      default: "last 90 days"
+    content_types:
+      type: string
+      description: "Comma-separated content types to audit (default: articles, FAQs, guides)"
+      default: "articles, FAQs, guides"
+
+steps:
+  - id: content-inventory
+    prompt: |
+      Create a complete inventory of all knowledge base content with metadata for
+      freshness and usage analysis.
+
+      Knowledge base source: {input.kb_source}
+      Content types to audit: {input.content_types}
+      Audit period: {input.audit_period}
+
+      You are a Knowledge Management Analyst. Your task is to catalog every piece of
+      content in the knowledge base with rich metadata that enables freshness scoring,
+      usage analysis, and prioritization of updates.
+
+      **CONTENT CATALOGING**
+
+      For every article, FAQ, guide, and document in the knowledge base, extract:
+
+      1. **Identification**
+         - Content ID (unique identifier in the KB system)
+         - Title
+         - URL/permalink
+         - Content type (article, FAQ, how-to guide, troubleshooting, API docs, release note)
+         - Category/folder location in the KB hierarchy
+         - Tags/labels assigned
+
+      2. **Temporal Metadata**
+         - Created date
+         - Last modified date
+         - Days since last update
+         - Last reviewed date (if tracked separately from modification)
+         - Publication status (published, draft, archived)
+
+      3. **Usage Metrics**
+         - Total views in the audit period ({input.audit_period})
+         - Unique visitors in the audit period
+         - Average time on page
+         - Bounce rate
+         - Search impressions (how often it appears in KB search results)
+         - Search click-through rate
+         - Helpful/not helpful votes (thumbs up/down)
+         - Helpfulness ratio (helpful / total votes)
+         - Comment count and recent comment themes
+
+      4. **Content Characteristics**
+         - Word count
+         - Number of images/screenshots
+         - Number of code snippets
+         - Number of external links
+         - Number of internal links to other KB articles
+         - Readability score (Flesch-Kincaid or similar estimate)
+         - Has video/embedded media?
+         - Last screenshot verification date (do screenshots match current UI?)
+
+      5. **Authorship and Ownership**
+         - Original author
+         - Last editor
+         - Designated content owner (if assigned)
+         - Number of distinct editors over time
+
+      6. **Interconnections**
+         - Articles that link TO this article (inbound links)
+         - Articles this article links TO (outbound links)
+         - Related articles (by topic or manual tagging)
+         - Orphan status: Does anything link to this? Is it reachable from navigation?
+
+      **CONTENT TAXONOMY ANALYSIS**
+
+      Map the KB structure:
+      - Category tree with article counts per category
+      - Category depth (how many levels of nesting)
+      - Balance analysis: are some categories overloaded while others are sparse?
+      - Navigation path analysis: how many clicks to reach the deepest content?
+      - Identify orphaned content (not linked from any category or other article)
+      - Identify redundant categories (overlapping topics)
+
+      **SEARCH ANALYTICS**
+
+      Analyze KB search behavior:
+      - Top 50 search queries in the audit period
+      - Search queries with NO results (critical gap indicator)
+      - Search queries with results but low click-through (results not matching intent)
+      - Search queries leading to "Contact Support" (article was not helpful)
+      - Popular search queries not matching any article title directly
+
+      **INITIAL FRESHNESS SCORING**
+
+      For each article, calculate a preliminary Freshness Score (0-100):
+      - Age penalty: -2 points per month since last update (max -50)
+      - View trend: +10 if views increasing, -10 if declining, 0 if stable
+      - Helpfulness bonus: +20 if >80% helpful votes, -20 if <50% helpful
+      - Comment signal: -10 if recent comments report outdated information
+      - Screenshot age: -15 if article has screenshots >6 months old
+      - Link health: -5 per broken outbound link
+
+      Classification:
+      - 80-100: Fresh - no immediate action needed
+      - 60-79: Aging - schedule review within 30 days
+      - 40-59: Stale - needs update within 14 days
+      - 20-39: Critical - likely contains outdated information, update urgently
+      - 0-19: Abandoned - consider archiving or rewriting
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "content_inventory" - Complete article catalog with all metadata fields
+      2. "taxonomy_analysis" - Category structure and balance assessment
+      3. "search_analytics" - Search query analysis and gap indicators
+      4. "freshness_scores" - Per-article freshness scores with classification
+      5. "inventory_statistics" - Summary stats (total articles, avg age, avg freshness,
+         content type distribution, category distribution)
+      6. "orphaned_content" - Articles not reachable from navigation
+      7. "zero_result_queries" - Search queries returning no results
+    model: haiku
+    max_turns: 10
+
+  - id: staleness-detection
+    depends_on: [content-inventory]
+    prompt: |
+      Perform deep staleness analysis on knowledge base content, going beyond simple
+      age metrics to detect functionally outdated information.
+
+      KB source: {input.kb_source}
+      Content inventory: {steps.content-inventory.output}
+      Audit period: {input.audit_period}
+
+      You are a Content Staleness Analyst with expertise in technical documentation
+      lifecycle management. Your task is to identify content that is functionally
+      stale - not just old, but WRONG or MISLEADING due to changes in the product,
+      industry, or customer context.
+
+      **STALENESS DETECTION METHODOLOGY**
+
+      **Method 1: Product Change Cross-Reference**
+      Compare KB content against product changes during the audit period:
+      - Release notes and changelogs: What features changed, were added, or removed?
+      - UI changes: Do screenshots and step-by-step instructions match the current UI?
+      - API changes: Do API documentation articles reflect current endpoints, parameters,
+        and response formats?
+      - Pricing changes: Do pricing-related articles reflect current plans and features?
+      - Policy changes: Do compliance, security, or terms articles reflect current policies?
+      - Integration changes: Have third-party integrations been updated, added, or removed?
+
+      For each article, check against these change categories:
+      - CONFIRMED_STALE: Article references a feature, UI, or process that has changed
+      - LIKELY_STALE: Article is in a category where significant changes occurred but
+        has not been updated since the changes
+      - POSSIBLY_STALE: Article is old and in an area that may have changed
+      - CONFIRMED_CURRENT: Article has been updated after the most recent relevant changes
+
+      **Method 2: Behavioral Staleness Signals**
+      Detect staleness from user behavior patterns:
+      - Articles with declining helpfulness votes over time (was useful, now isn't)
+      - Articles with increasing "contact support" clicks (article no longer resolves issue)
+      - Articles with comments saying "this is outdated" or "this doesn't work anymore"
+      - Articles with high view count but high bounce rate (found but not helpful)
+      - Articles where average time on page dropped (users leave quickly now)
+      - Articles linked from support macros that agents stopped using
+
+      **Method 3: Semantic Staleness Analysis**
+      Analyze the actual content for staleness signals:
+      - References to deprecated features or old product names
+      - Screenshots that look different from current UI (based on design system changes)
+      - Steps that reference removed menu items, buttons, or settings
+      - Pricing or plan names that no longer exist
+      - Links to pages that return 404 or redirect
+      - References to third-party tools by old names or discontinued versions
+      - Date-specific references that have passed (e.g., "starting in Q4 2024...")
+      - Technology references that are outdated (e.g., referencing Python 2, IE 11)
+
+      **Method 4: Competitive and Industry Staleness**
+      Content that references the broader ecosystem:
+      - Competitor comparisons using outdated information about competitors
+      - Industry regulation references that have been superseded
+      - Best practice recommendations that are no longer current
+      - Market data or statistics with old dates
+
+      **STALENESS SEVERITY MATRIX**
+
+      For each stale article, classify severity:
+
+      | Severity | Definition | Example | Impact |
+      |----------|-----------|---------|--------|
+      | CRITICAL | Content is WRONG and could cause user harm or data loss | Deprecated API endpoint still documented as active | Customer data loss, failed implementations |
+      | HIGH | Content is misleading and causes confusion or support tickets | Steps reference old UI, user cannot follow along | Increased support volume, poor CX |
+      | MEDIUM | Content is incomplete or partially outdated | Article missing new feature that changes the workflow | Suboptimal customer outcomes |
+      | LOW | Content is cosmetically outdated | Old screenshot but steps still work | Minor confusion |
+      | INFORMATIONAL | Content is old but still accurate | Article about a stable feature, just not recently reviewed | No immediate impact |
+
+      **STALENESS HOTSPOT ANALYSIS**
+
+      Identify systemic patterns:
+      - Which KB categories have the highest staleness concentration?
+      - Which product areas generate the most stale content?
+      - Which authors' content goes stale fastest? (may indicate areas of rapid change)
+      - Is there a seasonal pattern to staleness? (e.g., after major releases)
+      - What is the average "shelf life" of an article before it becomes stale?
+      - Are certain content types more prone to staleness than others?
+
+      **STALENESS CHAIN REACTIONS**
+
+      Identify cascading staleness:
+      - If Article A is stale and Articles B, C, D link to it, those links propagate
+        the staleness problem
+      - Map staleness propagation chains: which stale articles affect the most other articles?
+      - Identify "keystone articles" whose staleness would cascade widely
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "stale_articles" - All articles classified as stale, with severity and evidence
+      2. "staleness_by_method" - Findings organized by detection method
+      3. "severity_distribution" - Count and percentage per severity level
+      4. "hotspot_analysis" - Categories and areas with highest staleness concentration
+      5. "cascade_map" - Staleness propagation chains and keystone articles
+      6. "product_change_gaps" - Product changes not reflected in KB
+      7. "behavioral_signals" - User behavior indicating content problems
+      8. "shelf_life_analysis" - Average article lifespan before staleness by category
+    model: sonnet
+    max_turns: 10
+
+  - id: ticket-contradiction-scan
+    depends_on: [content-inventory]
+    prompt: |
+      Scan recent support tickets to identify contradictions between what the knowledge
+      base says and what customers actually experience, revealing accuracy gaps and
+      process misalignment.
+
+      KB source: {input.kb_source}
+      Ticket source: {input.ticket_source}
+      Audit period: {input.audit_period}
+      Content inventory: {steps.content-inventory.output}
+
+      You are a Support Intelligence Analyst specializing in the gap between documented
+      knowledge and real customer experience. Your task is to mine support tickets for
+      signals that KB content is contradicted by reality.
+
+      **TICKET ANALYSIS METHODOLOGY**
+
+      **Phase 1: Ticket Corpus Collection**
+      Analyze support tickets from the {input.audit_period} period:
+      - Total ticket volume and trend
+      - Category distribution of tickets
+      - Most common ticket topics (top 30)
+      - Average resolution time by category
+      - Escalation rate by category
+      - Self-service deflection rate (tickets where customer tried KB first but still needed support)
+
+      **Phase 2: KB-Contradiction Detection**
+
+      For each major ticket theme, check for contradictions against KB articles:
+
+      **Contradiction Type 1: Procedural Contradictions**
+      The KB says to do X, but support agents tell customers to do Y:
+      - Steps in KB articles that agents routinely override with different instructions
+      - Workarounds that agents share but are not documented in the KB
+      - KB articles that agents have flagged as incorrect in internal notes
+      - Standard operating procedures that diverge from published KB content
+      For each: cite the KB article, the ticket evidence, and the correct procedure.
+
+      **Contradiction Type 2: Feature/Capability Contradictions**
+      The KB describes a feature one way, but it actually works differently:
+      - Features described in KB that behave differently than documented
+      - Limitations not mentioned in KB that customers discover and report
+      - Edge cases where KB documentation is technically correct but practically misleading
+      - Configuration options described in KB that no longer exist or work differently
+      For each: cite the KB article, the ticket evidence, and the actual behavior.
+
+      **Contradiction Type 3: Availability/Access Contradictions**
+      The KB says something is available, but it is not (or vice versa):
+      - Features described as available on certain plans but not actually accessible
+      - Integration capabilities described in KB but not functioning
+      - Pricing or plan details in KB that do not match current offerings
+      - Geographic or regulatory availability changes not reflected in KB
+      For each: cite the KB article, the ticket evidence, and the reality.
+
+      **Contradiction Type 4: Timing/Process Contradictions**
+      The KB describes a timeline or process that is no longer accurate:
+      - SLA or response time commitments that have changed
+      - Onboarding processes described in KB that have been revised
+      - Data processing times that have changed
+      - Review/approval workflows that have been modified
+
+      **Phase 3: Support Ticket Pattern Analysis**
+
+      **"KB was wrong" Tickets**
+      Identify tickets where the customer explicitly states the KB was incorrect:
+      - Search for phrases like "the article says", "according to your help center",
+        "I followed the guide but", "documentation says", "your FAQ mentions"
+      - Categorize by: completely wrong, partially wrong, misleading, confusing
+      - Track volume trend: are "KB was wrong" tickets increasing or decreasing?
+
+      **"Not in KB" Tickets**
+      Identify common questions that SHOULD be in the KB but are not:
+      - Frequently asked questions that have no corresponding KB article
+      - Topics where agents repeatedly write the same response (should be an article)
+      - New feature questions with no KB coverage
+      - Common error messages with no troubleshooting guide
+      - Workflow-specific questions that fall between existing articles
+
+      **"Followed KB, Still Broken" Tickets**
+      Cases where customers followed KB instructions and the outcome was wrong:
+      - Most damaging contradiction type: customer trusted the KB and it failed them
+      - Document the failure path: which article, which steps, what went wrong
+      - Customer sentiment in these tickets (typically high frustration)
+      - Impact: did the customer churn, escalate, or leave a negative review?
+
+      **Phase 4: Agent Knowledge Divergence**
+      Compare how agents answer vs what the KB says:
+      - Topics where agents consistently deviate from KB content
+      - Agent macros/templates that contradict KB articles
+      - Internal notes flagging KB articles as incorrect
+      - Agent satisfaction surveys mentioning KB quality
+
+      **CONTRADICTION SEVERITY SCORING**
+
+      For each contradiction found:
+      - Frequency: How many tickets reference this contradiction? (1, 2-5, 6-20, 20+)
+      - Customer Impact: Did the contradiction cause: confusion, wasted time, data loss,
+        failed implementation, churn?
+      - Trust Damage: Does this contradiction undermine customer trust in the KB?
+        (If customers stop trusting KB, they go straight to support = higher costs)
+      - Compound Score: Frequency x Impact x Trust = Priority score
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "contradiction_inventory" - All contradictions with type, evidence, and severity
+      2. "ticket_patterns" - Common ticket themes related to KB issues
+      3. "not_in_kb" - Topics that should be in KB but are missing
+      4. "kb_failure_paths" - Documented cases where following KB led to wrong outcome
+      5. "agent_divergence" - Areas where agent practice differs from KB content
+      6. "severity_rankings" - Contradictions ranked by compound severity score
+      7. "volume_metrics" - KB-related ticket volumes and trends
+      8. "customer_impact_stories" - Most impactful contradiction cases for stakeholder buy-in
+    model: sonnet
+    max_turns: 10
+
+  - id: coverage-gap-analysis
+    depends_on: [content-inventory]
+    prompt: |
+      Analyze knowledge base coverage comprehensiveness by mapping content against
+      product features, customer journey stages, and support topic taxonomy to
+      identify gaps.
+
+      KB source: {input.kb_source}
+      Content inventory: {steps.content-inventory.output}
+      Content types: {input.content_types}
+
+      You are a Content Strategy Analyst specializing in knowledge base completeness
+      assessment. Your task is to determine what SHOULD be in the knowledge base
+      but ISN'T, using multiple analytical lenses.
+
+      **COVERAGE ANALYSIS LENSES**
+
+      **Lens 1: Product Feature Coverage**
+      Map every product feature/capability against KB content:
+      - Create a feature inventory (from product docs, marketing site, app navigation)
+      - For each feature: Does a KB article exist that explains it?
+      - Coverage status per feature:
+        * COMPREHENSIVE: Detailed article with setup, usage, troubleshooting, and FAQs
+        * BASIC: Article exists but only covers surface-level usage
+        * MENTIONED: Feature is mentioned in another article but has no dedicated content
+        * MISSING: No KB content addresses this feature at all
+      - Calculate feature coverage percentage
+      - Identify the most-used features with MISSING or BASIC coverage (critical gap)
+
+      **Lens 2: Customer Journey Coverage**
+      Map KB content to customer lifecycle stages:
+      - **Evaluation/Trial**: Content helping prospects evaluate the product
+        * Getting started guides, comparison content, use case examples
+      - **Onboarding/Setup**: Content for new customers getting started
+        * Installation, configuration, first steps, migration guides
+      - **Core Usage**: Content for day-to-day product usage
+        * Feature guides, how-tos, best practices, workflow tutorials
+      - **Advanced Usage**: Content for power users and complex scenarios
+        * API docs, integrations, automation, custom configurations
+      - **Troubleshooting**: Content for when things go wrong
+        * Error message guides, diagnostic steps, known issues
+      - **Account Management**: Content for billing, admin, and account tasks
+        * Plan management, user administration, security settings
+      - **Expansion/Upgrade**: Content for growing usage
+        * Upgrade guides, scaling documentation, enterprise features
+
+      For each stage:
+      - Article count and depth assessment
+      - Gap severity: how much does a gap at this stage hurt?
+        (Onboarding gaps cause churn, troubleshooting gaps cause tickets)
+      - Competitor KB comparison: what do competitors cover that we don't?
+
+      **Lens 3: Persona-Based Coverage**
+      Assess coverage for different user types:
+      - Admin / IT person (setup, security, compliance)
+      - End user / individual contributor (daily usage, features)
+      - Manager / team lead (reporting, team management, governance)
+      - Developer / technical user (API, integrations, customization)
+      - Finance / billing contact (pricing, invoicing, plan management)
+      Which personas are well-served by current KB? Which are underserved?
+
+      **Lens 4: Content Type Coverage**
+      For each topic area, assess which content FORMATS exist:
+      - Conceptual ("What is X?"): Explains concepts and principles
+      - Procedural ("How do I X?"): Step-by-step instructions
+      - Reference ("X specifications"): Technical reference material
+      - Troubleshooting ("X is not working"): Problem-solving guides
+      - Tutorial ("Build X from scratch"): End-to-end guided experiences
+      - FAQ ("Common questions about X"): Quick answers
+      - Video/visual ("Watch how to X"): Visual learning content
+
+      A well-covered topic should have at least conceptual + procedural + troubleshooting.
+      Most topics only have one format - identify where multiple formats are needed.
+
+      **Lens 5: Error/Edge Case Coverage**
+      Analyze coverage of error states and edge cases:
+      - Common error messages: Are they documented with resolution steps?
+      - API error codes: Is there a comprehensive error code reference?
+      - Browser/platform compatibility issues: Documented?
+      - Known limitations and workarounds: Documented?
+      - Data limits and quotas: Documented?
+      - Migration/upgrade paths: Documented?
+
+      **Lens 6: AI Chatbot Readiness**
+      If the company uses an AI chatbot powered by the KB:
+      - Are articles structured for AI consumption (clear headings, concise answers)?
+      - Are articles written in the question-and-answer format that AI models prefer?
+      - Are there disambiguation articles for commonly confused topics?
+      - Are related articles properly cross-linked (helps AI provide complete answers)?
+      - Are there "landing page" articles that provide overview before diving into details?
+      - What percentage of chatbot "I don't know" responses map to KB gaps?
+
+      **TOPIC HEAT MAP**
+
+      Create a visual heat map concept:
+      - X-axis: Product areas / feature categories
+      - Y-axis: Customer journey stages
+      - Cell color: Coverage depth (Green=comprehensive, Yellow=basic, Red=missing)
+      This makes gaps immediately visible to stakeholders.
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "feature_coverage_matrix" - Feature x coverage status mapping
+      2. "journey_coverage" - Customer journey stage coverage analysis
+      3. "persona_gaps" - Per-persona coverage assessment
+      4. "content_type_gaps" - Missing content format types per topic
+      5. "error_coverage" - Error message and edge case documentation status
+      6. "chatbot_readiness" - AI chatbot optimization assessment
+      7. "topic_heat_map" - Coverage heat map data for visualization
+      8. "critical_gaps" - Top 20 gaps ranked by business impact
+      9. "coverage_statistics" - Overall coverage percentages by each lens
+    model: haiku
+    max_turns: 10
+
+  - id: impact-scoring
+    depends_on: [staleness-detection, ticket-contradiction-scan, coverage-gap-analysis]
+    prompt: |
+      Synthesize all audit findings into a unified impact scoring model that quantifies
+      the business cost of KB issues and prioritizes remediation by ROI.
+
+      KB source: {input.kb_source}
+      Staleness findings: {steps.staleness-detection.output}
+      Contradiction findings: {steps.ticket-contradiction-scan.output}
+      Coverage gaps: {steps.coverage-gap-analysis.output}
+      Content inventory: {steps.content-inventory.output}
+
+      You are a Knowledge Operations Strategist. Your task is to unify all audit
+      findings into a single prioritization framework that enables leadership to make
+      data-driven decisions about KB investment.
+
+      **UNIFIED ISSUE SCORING MODEL**
+
+      For every issue identified across all three analyses (staleness, contradictions,
+      coverage gaps), calculate a composite Impact Score:
+
+      **Factor 1: Traffic Impact (0-25 points)**
+      Based on how many customers are affected:
+      - 0-5: Low-traffic article/topic (<100 monthly views)
+      - 6-10: Moderate traffic (100-500 monthly views)
+      - 11-15: High traffic (500-2000 monthly views)
+      - 16-20: Very high traffic (2000-10000 monthly views)
+      - 21-25: Critical traffic (>10000 monthly views)
+
+      **Factor 2: Support Ticket Correlation (0-25 points)**
+      Based on ticket volume attributable to this KB issue:
+      - 0-5: No ticket correlation detectable
+      - 6-10: 1-5 tickets/month related to this issue
+      - 11-15: 6-20 tickets/month
+      - 16-20: 21-50 tickets/month
+      - 21-25: >50 tickets/month (significant support cost driver)
+
+      **Factor 3: Customer Impact Severity (0-25 points)**
+      Based on what happens to the customer encountering this issue:
+      - 0-5: Cosmetic confusion, finds answer elsewhere quickly
+      - 6-10: Wasted time (30+ minutes) following wrong information
+      - 11-15: Failed implementation requiring support intervention
+      - 16-20: Data loss, security issue, or significant business disruption
+      - 21-25: Customer churn directly attributable to this KB issue
+
+      **Factor 4: Fix Effort (0-25 points, inverted)**
+      Lower effort to fix = higher score (prioritize easy wins):
+      - 21-25: Minor text edit (<30 minutes)
+      - 16-20: Content update with new screenshots (1-2 hours)
+      - 11-15: Article rewrite (2-4 hours)
+      - 6-10: New article creation (4-8 hours)
+      - 0-5: Major content project (>8 hours, may need SME input)
+
+      **Composite Impact Score = Factor 1 + Factor 2 + Factor 3 + Factor 4 (max 100)**
+
+      **COST QUANTIFICATION**
+
+      Translate KB issues into dollar impacts:
+
+      **Support Cost Impact:**
+      - Average cost per support ticket (fully loaded: agent time + tools + overhead)
+        Typical range: $15-40 per ticket
+      - For each KB issue: estimated tickets caused per month x cost per ticket = monthly cost
+      - Total monthly support cost attributable to KB issues
+
+      **Self-Service Deflection Impact:**
+      - Current self-service rate (% of issues resolved without human agent)
+      - Estimated self-service rate if KB issues were fixed
+      - Delta x ticket volume = additional tickets deflected
+      - Additional tickets deflected x cost per ticket = savings
+
+      **Customer Retention Impact:**
+      - Tickets with churn correlation flagged in contradiction analysis
+      - Estimated customer lifetime value (CLV) at risk
+      - Probability of churn attributable to KB issues x CLV = retention risk value
+
+      **Employee Productivity Impact:**
+      - Agent time spent answering questions that should be in KB
+      - Agent time spent correcting misinformation from KB
+      - Training time for new agents to learn which KB articles are unreliable
+      - Total: hours/month x loaded cost per hour = productivity cost
+
+      **CROSS-ANALYSIS CORRELATIONS**
+
+      Identify issues that appear across multiple analyses:
+      - Articles that are STALE + have TICKET CONTRADICTIONS = highest confidence problem
+      - Coverage gaps that correlate with highest ticket categories = confirmed need
+      - Stale articles in high-traffic areas = maximum blast radius
+      - Contradictions in onboarding content = churn risk multiplier
+
+      Create a correlation matrix showing how findings reinforce each other.
+
+      **PORTFOLIO ANALYSIS**
+
+      Group KB content into strategic categories:
+      - **Crown Jewels**: High traffic, high helpfulness, current - protect and maintain
+      - **Quick Fixes**: High impact issues, low effort to fix - do immediately
+      - **Strategic Investments**: High impact issues requiring significant effort - plan and resource
+      - **Diminishing Returns**: Low traffic, low impact - consider archiving
+      - **Hidden Gems**: Low traffic but high helpfulness - may need better discoverability
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "unified_issue_registry" - All issues scored and ranked by composite Impact Score
+      2. "cost_quantification" - Dollar impact by category with methodology
+      3. "cross_analysis_correlations" - Issues confirmed by multiple analyses
+      4. "portfolio_classification" - Content grouped by strategic category
+      5. "top_20_priorities" - Highest-impact issues with complete context and fix guidance
+      6. "executive_dashboard" - Key metrics for leadership: total KB health score,
+         estimated monthly cost of issues, top 5 issues by dollar impact
+      7. "trend_analysis" - Is KB health improving or declining over the audit period?
+      8. "benchmark_comparison" - How does this KB compare to industry standards?
+    model: sonnet
+    max_turns: 10
+
+  - id: update-recommendations
+    depends_on: [impact-scoring]
+    prompt: |
+      Generate a prioritized update plan with specific content recommendations, including
+      auto-drafted updates for the top stale articles and a KB governance framework.
+
+      KB source: {input.kb_source}
+      Audit period: {input.audit_period}
+      Impact scoring: {steps.impact-scoring.output}
+      Staleness findings: {steps.staleness-detection.output}
+      Contradiction findings: {steps.ticket-contradiction-scan.output}
+      Coverage gaps: {steps.coverage-gap-analysis.output}
+
+      You are a Knowledge Base Optimization Strategist and Senior Content Editor.
+      Your task is to produce an actionable update plan that the support and content
+      teams can execute immediately.
+
+      **IMMEDIATE ACTIONS (Week 1)**
+
+      **Action 1: Critical Corrections**
+      For every CRITICAL severity contradiction and staleness finding:
+      - Exact article to update (ID, title, URL)
+      - Specific section/paragraph that is wrong
+      - What it currently says (quoted)
+      - What it SHOULD say (draft corrected text)
+      - Source of truth for the correction (ticket, agent, product team)
+      - If the article cannot be immediately corrected, add a visible banner:
+        "This article is being updated. For current information, contact support."
+
+      **Action 2: Dangerous Content Quarantine**
+      Articles that could cause customer harm if followed:
+      - Recommend unpublishing or adding prominent "outdated" warnings
+      - List of articles to quarantine with justification
+      - Temporary redirect suggestions to correct content
+
+      **Action 3: Quick Content Wins**
+      Updates achievable in <30 minutes each with high impact:
+      - Broken link fixes (list every broken link with replacement URL)
+      - Outdated date references (find-and-replace list)
+      - Product name/branding updates
+      - Plan/pricing corrections
+
+      **SHORT-TERM PLAN (Weeks 2-4)**
+
+      **Article Rewrites**
+      For the top 10 highest-impact stale articles, provide full rewrite guidance:
+
+      For each article:
+      1. **Current state summary**: What is wrong and why it matters
+      2. **Target audience**: Who reads this article and what they need
+      3. **Content brief**:
+         - Recommended title (optimized for search and AI consumption)
+         - Outline with H2/H3 headers
+         - Key points to cover in each section
+         - Screenshots needed (describe what to capture)
+         - Code snippets or examples to include
+         - Related articles to cross-link
+         - Internal links to add
+         - Keywords to include for search optimization
+      4. **Draft content**: Write a complete draft of the updated article body
+         (aim for 500-1500 words per article depending on complexity)
+      5. **Quality checklist**: Specific items to verify before publishing
+
+      **New Articles Needed**
+      For the top 10 highest-impact coverage gaps:
+      1. **Proposed title**
+      2. **Content type** (how-to, FAQ, troubleshooting, conceptual)
+      3. **Content brief** (same structure as rewrites above)
+      4. **Draft outline** with section summaries
+      5. **Estimated writing effort** (hours)
+      6. **SME consultation needed?** (who to interview)
+
+      **MEDIUM-TERM PLAN (Months 2-3)**
+
+      **Structural Improvements:**
+      - Category reorganization recommendations (based on coverage analysis)
+      - Navigation restructuring suggestions
+      - Internal linking strategy (which articles should cross-reference each other)
+      - Content consolidation (articles to merge, redundant content to eliminate)
+      - Archive list (articles to retire with redirect plans)
+
+      **Content Expansion Projects:**
+      - New content series or guides to fill major coverage gaps
+      - Video/visual content recommendations for complex topics
+      - Interactive content opportunities (decision trees, wizards, calculators)
+      - Community-contributed content opportunities
+
+      **KB GOVERNANCE FRAMEWORK**
+
+      Establish an ongoing KB maintenance program:
+
+      **Content Ownership Model:**
+      - Assign every KB category to a content owner
+      - Define owner responsibilities: quarterly review, update within 2 weeks of
+        product changes, respond to content feedback
+      - Escalation path when owners fail to maintain content
+
+      **Review Cadence:**
+      - High-traffic articles (>1000 views/month): Monthly review
+      - Medium-traffic articles (100-1000 views/month): Quarterly review
+      - Low-traffic articles (<100 views/month): Semi-annual review
+      - All articles: Annual accuracy audit (this workflow)
+
+      **Change Trigger System:**
+      - Product release triggers: Auto-assign KB updates when features change
+      - Ticket spike triggers: Alert when ticket volume on a topic suddenly increases
+      - Feedback triggers: Alert when an article receives 3+ negative votes in a week
+      - Agent flag triggers: Alert when agents mark an article as outdated
+
+      **Quality Standards:**
+      - Template for each content type (article, FAQ, troubleshooting)
+      - Readability target (e.g., Flesch-Kincaid grade level 8 or below)
+      - Screenshot standards (resolution, annotation format, recapture policy)
+      - Review checklist before publishing
+      - AI chatbot optimization checklist
+
+      **Metrics and Reporting:**
+      - Monthly KB health dashboard (freshness scores, coverage %, helpfulness %)
+      - Quarterly trend reports
+      - Annual comprehensive audit (repeat this workflow)
+      - KPI targets for each metric with accountability
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "immediate_actions" - Critical corrections, quarantine list, quick wins
+      2. "article_rewrites" - Top 10 stale articles with complete rewrite briefs and drafts
+      3. "new_articles" - Top 10 coverage gaps with complete content briefs
+      4. "structural_improvements" - Category, navigation, and linking recommendations
+      5. "archive_list" - Articles to retire with redirect plans
+      6. "governance_framework" - Ownership model, review cadence, triggers, standards
+      7. "metrics_dashboard_spec" - KPIs, targets, and reporting cadence
+      8. "executive_summary" - 1-page summary: KB health score, dollar cost of issues,
+         top 5 actions, expected ROI of the update program
+      9. "implementation_timeline" - Week-by-week plan for the first 90 days
+    model: sonnet
+    max_turns: 10

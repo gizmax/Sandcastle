@@ -26,62 +26,188 @@ steps:
       Use the Salesforce tool:
         node /home/user/tools/salesforce.mjs get_account '{input.account_name}'
 
-      Return account details: name, plan/tier, ARR, contract renewal date,
-      main contacts, last interaction date, and any notes.
+      Retrieve the FULL account profile including:
+      - Account basics: name, industry, employee count, website, account owner
+      - Commercial details: plan/tier (free, starter, pro, enterprise), ARR/MRR,
+        contract start date, renewal date, payment terms, billing frequency
+      - Expansion history: initial deal size vs current ARR (growth trajectory),
+        upsell/cross-sell history, discount percentage on current contract
+      - Relationship map: primary contact, executive sponsor, day-to-day user contacts,
+        billing contact - with last interaction date for each
+      - Activity timeline: last 5 logged activities (calls, emails, meetings) with dates
+      - Opportunity pipeline: any open upsell/renewal opportunities and their stages
+      - Custom fields: NPS score (if captured), product usage tier, CSM assignment,
+        customer segment, strategic account flag
+
+      Also check for any open Cases in Salesforce and their status.
+      Note the number of days until contract renewal.
     model: haiku
     max_turns: 5
 
   - id: fetch-tickets
     prompt: |
-      Fetch all Zendesk tickets for the customer: {input.account_name}
-      Look at the last 90 days of ticket history.
+      Fetch comprehensive support ticket data for: {input.account_name}
+      Analyze the last 90 days of ticket history in depth.
 
       Use the Zendesk tool:
         node /home/user/tools/zendesk.mjs search_tickets '{input.account_name}' 90
 
-      Return ticket count, average resolution time, open tickets, and recurring themes.
+      EXTRACT AND ORGANIZE:
+
+      VOLUME METRICS:
+      - Total tickets in period, broken down by month (3-month trend)
+      - Tickets by priority: urgent, high, normal, low
+      - Tickets by category: bug, feature request, how-to, billing, account, integration
+      - New vs reopened tickets ratio (high reopen rate = quality issue)
+
+      RESOLUTION METRICS:
+      - Average first response time (target: <4h for urgent, <24h for normal)
+      - Average resolution time by priority level
+      - First contact resolution rate (resolved without escalation or follow-up)
+      - Tickets escalated to engineering (count and percentage)
+      - Currently open/pending tickets with age (days since creation)
+
+      SENTIMENT ANALYSIS:
+      - For each ticket, assess the customer sentiment: positive, neutral, frustrated, angry
+      - Track sentiment trend across the 90-day period (improving, stable, declining)
+      - Identify any tickets with explicitly negative CSAT ratings
+      - Flag tickets where the customer threatened to churn or mentioned competitors
+
+      RECURRING THEMES:
+      - Top 5 most frequent issue categories
+      - Repeated issues that were supposedly resolved but recurred
+      - Feature requests mentioned more than once
+      - Integration or API-related issues (signal of deep product engagement)
+
+      FLAG CRITICAL PATTERNS:
+      - Any ticket open for >14 days without resolution
+      - Multiple urgent tickets in a short period (cluster = possible outage impact)
+      - Tickets from executive-level contacts (escalation risk)
+      - Tickets mentioning contract, renewal, cancel, or competitor names
     model: haiku
     max_turns: 5
 
   - id: analyze-health
     depends_on: [fetch-customer, fetch-tickets]
     prompt: |
-      Analyze the overall health of this customer account:
+      Perform a comprehensive health analysis of this customer account using a
+      risk-adjusted scoring framework.
 
       Account data: {steps.fetch-customer.output}
       Support history: {steps.fetch-tickets.output}
 
-      Calculate a Health Score (1-100) based on:
-      - Support volume trend (fewer tickets = healthier): 0-25 points
-      - Resolution satisfaction (fast resolution = healthier): 0-25 points
-      - Engagement level (recent interactions, feature usage): 0-25 points
-      - Contract signals (renewal date proximity, plan tier): 0-25 points
+      HEALTH SCORE FORMULA (total 1-100, risk-adjusted):
 
-      Classify as:
-      - Healthy (80-100): Expand opportunity
-      - At Risk (50-79): Proactive outreach needed
-      - Critical (0-49): Immediate intervention required
+      1. SUPPORT HEALTH (0-25 points):
+         - Ticket volume trend (3-month): decreasing = 25, stable = 18, increasing = 8, spike = 3
+         - Resolution time vs SLA: consistently within SLA = 25, occasional miss = 18,
+           frequent miss = 10, critical breach = 3
+         - Reopen rate: <5% = 25, 5-15% = 18, 15-30% = 10, >30% = 3
+         - Apply the lowest of these three sub-scores as the dimension score.
 
-      Identify top 3 risk factors and top 3 positive signals.
+      2. ENGAGEMENT DEPTH (0-25 points):
+         - Last interaction recency: <7 days = 10, <30 days = 7, <60 days = 4, >60 days = 1
+         - Interaction frequency (calls/meetings per month): >2 = 8, 1-2 = 5, <1 = 2, none = 0
+         - Feature adoption depth: using >70% of entitled features = 7, 40-70% = 5, <40% = 2
+           (estimate from ticket topics and integration mentions - broad issue variety = deep adoption)
+         - Executive sponsor engaged (recent activity from sponsor contact): +5 if yes, 0 if no
+
+      3. COMMERCIAL SIGNALS (0-25 points):
+         - ARR trend: growing = 10, stable = 7, declining = 2
+         - Contract renewal proximity: >180 days = 8, 90-180 days = 5, <90 days = 2
+           (closer renewal + risk factors = critical alert)
+         - Payment health: always on time = 7, occasional late = 4, frequently late = 1
+         - Expansion pipeline: active upsell opportunity = 5, none but potential = 3, contracted = 0
+
+      4. SENTIMENT AND RELATIONSHIP (0-25 points):
+         - Overall ticket sentiment trend: improving = 10, stable positive = 8,
+           stable neutral = 5, declining = 2, hostile = 0
+         - NPS PREDICTION: Based on ticket sentiment distribution and resolution satisfaction,
+           estimate likely NPS response: Promoter (9-10) = 10, Passive (7-8) = 6, Detractor (0-6) = 2
+         - Champion strength: identified internal advocate actively engaged = 5,
+           advocate exists but inactive = 3, no advocate identified = 0
+
+      RISK ADJUSTMENTS (deductions from total):
+      - Churn language detected in any ticket: -10
+      - Competitor mentioned in support context: -8
+      - Executive escalation in last 30 days: -7
+      - >3 urgent tickets in last 30 days: -5
+      - No interaction in >45 days with renewal <120 days: -10
+
+      CLASSIFICATION:
+      - Healthy (80-100): Active expansion candidate. Look for upsell timing.
+      - Stable (65-79): Maintain current engagement. Monitor for changes.
+      - At Risk (40-64): Proactive intervention needed within 2 weeks.
+      - Critical (0-39): Immediate executive-level intervention. Churn likely without action.
+
+      EXPANSION REVENUE POTENTIAL:
+      - Based on company size, current plan tier, and feature adoption, estimate:
+        * Upsell potential (higher tier): $X/year with probability %
+        * Cross-sell potential (additional products): $X/year with probability %
+        * Seat expansion potential: $X/year based on company growth rate
+
+      Output: health_score (with sub-dimension breakdown), classification, NPS_prediction,
+      expansion_revenue_estimate, top 5 risk factors (ranked by severity),
+      top 5 positive signals, and confidence level for the assessment.
     model: sonnet
     max_turns: 8
 
   - id: report
     depends_on: [analyze-health]
     prompt: |
-      Generate a customer health report:
+      Generate a comprehensive Customer Health Report suitable for a QBR (Quarterly
+      Business Review) or customer success team review.
 
       Health analysis: {steps.analyze-health.output}
       Account data: {steps.fetch-customer.output}
 
-      Create a structured report with:
-      1. **Executive Summary** - 2-3 sentence overview
-      2. **Health Score** - score and classification with trend
-      3. **Key Metrics** - support volume, resolution time, engagement
-      4. **Risk Factors** - what to watch
-      5. **Positive Signals** - what's working
-      6. **Recommended Actions** - 3-5 specific next steps with owners
+      REPORT STRUCTURE:
 
-      Format as a clear, actionable document suitable for a customer success review.
+      1. EXECUTIVE SUMMARY (3 sentences max):
+         - Current health status with score and trend direction (arrow up/down/stable).
+         - Single most important insight (biggest risk or biggest opportunity).
+         - Recommended immediate action with owner and deadline.
+
+      2. HEALTH SCORECARD (visual-friendly format):
+         - Overall score: [X/100] - [Classification]
+         - Support Health: [X/25] with trend indicator
+         - Engagement Depth: [X/25] with trend indicator
+         - Commercial Signals: [X/25] with trend indicator
+         - Sentiment & Relationship: [X/25] with trend indicator
+         - Predicted NPS: [X] - [Promoter/Passive/Detractor]
+         - Include comparison to portfolio average if context allows.
+
+      3. SUPPORT ANALYSIS:
+         - 90-day ticket volume chart description (month-over-month trend)
+         - Resolution time performance vs SLA targets
+         - Top 3 recurring issue themes with frequency and status
+         - Open tickets requiring attention (sorted by age and priority)
+         - Sentiment trend line description (improving/stable/declining)
+
+      4. ENGAGEMENT DEEP DIVE:
+         - Last meaningful interaction details (who, when, what)
+         - Feature adoption assessment (what they use heavily, what they ignore)
+         - Stakeholder map health: champion status, sponsor engagement, user satisfaction
+         - Communication gap analysis (where are we under-engaging?)
+
+      5. COMMERCIAL OUTLOOK:
+         - Contract details: renewal date, current ARR, growth history
+         - Expansion revenue potential with probability estimates
+         - Risk-to-revenue assessment: potential ARR at risk if health declines
+         - Pricing analysis: are they on the right plan for their usage?
+
+      6. RISK REGISTER (ranked by severity):
+         - For each risk: description, severity (1-10), likelihood (1-10),
+           mitigation action, owner, deadline.
+
+      7. ACTION PLAN (specific, time-bound, assigned):
+         - Immediate (this week): critical items requiring urgent attention
+         - Short-term (this month): proactive engagement and risk mitigation
+         - Medium-term (this quarter): strategic account development
+         - Each action: description, owner (CSM/AE/Support/Product), deadline, success metric.
+
+      Format as a professional, scannable document with clear headers, tables where
+      appropriate, and bold text for key metrics. Aim for 2 pages equivalent - detailed
+      enough to be actionable but concise enough to read in 5 minutes.
     model: sonnet
     max_turns: 8

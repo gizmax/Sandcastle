@@ -19,11 +19,54 @@ input_schema:
 
 steps:
   - id: extract-terms
-    prompt: >
-      Extract all key terms from the following contract document. Identify: parties involved,
-      effective and termination dates, core obligations for each party, payment terms and
-      schedule, liability caps, indemnification clauses, intellectual property provisions,
-      termination conditions, and governing law. Contract: {input.contract_text}
+    prompt: |
+      Perform a clause-by-clause extraction of all key terms from the following contract.
+      Work through the document systematically, section by section, and extract:
+
+      PARTIES AND STRUCTURE:
+      - Full legal names of all parties, their roles (licensor/licensee, vendor/client, employer/employee)
+      - Entity types (LLC, Corp, LP) and jurisdictions of incorporation
+      - Any affiliates, subsidiaries, or third-party beneficiaries referenced
+
+      DATES AND MILESTONES:
+      - Effective date, execution date, and any conditions precedent to effectiveness
+      - Contract term length, renewal periods, and auto-renewal mechanisms
+      - Key milestone dates, delivery deadlines, and performance benchmarks
+      - Notice periods for termination, renewal opt-out, and amendment
+
+      FINANCIAL TERMS:
+      - Total contract value, payment amounts, and payment schedule
+      - Currency, late payment penalties, and interest rate on overdue amounts
+      - Price escalation clauses, CPI adjustments, or renegotiation triggers
+      - Expense reimbursement terms and audit rights on financials
+
+      OBLIGATIONS AND DELIVERABLES:
+      - Core obligations for each party with specific deliverables
+      - Service level agreements (SLAs) with measurable targets
+      - Acceptance criteria and rejection/cure procedures
+      - Reporting and communication requirements
+
+      PROTECTIVE CLAUSES:
+      - Liability caps (per-incident and aggregate) and exclusions
+      - Indemnification obligations (scope, caps, procedures, carve-outs)
+      - Insurance requirements (types, minimum coverage amounts)
+      - Intellectual property ownership, licenses, and work-for-hire provisions
+      - Confidentiality scope, duration, and permitted disclosures
+      - Non-compete and non-solicitation restrictions (scope, duration, geography)
+
+      TERMINATION AND EXIT:
+      - Termination for cause triggers and cure periods
+      - Termination for convenience rights and associated fees
+      - Transition assistance obligations and data return/destruction
+      - Survival clauses (which provisions outlast termination)
+
+      DISPUTE AND GOVERNANCE:
+      - Governing law and jurisdiction
+      - Dispute resolution mechanism (litigation, arbitration, mediation)
+      - Force majeure definition and notification requirements
+      - Amendment and waiver procedures
+
+      Contract: {input.contract_text}
     model: sonnet
     max_turns: 10
     output_schema:
@@ -69,33 +112,163 @@ steps:
 
   - id: risk-analysis
     depends_on: [extract-terms]
-    prompt: >
-      Analyze the extracted contract terms for potential risks. Identify unusual or
-      one-sided clauses, missing standard protections (limitation of liability, force
-      majeure, dispute resolution), auto-renewal traps, broad non-compete provisions,
-      and any terms that deviate from market standards. Rate each risk as low, medium,
-      or high severity. Extracted terms: {steps.extract-terms.output}
+    prompt: |
+      Perform a comprehensive risk analysis on the extracted contract terms using a
+      structured risk scoring matrix. Rate EACH identified risk on a 1-10 scale across
+      two dimensions: LIKELIHOOD (1=remote, 10=near certain) and IMPACT (1=negligible,
+      10=catastrophic). The composite risk score = likelihood x impact (1-100).
+
+      CLAUSE-BY-CLAUSE RISK ASSESSMENT:
+
+      1. LIABILITY AND INDEMNIFICATION RISKS:
+         - Are liability caps reasonable for the contract value? Industry standard is
+           typically 1-2x annual contract value for direct damages.
+         - Is there an uncapped indemnification obligation? Flag any indemnity without
+           aggregate caps as HIGH risk.
+         - Are consequential damages excluded mutually or one-sided?
+         - Does the indemnification procedure require timely notice and cooperation?
+         - Check for "hold harmless" language that may exceed standard indemnification.
+
+      2. TERMINATION AND LOCK-IN RISKS:
+         - Auto-renewal without adequate opt-out notice (< 60 days is risky).
+         - Termination for convenience penalties that exceed reasonable breakage costs.
+         - Missing or inadequate transition assistance provisions.
+         - Data portability and return obligations upon termination.
+         - "Evergreen" clauses that make exit prohibitively expensive.
+
+      3. FINANCIAL RISKS:
+         - Unlimited price escalation mechanisms or uncapped CPI adjustments.
+         - Payment terms that create cash flow exposure (net-90+ is elevated risk).
+         - Missing audit rights on usage-based or variable pricing.
+         - Penalty clauses that may be unenforceable or disproportionate.
+
+      4. IP AND CONFIDENTIALITY RISKS:
+         - Overly broad IP assignment that captures pre-existing IP.
+         - Work-for-hire provisions on materials that should remain licensed.
+         - Confidentiality obligations without reasonable carve-outs (public info, compelled disclosure).
+         - Non-compete scope that unreasonably restricts future business.
+
+      5. OPERATIONAL RISKS:
+         - SLAs without meaningful remedies (credits, termination rights).
+         - Force majeure that is too narrow or too broad.
+         - Assignment restrictions that block M&A transactions.
+         - Missing or one-sided audit rights.
+
+      6. MARKET STANDARD COMPARISON:
+         - Compare each material clause against industry-standard benchmarks.
+         - Flag terms that deviate significantly from what a reasonably sophisticated
+           party would accept in an arm's-length negotiation.
+         - Note any "unusual" provisions not commonly seen in this contract type.
+
+      Output a prioritized risk register with: risk_id, clause_reference, risk_description,
+      likelihood (1-10), impact (1-10), composite_score, risk_category (critical/high/medium/low),
+      and recommended_mitigation.
+
+      Extracted terms: {steps.extract-terms.output}
     model: sonnet
     max_turns: 10
 
   - id: compliance-check
     depends_on: [extract-terms]
-    prompt: >
-      Check the contract terms against standard compliance requirements. Verify data
-      protection and privacy provisions, regulatory compliance references, required
-      insurance and bonding clauses, accessibility and non-discrimination language,
-      and record-keeping obligations. Flag any missing or insufficient provisions.
+    prompt: |
+      Perform a regulatory and compliance audit of the contract terms against
+      applicable legal frameworks. Check each area systematically:
+
+      DATA PROTECTION AND PRIVACY:
+      - GDPR compliance: data processing agreement (DPA), lawful basis, data subject rights,
+        cross-border transfer mechanisms (SCCs, adequacy decisions), breach notification (72h).
+      - CCPA/CPRA compliance: service provider obligations, sale/sharing restrictions,
+        consumer rights passthrough, opt-out mechanisms.
+      - Data retention and deletion obligations with specific timeframes.
+      - Sub-processor approval rights and notification requirements.
+      - Data Protection Impact Assessment (DPIA) cooperation obligations.
+
+      INDUSTRY-SPECIFIC REGULATIONS:
+      - Financial services: SOX compliance references, PCI-DSS for payment data.
+      - Healthcare: HIPAA BAA requirements if PHI is involved.
+      - Government: FAR/DFAR flowdown clauses if applicable.
+      - Identify which regulations SHOULD apply based on the parties and subject matter,
+        and flag any that are missing.
+
+      EMPLOYMENT AND LABOR:
+      - Non-discrimination and equal opportunity language.
+      - Worker classification risks (contractor vs. employee).
+      - Wage and hour compliance for service agreements.
+
+      INSURANCE AND BONDING:
+      - Required insurance types (general liability, professional liability, cyber).
+      - Minimum coverage amounts relative to contract value.
+      - Certificate of insurance and additional insured requirements.
+      - Missing insurance requirements that would be standard for this contract type.
+
+      RECORD-KEEPING AND AUDIT:
+      - Document retention requirements and minimum periods.
+      - Audit rights scope, frequency, cost allocation, and notice requirements.
+      - Regulatory examination cooperation clauses.
+
+      ANTI-CORRUPTION AND SANCTIONS:
+      - Anti-bribery representations (FCPA, UK Bribery Act).
+      - Sanctions and export control compliance.
+      - Conflict of interest disclosures.
+
+      For each compliance area, assign a status: COMPLIANT, PARTIALLY_COMPLIANT,
+      NON_COMPLIANT, or NOT_APPLICABLE, with specific findings and remediation steps.
+
       Extracted terms: {steps.extract-terms.output}
     model: sonnet
     max_turns: 5
 
   - id: plain-summary
     depends_on: [extract-terms, risk-analysis, compliance-check]
-    prompt: >
-      Generate a plain-language summary of the contract suitable for non-legal stakeholders.
-      Include what each party is agreeing to, key dates and deadlines, financial obligations,
-      highlighted risks with severity levels, compliance concerns, and a prioritized list
-      of action items for negotiation or clarification.
+    prompt: |
+      Generate a plain-language contract summary designed for non-legal stakeholders
+      (executives, project managers, finance team). Write clearly, avoid legal jargon,
+      and use concrete examples where possible.
+
+      STRUCTURE THE SUMMARY AS FOLLOWS:
+
+      1. ONE-PARAGRAPH EXECUTIVE OVERVIEW:
+         - What is this contract about in plain English?
+         - Who are the parties and what does each get?
+         - What is the total financial commitment and duration?
+
+      2. KEY DATES AND DEADLINES TABLE:
+         - Effective date, end date, renewal deadlines, notice periods.
+         - Format as a simple timeline or table for quick reference.
+
+      3. FINANCIAL OBLIGATIONS BREAKDOWN:
+         - Total cost, payment schedule, and any variable/contingent amounts.
+         - What triggers additional costs? Are there caps?
+         - Penalty or late payment consequences in plain terms.
+
+      4. WHAT WE ARE COMMITTING TO:
+         - Our obligations in bullet points, ranked by importance.
+         - What happens if we fail to deliver? Specific consequences.
+
+      5. WHAT THEY ARE COMMITTING TO:
+         - Their obligations and our remedies if they fail.
+         - SLA targets and what credits or rights we get on breach.
+
+      6. RISK SCORECARD (use traffic light format):
+         - RED (critical, score 50+): risks requiring immediate negotiation.
+         - AMBER (elevated, score 20-49): risks to address if possible.
+         - GREEN (acceptable, score <20): standard or low risks.
+         - For each red/amber risk, include a one-sentence "what this means" explanation
+           and a specific "ask" for the negotiation team.
+
+      7. COMPLIANCE FLAGS:
+         - List any non-compliant or partially compliant areas with plain-English impact.
+         - What could go wrong if we sign without fixing these?
+
+      8. NEGOTIATION PRIORITY LIST (ranked by importance):
+         - Top 5 items to push back on, with specific suggested alternative language.
+         - "Must have" vs "nice to have" classification for each item.
+         - Estimate of negotiation difficulty (easy/moderate/hard) based on market standards.
+
+      9. COMPARISON TO MARKET STANDARD:
+         - Is this contract broadly favorable, neutral, or unfavorable compared to
+           typical terms in this industry? One-paragraph assessment.
+
       Extracted terms: {steps.extract-terms.output}
       Risk analysis: {steps.risk-analysis.output}
       Compliance check: {steps.compliance-check.output}

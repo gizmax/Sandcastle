@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { X, Wand2, Loader2, CheckCircle, AlertTriangle, Send, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { X, Wand2, Loader2, CheckCircle, AlertTriangle, Send, ChevronDown, ChevronRight, MessageSquare, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
 
@@ -40,6 +40,8 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
   const [loading, setLoading] = useState(false);
   const [latestResult, setLatestResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previousYaml, setPreviousYaml] = useState<string | null>(null);
+  const [currentYaml, setCurrentYaml] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevOpenRef = useRef(false);
@@ -52,9 +54,11 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
       setLoading(false);
       setLatestResult(null);
       setError(null);
+      setPreviousYaml(existingYaml || null);
+      setCurrentYaml(existingYaml || null);
     }
     prevOpenRef.current = open;
-  }, [open]);
+  }, [open, existingYaml]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -89,7 +93,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
       "/generate/chat",
       {
         messages: apiMessages,
-        existing_yaml: existingYaml || null,
+        existing_yaml: currentYaml || null,
       },
       90_000
     );
@@ -113,6 +117,9 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
           input_schema: data.input_schema || null,
         };
         setLatestResult(yamlResult);
+        // Track YAML versions for diff
+        setPreviousYaml(currentYaml);
+        setCurrentYaml(data.yaml_content);
         setMessages((prev) => [
           ...prev,
           { role: "assistant", content: data.message, yaml: yamlResult },
@@ -124,7 +131,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
         ]);
       }
     }
-  }, [input, messages, loading, existingYaml]);
+  }, [input, messages, loading, currentYaml]);
 
   const handleUse = useCallback(() => {
     if (!latestResult) return;
@@ -137,6 +144,8 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     setInput("");
     setLatestResult(null);
     setError(null);
+    setPreviousYaml(null);
+    setCurrentYaml(null);
   }, [latestResult, onSelect]);
 
   const handleClose = useCallback(() => {
@@ -144,8 +153,70 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     setInput("");
     setLatestResult(null);
     setError(null);
+    setPreviousYaml(null);
+    setCurrentYaml(null);
     onClose();
   }, [onClose]);
+
+  // Send a suggestion chip - insert text and auto-send
+  const sendSuggestion = useCallback((text: string) => {
+    if (loading) return;
+    setInput(text);
+    // Use a microtask to allow state to update before sending
+    setTimeout(() => {
+      const userMsg: ChatMessage = { role: "user", content: text };
+      const newMessages = [...messages, userMsg];
+      setMessages(newMessages);
+      setInput("");
+      setLoading(true);
+      setError(null);
+
+      const apiMessages = newMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      api.post<ChatResponse>(
+        "/generate/chat",
+        {
+          messages: apiMessages,
+          existing_yaml: currentYaml || null,
+        },
+        90_000
+      ).then((res) => {
+        setLoading(false);
+        if (res.error) {
+          setError(res.error.message);
+          return;
+        }
+        if (res.data) {
+          const data = res.data;
+          if (data.mode === "yaml" && data.yaml_content) {
+            const yamlResult: GenerateResult = {
+              yaml_content: data.yaml_content,
+              name: data.name || "",
+              description: data.description || "",
+              steps_count: data.steps_count || 0,
+              validation_errors: data.validation_errors || [],
+              input_schema: data.input_schema || null,
+            };
+            setLatestResult(yamlResult);
+            setPreviousYaml(currentYaml);
+            setCurrentYaml(data.yaml_content);
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: data.message, yaml: yamlResult },
+            ]);
+          } else {
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: data.message },
+            ]);
+          }
+        }
+      });
+    }, 0);
+  }, [loading, messages, currentYaml]);
 
   if (!open) return null;
 
@@ -244,7 +315,19 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
 
                   {/* YAML preview (for assistant messages with yaml) */}
                   {msg.role === "assistant" && msg.yaml && (
-                    <YamlChatPreview result={msg.yaml} />
+                    <>
+                      <YamlChatPreview
+                        result={msg.yaml}
+                        previousYaml={previousYaml}
+                      />
+                      {/* Suggested actions - only on the latest YAML result */}
+                      {msg.yaml === latestResult && !loading && (
+                        <SuggestedActions
+                          yamlContent={msg.yaml.yaml_content}
+                          onSend={sendSuggestion}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -358,9 +441,93 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
   );
 }
 
-/** Collapsible YAML preview inside a chat message */
-function YamlChatPreview({ result }: { result: GenerateResult }) {
+/** Compute a simple line-by-line diff between two YAML strings */
+function computeLineDiff(
+  oldText: string,
+  newText: string
+): Array<{ type: "added" | "removed" | "unchanged"; line: string }> {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const result: Array<{ type: "added" | "removed" | "unchanged"; line: string }> = [];
+
+  // Build a simple LCS-inspired diff using line matching
+  let oi = 0;
+  let ni = 0;
+
+  while (oi < oldLines.length && ni < newLines.length) {
+    if (oldLines[oi] === newLines[ni]) {
+      result.push({ type: "unchanged", line: oldLines[oi] });
+      oi++;
+      ni++;
+    } else if (!newSet.has(oldLines[oi])) {
+      // Old line not present in new text - removed
+      result.push({ type: "removed", line: oldLines[oi] });
+      oi++;
+    } else if (!oldSet.has(newLines[ni])) {
+      // New line not present in old text - added
+      result.push({ type: "added", line: newLines[ni] });
+      ni++;
+    } else {
+      // Both lines exist elsewhere - treat old as removed, new as added
+      result.push({ type: "removed", line: oldLines[oi] });
+      oi++;
+    }
+  }
+
+  // Remaining old lines are removed
+  while (oi < oldLines.length) {
+    result.push({ type: "removed", line: oldLines[oi] });
+    oi++;
+  }
+
+  // Remaining new lines are added
+  while (ni < newLines.length) {
+    result.push({ type: "added", line: newLines[ni] });
+    ni++;
+  }
+
+  return result;
+}
+
+/** Visual diff display component */
+function YamlDiffPreview({ oldYaml, newYaml }: { oldYaml: string; newYaml: string }) {
+  const diffLines = useMemo(() => computeLineDiff(oldYaml, newYaml), [oldYaml, newYaml]);
+
+  return (
+    <pre className="max-h-52 overflow-auto p-3 text-[11px] font-mono leading-relaxed">
+      {diffLines.map((line, i) => (
+        <div
+          key={i}
+          className={cn(
+            "px-1 -mx-1 rounded-sm",
+            line.type === "removed" && "bg-red-500/10 text-red-400",
+            line.type === "added" && "bg-green-500/10 text-green-400",
+            line.type === "unchanged" && "text-foreground/60"
+          )}
+        >
+          <span className="select-none inline-block w-4 text-right mr-2 opacity-50">
+            {line.type === "removed" ? "-" : line.type === "added" ? "+" : " "}
+          </span>
+          {line.line || " "}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+/** Collapsible YAML preview inside a chat message with optional diff tab */
+function YamlChatPreview({
+  result,
+  previousYaml,
+}: {
+  result: GenerateResult;
+  previousYaml: string | null;
+}) {
   const [expanded, setExpanded] = useState(true);
+  const hasDiff = !!previousYaml;
+  const [activeTab, setActiveTab] = useState<"yaml" | "diff">("yaml");
   const hasErrors = result.validation_errors.length > 0;
 
   return (
@@ -396,29 +563,144 @@ function YamlChatPreview({ result }: { result: GenerateResult }) {
         </div>
       )}
 
-      {/* Collapsible YAML */}
+      {/* Collapsible YAML with optional diff tab */}
       <div className="rounded-lg border border-border bg-black/20 overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="flex w-full items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted hover:text-foreground transition-colors"
-        >
-          <span className="font-medium">Generated YAML</span>
-          <span className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+          <div className="flex items-center gap-0">
+            {/* Tab buttons */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("yaml")}
+              className={cn(
+                "px-2 py-0.5 text-xs font-medium rounded-md transition-colors",
+                activeTab === "yaml"
+                  ? "text-foreground bg-muted/15"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              YAML
+            </button>
+            {hasDiff && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("diff")}
+                className={cn(
+                  "px-2 py-0.5 text-xs font-medium rounded-md transition-colors",
+                  activeTab === "diff"
+                    ? "text-foreground bg-muted/15"
+                    : "text-muted hover:text-foreground"
+                )}
+              >
+                Diff
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
+          >
             <span className="text-muted/60">{result.steps_count} steps</span>
             {expanded ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
               <ChevronRight className="h-3 w-3" />
             )}
-          </span>
-        </button>
+          </button>
+        </div>
         {expanded && (
-          <pre className="max-h-52 overflow-auto p-3 text-[11px] text-foreground/80 font-mono leading-relaxed">
-            {result.yaml_content}
-          </pre>
+          activeTab === "diff" && hasDiff ? (
+            <YamlDiffPreview oldYaml={previousYaml} newYaml={result.yaml_content} />
+          ) : (
+            <pre className="max-h-52 overflow-auto p-3 text-[11px] text-foreground/80 font-mono leading-relaxed">
+              {result.yaml_content}
+            </pre>
+          )
         )}
       </div>
+    </div>
+  );
+}
+
+/** Contextual suggestion chips shown after YAML generation */
+function SuggestedActions({
+  yamlContent,
+  onSend,
+}: {
+  yamlContent: string;
+  onSend: (text: string) => void;
+}) {
+  const suggestions = useMemo(() => {
+    const chips: Array<{ label: string; message: string }> = [];
+    const lc = yamlContent.toLowerCase();
+
+    if (!lc.includes("type: \"approval\"") && !lc.includes("type: approval") && !lc.includes("type: \"gate\"") && !lc.includes("type: gate")) {
+      chips.push({
+        label: "Add approval gate",
+        message: "Add an approval gate step before the final step so a human can review before execution",
+      });
+    }
+
+    if (!lc.includes("type: \"notify\"") && !lc.includes("type: notify")) {
+      chips.push({
+        label: "Add notifications",
+        message: "Add a notification step at the end to alert when the workflow completes",
+      });
+    }
+
+    // Check if all steps use sonnet
+    const modelMatches = lc.match(/model:\s*["']?(\w+)/g) || [];
+    const allSonnet = modelMatches.length > 0 && modelMatches.every((m) => m.includes("sonnet"));
+    if (allSonnet && modelMatches.length > 1) {
+      chips.push({
+        label: "Optimize models",
+        message: "Optimize model usage - use haiku for simpler steps to reduce cost and latency",
+      });
+    }
+
+    // Check for parallelization opportunity - no shared depends_on
+    const dependsMatches = lc.match(/depends_on:/g) || [];
+    if (dependsMatches.length <= 1) {
+      chips.push({
+        label: "Parallelize steps",
+        message: "Identify independent steps and run them in parallel using depends_on to speed up execution",
+      });
+    }
+
+    // Always available suggestions
+    chips.push({
+      label: "Add error handling",
+      message: "Add error handling and retry logic to steps that might fail",
+    });
+
+    chips.push({
+      label: "Add input validation",
+      message: "Add input validation to verify all required inputs before the workflow starts",
+    });
+
+    // Return max 4 suggestions
+    return chips.slice(0, 4);
+  }, [yamlContent]);
+
+  if (suggestions.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {suggestions.map((s) => (
+        <button
+          key={s.label}
+          type="button"
+          onClick={() => onSend(s.message)}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full",
+            "border border-accent/30 text-accent text-xs px-2.5 py-1",
+            "hover:bg-accent/10 transition-colors cursor-pointer"
+          )}
+        >
+          <Plus className="h-3 w-3" />
+          {s.label}
+        </button>
+      ))}
     </div>
   );
 }

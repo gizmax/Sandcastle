@@ -1,0 +1,744 @@
+# name: Product Feedback Prioritizer
+# description: Aggregate product feedback from multiple channels, deduplicate, cluster by theme, score by business impact, and produce a prioritized roadmap
+# tags: [Product, Feedback, Prioritization, Roadmap, RICE]
+# category: general_ai
+
+name: product-feedback-prioritizer
+description: Aggregate product feedback from multiple channels, deduplicate, cluster by theme, score by business impact, and produce a prioritized roadmap
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["product_name", "feedback_sources"]
+  properties:
+    product_name:
+      type: string
+      description: "Name of the product to analyze feedback for"
+    feedback_sources:
+      type: string
+      description: "Comma-separated feedback channels (e.g. 'Intercom, Canny, Slack, G2, Zendesk, App Store')"
+    time_period:
+      type: string
+      description: "Time period to analyze (default: last 90 days)"
+      default: "last 90 days"
+
+steps:
+  - id: channel-ingestion
+    prompt: |
+      You are a product feedback data engineer. Your task is to systematically ingest,
+      normalize, and structure raw product feedback from multiple channels for the product
+      "{input.product_name}".
+
+      Feedback sources to process: {input.feedback_sources}
+      Time period: {input.time_period}
+
+      For each feedback source channel, perform the following ingestion protocol:
+
+      === CHANNEL-SPECIFIC EXTRACTION RULES ===
+
+      **Intercom / Zendesk / Support Tickets:**
+      - Extract the customer's verbatim complaint, request, or question
+      - Capture ticket priority/severity as assigned by support agents
+      - Extract the customer's plan tier (free, starter, pro, enterprise)
+      - Note the customer's account age and monthly recurring revenue (MRR) if available
+      - Identify whether the ticket was resolved, escalated, or remains open
+      - Tag whether the feedback is a bug report, feature request, UX complaint, or general question
+      - Count the number of back-and-forth messages (indicates friction intensity)
+      - Extract any workaround the support agent suggested (indicates a gap in the product)
+
+      **Canny / UserVoice / Feature Request Boards:**
+      - Extract the feature title and full description
+      - Capture the vote count and number of unique commenters
+      - Note the submission date and most recent activity date
+      - Extract all comments - these often contain more nuanced context than the original request
+      - Identify the status (open, under review, planned, in progress, completed, declined)
+      - Tag the requester's company size and plan tier if visible
+      - Note if any Canny admin or product team member responded and what they said
+      - Calculate engagement velocity: votes per week since submission
+
+      **Slack / Discord / Community Channels:**
+      - Extract messages that contain feature requests, complaints, workarounds, or praise
+      - Capture thread length and number of unique participants (consensus indicator)
+      - Note emoji reactions, especially thumbs-up, +1, fire, or custom reaction counts
+      - Identify whether a team member acknowledged or responded to the feedback
+      - Extract the user's role context (developer, manager, admin) from their profile or message
+      - Flag recurring topics that appear in multiple threads across the time period
+      - Distinguish between casual mentions and deliberate feedback/requests
+
+      **G2 / Capterra / TrustRadius / Review Platforms:**
+      - Extract the full review text, both pros and cons sections
+      - Capture the star rating (overall and per-dimension if available)
+      - Note the reviewer's company size, industry, and role
+      - Identify whether the reviewer is a verified user
+      - Extract the "what do you dislike" section - this is the richest feedback source
+      - Note if the reviewer mentions switching from or considering switching to a competitor
+      - Capture the review date to assess recency and relevance
+      - Tag "would recommend" or NPS-equivalent scores
+
+      **App Store / Play Store Reviews:**
+      - Extract the review text, star rating, and date
+      - Identify the app version at the time of review (correlate issues with releases)
+      - Note if the reviewer updated their review after a response
+      - Capture device/OS information if available (platform-specific issues)
+      - Tag whether the review mentions a specific feature, bug, or general sentiment
+
+      **Email / NPS Surveys:**
+      - Extract the NPS score and verbatim comment
+      - Categorize by promoter (9-10), passive (7-8), and detractor (0-6)
+      - Capture the respondent's account metadata (plan, tenure, usage level)
+      - Extract specific product mentions from open-ended responses
+      - Note response date relative to any recent product changes or releases
+
+      === NORMALIZATION SCHEMA ===
+
+      For EVERY feedback item extracted, normalize into this structure:
+      {
+        "id": "unique-sequential-id",
+        "source_channel": "channel name",
+        "raw_text": "verbatim feedback text",
+        "feedback_type": "bug | feature_request | ux_complaint | praise | question | churn_signal",
+        "customer_segment": "free | starter | pro | enterprise | unknown",
+        "customer_mrr": "dollar amount or unknown",
+        "customer_tenure_months": "number or unknown",
+        "submission_date": "ISO date",
+        "engagement_signals": {
+          "votes": 0,
+          "comments": 0,
+          "reactions": 0,
+          "thread_participants": 0
+        },
+        "severity_indicators": {
+          "mentions_leaving": true/false,
+          "mentions_competitor": "competitor name or null",
+          "mentions_workaround": true/false,
+          "emotional_intensity": "low | medium | high | critical",
+          "blocks_workflow": true/false
+        },
+        "extracted_keywords": ["keyword1", "keyword2"],
+        "product_area": "best guess at which product area this relates to"
+      }
+
+      === SUMMARY STATISTICS ===
+
+      After ingestion, provide:
+      - Total feedback items collected per channel
+      - Breakdown by feedback_type across all channels
+      - Breakdown by customer_segment
+      - Top 20 most frequently mentioned keywords or phrases
+      - Channels with the highest volume of negative/critical feedback
+      - Date distribution showing any spikes in feedback volume (may correlate with releases or incidents)
+
+      Return the complete normalized dataset and summary statistics as structured JSON.
+    model: haiku
+    max_turns: 10
+
+  - id: deduplication-clustering
+    depends_on: [channel-ingestion]
+    prompt: |
+      You are a data scientist specializing in NLP-based text clustering and deduplication.
+      Your task is to process the normalized feedback dataset for "{input.product_name}" and
+      identify duplicate entries, near-duplicates, and thematic clusters.
+
+      Ingested feedback data: {steps.channel-ingestion.output}
+
+      === PHASE 1: DEDUPLICATION ===
+
+      Identify and merge duplicate feedback items using these matching criteria:
+
+      **Exact duplicates:**
+      - Same user submitting the same feedback across multiple channels (e.g., support ticket
+        AND Canny post AND Slack message about the same issue)
+      - Copy-pasted text appearing in multiple reviews or forums
+
+      **Near-duplicates (semantic similarity > 0.85):**
+      - Same core request expressed in different words by the same user
+      - Template-based feedback (users copying each other's feature requests)
+      - Follow-up messages that restate the original without adding new information
+
+      **Cross-channel consolidation:**
+      - When the same underlying issue appears across channels, merge into a single
+        canonical entry but preserve all source metadata
+      - Keep the most detailed/articulate version as the canonical text
+      - Sum engagement signals across all duplicate entries (total votes, reactions, etc.)
+      - Use the earliest submission date as the canonical date
+
+      For each merged group, record:
+      - Number of original entries merged
+      - Source channels represented
+      - Combined engagement score
+      - Whether multiple distinct customers reported the same issue (vs. one user across channels)
+
+      Deduplication metrics to report:
+      - Original item count
+      - Deduplicated item count
+      - Reduction percentage
+      - Number of cross-channel duplicates found
+
+      === PHASE 2: THEMATIC CLUSTERING ===
+
+      Cluster the deduplicated feedback into coherent themes using a hierarchical approach:
+
+      **Level 1 - Product Areas (broad):**
+      Examples: Onboarding, Core Functionality, Integrations, Performance, Pricing,
+      Documentation, Mobile Experience, API, Admin/Settings, Billing, Reporting/Analytics
+
+      **Level 2 - Feature Themes (specific):**
+      Within each product area, identify specific feature-level themes.
+      Example under "Integrations": Slack integration, Zapier support, API webhooks,
+      SSO/SAML, CRM sync, Calendar integration
+
+      **Level 3 - Issue Sub-themes (granular):**
+      Within each feature theme, identify specific aspects.
+      Example under "Slack integration": Missing thread support, Notification noise,
+      Two-way sync needed, Slack Connect compatibility
+
+      Clustering methodology:
+      1. Extract key noun phrases and action verbs from each feedback item
+      2. Group items sharing 2+ key phrases into candidate clusters
+      3. Review candidate clusters for coherence - split clusters that contain
+         multiple distinct issues, merge clusters that are artificially separated
+      4. Assign each item to exactly one Level 3 cluster
+      5. Roll up Level 3 clusters into Level 2, and Level 2 into Level 1
+      6. Items that do not fit any cluster go into an "Uncategorized" bucket
+         (should be <5% of total items)
+
+      For each cluster at every level, calculate:
+      - Item count (number of unique feedback entries)
+      - Unique customer count (how many distinct customers mentioned this)
+      - Total engagement score (sum of votes, reactions, comments)
+      - Average emotional intensity
+      - Customer segment distribution (what % from free vs enterprise)
+      - Revenue-weighted frequency (items from high-MRR customers count more)
+      - Recency score (more recent feedback weighted higher)
+      - Representative quotes (3-5 verbatim excerpts that best capture the cluster)
+
+      === OUTPUT FORMAT ===
+
+      Return:
+      1. The deduplicated dataset with cluster assignments
+      2. The hierarchical cluster taxonomy (Level 1 > Level 2 > Level 3)
+      3. Per-cluster statistics at all three levels
+      4. A "cluster strength" ranking - clusters sorted by combined frequency,
+         engagement, and revenue-weight
+      5. Cross-cluster connections (clusters that are frequently co-mentioned
+         by the same customers, indicating related issues)
+    model: haiku
+    max_turns: 10
+
+  - id: sentiment-scoring
+    depends_on: [channel-ingestion]
+    prompt: |
+      You are a sentiment analysis specialist with expertise in product feedback
+      interpretation. Your task is to perform deep sentiment and emotion analysis
+      on the feedback data for "{input.product_name}".
+
+      Ingested feedback data: {steps.channel-ingestion.output}
+      Time period: {input.time_period}
+
+      === SENTIMENT SCORING FRAMEWORK ===
+
+      For each feedback item, assign scores across multiple dimensions:
+
+      **1. Overall Sentiment Score (-1.0 to +1.0):**
+      - -1.0 = Extremely negative, angry, threatening to leave
+      - -0.5 = Clearly negative, frustrated, disappointed
+      - 0.0 = Neutral, factual observation, neither positive nor negative
+      - +0.5 = Positive, appreciative, satisfied
+      - +1.0 = Extremely positive, enthusiastic advocate, delighted
+
+      **2. Urgency Score (1-10):**
+      Assess how time-sensitive the feedback is based on these indicators:
+      - 10: Customer actively churning, workflow completely blocked, data loss
+      - 8-9: Workaround exists but is unsustainable, deadline pressure mentioned
+      - 6-7: Significant daily friction, mentions evaluating alternatives
+      - 4-5: Noticeable inconvenience but manageable, "would be nice" language
+      - 2-3: Minor improvement suggestion, cosmetic or polish request
+      - 1: Blue-sky idea, nice-to-have with no urgency
+
+      **3. Emotion Classification:**
+      Assign primary and secondary emotions from this taxonomy:
+      - Frustration: Repeated attempts failing, "I keep trying to..."
+      - Anger: Hostile tone, profanity, threats, ALL CAPS
+      - Disappointment: Expected feature missing, "I was hoping..."
+      - Confusion: Cannot figure out how to do something, "How do I..."
+      - Anxiety: Worried about data security, reliability, or future pricing
+      - Hope: Optimistic about product direction, "If you could just add..."
+      - Delight: Genuine positive surprise, exceeding expectations
+      - Trust: Confidence in the product and team
+      - Resignation: Given up trying, accepted limitations, "I guess we have to..."
+      - Betrayal: Feature removed, price increased, broken promise
+
+      **4. Customer Health Signal:**
+      Based on sentiment, classify each item's health signal:
+      - GREEN: Positive feedback, engaged customer, no risk
+      - YELLOW: Mixed feedback, minor frustrations, monitoring recommended
+      - ORANGE: Significant frustration, mentions alternatives, intervention needed
+      - RED: Churn imminent, ultimatum language, severe dissatisfaction
+
+      **5. Actionability Score (1-10):**
+      How actionable is this feedback for the product team?
+      - 10: Specific, reproducible bug with steps, clear feature spec
+      - 8-9: Clear problem statement with context, can derive requirements
+      - 6-7: Reasonable request but needs product discovery to scope
+      - 4-5: Vague complaint, needs follow-up to understand root cause
+      - 2-3: Subjective preference, "I don't like the color"
+      - 1: Incomprehensible, off-topic, or spam
+
+      === AGGREGATE SENTIMENT ANALYSIS ===
+
+      After scoring individual items, compute:
+
+      **Product-Level Sentiment:**
+      - Overall product sentiment score (weighted average by customer MRR)
+      - Sentiment trend over the time period (improving, stable, declining)
+      - Sentiment distribution histogram (what % falls in each score band)
+      - Net Promoter Score equivalent from review data
+
+      **Segment-Level Sentiment:**
+      - Sentiment score by customer plan tier
+      - Sentiment score by customer tenure (new vs mature customers)
+      - Identify segments where sentiment is significantly above or below average
+
+      **Topic-Level Sentiment:**
+      - Sentiment score by product area (using keywords from ingestion step)
+      - Identify product areas with the most negative sentiment concentration
+      - Identify product areas with the most positive sentiment (strengths to protect)
+
+      **Temporal Sentiment:**
+      - Weekly or monthly sentiment trend line
+      - Identify any sentiment spikes (positive or negative) and correlate with
+        product releases, incidents, or announcements if detectable
+      - Calculate sentiment velocity (is it changing fast or slowly)
+
+      **Churn Risk Assessment:**
+      - Count of RED health signal customers and their combined MRR
+      - Count of ORANGE health signal customers and their combined MRR
+      - Total at-risk revenue
+      - Most common issues among at-risk customers
+      - Recommended immediate outreach list (top 10 at-risk accounts by MRR)
+
+      === OUTPUT ===
+
+      Return:
+      1. Per-item sentiment scores (all 5 dimensions)
+      2. Aggregate sentiment dashboards (product, segment, topic, temporal)
+      3. Churn risk assessment with at-risk account list
+      4. Top 10 most emotionally intense feedback items (potential fires to address)
+      5. Sentiment-based priority flags for the clustering step
+    model: sonnet
+    max_turns: 10
+
+  - id: impact-analysis
+    depends_on: [deduplication-clustering, sentiment-scoring]
+    prompt: |
+      You are a product strategist with deep expertise in prioritization frameworks.
+      Your task is to score every feedback cluster for "{input.product_name}" using
+      multiple business impact dimensions and produce a definitive priority ranking.
+
+      Clustered feedback: {steps.deduplication-clustering.output}
+      Sentiment analysis: {steps.sentiment-scoring.output}
+      Product name: {input.product_name}
+
+      === SCORING FRAMEWORK: MULTI-MODEL APPROACH ===
+
+      Apply ALL THREE prioritization frameworks to each Level 2 cluster, then compute
+      a composite score. Using multiple frameworks reduces bias from any single model.
+
+      --- FRAMEWORK 1: RICE SCORING ---
+
+      **Reach (1-10):**
+      How many customers will this impact within the next quarter?
+      - 10: Affects all active users (100% of user base)
+      - 8-9: Affects a major segment (50-99% of users or all enterprise accounts)
+      - 6-7: Affects a significant minority (20-49% of users)
+      - 4-5: Affects a niche segment (5-19% of users)
+      - 2-3: Affects a small group (<5% of users but high-value)
+      - 1: Affects a handful of users with an edge case
+
+      Scoring inputs: unique customer count in cluster, segment distribution,
+      extrapolation to full user base based on sample representation.
+
+      **Impact (1-10):**
+      How significantly will addressing this change customer behavior?
+      - 10: Eliminates #1 churn reason, unlocks entirely new use case
+      - 8-9: Significantly improves core workflow, removes daily friction
+      - 6-7: Noticeable improvement, reduces support tickets substantially
+      - 4-5: Moderate quality-of-life improvement, polishes experience
+      - 2-3: Minor enhancement, marginal satisfaction increase
+      - 1: Cosmetic or negligible behavioral change
+
+      Scoring inputs: emotional intensity scores, urgency scores, health signals,
+      whether the issue blocks core workflows.
+
+      **Confidence (1-10):**
+      How confident are we in the reach and impact estimates?
+      - 10: Quantitative data from 100+ feedback items, validated across channels
+      - 8-9: Strong qualitative signal from 50+ items across multiple channels
+      - 6-7: Moderate signal from 20-49 items, mostly consistent across sources
+      - 4-5: Some signal from 10-19 items, but sources may disagree
+      - 2-3: Weak signal from <10 items, single channel only
+      - 1: Speculation, minimal data, single anecdote
+
+      Scoring inputs: item count, channel diversity, cross-source validation score.
+
+      **Effort (1-10, inverted - higher = easier):**
+      How much effort would it take to address this cluster?
+      - 10: Quick fix, configuration change, documentation update
+      - 8-9: Small feature, 1-2 sprint effort, well-understood scope
+      - 6-7: Medium feature, 1-2 month effort, some unknowns
+      - 4-5: Large feature, quarter-long initiative, significant unknowns
+      - 2-3: Major platform change, multi-quarter effort, high risk
+      - 1: Architectural overhaul, 6+ month effort, fundamental redesign
+
+      Scoring inputs: technical complexity inferred from the feedback (is this a UX
+      tweak or a new subsystem?), mentions of integration complexity, mentions of
+      "should be easy/simple" from customers (often wrong but directional).
+
+      RICE Score = (Reach * Impact * Confidence) / Effort (scale normalized to 0-100)
+
+      --- FRAMEWORK 2: KANO MODEL CLASSIFICATION ---
+
+      Classify each cluster into a Kano category:
+
+      **Must-Be (Basic Expectations):**
+      - Customers expect this to work and are dissatisfied when it doesn't
+      - Does NOT increase satisfaction when present, but causes strong dissatisfaction when absent
+      - Indicators: bug reports, "this should work", "every other tool has this"
+      - Priority implication: HIGH - fix these first, they cause disproportionate churn
+
+      **One-Dimensional (Performance):**
+      - Satisfaction is proportional to how well this is implemented
+      - Better implementation = more satisfaction, worse = less satisfaction
+      - Indicators: "faster", "more reliable", "better at X"
+      - Priority implication: MEDIUM - improve incrementally based on competition
+
+      **Attractive (Delighters):**
+      - Customers don't expect this but are delighted when it exists
+      - Absence does NOT cause dissatisfaction
+      - Indicators: "it would be amazing if", "imagine if you could", "wish list"
+      - Priority implication: STRATEGIC - use selectively for differentiation
+
+      **Indifferent:**
+      - Customers don't care either way
+      - Indicators: low engagement scores, lack of follow-up comments
+      - Priority implication: LOW - deprioritize
+
+      **Reverse:**
+      - Some customers actively dislike this feature/change
+      - Indicators: polarized feedback, "please don't add", "this makes it worse"
+      - Priority implication: CAUTION - investigate further before acting
+
+      --- FRAMEWORK 3: MoSCoW CLASSIFICATION ---
+
+      **Must Have:** Product is not viable without this. Critical bugs, compliance gaps,
+      or feature parity items that cause immediate churn.
+
+      **Should Have:** Important but not critical. Significant pain points that have
+      workarounds. Would meaningfully improve retention and satisfaction.
+
+      **Could Have:** Desirable improvements that would enhance the experience but
+      are not blocking any critical workflows.
+
+      **Won't Have (this cycle):** Ideas that are interesting but do not align with
+      current strategic priorities or have insufficient data support.
+
+      === REVENUE IMPACT MODELING ===
+
+      For each cluster, estimate the revenue impact:
+
+      **Churn Prevention Revenue:**
+      - Count of RED/ORANGE health signal customers in this cluster
+      - Sum of their MRR
+      - Estimated % that would retain if this issue is resolved (50-80% for RED, 70-90% for ORANGE)
+      - Annual churn prevention value = at_risk_MRR * retention_rate * 12
+
+      **Expansion Revenue:**
+      - Would resolving this unblock upsells or plan upgrades?
+      - Estimated number of accounts that would upgrade
+      - Average upgrade value per account
+      - Annual expansion value = upgrade_accounts * upgrade_value * 12
+
+      **New Business Revenue:**
+      - Does this appear in competitive loss reasons or prospect objections?
+      - Estimated win rate improvement if addressed
+      - Average new deal value * additional wins per quarter * 4
+
+      **Total Revenue Impact = Churn Prevention + Expansion + New Business**
+
+      === COMPOSITE PRIORITY SCORE ===
+
+      Calculate final priority for each cluster:
+      Priority Score = (RICE_normalized * 0.40) + (Kano_weight * 0.25) + (Revenue_Impact_normalized * 0.35)
+
+      Where Kano_weight: Must-Be=10, One-Dimensional=7, Attractive=5, Indifferent=2, Reverse=0
+
+      === OUTPUT ===
+
+      Return for each Level 2 cluster:
+      1. RICE scores (each component + composite)
+      2. Kano classification with justification
+      3. MoSCoW classification with justification
+      4. Revenue impact estimate (broken into churn/expansion/new business)
+      5. Composite priority score
+      6. Ranking position (1 = highest priority)
+      7. Key supporting evidence (top 3 quotes)
+      8. Recommended action type: Fix (bug), Build (feature), Improve (enhancement), Investigate (needs more data)
+
+      Also produce a 2x2 matrix visualization (Impact vs Effort) showing all clusters.
+    model: sonnet
+    max_turns: 10
+
+  - id: roadmap-generation
+    depends_on: [impact-analysis]
+    prompt: |
+      You are a seasoned product manager and roadmap strategist. Your task is to
+      transform the prioritized feedback clusters for "{input.product_name}" into
+      a concrete, actionable product roadmap with clear sequencing and rationale.
+
+      Impact analysis: {steps.impact-analysis.output}
+      Clustered feedback: {steps.deduplication-clustering.output}
+      Sentiment data: {steps.sentiment-scoring.output}
+      Product name: {input.product_name}
+
+      === ROADMAP GENERATION PROTOCOL ===
+
+      --- STEP 1: STRATEGIC GROUPING ---
+
+      Group the prioritized clusters into roadmap themes (epics):
+
+      **Theme naming convention:** Each theme should have:
+      - A concise, outcome-oriented name (e.g., "Reduce Onboarding Drop-off" not "Fix Onboarding")
+      - A one-sentence goal statement ("Reduce time-to-value from 14 days to 3 days")
+      - A measurable success metric with target
+      - Mapping to business objective (retention, expansion, acquisition, efficiency)
+
+      Group related Level 2 clusters into themes when:
+      - They share the same product area AND solving them together is more efficient
+      - They form a coherent user story arc (one enables the other)
+      - Addressing them together creates a more compelling narrative for customers
+
+      Do NOT group unrelated items just to reduce theme count. Each theme should be
+      independently valuable and shippable.
+
+      --- STEP 2: SEQUENCING AND TIME HORIZONS ---
+
+      Assign each theme to a time horizon:
+
+      **Now (0-6 weeks) - Quick Wins and Critical Fixes:**
+      - Must-Be items with composite priority score in top 20%
+      - Items with Effort score 8-10 (easy) regardless of other scores
+      - RED health signal items where at-risk MRR exceeds threshold
+      - Bug fixes that affect core workflows
+      - Maximum 3-5 items in this horizon (focus is key)
+
+      **Next (6-12 weeks) - Strategic Investments:**
+      - One-Dimensional items with high RICE scores
+      - Should Have items that require 1-3 sprints of effort
+      - Items that address the most common competitive loss reasons
+      - Features that enable expansion revenue
+      - Maximum 5-8 items in this horizon
+
+      **Later (3-6 months) - Platform Bets:**
+      - Attractive/Delighter items that could differentiate
+      - Large effort items with high revenue impact
+      - Architectural improvements that enable future velocity
+      - Market expansion features
+      - Maximum 5-10 items, less precisely scoped
+
+      **Future (6+ months) - Vision Items:**
+      - Long-term strategic bets informed by feedback trends
+      - Items requiring significant research or platform changes
+      - Aspirational features that appear in positive competitor mentions
+      - No limit, but mark confidence level (speculative)
+
+      --- STEP 3: DEPENDENCY MAPPING ---
+
+      For each roadmap item, identify:
+      - **Hard dependencies:** "X must be built before Y can work" (technical prerequisite)
+      - **Soft dependencies:** "X is more valuable after Y ships" (enhanced by sequence)
+      - **Resource conflicts:** "X and Y need the same team and cannot run in parallel"
+      - **External dependencies:** "X requires a third-party API, vendor contract, or partnership"
+
+      Produce a dependency graph showing the critical path through the roadmap.
+      Identify the longest chain of sequential dependencies (this determines minimum
+      time to complete the full roadmap).
+
+      --- STEP 4: EFFORT ESTIMATION ---
+
+      For each roadmap item, provide a t-shirt size estimate:
+      - **XS (1-2 days):** Configuration change, copy update, small UI tweak
+      - **S (3-5 days):** Small feature, single component, well-defined scope
+      - **M (1-3 weeks):** Medium feature, multiple components, some discovery needed
+      - **L (1-2 months):** Large feature, new subsystem, significant discovery
+      - **XL (3+ months):** Platform initiative, architectural change, multi-team
+
+      For each estimate, note:
+      - Key assumptions that could change the estimate
+      - Biggest technical risk or unknown
+      - Whether a spike/prototype is recommended before committing
+
+      --- STEP 5: SUCCESS METRICS ---
+
+      For each roadmap theme, define:
+      - **Leading indicator:** Measurable within 2 weeks of launch (e.g., adoption rate,
+        support ticket reduction for that topic, feature usage rate)
+      - **Lagging indicator:** Measurable after 1-3 months (e.g., NPS improvement in segment,
+        churn rate reduction, expansion revenue from affected accounts)
+      - **Target:** Specific numerical target for each metric
+      - **Measurement method:** How will you track this? (analytics event, survey, support
+        ticket tag, revenue report)
+
+      --- STEP 6: TRADE-OFF DOCUMENTATION ---
+
+      For the top 5 items that were deprioritized (high impact but pushed to Later/Future),
+      document:
+      - Why it was deprioritized despite high scores
+      - What would need to change for it to move up (trigger conditions)
+      - The cost of NOT doing it (ongoing churn risk, competitive exposure)
+      - Alternative lightweight solutions or workarounds to offer in the interim
+
+      For any conflicting priorities (two items compete for the same resources),
+      document the trade-off decision and reasoning.
+
+      === OUTPUT FORMAT ===
+
+      Produce the roadmap in this structure:
+      1. Executive summary (3-5 sentences: what are we building and why)
+      2. Roadmap visualization (Now/Next/Later/Future with items and dependencies)
+      3. Detailed theme cards (one per theme with all fields above)
+      4. Dependency graph
+      5. Risk register (what could go wrong with this plan)
+      6. Trade-off documentation
+      7. Appendix: Items explicitly NOT on the roadmap and why
+    model: sonnet
+    max_turns: 10
+
+  - id: stakeholder-report
+    depends_on: [roadmap-generation, impact-analysis, sentiment-scoring]
+    prompt: |
+      You are a product communications expert. Your task is to produce a comprehensive
+      stakeholder report for "{input.product_name}" that communicates feedback analysis
+      findings and the resulting roadmap to different audiences within the organization.
+
+      Roadmap: {steps.roadmap-generation.output}
+      Impact analysis: {steps.impact-analysis.output}
+      Sentiment analysis: {steps.sentiment-scoring.output}
+      Clustered feedback: {steps.deduplication-clustering.output}
+      Feedback sources: {input.feedback_sources}
+      Time period: {input.time_period}
+
+      === REPORT STRUCTURE ===
+
+      Produce THREE versions of the report, each tailored to a different audience:
+
+      --- VERSION 1: EXECUTIVE BRIEFING (for C-suite and VPs) ---
+
+      Maximum 2 pages. Focus on business impact and strategic decisions.
+
+      **Section 1: Key Numbers**
+      - Total feedback items analyzed (across all channels)
+      - Overall product sentiment score with trend arrow
+      - At-risk revenue (RED + ORANGE health signals)
+      - Top 3 themes by revenue impact
+      - Customer health distribution (% GREEN/YELLOW/ORANGE/RED)
+
+      **Section 2: Critical Findings**
+      - The single most important insight from this analysis (one paragraph)
+      - Top 3 risks that require immediate executive attention
+      - Top 3 opportunities with estimated revenue impact
+      - Competitive positioning summary (are we gaining or losing ground)
+
+      **Section 3: Recommended Actions**
+      - 3-5 bullet points of strategic decisions needed
+      - Resource allocation implications
+      - Timeline for expected impact
+      - Investment required vs revenue protected/generated
+
+      **Section 4: Roadmap Summary**
+      - Now/Next/Later visualization (theme names and t-shirt sizes only)
+      - Total estimated effort in engineering weeks
+      - Expected business outcomes by quarter
+
+      --- VERSION 2: PRODUCT TEAM BRIEF (for PM, Engineering, Design) ---
+
+      Detailed and actionable. 5-8 pages.
+
+      **Section 1: Feedback Landscape**
+      - Channel-by-channel volume and sentiment breakdown
+      - Feedback type distribution (bugs vs features vs UX vs other)
+      - Cluster taxonomy (full Level 1 > Level 2 hierarchy with counts)
+      - Trend analysis: what is getting better, what is getting worse
+
+      **Section 2: Priority Ranking**
+      - Full ranked list of Level 2 clusters with RICE scores, Kano classification,
+        and MoSCoW designation
+      - Impact vs Effort 2x2 matrix
+      - Revenue impact breakdown per cluster
+      - Top 10 verbatim quotes that best represent the highest-priority issues
+
+      **Section 3: Detailed Roadmap**
+      - Full roadmap with all themes, items, dependencies, and estimates
+      - Dependency graph
+      - Risk register
+      - Success metrics per theme
+      - Trade-off documentation
+
+      **Section 4: Technical Considerations**
+      - Items that require architectural discussion or spikes
+      - Cross-team dependencies identified
+      - Items that could be quick wins with existing infrastructure
+      - Suggested approach for the top 3 "Now" items
+
+      **Section 5: Open Questions**
+      - Items where feedback is conflicting and needs user research
+      - Items where effort estimation has high uncertainty
+      - Strategic questions for leadership (invest in X vs Y)
+
+      --- VERSION 3: CUSTOMER-FACING CHANGELOG / TRANSPARENCY REPORT ---
+
+      Public-friendly format for sharing with customers, updating Canny/roadmap page,
+      or including in newsletter.
+
+      **Section 1: "We Heard You"**
+      - Acknowledge the top 5 most-requested themes in customer-friendly language
+      - Thank the community for feedback with specific numbers ("Over 400 of you told
+        us that X was important")
+      - Show that feedback directly influenced the roadmap
+
+      **Section 2: "Here is What We are Building"**
+      - Now items: specific, committed, with approximate timeline
+      - Next items: directionally committed, with "coming soon" framing
+      - Later items: "exploring" or "on our radar" framing
+      - Use customer-friendly language, not internal jargon
+
+      **Section 3: "Why Not X?"**
+      - Address the top 3-5 popular requests that are NOT on the roadmap
+      - Explain the reasoning transparently (technical constraints, strategic focus,
+        alternative approach)
+      - Offer interim workarounds where available
+
+      **Section 4: "Keep Talking to Us"**
+      - Feedback channel links
+      - Invitation to upvote and comment on specific items
+      - Preview of upcoming user research or beta programs
+
+      === CROSS-VERSION CONSISTENCY ===
+
+      Ensure all three versions:
+      - Use consistent data (same numbers, same rankings)
+      - Tell the same strategic story (priorities align across versions)
+      - Reference the same top themes (even if depth varies)
+      - Use the same terminology for roadmap items
+
+      === FINAL DELIVERABLE ===
+
+      Return all three report versions clearly separated, plus:
+      - A "data sources and methodology" appendix explaining how feedback was collected,
+        deduplicated, clustered, and scored
+      - A glossary of frameworks used (RICE, Kano, MoSCoW) for stakeholders unfamiliar
+      - A recommendation for feedback analysis cadence (how often to repeat this process)
+      - Suggested process improvements for feedback collection based on data gaps observed
+    model: sonnet
+    max_turns: 10

@@ -48,6 +48,17 @@ export function RunsChart({ data }: RunsChartProps) {
               border: "1px solid var(--color-border)",
               borderRadius: "8px",
               fontSize: "12px",
+              fontFamily: "'IBM Plex Mono', monospace",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              padding: "8px 12px",
+            }}
+            labelStyle={{
+              fontWeight: 600,
+              marginBottom: "4px",
+              color: "var(--color-foreground)",
+            }}
+            itemStyle={{
+              padding: "2px 0",
             }}
           />
           <Legend wrapperStyle={{ fontSize: "12px" }} />

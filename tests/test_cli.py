@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -9,8 +10,14 @@ import pytest
 
 from sandcastle.__main__ import (
     _build_parser,
+    _cmd_approve,
+    _cmd_fork,
     _cmd_health,
+    _cmd_reject,
+    _cmd_replay,
+    _cmd_runs,
     _cmd_serve,
+    _cmd_templates,
     _parse_input_pairs,
 )
 
@@ -286,3 +293,413 @@ class TestServeCommand:
             port=8080,
             reload=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: New CLI commands - argument parsing
+# ---------------------------------------------------------------------------
+
+
+class TestNewCommandParsing:
+    """Verify that all new subcommands are registered and parse correctly."""
+
+    def test_templates_command(self):
+        """'templates' command should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["templates"])
+
+        assert args.command == "templates"
+
+    def test_templates_with_category(self):
+        """'templates --category data' should set the category filter."""
+        parser = _build_parser()
+        args = parser.parse_args(["templates", "--category", "data"])
+
+        assert args.command == "templates"
+        assert args.category == "data"
+
+    def test_replay_command(self):
+        """'replay <run_id> --from-step <step>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["replay", "run-abc", "--from-step", "step-2"])
+
+        assert args.command == "replay"
+        assert args.run_id == "run-abc"
+        assert args.from_step == "step-2"
+
+    def test_fork_command(self):
+        """'fork <run_id> --from-step <step>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["fork", "run-abc", "--from-step", "step-1"])
+
+        assert args.command == "fork"
+        assert args.run_id == "run-abc"
+        assert args.from_step == "step-1"
+
+    def test_fork_with_changes(self):
+        """'fork <run_id> --from-step s --change k=v' should capture changes."""
+        parser = _build_parser()
+        args = parser.parse_args([
+            "fork", "run-abc", "--from-step", "s",
+            "--change", "prompt=new text",
+            "--change", "model=haiku",
+        ])
+
+        assert args.change == ["prompt=new text", "model=haiku"]
+
+    def test_approve_command(self):
+        """'approve <run_id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["approve", "run-xyz"])
+
+        assert args.command == "approve"
+        assert args.run_id == "run-xyz"
+
+    def test_approve_with_data(self):
+        """'approve <run_id> --data ...' should set the data argument."""
+        parser = _build_parser()
+        args = parser.parse_args(["approve", "run-xyz", "--data", '{"ok": true}'])
+
+        assert args.data == '{"ok": true}'
+
+    def test_reject_command(self):
+        """'reject <run_id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["reject", "run-xyz"])
+
+        assert args.command == "reject"
+        assert args.run_id == "run-xyz"
+
+    def test_reject_with_reason(self):
+        """'reject <run_id> --reason ...' should set the reason argument."""
+        parser = _build_parser()
+        args = parser.parse_args(["reject", "run-xyz", "--reason", "bad output"])
+
+        assert args.reason == "bad output"
+
+    def test_runs_command(self):
+        """'runs' command should parse correctly with defaults."""
+        parser = _build_parser()
+        args = parser.parse_args(["runs"])
+
+        assert args.command == "runs"
+        assert args.limit == 20
+        assert args.status is None
+
+    def test_runs_with_filters(self):
+        """'runs --status completed --limit 5' should set filters."""
+        parser = _build_parser()
+        args = parser.parse_args(["runs", "--status", "completed", "--limit", "5"])
+
+        assert args.status == "completed"
+        assert args.limit == 5
+
+    def test_global_json_flag(self):
+        """'--json templates' should make the json flag available."""
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "templates"])
+
+        assert args.json is True
+        assert args.command == "templates"
+
+    def test_global_json_flag_default_false(self):
+        """By default --json should be False."""
+        parser = _build_parser()
+        args = parser.parse_args(["templates"])
+
+        assert args.json is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: New CLI commands - handler execution
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    """Mock httpx response object."""
+
+    def __init__(self, data, status_code=200):
+        self._data = data
+        self.status_code = status_code
+
+    def json(self):
+        return self._data
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP {self.status_code}")
+
+
+class TestTemplatesCommand:
+    def test_templates_json_output(self):
+        """templates --json should print raw JSON."""
+        mock_data = {
+            "data": [
+                {"name": "wf1", "category": "data", "step_count": 3, "description": "Desc"},
+            ]
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "templates"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_templates(args)
+
+        output = json.loads(captured.getvalue())
+        assert len(output) == 1
+        assert output[0]["name"] == "wf1"
+
+    def test_templates_table_output(self):
+        """templates without --json should print a formatted table."""
+        mock_data = {
+            "data": [
+                {"name": "wf1", "category": "data", "step_count": 3, "description": "A workflow"},
+            ]
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["templates"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_templates(args)
+
+        output = captured.getvalue()
+        assert "wf1" in output
+        assert "data" in output
+
+    def test_templates_category_filter(self):
+        """templates --category should filter results."""
+        mock_data = {
+            "data": [
+                {"name": "wf1", "category": "data", "step_count": 3, "description": "D"},
+                {"name": "wf2", "category": "ai", "step_count": 2, "description": "A"},
+            ]
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "templates", "--category", "data"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_templates(args)
+
+        output = json.loads(captured.getvalue())
+        assert len(output) == 1
+        assert output[0]["name"] == "wf1"
+
+
+class TestReplayCommand:
+    def test_replay_json_output(self):
+        """replay --json should print raw JSON."""
+        mock_data = {
+            "data": {
+                "new_run_id": "new-run-123",
+                "parent_run_id": "run-abc",
+                "replay_from_step": "step-2",
+                "status": "queued",
+            }
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "replay", "run-abc", "--from-step", "step-2"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.post", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_replay(args)
+
+        output = json.loads(captured.getvalue())
+        assert output["new_run_id"] == "new-run-123"
+
+    def test_replay_table_output(self):
+        """replay should print formatted output by default."""
+        mock_data = {
+            "data": {
+                "new_run_id": "new-run-123",
+                "parent_run_id": "run-abc",
+                "replay_from_step": "step-2",
+                "status": "queued",
+            }
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["replay", "run-abc", "--from-step", "step-2"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.post", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_replay(args)
+
+        output = captured.getvalue()
+        assert "new-run-123" in output
+        assert "run-abc" in output
+
+
+class TestForkCommand:
+    def test_fork_json_output(self):
+        """fork --json should print raw JSON."""
+        mock_data = {
+            "data": {
+                "new_run_id": "fork-456",
+                "parent_run_id": "run-abc",
+                "fork_from_step": "step-1",
+                "changes": {"prompt": "new prompt"},
+                "status": "queued",
+            }
+        }
+        parser = _build_parser()
+        args = parser.parse_args([
+            "--json", "fork", "run-abc", "--from-step", "step-1",
+            "--change", "prompt=new prompt",
+        ])
+
+        captured = StringIO()
+        with (
+            patch("httpx.post", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_fork(args)
+
+        output = json.loads(captured.getvalue())
+        assert output["new_run_id"] == "fork-456"
+
+
+class TestApproveCommand:
+    def test_approve_prints_confirmation(self):
+        """approve should print a confirmation message."""
+        # Mock the approval lookup and the approve call
+        approval_resp = _FakeResponse({
+            "data": [
+                {"id": "appr-111", "run_id": "run-xyz", "status": "pending"},
+            ]
+        })
+        approve_resp = _FakeResponse({
+            "data": {"approved": True, "approval_id": "appr-111", "run_id": "run-xyz"}
+        })
+
+        parser = _build_parser()
+        args = parser.parse_args(["approve", "run-xyz"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=approval_resp),
+            patch("httpx.post", return_value=approve_resp),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_approve(args)
+
+        output = captured.getvalue()
+        assert "Approved" in output
+        assert "run-xyz" in output
+
+
+class TestRejectCommand:
+    def test_reject_prints_confirmation(self):
+        """reject should print a confirmation message."""
+        approval_resp = _FakeResponse({
+            "data": [
+                {"id": "appr-222", "run_id": "run-xyz", "status": "pending"},
+            ]
+        })
+        reject_resp = _FakeResponse({
+            "data": {"rejected": True, "approval_id": "appr-222", "run_id": "run-xyz"}
+        })
+
+        parser = _build_parser()
+        args = parser.parse_args(["reject", "run-xyz", "--reason", "bad quality"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=approval_resp),
+            patch("httpx.post", return_value=reject_resp),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_reject(args)
+
+        output = captured.getvalue()
+        assert "Rejected" in output
+        assert "run-xyz" in output
+        assert "bad quality" in output
+
+
+class TestRunsCommand:
+    def test_runs_json_output(self):
+        """runs --json should print raw JSON."""
+        mock_data = {
+            "data": [
+                {
+                    "run_id": "abc-123-def-456",
+                    "workflow_name": "test-wf",
+                    "status": "completed",
+                    "total_cost_usd": 0.0123,
+                    "started_at": "2026-02-25T10:00:00",
+                },
+            ],
+            "meta": {"total": 1, "limit": 20, "offset": 0},
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "runs"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_runs(args)
+
+        output = json.loads(captured.getvalue())
+        assert output["data"][0]["workflow_name"] == "test-wf"
+
+    def test_runs_table_output(self):
+        """runs should print a formatted table by default."""
+        mock_data = {
+            "data": [
+                {
+                    "run_id": "abc-123-def-456",
+                    "workflow_name": "test-wf",
+                    "status": "completed",
+                    "total_cost_usd": 0.0123,
+                    "started_at": "2026-02-25T10:00:00",
+                },
+            ],
+            "meta": {"total": 1, "limit": 20, "offset": 0},
+        }
+        parser = _build_parser()
+        args = parser.parse_args(["runs"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_runs(args)
+
+        output = captured.getvalue()
+        assert "test-wf" in output
+        assert "abc-123-def" in output
+
+    def test_runs_no_results(self):
+        """runs with empty results should print a message."""
+        mock_data = {"data": [], "meta": {"total": 0, "limit": 20, "offset": 0}}
+        parser = _build_parser()
+        args = parser.parse_args(["runs"])
+
+        captured = StringIO()
+        with (
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_runs(args)
+
+        output = captured.getvalue()
+        assert "No runs found" in output

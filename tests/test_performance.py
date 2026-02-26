@@ -1,7 +1,6 @@
 """Tests for performance features: rate limiter, semaphore, cache, cancellation."""
 
 import asyncio
-import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,46 +25,51 @@ class TestRateLimiter:
             req.state.tenant_id = None
         return req
 
-    def test_allows_under_limit(self):
+    @pytest.mark.asyncio
+    async def test_allows_under_limit(self):
         limiter = RateLimiter(max_requests=5, window_seconds=60)
         req = self._make_request()
         for _ in range(5):
-            limiter.check(req)  # Should not raise
+            await limiter.check(req)  # Should not raise
 
-    def test_blocks_over_limit(self):
+    @pytest.mark.asyncio
+    async def test_blocks_over_limit(self):
         from fastapi import HTTPException
         limiter = RateLimiter(max_requests=3, window_seconds=60)
         req = self._make_request()
         for _ in range(3):
-            limiter.check(req)
+            await limiter.check(req)
         with pytest.raises(HTTPException) as exc_info:
-            limiter.check(req)
+            await limiter.check(req)
         assert exc_info.value.status_code == 429
 
-    def test_separate_keys_per_ip(self):
+    @pytest.mark.asyncio
+    async def test_separate_keys_per_ip(self):
         limiter = RateLimiter(max_requests=2, window_seconds=60)
         req1 = self._make_request(ip="1.1.1.1")
         req2 = self._make_request(ip="2.2.2.2")
         for _ in range(2):
-            limiter.check(req1)
-            limiter.check(req2)
+            await limiter.check(req1)
+            await limiter.check(req2)
         # Both should be at limit but independent
 
-    def test_tenant_key_takes_precedence(self):
+    @pytest.mark.asyncio
+    async def test_tenant_key_takes_precedence(self):
         limiter = RateLimiter(max_requests=2, window_seconds=60)
         req = self._make_request(ip="1.1.1.1", tenant_id="tenant-abc")
-        limiter.check(req)
-        limiter.check(req)
+        await limiter.check(req)
+        await limiter.check(req)
         from fastapi import HTTPException
         with pytest.raises(HTTPException):
-            limiter.check(req)
+            await limiter.check(req)
 
-    def test_window_expiry(self):
+    @pytest.mark.asyncio
+    async def test_window_expiry(self):
         limiter = RateLimiter(max_requests=1, window_seconds=0.1)
         req = self._make_request()
-        limiter.check(req)
-        time.sleep(0.15)  # Wait for window to expire
-        limiter.check(req)  # Should not raise
+        await limiter.check(req)
+        await asyncio.sleep(0.15)  # Wait for window to expire
+        await limiter.check(req)  # Should not raise
 
     def test_info_property(self):
         limiter = RateLimiter(max_requests=10, window_seconds=60)
@@ -211,7 +215,8 @@ class TestStepCache:
 class TestRateLimitIntegration:
     """Test that rate limiter correctly blocks repeated requests."""
 
-    def test_rate_limiter_blocks_after_limit(self):
+    @pytest.mark.asyncio
+    async def test_rate_limiter_blocks_after_limit(self):
         """Verify that the limiter raises 429 after exceeding max_requests."""
         from fastapi import HTTPException
 
@@ -223,12 +228,12 @@ class TestRateLimitIntegration:
         req.state.tenant_id = "test-tenant"
 
         # First two requests pass
-        limiter.check(req)
-        limiter.check(req)
+        await limiter.check(req)
+        await limiter.check(req)
 
         # Third request gets 429
         with pytest.raises(HTTPException) as exc_info:
-            limiter.check(req)
+            await limiter.check(req)
         assert exc_info.value.status_code == 429
         assert "Rate limit exceeded" in str(exc_info.value.detail)
         assert exc_info.value.headers["Retry-After"] == "60"

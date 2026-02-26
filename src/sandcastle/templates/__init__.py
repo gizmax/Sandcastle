@@ -24,6 +24,7 @@ class TemplateInfo:
     step_count: int
     input_schema: dict | None = None
     category: str | None = None
+    source: str = "built-in"  # "built-in" or "community"
 
 
 _TEMPLATES_DIR = Path(__file__).parent
@@ -61,31 +62,53 @@ def _parse_comment_metadata(content: str) -> dict[str, str | list[str]]:
     return meta
 
 
+def _parse_template(path: Path, source: str = "built-in") -> TemplateInfo:
+    """Parse a single template YAML file into a TemplateInfo object.
+
+    Args:
+        path: Path to the YAML template file.
+        source: Origin of the template - "built-in" or "community".
+
+    Returns:
+        A TemplateInfo with metadata extracted from the file.
+    """
+    content = path.read_text()
+    meta = _parse_comment_metadata(content)
+
+    # Count steps from the parsed YAML body
+    data = yaml.safe_load(content)
+    step_count = len(data.get("steps", []))
+
+    return TemplateInfo(
+        name=str(meta.get("name", path.stem)),
+        description=str(meta.get("description", "")),
+        tags=list(meta.get("tags", [])),
+        file_name=path.name,
+        step_count=step_count,
+        input_schema=data.get("input_schema"),
+        category=str(meta["category"]) if "category" in meta else None,
+        source=source,
+    )
+
+
 def list_templates() -> list[TemplateInfo]:
     """List all available workflow templates with their metadata.
 
     Returns a list of TemplateInfo objects sorted alphabetically by file name.
+    Includes both built-in templates and user-installed community templates.
     """
     templates: list[TemplateInfo] = []
+
+    # Built-in templates
     for path in sorted(_TEMPLATES_DIR.glob("*.yaml")):
-        content = path.read_text()
-        meta = _parse_comment_metadata(content)
+        templates.append(_parse_template(path, source="built-in"))
 
-        # Count steps from the parsed YAML body
-        data = yaml.safe_load(content)
-        step_count = len(data.get("steps", []))
+    # Community templates (user-installed)
+    community_dir = _TEMPLATES_DIR / "community"
+    if community_dir.is_dir():
+        for path in sorted(community_dir.glob("*.yaml")):
+            templates.append(_parse_template(path, source="community"))
 
-        templates.append(
-            TemplateInfo(
-                name=str(meta.get("name", path.stem)),
-                description=str(meta.get("description", "")),
-                tags=list(meta.get("tags", [])),
-                file_name=path.name,
-                step_count=step_count,
-                input_schema=data.get("input_schema"),
-                category=str(meta["category"]) if "category" in meta else None,
-            )
-        )
     return templates
 
 
@@ -94,6 +117,8 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
 
     The name can be the file stem (e.g. "summarize") or the file name
     with extension (e.g. "summarize.yaml").
+
+    Searches both built-in and community templates.
 
     Returns:
         A tuple of (yaml_content, template_info).
@@ -104,30 +129,24 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
     # Normalize: strip .yaml suffix if present
     stem = name.removesuffix(".yaml")
 
-    for path in _TEMPLATES_DIR.glob("*.yaml"):
-        content = path.read_text()
-        meta = _parse_comment_metadata(content)
-        display_name = str(meta.get("name", path.stem))
+    # Collect all search directories
+    search_dirs: list[tuple[Path, str]] = [(_TEMPLATES_DIR, "built-in")]
+    community_dir = _TEMPLATES_DIR / "community"
+    if community_dir.is_dir():
+        search_dirs.append((community_dir, "community"))
 
-        # Match by file stem or by display name
-        if path.stem != stem and display_name != name:
-            continue
+    for dir_path, source in search_dirs:
+        for path in dir_path.glob("*.yaml"):
+            content = path.read_text()
+            meta = _parse_comment_metadata(content)
+            display_name = str(meta.get("name", path.stem))
 
-        data = yaml.safe_load(content)
-        step_count = len(data.get("steps", []))
+            # Match by file stem or by display name
+            if path.stem != stem and display_name != name:
+                continue
 
-        info = TemplateInfo(
-            name=display_name,
-            description=str(meta.get("description", "")),
-            tags=list(meta.get("tags", [])),
-            file_name=path.name,
-            step_count=step_count,
-            input_schema=data.get("input_schema"),
-            category=str(meta["category"]) if "category" in meta else None,
-        )
-        return content, info
+            info = _parse_template(path, source=source)
+            return content, info
 
     available = [p.stem for p in _TEMPLATES_DIR.glob("*.yaml")]
-    raise FileNotFoundError(
-        f"Template '{name}' not found. Available: {', '.join(available)}"
-    )
+    raise FileNotFoundError(f"Template '{name}' not found. Available: {', '.join(available)}")

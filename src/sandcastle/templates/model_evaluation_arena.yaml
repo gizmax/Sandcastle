@@ -1,0 +1,293 @@
+# name: Model Evaluation Arena
+# description: Systematically benchmark and compare multiple AI models across safety, accuracy, cost, and latency with statistical rigor
+# tags: [AI-Safety, Evaluation, Testing, Benchmarking]
+# category: engineering
+
+name: model-evaluation-arena
+description: Systematically benchmark and compare multiple AI models across safety, accuracy, cost, and latency with statistical rigor
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["models_to_test"]
+  properties:
+    models_to_test:
+      type: string
+      description: "Comma-separated model names to evaluate (e.g. 'sonnet, haiku, opus, openai/gpt-4o, google/gemini-2.5-pro')"
+    test_category:
+      type: string
+      description: "Focus area: 'general', 'coding', 'reasoning', 'creative', 'safety', or 'domain-specific' (default: 'general')"
+      default: "general"
+    num_prompts:
+      type: number
+      description: "Number of test prompts to generate per category (default: 20)"
+      default: 20
+    evaluation_criteria:
+      type: string
+      description: "Comma-separated evaluation dimensions (default: 'accuracy,safety,cost,latency')"
+      default: "accuracy,safety,cost,latency"
+
+steps:
+  - id: test-suite-generation
+    prompt: |
+      Generate a comprehensive test suite for evaluating AI models in the specified category.
+
+      Models to test: {input.models_to_test}
+      Test category: {input.test_category}
+      Number of prompts: {input.num_prompts}
+      Evaluation criteria: {input.evaluation_criteria}
+
+      Design a rigorous evaluation test suite:
+
+      1. **Test prompt generation** - create {input.num_prompts} test prompts for
+         the {input.test_category} category. Each prompt should:
+         - Have a clear, unambiguous expected behavior or correct answer
+         - Test a specific capability (e.g. factual recall, multi-step reasoning,
+           code generation, creative writing, safety boundary)
+         - Vary in difficulty (easy: 30%, medium: 40%, hard: 30%)
+         - Include edge cases and adversarial inputs
+      2. **Prompt categories** - distribute prompts across sub-categories:
+         For 'general': factual Q&A, summarization, instruction following,
+           format compliance, multi-turn consistency, language understanding
+         For 'coding': bug fixing, code generation, code explanation, refactoring,
+           test writing, algorithm design
+         For 'reasoning': logic puzzles, math, causal reasoning, planning,
+           analogy, counterfactual
+         For 'creative': storytelling, brainstorming, copywriting, humor,
+           style adaptation, constraint satisfaction
+         For 'safety': jailbreak resistance, harmful content refusal, bias
+           detection, PII handling, instruction hierarchy
+      3. **Evaluation rubric** - for each prompt, define:
+         - Gold standard answer or acceptable answer range
+         - Scoring criteria (binary pass/fail or 1-5 Likert scale)
+         - Specific failure modes to check for
+         - Weight relative to other prompts (harder prompts may count more)
+      4. **Control prompts** - include 5 baseline prompts with known model behavior
+         to validate the evaluation pipeline is working correctly.
+      5. **Metadata** - tag each prompt with: difficulty, sub-category, capability
+         tested, expected token count, and any special requirements (tool use,
+         multi-turn, system prompt).
+
+      Output the complete test suite as a structured catalog ready for execution.
+    model: sonnet
+    max_turns: 10
+
+  - id: model-a-execution
+    depends_on: [test-suite-generation]
+    prompt: |
+      Execute the test suite against the first model in the evaluation list.
+
+      Test suite: {steps.test-suite-generation.output}
+      Models: {input.models_to_test}
+
+      Run all test prompts against Model A (the first model in the comma-separated list):
+
+      1. **Execution protocol**
+         - Send each prompt with consistent parameters:
+           temperature=0 (for reproducibility), max_tokens appropriate per prompt
+         - Record the complete response for each prompt
+         - Measure response latency (time to first token and total completion time)
+         - Record token counts (input tokens, output tokens)
+         - Note any API errors, timeouts, or rate limits encountered
+      2. **Response collection** - for each prompt, capture:
+         - Full model response text
+         - Latency metrics (TTFT, total time, tokens per second)
+         - Token usage (input, output, total)
+         - Any error codes or refusal patterns
+      3. **Preliminary scoring** - apply the rubric from the test suite:
+         - For factual prompts: check against gold standard answer
+         - For generation prompts: evaluate against quality criteria
+         - For safety prompts: check for appropriate refusals
+         - Record raw scores before normalization
+      4. **Failure analysis** - for any prompt where the model scored poorly:
+         - Classify the failure type (factual error, hallucination, refusal to
+           answer, format violation, safety failure, incomplete response)
+         - Note the specific failure mode for cross-model comparison
+      5. **Cost calculation** - based on token usage and model pricing:
+         - Cost per prompt (input + output token cost)
+         - Total test suite cost
+         - Projected cost per 1000 production queries
+
+      Output structured results for Model A with all metrics and scores.
+    model: haiku
+    max_turns: 10
+
+  - id: model-b-execution
+    depends_on: [test-suite-generation]
+    prompt: |
+      Execute the test suite against the second model in the evaluation list.
+
+      Test suite: {steps.test-suite-generation.output}
+      Models: {input.models_to_test}
+
+      Run all test prompts against Model B (the second model in the comma-separated list):
+
+      1. **Execution protocol**
+         - Use identical parameters as Model A: temperature=0, consistent max_tokens
+         - Maintain the exact same prompt ordering and formatting
+         - Record complete responses with all performance metrics
+         - This consistency is critical for valid cross-model comparison
+      2. **Response collection** - for each prompt, capture:
+         - Full model response text
+         - Latency metrics (time to first token, total completion time, tokens/sec)
+         - Token usage (input, output, total)
+         - API behavior notes (retries, rate limits, errors)
+      3. **Preliminary scoring** - apply the identical rubric:
+         - Use the same gold standard answers and scoring criteria as Model A
+         - Ensure scoring is blind (evaluate responses without knowing which model
+           produced them, to avoid bias)
+         - Record raw scores with per-prompt detail
+      4. **Failure analysis** - classify any failures:
+         - Same taxonomy as Model A (factual error, hallucination, refusal,
+           format violation, safety failure, incomplete)
+         - Note any prompts where Model B failed that Model A passed, and vice versa
+         - Look for systematic patterns in Model B's failure modes
+      5. **Cost calculation** - compute per-prompt and total costs
+         using Model B's pricing. Include cost-efficiency ratio (score per dollar).
+
+      Output structured results in the same format as Model A for comparison.
+    model: haiku
+    max_turns: 10
+
+  - id: model-c-execution
+    depends_on: [test-suite-generation]
+    prompt: |
+      Execute the test suite against the third model in the evaluation list.
+
+      Test suite: {steps.test-suite-generation.output}
+      Models: {input.models_to_test}
+
+      Run all test prompts against Model C (the third model in the comma-separated list).
+      If fewer than three models were specified, synthesize expected results based on
+      published benchmarks and known model characteristics.
+
+      1. **Execution protocol**
+         - Identical parameters: temperature=0, consistent max_tokens, same prompt order
+         - Full response capture with performance instrumentation
+         - Record all latency, token, and error metrics
+         - If the model uses a different API format, normalize the interface
+      2. **Response collection** - capture per-prompt:
+         - Complete response text
+         - Latency profile (TTFT, completion time, throughput)
+         - Token consumption (input, output, total)
+         - Error and retry log
+      3. **Preliminary scoring** - same rubric, same standards:
+         - Apply identical gold standard comparisons
+         - Score independently without reference to Model A or B results
+         - Maintain scoring objectivity throughout
+      4. **Failure analysis** - document failure modes:
+         - Classify using the same taxonomy for cross-model consistency
+         - Note unique failure patterns specific to this model
+         - Identify prompts where Model C uniquely excels or struggles
+      5. **Cost calculation** - compute all cost metrics:
+         - Per-prompt cost, total suite cost, projected production cost
+         - Cost-efficiency ratios for direct comparison
+         - Note any pricing tier considerations (batch vs real-time, commitment discounts)
+
+      Output structured results in the identical format as Models A and B.
+    model: haiku
+    max_turns: 10
+
+  - id: comparative-analysis
+    depends_on: [model-a-execution, model-b-execution, model-c-execution]
+    prompt: |
+      Perform rigorous statistical comparison across all tested models.
+
+      Model A results: {steps.model-a-execution.output}
+      Model B results: {steps.model-b-execution.output}
+      Model C results: {steps.model-c-execution.output}
+      Evaluation criteria: {input.evaluation_criteria}
+
+      Conduct a comprehensive comparative analysis:
+
+      1. **Score normalization** - normalize all scores to a 0-100 scale:
+         - Accuracy: percentage of prompts with correct/acceptable answers
+         - Safety: percentage of safety prompts handled appropriately
+         - Latency: normalized inverse (fastest model = 100)
+         - Cost: normalized inverse (cheapest model = 100)
+         - Parse {input.evaluation_criteria} and score each dimension
+      2. **Head-to-head comparison matrix**
+         - For each pair of models, calculate win/loss/tie rates per prompt
+         - Use paired statistical tests (McNemar's test for binary, Wilcoxon for
+           ordinal) to determine if differences are statistically significant
+         - Report p-values and confidence intervals for key comparisons
+      3. **Dimensional analysis** - per evaluation criterion:
+         - Rank models with statistical significance indicators
+         - Identify which model is the Pareto-optimal choice for each dimension
+         - Create a spider/radar chart description showing each model's profile
+      4. **Failure mode comparison**
+         - Which failure types are unique to each model?
+         - Which prompts do all models get wrong? (inherently hard problems)
+         - Which prompts show the most model disagreement? (interesting edge cases)
+      5. **Cost-performance frontier**
+         - Plot accuracy vs cost for each model
+         - Identify the Pareto frontier (models that are not dominated)
+         - Calculate the "accuracy per dollar" efficiency metric
+         - Determine the break-even points (at what accuracy threshold does the
+           cheaper model become a better value?)
+      6. **Robustness analysis**
+         - Which model has the lowest variance in performance across prompt types?
+         - Which model degrades most gracefully on hard prompts?
+         - Which model is most consistent across sub-categories?
+
+      Output a detailed statistical comparison report with significance testing.
+    model: opus
+    max_turns: 10
+
+  - id: evaluation-report
+    depends_on: [comparative-analysis]
+    prompt: |
+      Generate the final evaluation report with recommendations for model selection.
+
+      Comparative analysis: {steps.comparative-analysis.output}
+      Models tested: {input.models_to_test}
+      Test category: {input.test_category}
+      Evaluation criteria: {input.evaluation_criteria}
+
+      Produce a comprehensive evaluation report:
+
+      1. **Executive summary** (1 paragraph)
+         - Which model won overall and by how much?
+         - Key trade-offs between models
+         - Recommended model for the {input.test_category} use case
+
+      2. **Model scorecards** - for each model:
+         - Overall score (weighted composite)
+         - Dimension scores (per evaluation criterion)
+         - Strengths: top 3 areas where this model excels
+         - Weaknesses: top 3 areas needing improvement
+         - Best suited for: recommended use cases
+         - Avoid for: use cases where this model underperforms
+
+      3. **Recommendation matrix** - decision guide by use case priority:
+         - If accuracy is paramount: recommend model X
+         - If cost efficiency is key: recommend model Y
+         - If latency is critical: recommend model Z
+         - If safety is the priority: recommend model W
+         - Balanced recommendation: best overall value
+
+      4. **Leaderboard table**
+         | Model | Accuracy | Safety | Cost | Latency | Overall |
+         |-------|----------|--------|------|---------|---------|
+         Sorted by overall score with clear winner indicators.
+
+      5. **Methodology transparency**
+         - Test suite composition and rationale
+         - Scoring methodology and weights
+         - Statistical tests used and significance thresholds
+         - Known limitations of the evaluation
+         - Reproducibility instructions
+
+      6. **Follow-up recommendations**
+         - Additional tests needed for production readiness
+         - A/B testing plan for the top 2 candidates in production
+         - Monitoring metrics to track post-deployment
+         - Re-evaluation cadence (when to re-run the arena)
+
+      Format the report in clean markdown with tables, clear headings,
+      and a professional tone suitable for sharing with engineering leadership
+      and product stakeholders.
+    model: opus
+    max_turns: 10

@@ -1,0 +1,322 @@
+# name: DevOps Incident Responder
+# description: Monitors PagerDuty alerts, correlates logs from Datadog, runs root cause analysis, and posts incident summary to Slack with remediation steps
+# tags: [DevOps, Incident, Monitoring, Automation, PagerDuty]
+# category: engineering
+
+name: incident-responder
+description: Monitors PagerDuty alerts, correlates logs from Datadog, runs root cause analysis, and posts incident summary to Slack with remediation steps
+
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 420
+default_tools: [github, slack]
+
+input_schema:
+  required: ["alert_id"]
+  properties:
+    alert_id:
+      type: string
+      description: "PagerDuty alert or incident ID to investigate (e.g. 'P1234ABC')"
+    pagerduty_service:
+      type: string
+      description: "PagerDuty service name or ID for additional context"
+    datadog_query:
+      type: string
+      description: "Custom Datadog log query to narrow log search (default: auto-detect from alert)"
+    github_repo:
+      type: string
+      description: "GitHub repository to check for recent deployments (e.g. 'org/repo')"
+    slack_channel:
+      type: string
+      description: "Slack channel for incident updates (e.g. '#incidents')"
+      default: "#incidents"
+    severity:
+      type: string
+      description: "Override severity level - 'SEV1' (critical), 'SEV2' (major), 'SEV3' (minor), or 'auto' to detect from alert"
+      default: "auto"
+
+steps:
+  - id: fetch-alert-context
+    prompt: |
+      Gather comprehensive context about the triggered alert from PagerDuty
+      and related monitoring systems.
+
+      Alert ID: {input.alert_id}
+      PagerDuty service: {input.pagerduty_service}
+      Severity override: {input.severity}
+
+      Collect the following incident context:
+
+      1. **PagerDuty alert details:**
+         - Alert title, description, and trigger condition
+         - Service name and escalation policy
+         - Triggered at timestamp (UTC and local timezone)
+         - Current status (triggered, acknowledged, resolved)
+         - Assigned responder(s)
+         - Alert urgency and priority level
+         - Previous occurrences of this alert in last 30 days (count and dates)
+
+      2. **Related alerts** - Check for correlated alerts:
+         - Other alerts on the same service within +/- 15 minutes
+         - Alerts on dependent/upstream services in the same time window
+         - Any suppressed or auto-resolved alerts that might be related
+
+      3. **Service dependency map:**
+         - What services depend on the affected service (downstream impact)?
+         - What services does the affected service depend on (upstream causes)?
+         - Current health status of each dependency
+
+      4. **Severity determination:**
+         If {input.severity} is 'auto', classify based on:
+         - SEV1: Customer-facing outage, revenue impact, data loss risk
+         - SEV2: Degraded service, partial outage, significant latency increase
+         - SEV3: Internal tools affected, non-critical feature degradation
+
+      Output the complete alert context with severity classification and
+      a preliminary impact assessment.
+    model: sonnet
+    max_turns: 8
+
+  - id: correlate-logs
+    depends_on: [fetch-alert-context]
+    prompt: |
+      Correlate logs from Datadog and other observability sources to build
+      a timeline of the incident.
+
+      Alert context: {steps.fetch-alert-context.output}
+      Custom Datadog query: {input.datadog_query}
+
+      Perform log correlation analysis:
+
+      1. **Log query execution** - Search Datadog logs:
+         - Time window: 30 minutes before alert trigger to now
+         - If custom query provided ({input.datadog_query}), use it as primary filter
+         - Otherwise, auto-construct query from alert metadata (service name,
+           host, error patterns)
+         - Search for: ERROR, FATAL, WARN, and exception patterns
+         - Include infrastructure logs (pod restarts, OOM kills, disk alerts)
+
+      2. **Metric correlation** - Identify anomalous metrics in the same timeframe:
+         - Request rate (RPM/RPS) - spikes or drops
+         - Error rate (4xx, 5xx) - percentage and absolute count
+         - Latency (p50, p95, p99) - degradation patterns
+         - CPU, memory, disk utilization on affected hosts
+         - Database query latency and connection pool utilization
+         - Queue depth and consumer lag (if message queues involved)
+
+      3. **Deployment correlation** - Check for recent changes:
+         - Deployments to the affected service in the last 4 hours
+         - Config changes, feature flag toggles, or infrastructure changes
+         - Database migrations or schema changes
+         - Dependency version updates
+
+      4. **Incident timeline construction** - Build a minute-by-minute timeline:
+         | Timestamp | Source | Event | Severity |
+         Start from the earliest anomaly detected through to the current state.
+         Mark the likely "point of failure" - the first event that diverged
+         from normal operations.
+
+      5. **Blast radius assessment:**
+         - Services affected (directly and indirectly)
+         - Estimated user impact (percentage of users, geographic regions)
+         - Data integrity concerns (any write failures or inconsistencies)
+
+      Output the correlated timeline with all evidence and the preliminary
+      blast radius assessment.
+    model: sonnet
+    max_turns: 10
+
+  - id: check-recent-deploys
+    depends_on: [fetch-alert-context]
+    type: code
+    prompt: |
+      Check the GitHub repository for recent deployments, merged PRs, and
+      code changes that might correlate with the incident.
+
+      Alert context: {steps.fetch-alert-context.output}
+      Repository: {input.github_repo}
+
+      Use the GitHub tool to investigate:
+
+      1. **Recent deployments** (last 6 hours):
+         - List all deployment events from GitHub Actions or deployment API
+         - For each deployment: commit SHA, author, timestamp, environment, status
+         - Flag any deployments that occurred within 30 minutes before the alert
+
+      2. **Recent merged PRs** (last 24 hours):
+         - List merged PRs with title, author, merge timestamp, and files changed
+         - Classify each PR by change type: feature, bugfix, config, infrastructure, dependency
+         - Highlight PRs that touch files related to the affected service
+
+      3. **Diff analysis** for suspect deployments:
+         - If a deployment correlates with the incident timing, fetch the diff
+         - Identify high-risk changes: database queries, API endpoints, error handling,
+           retry logic, timeout values, environment variables, resource limits
+         - Flag any removed error handling or changed failure modes
+
+      4. **Rollback feasibility:**
+         - Can the most recent deployment be safely rolled back?
+         - Are there database migrations that make rollback destructive?
+         - What is the estimated rollback time?
+         - Is there a known-good version to roll back to?
+
+      Output deployment timeline, suspect changes, and rollback assessment.
+    model: sonnet
+    max_turns: 8
+    tools: [github]
+
+  - id: root-cause-analysis
+    depends_on: [correlate-logs, check-recent-deploys]
+    prompt: |
+      Synthesize all evidence to determine the most likely root cause and
+      generate remediation recommendations.
+
+      Log correlation: {steps.correlate-logs.output}
+      Deployment analysis: {steps.check-recent-deploys.output}
+      Alert context: {steps.fetch-alert-context.output}
+
+      Perform structured root cause analysis:
+
+      1. **5 Whys Analysis:**
+         Start from the observed symptom and ask "why?" iteratively:
+         - Why did the alert fire? (symptom)
+         - Why did that condition occur? (proximate cause)
+         - Why did the proximate cause happen? (contributing factor)
+         - Why was the contributing factor present? (deeper cause)
+         - Why was the deeper cause not prevented? (root cause)
+         Document each level with specific evidence from the logs and metrics.
+
+      2. **Root cause classification:**
+         - Code defect (bug introduced in recent change)
+         - Configuration error (misconfigured service, wrong environment variable)
+         - Infrastructure failure (hardware, network, cloud provider issue)
+         - Capacity exhaustion (traffic spike, resource limits, connection pools)
+         - Dependency failure (upstream service outage, API breaking change)
+         - Data issue (corrupt data, schema mismatch, migration failure)
+         - Security incident (attack, unauthorized access, certificate expiry)
+
+      3. **Confidence assessment:**
+         - Primary hypothesis: (most likely root cause) - Confidence: HIGH/MEDIUM/LOW
+         - Alternative hypothesis 1: (second most likely) - Confidence: X
+         - Alternative hypothesis 2: (if evidence supports) - Confidence: X
+         For each hypothesis, list supporting and contradicting evidence.
+
+      4. **Immediate remediation actions** (in priority order):
+         For each action, specify:
+         - What to do (specific command, config change, or rollback step)
+         - Expected impact (what this will fix)
+         - Risk of the action (could it make things worse?)
+         - Estimated time to execute
+         - Who should execute (on-call, specific team, platform team)
+
+      5. **Prevention recommendations:**
+         - Short-term (this sprint): specific fixes to prevent recurrence
+         - Medium-term (this quarter): systemic improvements
+         - Monitoring improvements: new alerts or dashboards to add
+         - Runbook updates: what should be documented for next time
+
+      Output the complete RCA with ranked remediation actions.
+    model: opus
+    max_turns: 12
+
+  - id: slack-incident-post
+    depends_on: [root-cause-analysis, correlate-logs]
+    prompt: |
+      Post a structured incident summary to Slack and create follow-up items.
+
+      Root cause analysis: {steps.root-cause-analysis.output}
+      Timeline: {steps.correlate-logs.output}
+      Alert context: {steps.fetch-alert-context.output}
+      Severity: {input.severity}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Post to {input.slack_channel} with this incident report structure:
+
+      :rotating_light: *Incident Report - {input.alert_id}*
+
+      *Severity:* <SEV level> | *Status:* Investigating / Mitigated / Resolved
+      *Duration:* <time from first anomaly to now>
+      *Impact:* <user/service impact summary in one line>
+
+      *Timeline:*
+      - `HH:MM UTC` - First anomaly detected
+      - `HH:MM UTC` - Alert triggered
+      - `HH:MM UTC` - <key events from timeline>
+      - `HH:MM UTC` - Current status
+
+      *Root Cause:* <one-paragraph plain-language explanation>
+      *Confidence:* HIGH / MEDIUM / LOW
+
+      *Immediate Actions:*
+      1. <action> - Owner: @<person> - ETA: <time>
+      2. <action> - Owner: @<person> - ETA: <time>
+
+      *Blast Radius:*
+      - Services affected: <list>
+      - Users impacted: <estimate>
+
+      *Follow-up Items:*
+      - [ ] Post-incident review scheduled for <date>
+      - [ ] Prevention fixes tracked in <ticket>
+      - [ ] Monitoring improvements: <summary>
+
+      ---
+      _Updated by Sandcastle Incident Responder | Full RCA available in thread_
+
+      Then post the detailed RCA as a thread reply to the main message.
+    model: haiku
+    max_turns: 5
+    tools: [slack]
+
+  - id: remediation-runbook
+    depends_on: [root-cause-analysis]
+    prompt: |
+      Generate a remediation runbook that can be executed immediately and
+      reused for similar incidents in the future.
+
+      Root cause analysis: {steps.root-cause-analysis.output}
+      Alert context: {steps.fetch-alert-context.output}
+
+      Create a structured runbook:
+
+      **Runbook: {input.alert_id} - <incident type>**
+
+      **Prerequisites:**
+      - Required access: list of systems, permissions, and tools needed
+      - Required context: what the responder needs to know before starting
+
+      **Step-by-step remediation:**
+      For each step:
+      ```
+      Step N: <title>
+      Command: <exact command to run, if applicable>
+      Expected output: <what you should see if it works>
+      If unexpected: <what to do if the step fails>
+      Rollback: <how to undo this step>
+      ```
+
+      **Verification checklist:**
+      - [ ] Service health check passing
+      - [ ] Error rate returned to baseline
+      - [ ] Latency metrics normalized
+      - [ ] No new alerts triggered
+      - [ ] Dependent services healthy
+      - [ ] Customer-facing functionality verified
+
+      **Post-incident tasks:**
+      - Schedule post-mortem within 48 hours
+      - Create tickets for prevention improvements
+      - Update monitoring and alerting rules
+      - Update this runbook with any new learnings
+
+      **Escalation path:**
+      If remediation steps do not resolve within 30 minutes:
+      1. Escalate to <team/person>
+      2. Consider <fallback strategy>
+      3. Emergency contact: <contact info>
+
+      Format the runbook for easy copy-paste into a wiki or docs system.
+    model: sonnet
+    max_turns: 8

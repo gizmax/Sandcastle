@@ -31,61 +31,244 @@ input_schema:
 
 steps:
   - id: research-company
-    prompt: >
-      Research the following company thoroughly. Find their company size,
-      industry vertical, recent news and press releases, technology stack,
-      and any known funding rounds or financial milestones.
+    prompt: |
+      Conduct deep research on the following company across multiple dimensions.
+
       Company: {input.company_name}
       Domain: {input.company_domain}
+
+      FIRMOGRAPHIC PROFILE:
+      - Company size: exact employee count (or best estimate with range), headcount trend
+        over last 12 months (growing, stable, shrinking).
+      - Revenue estimate: ARR or annual revenue range, revenue growth trajectory.
+      - Industry vertical and sub-vertical (be specific: "B2B SaaS > DevOps tooling"
+        not just "Technology").
+      - Headquarters location, office count, and remote-first vs office-centric.
+      - Founded year, company stage (seed/series-A/B/C/growth/public).
+      - Business model (SaaS, marketplace, services, hardware, hybrid).
+
+      FUNDING AND FINANCIAL MILESTONES:
+      - All known funding rounds: date, amount, series, lead investor, key participants.
+      - Total funding raised to date.
+      - Runway estimate if available (months of cash remaining).
+      - IPO signals, acquisition rumors, or strategic partnership announcements.
+      - Recent financial milestones: profitability, new market entry, major contract wins.
+
+      TECHNOLOGY STACK DETECTION:
+      - Frontend: frameworks, CDN providers (check page source of {input.company_domain}).
+      - Backend: programming languages, cloud infrastructure (AWS/GCP/Azure).
+      - Data and analytics: warehouse, BI tools, data pipeline technologies.
+      - DevOps and CI/CD: GitHub/GitLab, deployment tools, monitoring.
+      - Marketing tech: CRM, email platform, analytics, ad tech.
+      - Security and compliance: SOC2, ISO27001, HIPAA mentions.
+      - Job postings as proxy for tech stack (what technologies are they hiring for?).
+
+      GROWTH SIGNALS AND TRIGGERS:
+      - Active hiring: total open roles, growth in engineering/sales/marketing headcount.
+      - Office expansion: new locations, lease announcements.
+      - Product launches or major feature releases in last 6 months.
+      - New market or geography expansion.
+      - Executive hires (new CTO, VP Sales, etc.) that signal strategic shifts.
+      - Conference sponsorships, speaking engagements, community involvement.
+
+      COMPETITIVE LANDSCAPE:
+      - Direct competitors and market position.
+      - Known vendor relationships that we could potentially displace.
+      - Competitor products visible in their tech stack or job postings.
+      - Market share or ranking signals (G2, analyst reports).
+
+      NEWS AND PRESS (last 12 months):
+      - Press releases, media coverage, blog announcements.
+      - Regulatory actions, lawsuits, or compliance issues.
+      - Customer wins or case studies they have published.
+      - Awards, recognitions, or analyst mentions.
     model: sonnet
     max_turns: 10
 
   - id: research-contacts
     depends_on: [research-company]
-    prompt: >
-      Based on the company research, identify key decision makers and
-      stakeholders who would be relevant for a B2B sales conversation.
-      Include their titles, responsibilities, and any public LinkedIn or
-      professional profile insights.
+    prompt: |
+      Identify and profile key decision makers and stakeholders at this company
+      who match our target persona criteria.
+
       Company info: {steps.research-company.output}
       Target persona: {input.target_persona}
+
+      CONTACT IDENTIFICATION STRATEGY:
+      - Map the organizational structure relevant to our solution:
+        * Economic buyer (who holds the budget - typically VP or C-level)
+        * Technical evaluator (who assesses the product - typically Director/Manager)
+        * Champion (who drives internal advocacy - typically Manager/Senior IC)
+        * End user (who will use the product daily)
+      - Identify 3-5 contacts across these buying roles for multi-threading.
+      - Prioritize contacts who match the target persona: {input.target_persona}
+
+      PER-CONTACT PROFILING:
+      - Full name, current title, and department.
+      - Tenure at company and in current role (longer tenure = more influence).
+      - Career trajectory: previous companies and roles (especially at companies
+        that are our customers - "warm path" signal).
+      - Educational background and certifications relevant to our domain.
+      - Public thought leadership: blog posts, conference talks, podcast appearances,
+        published articles, open-source contributions.
+      - Social media activity: LinkedIn posting frequency and topics, Twitter/X engagement.
+      - Professional group memberships and community involvement.
+
+      RELATIONSHIP MAPPING:
+      - Reporting relationships between identified contacts (who reports to whom).
+      - Any mutual connections with our team (LinkedIn second-degree connections).
+      - Shared affiliations: alumni networks, professional associations, previous employers.
+      - Past interactions with our company (conference meetings, webinar attendance, content downloads).
+
+      ENGAGEMENT READINESS ASSESSMENT:
+      - Rate each contact's likely receptiveness (1-10) based on:
+        * Active on LinkedIn (posts/comments regularly) = easier to engage.
+        * Published content about problems we solve = high intent signal.
+        * Recently changed roles (first 90 days) = budget and initiative flexibility.
+        * Their company is hiring in areas our product addresses = active need signal.
     model: sonnet
     max_turns: 8
 
   - id: score-lead
     depends_on: [research-company]
-    prompt: >
-      Score this lead on a scale of 1-100 based on how well it matches
-      our Ideal Customer Profile (ICP). Consider company size, industry fit,
-      technology compatibility, and growth signals. Provide a breakdown of
-      scoring factors with individual scores and reasoning.
+    prompt: |
+      Score this lead using a structured ICP (Ideal Customer Profile) fit assessment.
+
       Company info: {steps.research-company.output}
       ICP criteria: {input.icp_criteria}
+
+      ICP FIT SCORING FRAMEWORK (total 1-100):
+
+      1. FIRMOGRAPHIC FIT (0-30 points):
+         - Company size within ICP range: 0-10 points
+         - Revenue/funding within ICP range: 0-8 points
+         - Industry vertical match: 0-7 points (exact match = 7, adjacent = 4, mismatch = 0)
+         - Geographic fit: 0-5 points
+
+      2. TECHNOGRAPHIC FIT (0-25 points):
+         - Uses complementary technologies in our ecosystem: 0-10 points
+         - Uses competitor products we can displace: 0-8 points
+         - Technical sophistication matches our product requirements: 0-7 points
+         - Deduct if they use a deeply integrated competitor (-5 to -10 points)
+
+      3. GROWTH AND TIMING SIGNALS (0-25 points):
+         - Active hiring in relevant departments: 0-8 points
+         - Recent funding round (last 6 months): 0-7 points
+         - New executive hire signaling strategic shift: 0-5 points
+         - Office/market expansion indicating growth phase: 0-5 points
+         - No signals detected: 0 points
+
+      4. COMPETITIVE DISPLACEMENT OPPORTUNITY (0-20 points):
+         - Uses a competitor nearing end-of-life or with known issues: 0-10 points
+         - Published complaints about current solution (reviews, social media): 0-5 points
+         - Contract renewal timing aligns (if detectable): 0-5 points
+         - Strong incumbent with deep integration: -5 points
+
+      FUNDING STAGE MODIFIER:
+      - Seed/Pre-seed: x0.7 (limited budget, high churn risk)
+      - Series A-B: x1.0 (ideal - budget available, scaling needs)
+      - Series C+/Growth: x1.1 (larger deal size potential)
+      - Public: x0.9 (longer sales cycles, procurement complexity)
+      - Bootstrapped profitable: x1.0 (deliberate buyers, good retention)
+
+      Output a detailed scorecard with: dimension, points_awarded, max_points,
+      reasoning for each. Include the final weighted score, ICP tier (Tier 1: 80+,
+      Tier 2: 60-79, Tier 3: 40-59, Tier 4: <40), and a confidence level for the
+      overall assessment.
     model: haiku
     max_turns: 5
 
   - id: outreach-angles
     depends_on: [research-company, research-contacts]
-    prompt: >
-      Suggest 3 personalized outreach angles for engaging this lead.
-      Each angle should reference specific company details, recent events,
-      or contact-specific insights. Include a suggested subject line and
-      opening sentence for each approach.
+    prompt: |
+      Develop 3 distinct, highly personalized outreach strategies for engaging this lead.
+      Each angle must reference SPECIFIC findings from the research - never use generic templates.
+
       Company info: {steps.research-company.output}
       Key contacts: {steps.research-contacts.output}
       Our value prop: {input.value_proposition}
+
+      ANGLE 1 - TRIGGER-BASED OUTREACH:
+      - Anchor on the most compelling recent trigger event (funding, hire, expansion, product launch).
+      - Connect the trigger directly to a pain point our solution addresses.
+      - Target the contact most likely to feel this pain (economic buyer or champion).
+      - Subject line: reference the specific trigger (e.g., "Congrats on the Series B - scaling [X]?")
+      - Opening: 1 sentence acknowledging the trigger, 1 sentence connecting to their likely challenge.
+      - CTA: specific, low-commitment (e.g., "15-min call to share how [similar company] handled this").
+
+      ANGLE 2 - COMPETITIVE DISPLACEMENT:
+      - Reference their current solution (competitor product detected in tech stack or job postings).
+      - Highlight specific limitations or pain points known about that competitor.
+      - Position our differentiation without directly bashing the competitor.
+      - Target the technical evaluator or champion who experiences daily friction.
+      - Include a relevant case study reference of a similar company that switched.
+
+      ANGLE 3 - THOUGHT LEADERSHIP / VALUE-FIRST:
+      - Reference a specific piece of content the contact published or engaged with.
+      - Offer genuine value: relevant benchmark data, industry report, or practical insight.
+      - Build credibility before asking for anything.
+      - Target the contact with the most active public presence.
+      - This is a longer-play nurture approach for contacts not showing immediate intent.
+
+      For EACH angle, provide:
+      - Target contact name and title
+      - Outreach channel recommendation (email, LinkedIn InMail, Twitter DM, mutual intro)
+      - Subject line (< 50 chars, no spam trigger words)
+      - Full message draft (3-5 sentences max, conversational tone)
+      - Suggested follow-up timing and message if no response (day 3, day 7)
+      - Expected response rate estimate (%) with reasoning
     model: sonnet
     max_turns: 8
 
   - id: compile-profile
     depends_on: [research-contacts, score-lead, outreach-angles]
-    prompt: >
-      Compile a complete lead profile document combining all research findings.
-      Structure it with sections for Company Overview, Key Contacts, Lead Score
-      with rationale, and Recommended Outreach Strategy. Format it cleanly
-      for the sales team to review and act on.
+    prompt: |
+      Compile a comprehensive lead dossier that a sales rep can use immediately
+      to prepare for outreach. This should be the single document they need.
+
       Contacts: {steps.research-contacts.output}
       Lead score: {steps.score-lead.output}
       Outreach angles: {steps.outreach-angles.output}
+
+      DOSSIER STRUCTURE:
+
+      1. EXECUTIVE SNAPSHOT (top of document, scannable in 30 seconds):
+         - Company name, logo URL, domain, HQ location
+         - ICP Score: [X/100] - Tier [1-4] - [one-line verdict]
+         - Top growth signal: [single most compelling trigger]
+         - Recommended first action: [specific next step]
+         - Estimated deal size range and sales cycle length
+
+      2. COMPANY DEEP DIVE:
+         - Business overview in 3-4 sentences (what they do, for whom, how they make money)
+         - Key metrics table: employees, revenue, funding, growth rate
+         - Technology stack summary relevant to our solution
+         - Competitive landscape: what they use today, displacement opportunity assessment
+
+      3. BUYING COMMITTEE MAP:
+         - Visual-friendly org chart of identified contacts with roles in buying process
+         - For each contact: name, title, engagement readiness score, recommended approach
+         - Highlight the recommended "door opener" contact with reasoning
+
+      4. ICP SCORECARD:
+         - Dimension-by-dimension breakdown with scores and reasoning
+         - Key strengths (why this is a good lead)
+         - Key risks (what could prevent a deal)
+         - Comparison to our best customer archetype
+
+      5. OUTREACH PLAYBOOK:
+         - Recommended sequence: which angle first, which contact, which channel
+         - Full message drafts ready to customize and send
+         - Objection preparation: likely pushback and how to handle it
+         - Competitive talking points if displacement angle is relevant
+
+      6. APPENDIX - RAW RESEARCH:
+         - News items with dates and sources
+         - Funding details
+         - Job posting excerpts that signal technology needs
+         - Social media insights
+
+      Format the dossier with clear headers, bullet points, and tables.
+      Ensure it is actionable - every section should help the rep take a specific next step.
     model: sonnet
     max_turns: 10

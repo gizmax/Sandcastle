@@ -3,10 +3,10 @@ name = "sandcastle-ai"
 dynamic = ["version"]
 description = "Production-ready workflow orchestrator for AI agents. Define pipelines in YAML, run locally with zero config, scale to production."
 requires-python = ">=3.11"
-license = "BSL-1.1"
+license = {text = "BSL-1.1"}
 readme = "README.md"
 authors = [
-    { name = "Tomas Pflanzer", email = "tomas@gizmax.cz" },
+    { name = "Tomas Pflanzer", email = "tom@pflanzer.cz" },
 ]
 keywords = ["ai", "agents", "workflow", "orchestrator", "e2b", "llm", "pipeline", "workflow-templates"]
 classifiers = [
@@ -55,12 +55,20 @@ docker = [
 mcp = [
     "mcp>=1.0",
 ]
+security = [
+    "cryptography>=42.0",
+]
+telemetry = [
+    "sentry-sdk[fastapi]>=2.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "aiodocker>=0.22",
     "mcp>=1.0",
+    "sentry-sdk[fastapi]>=2.0",
+    "cryptography>=42.0",
 ]
 
 [project.urls]

@@ -1,0 +1,277 @@
+# name: Multi-Channel Support Router
+# description: Classify incoming tickets from email, chat, and social. Route to the right team with suggested responses and auto-escalation rules
+# tags: [Support, Routing, Classification, Multi-channel]
+# category: support
+
+name: multi-channel-router
+description: Classify incoming tickets from email, chat, and social. Route to the right team with suggested responses and auto-escalation rules
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [zendesk, slack]
+
+input_schema:
+  required: ["ticket_content"]
+  properties:
+    ticket_content:
+      type: string
+      description: "The incoming support ticket or message content"
+    channel:
+      type: string
+      description: "Source channel - 'email', 'chat', 'twitter', 'facebook', 'instagram', or 'phone'"
+      default: "email"
+    customer_email:
+      type: string
+      description: "Customer email address for account lookup"
+    slack_channel:
+      type: string
+      description: "Slack channel for routing notifications (e.g. '#support-routing')"
+      default: "#support-routing"
+    escalation_rules:
+      type: string
+      description: "Custom escalation rules - e.g. 'VIP customers -> direct to senior agent; billing issues -> billing team within 1h'"
+
+steps:
+  - id: classify-ticket
+    prompt: |
+      Perform multi-dimensional classification of this incoming support ticket.
+
+      Ticket content: {input.ticket_content}
+      Source channel: {input.channel}
+      Customer email: {input.customer_email}
+
+      Classify across these dimensions:
+
+      **Category (pick one primary, up to two secondary):**
+      - technical_issue: bugs, errors, crashes, unexpected behavior
+      - billing: payments, invoices, subscriptions, refunds, plan changes
+      - account: login, permissions, SSO, password reset, account deletion
+      - how_to: usage questions, configuration help, feature guidance
+      - feature_request: new capability requests, integration asks
+      - complaint: service dissatisfaction, escalation demands
+      - sales_inquiry: pricing questions, upgrade interest, demo requests
+      - data_issue: data loss, export problems, migration, sync failures
+
+      **Urgency assessment (1-5):**
+      - 5 (Critical): service outage, data loss, security breach, blocked revenue
+      - 4 (High): major feature broken, billing error, angry VIP customer
+      - 3 (Medium): partial functionality issue, moderate frustration
+      - 2 (Low): how-to question, minor inconvenience, feature request
+      - 1 (Minimal): general feedback, informational inquiry
+
+      **Sentiment analysis:**
+      - Score: -1.0 (hostile) to +1.0 (positive)
+      - Label: positive, neutral, concerned, frustrated, angry
+      - Churn risk indicator: does the language suggest the customer may leave?
+
+      **Channel-specific context:**
+      - Email: check for CC'd executives, legal language, thread history
+      - Chat: note response time expectations (real-time)
+      - Social: flag public visibility risk (negative tweet = PR risk)
+      - Phone: transcription quality notes, emotional tone markers
+
+      **Language and locale detection:**
+      - Detected language for routing to language-capable agents
+      - Time zone inference from email headers or message timestamps
+
+      Output structured JSON with all classification dimensions.
+    model: haiku
+    max_turns: 5
+    output_schema:
+      type: object
+      properties:
+        primary_category: { type: string }
+        secondary_categories: { type: array }
+        urgency: { type: integer }
+        sentiment_score: { type: number }
+        sentiment_label: { type: string }
+        churn_risk: { type: boolean }
+        language: { type: string }
+
+  - id: lookup-customer
+    depends_on: [classify-ticket]
+    prompt: |
+      Look up customer context from Zendesk to inform routing decisions.
+
+      Use the Zendesk tool:
+        node /home/user/tools/zendesk.mjs search_user '{input.customer_email}'
+
+      Customer email: {input.customer_email}
+      Classification: {steps.classify-ticket.output}
+
+      Retrieve and compile:
+
+      1. **Customer profile:**
+         - Account tier: free, starter, pro, enterprise, VIP
+         - Company name and size
+         - Account age and total spend
+         - Assigned CSM or account manager (if any)
+
+      2. **Ticket history:**
+         - Total tickets in last 90 days
+         - Open ticket count (is this a repeat contact about an existing issue?)
+         - Previous categories (is this customer always having billing issues?)
+         - Average satisfaction rating on resolved tickets
+         - Any previous escalations or complaints
+
+      3. **SLA context:**
+         - Applicable SLA based on customer tier
+         - Current SLA compliance rate for this customer
+         - Any SLA credits or exceptions in place
+
+      4. **Risk signals:**
+         - Contract renewal date (is it approaching?)
+         - Recent downgrade or cancellation signals
+         - Previously flagged as at-risk by customer success
+
+      If customer is not found in Zendesk, note as "new customer" and apply
+      default routing rules.
+
+      Return structured customer context for the routing engine.
+    model: haiku
+    max_turns: 5
+    tools: [zendesk]
+
+  - id: route-ticket
+    depends_on: [classify-ticket, lookup-customer]
+    prompt: |
+      Determine optimal ticket routing based on classification, customer context,
+      and team availability.
+
+      Classification: {steps.classify-ticket.output}
+      Customer context: {steps.lookup-customer.output}
+      Channel: {input.channel}
+      Custom escalation rules: {input.escalation_rules}
+
+      Apply routing logic in this priority order:
+
+      **1. Custom rule override check:**
+      Apply any custom escalation rules from: {input.escalation_rules}
+      Custom rules take highest priority over default routing.
+
+      **2. Channel-based routing:**
+      - Social media (twitter, facebook, instagram): route to social-support team
+        with PR awareness flag. Response must be public-appropriate.
+      - Chat: route to live-chat queue with real-time SLA (< 2 min first response)
+      - Phone: route to phone-support queue with callback scheduling
+      - Email: standard queue-based routing below
+
+      **3. Category + urgency routing matrix:**
+      | Category        | Urgency 4-5     | Urgency 2-3     | Urgency 1       |
+      |----------------|-----------------|-----------------|-----------------|
+      | technical_issue | tier-2-support  | tier-1-support  | tier-1-support  |
+      | billing         | billing-team    | billing-team    | tier-1-support  |
+      | account         | tier-2-support  | tier-1-support  | tier-1-support  |
+      | data_issue      | engineering     | tier-2-support  | tier-1-support  |
+      | complaint       | senior-support  | tier-2-support  | tier-1-support  |
+      | sales_inquiry   | sales-team      | sales-team      | sales-team      |
+      | feature_request | product-team    | product-team    | tier-1-support  |
+      | how_to          | tier-1-support  | tier-1-support  | self-serve      |
+
+      **4. Customer tier escalation:**
+      - Enterprise/VIP: escalate one level up from default routing
+      - Enterprise + angry sentiment: route directly to senior-support + notify CSM
+      - At-risk customer (from lookup): flag for CSM review regardless of category
+
+      **5. Language-based routing:**
+      - Non-English ticket: route to language-capable agent if available,
+        otherwise route to default team with translation flag
+
+      **6. Escalation path definition:**
+      Define the full escalation chain for this specific ticket:
+      Level 1 -> Level 2 -> Manager -> Director (with specific team names)
+
+      Output: primary_team, assigned_queue, priority_level, sla_target,
+      escalation_path, routing_reason, special_flags.
+    model: sonnet
+    max_turns: 8
+
+  - id: draft-response
+    depends_on: [classify-ticket, lookup-customer, route-ticket]
+    prompt: |
+      Draft an appropriate initial response tailored to the channel, classification,
+      and customer context.
+
+      Original message: {input.ticket_content}
+      Channel: {input.channel}
+      Classification: {steps.classify-ticket.output}
+      Customer context: {steps.lookup-customer.output}
+      Routing: {steps.route-ticket.output}
+
+      **Channel-specific formatting:**
+
+      - **Email:** Professional format, 150-300 words. Include ticket reference number,
+        expected response timeline based on SLA, and next steps.
+      - **Chat:** Conversational, concise (50-100 words). Acknowledge immediately,
+        set expectation for resolution, offer to stay connected or follow up.
+      - **Social media:** Public-appropriate, empathetic, brief (under 280 chars for Twitter).
+        Move the conversation to DM/email for account-specific details.
+        Never include account details or internal references publicly.
+      - **Phone:** Script/talking points for callback, with key context points.
+
+      **Tone calibration based on sentiment:**
+      - Positive/neutral: professional, efficient, helpful
+      - Concerned: reassuring, proactive, set clear expectations
+      - Frustrated: empathetic lead ("I understand this is frustrating"), take ownership
+      - Angry: strong empathy, immediate escalation mention, direct contact offered
+
+      **Content based on category:**
+      - Technical: acknowledge the specific issue, ask for reproduction steps if needed
+      - Billing: reference the specific billing concern, explain resolution process
+      - Account: provide immediate self-service steps if possible
+      - Complaint: acknowledge impact, outline resolution plan with timeline
+
+      **Customer-tier personalization:**
+      - Enterprise/VIP: address by name, reference their account history, offer
+        direct line to senior support
+      - Standard: professional and helpful, reference self-service resources
+      - New customer: warm welcome, extra guidance on getting started
+
+      Include: draft_response, channel_format, auto_send_recommended (boolean),
+      needs_human_review (boolean with reason).
+    model: sonnet
+    max_turns: 8
+
+  - id: notify-team
+    depends_on: [route-ticket, draft-response]
+    prompt: |
+      Post routing decision and context to Slack for team awareness.
+
+      Routing: {steps.route-ticket.output}
+      Classification: {steps.classify-ticket.output}
+      Draft response: {steps.draft-response.output}
+      Customer context: {steps.lookup-customer.output}
+
+      Use the Slack tool:
+        node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
+
+      Format the Slack notification:
+
+      :incoming_envelope: *New Ticket Routed* ({input.channel})
+
+      *Classification:* <category> | Urgency: <level>/5 | Sentiment: <label>
+      *Customer:* <name> (<tier>) | <company>
+      *Routed to:* <team> | SLA: <first response target>
+
+      > <first 100 chars of ticket content>...
+
+      *Routing reason:* <brief explanation>
+
+      :clipboard: *Quick actions:*
+      - Draft response ready: <yes/no>
+      - Auto-send recommended: <yes/no>
+      - Human review needed: <yes/no - reason>
+
+      For urgent tickets (urgency 4-5), add:
+      :rotating_light: *URGENT* - requires response within <SLA target>
+      @<assigned team> please acknowledge
+
+      For at-risk customers, add:
+      :warning: Customer flagged as at-risk - CC @<CSM name>
+
+      If the ticket is a social media complaint with high visibility risk, add:
+      :megaphone: *Public visibility alert* - social media response required
+    model: haiku
+    max_turns: 5
+    tools: [slack]

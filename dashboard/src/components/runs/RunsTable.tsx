@@ -91,7 +91,10 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                     />
                   </td>
                 )}
-                <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-medium text-foreground">{run.workflow_name}</td>
+                <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-medium text-foreground">
+                  <span>{run.workflow_name}</span>
+                  <span className="ml-2 font-data text-[11px] text-muted-foreground">{run.run_id.slice(0, 8)}</span>
+                </td>
                 <td className="px-3 sm:px-5 py-3">
                   <RunStatusBadge status={run.status} />
                 </td>
@@ -99,7 +102,7 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                   {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
                 </td>
                 <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">{getDuration(run)}</td>
-                <td className="px-3 sm:px-5 py-3 text-right font-mono text-muted">
+                <td className="px-3 sm:px-5 py-3 text-right font-data text-muted">
                   {formatCost(run.total_cost_usd)}
                 </td>
               </tr>

@@ -1,0 +1,796 @@
+# name: Student Learning Path Builder
+# description: Analyze student assessment results and learning preferences to generate personalized learning paths with resource recommendations, pacing adjustments, and intervention triggers
+# tags: [Education, Personalized-Learning, Curriculum, Assessment, EdTech]
+# category: general_ai
+
+name: student-learning-path-builder
+description: Analyze student assessment results and learning preferences to generate personalized learning paths with resource recommendations, pacing adjustments, and intervention triggers
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["student_profile", "subject_area"]
+  properties:
+    student_profile:
+      type: string
+      description: "Description of the student - include current level (grade, year, or skill level), academic history, assessment scores, known strengths and weaknesses, learning goals, and any relevant context (e.g. 'Grade 10 student, strong in algebra but struggling with geometry proofs, SAT prep goal, diagnosed ADHD')"
+    subject_area:
+      type: string
+      description: "Subject or skill area for the learning path (e.g. 'High School Mathematics', 'AP Biology', 'Python Programming', 'Academic English Writing', 'Data Science Fundamentals')"
+    curriculum_standard:
+      type: string
+      description: "Curriculum framework or standard to align to (e.g. 'Common Core State Standards', 'IB Diploma', 'AP Curriculum', 'NGSS', 'Cambridge IGCSE', or 'custom')"
+      default: "custom"
+    learning_style:
+      type: string
+      description: "Preferred learning modality: 'visual', 'auditory', 'kinesthetic', 'reading-writing', or 'mixed'"
+      default: "mixed"
+    available_resources:
+      type: string
+      description: "Comma-separated list of resource types available to the student"
+      default: "video, text, interactive, labs"
+
+steps:
+  - id: assessment-analysis
+    prompt: |
+      You are a psychometrician and educational assessment specialist. Analyze the student profile
+      provided below to establish a precise diagnostic baseline that will drive all subsequent
+      learning path decisions.
+
+      STUDENT PROFILE:
+      {input.student_profile}
+
+      SUBJECT AREA: {input.subject_area}
+      CURRICULUM STANDARD: {input.curriculum_standard}
+      LEARNING STYLE PREFERENCE: {input.learning_style}
+
+      ASSESSMENT ANALYSIS METHODOLOGY:
+
+      1. BLOOM'S TAXONOMY LEVEL ASSESSMENT
+         Evaluate the student's current functioning level across all six cognitive domains
+         of the revised Bloom's Taxonomy as they relate to {input.subject_area}:
+
+         a) REMEMBER (Level 1)
+            - Can the student recall fundamental facts, definitions, and terminology?
+            - Identify specific knowledge gaps in foundational vocabulary and concepts
+            - Assessment indicators: Can they list, define, name, identify, match, recall?
+            - Evidence from profile: [cite specific indicators from the student profile]
+
+         b) UNDERSTAND (Level 2)
+            - Can the student explain concepts in their own words?
+            - Can they interpret data, summarize information, classify examples?
+            - Can they compare and contrast related concepts?
+            - Assessment indicators: Can they describe, explain, paraphrase, summarize, interpret?
+            - Evidence from profile: [cite specific indicators]
+
+         c) APPLY (Level 3)
+            - Can the student use learned concepts in new situations?
+            - Can they solve problems using established procedures?
+            - Can they implement methods in practical contexts?
+            - Assessment indicators: Can they calculate, demonstrate, solve, use, implement?
+            - Evidence from profile: [cite specific indicators]
+
+         d) ANALYZE (Level 4)
+            - Can the student break complex problems into components?
+            - Can they identify patterns, relationships, and organizational structures?
+            - Can they distinguish relevant from irrelevant information?
+            - Assessment indicators: Can they compare, contrast, differentiate, organize, deconstruct?
+            - Evidence from profile: [cite specific indicators]
+
+         e) EVALUATE (Level 5)
+            - Can the student make judgments based on criteria?
+            - Can they critique, assess quality, and justify decisions?
+            - Can they identify logical fallacies or errors in reasoning?
+            - Assessment indicators: Can they judge, critique, justify, evaluate, defend?
+            - Evidence from profile: [cite specific indicators]
+
+         f) CREATE (Level 6)
+            - Can the student generate original work, synthesize information into new forms?
+            - Can they design solutions, formulate hypotheses, construct arguments?
+            - Assessment indicators: Can they design, construct, develop, formulate, compose?
+            - Evidence from profile: [cite specific indicators]
+
+         Produce a Bloom's Level Profile: a 1-6 score for each cognitive domain with
+         supporting evidence and confidence level (high/medium/low based on available data).
+
+      2. SKILL COMPONENT DECOMPOSITION
+         Break {input.subject_area} into its fundamental skill components and assess mastery:
+
+         For each skill component, determine:
+         - Mastery level: Not introduced / Developing / Approaching / Proficient / Advanced
+         - Confidence level: How certain are we about this assessment (high/medium/low)?
+         - Recency: When was this skill last practiced or assessed?
+         - Decay risk: Is this skill at risk of regression without reinforcement?
+         - Prerequisite strength: Are the foundations for this skill solid?
+
+         Map these skills on a competency matrix showing the relationship between
+         current level and target level for each component.
+
+      3. LEARNING STYLE AND MODALITY ANALYSIS
+         Based on the stated preference ({input.learning_style}) and profile indicators:
+
+         a) PRIMARY LEARNING CHANNEL
+            - Visual learners: prefer diagrams, charts, color coding, spatial arrangement
+            - Auditory learners: benefit from lectures, discussions, verbal explanations
+            - Kinesthetic learners: need hands-on practice, movement, physical manipulation
+            - Reading-writing: prefer text-based materials, note-taking, written exercises
+            - Mixed: adaptable, benefit from multimodal presentation
+
+         b) COGNITIVE PROCESSING STYLE
+            - Sequential vs. global: does the student prefer step-by-step or big-picture-first?
+            - Active vs. reflective: learns by doing vs. learns by thinking
+            - Sensing vs. intuitive: prefers concrete facts vs. abstract theories
+            - Verbal vs. visual: prefers words vs. images for new information
+
+         c) ATTENTION AND ENGAGEMENT PATTERNS
+            - Optimal session length before fatigue
+            - Need for variety vs. consistency
+            - Self-regulation capability
+            - Intrinsic vs. extrinsic motivation patterns
+            - Identified attention or processing challenges (ADHD, dyslexia, etc.)
+
+      4. ZONE OF PROXIMAL DEVELOPMENT (ZPD) CALIBRATION
+         Using Vygotsky's ZPD framework, determine for each skill component:
+         - Current independent performance level: what the student can do without help
+         - Current assisted performance level: what the student can do with guidance
+         - Frustration level: where tasks become too difficult even with support
+         - ZPD sweet spot: the optimal challenge level for growth
+
+         The ZPD calibration should produce:
+         - Starting difficulty level for new material (just above independent level)
+         - Scaffolding density needed (high/medium/low support)
+         - Expected pace through the ZPD (fast/medium/slow based on learning rate indicators)
+         - Signals that indicate ZPD recalibration is needed
+
+      5. MOTIVATION AND AFFECT ASSESSMENT
+         Analyze motivational factors that will impact learning path adherence:
+         - Goal orientation: mastery-oriented (learning for understanding) vs. performance-oriented
+           (learning for grades/scores)
+         - Self-efficacy: does the student believe they can succeed in {input.subject_area}?
+         - Math/science anxiety indicators (if applicable)
+         - Attribution patterns: does the student attribute success to effort or ability?
+         - Persistence indicators: how does the student respond to difficulty?
+         - External pressures: parental expectations, test deadlines, college applications
+
+      6. DIAGNOSTIC SUMMARY
+         Produce a structured diagnostic profile:
+         - Overall level classification with confidence interval
+         - Bloom's Taxonomy profile (radar chart description)
+         - Top 5 strengths to leverage
+         - Top 5 gaps to address (prioritized by impact on learning goals)
+         - ZPD calibration parameters
+         - Learning style accommodation requirements
+         - Motivational strategy recommendations
+         - Estimated time to reach stated learning goals (range with assumptions)
+    model: sonnet
+    max_turns: 10
+
+  - id: prerequisite-mapping
+    depends_on: [assessment-analysis]
+    prompt: |
+      You are a curriculum architect and learning scientist. Using the diagnostic assessment,
+      build a complete prerequisite dependency graph for the student's learning path in
+      {input.subject_area}.
+
+      DIAGNOSTIC ASSESSMENT:
+      {steps.assessment-analysis.output}
+
+      SUBJECT AREA: {input.subject_area}
+      CURRICULUM STANDARD: {input.curriculum_standard}
+
+      PREREQUISITE MAPPING METHODOLOGY:
+
+      1. KNOWLEDGE GRAPH CONSTRUCTION
+         Build a directed acyclic graph (DAG) of all concepts and skills in {input.subject_area}
+         relevant to the student's current level and learning goals.
+
+         For each node (concept/skill) in the graph, document:
+         - Node ID (unique identifier, e.g., MATH-ALG-101)
+         - Concept name and brief description
+         - Bloom's taxonomy level required for mastery
+         - Estimated learning time (in hours) for an average student
+         - Prerequisite nodes: which concepts MUST be mastered before attempting this one
+         - Co-requisite nodes: concepts that are best learned concurrently
+         - Optional enhancement nodes: concepts that improve understanding but are not required
+         - Curriculum standard alignment: which standard(s) this maps to in {input.curriculum_standard}
+
+         The graph should include:
+         - Foundational prerequisites the student may need to review or fill
+         - Core concepts at the student's current working level
+         - Target concepts the student needs to reach their goals
+         - Extension concepts for gifted/accelerated paths
+
+      2. GAP-PREREQUISITE CHAIN ANALYSIS
+         For each gap identified in the assessment, trace back through the prerequisite chain:
+         - What foundational concepts are assumed by the gap area?
+         - Are those foundational concepts solid, or are there hidden prerequisite gaps?
+         - How far back does the student need to remediate?
+         - Which remediation paths are shortest to reach the target concepts?
+
+         Produce a "gap chain" for each major gap:
+         [Current Gap] <- [Missing Prerequisite 1] <- [Missing Prerequisite 2] <- [Solid Foundation]
+         The student starts learning from the last solid foundation forward.
+
+      3. CRITICAL PATH IDENTIFICATION
+         Determine the critical path through the knowledge graph:
+         - Which concepts are on the longest prerequisite chain to the final learning goal?
+         - Which concepts are bottlenecks (many downstream concepts depend on them)?
+         - Which concepts can be learned in parallel (no mutual dependencies)?
+         - What is the minimum time to traverse the critical path?
+
+         Identify acceleration opportunities:
+         - Concepts the student has partial mastery of (can be reviewed quickly, not retaught)
+         - Concepts that can be combined in a single lesson
+         - Concepts where the student's strengths provide a shortcut
+
+      4. SPIRAL CURRICULUM MAPPING
+         Map how concepts should revisit and deepen over time (Bruner's spiral curriculum):
+         - First encounter: introduce concept at concrete/intuitive level
+         - Second encounter: formalize with definitions and procedures
+         - Third encounter: apply in complex, multi-step problems
+         - Fourth encounter: connect to other domains and real-world applications
+
+         For each concept, determine which spiral pass the student is currently at and
+         where they need to progress to.
+
+      5. CROSS-DOMAIN CONNECTIONS
+         Identify connections between {input.subject_area} and other domains:
+         - Transferable skills that enhance learning (e.g., reading comprehension for word problems)
+         - Cross-curricular connections that can motivate learning (e.g., physics applications of calculus)
+         - Study skills and metacognitive strategies relevant to this subject
+         - Technology tools that support learning in this domain
+
+      6. PREREQUISITE MAP OUTPUT
+         Produce the complete prerequisite map in a structured format:
+         - Full node list with all properties
+         - Edge list showing all prerequisite relationships
+         - Critical path highlighted
+         - Student's current position on the graph (mastered/in-progress/not-started for each node)
+         - Recommended traversal order
+         - Estimated total hours from current position to learning goals
+         - Parallel learning opportunities (concepts that can be studied simultaneously)
+    model: haiku
+    max_turns: 10
+
+  - id: path-design
+    depends_on: [prerequisite-mapping]
+    prompt: |
+      You are a personalized learning architect. Design a complete, week-by-week learning path
+      for this student based on the diagnostic assessment and prerequisite map.
+
+      PREREQUISITE MAP:
+      {steps.prerequisite-mapping.output}
+
+      DIAGNOSTIC ASSESSMENT:
+      {steps.assessment-analysis.output}
+
+      STUDENT PROFILE: {input.student_profile}
+      SUBJECT AREA: {input.subject_area}
+      CURRICULUM STANDARD: {input.curriculum_standard}
+      LEARNING STYLE: {input.learning_style}
+
+      LEARNING PATH DESIGN METHODOLOGY:
+
+      1. PATH ARCHITECTURE
+         Design the overall learning path structure using evidence-based principles:
+
+         a) UNIT STRUCTURE
+            Organize the path into thematic units, each containing 3-7 learning objectives.
+            For each unit:
+            - Unit title and overarching question or theme
+            - Learning objectives (SMART: Specific, Measurable, Achievable, Relevant, Time-bound)
+            - Prerequisite units (from the dependency graph)
+            - Estimated duration in sessions (calibrated to student's pace from ZPD analysis)
+            - Bloom's taxonomy levels targeted
+            - Mastery threshold: what percentage/score indicates readiness to proceed
+
+         b) LESSON SEQUENCING WITHIN UNITS
+            For each unit, sequence individual lessons following the I Do - We Do - You Do
+            gradual release model adapted to {input.learning_style}:
+            - Introduction/activation: connect to prior knowledge (10-15% of time)
+            - Direct instruction/modeling: explicit teaching of new concept (20-25%)
+            - Guided practice: scaffolded practice with feedback (25-30%)
+            - Independent practice: student works autonomously (20-25%)
+            - Reflection/consolidation: summarize learning, self-assess (10-15%)
+
+         c) INTERLEAVING STRATEGY
+            Rather than massing practice on one topic, design interleaved practice:
+            - New concept introduction: 40% of practice on new topic
+            - Recent review: 30% on material from the last 1-2 units
+            - Spaced review: 30% on material from earlier units
+            This dramatically improves long-term retention compared to blocked practice.
+
+      2. WEEK-BY-WEEK LEARNING PLAN
+         For each week of the learning path, specify:
+
+         WEEK N: [Unit Name - Topic Focus]
+         - Learning objectives for the week (2-4 objectives)
+         - Session 1: [Topic, Activity Type, Duration, Bloom's Level]
+         - Session 2: [Topic, Activity Type, Duration, Bloom's Level]
+         - Session 3: [Topic, Activity Type, Duration, Bloom's Level]
+         - Practice assignments (with estimated time)
+         - Formative check: quick assessment to verify understanding
+         - Spaced review topics from previous weeks
+         - Connection activity: real-world application or cross-domain link
+
+         Calibrate the weekly workload to the student's:
+         - Available study time (estimate from profile context)
+         - Attention span and session length tolerance
+         - Pace through the ZPD (from assessment calibration)
+         - Need for variety vs. deep focus
+
+      3. MASTERY-BASED PROGRESSION GATES
+         At the end of each unit, design a mastery gate:
+         - Assessment format: quiz, project, demonstration, portfolio piece, or oral explanation
+         - Mastery threshold: minimum score/performance level to proceed (typically 80-85%)
+         - Partial mastery path: if 60-79%, which specific sub-skills need reteaching?
+         - Below threshold path: if <60%, return to prerequisite review with different approach
+         - Above mastery path: if >95%, offer acceleration/enrichment activities
+
+         Gate design considerations:
+         - Multiple attempts allowed (learning from mistakes is the goal)
+         - Different assessment formats on retake (not the same test twice)
+         - Reduced anxiety: frame as "checkpoint" not "test"
+         - Immediate feedback with explanatory solutions
+
+      4. DIFFERENTIATION LAYERS
+         Build differentiation into the path for flexibility:
+
+         a) REMEDIATION LAYER (below expected level)
+            - Prerequisite review mini-lessons available at each unit
+            - Simplified explanations with more concrete examples
+            - Additional scaffolding: worked examples, step-by-step guides
+            - Reduced cognitive load: fewer variables, simpler contexts
+
+         b) ON-LEVEL LAYER (standard path)
+            - The main learning path as designed above
+            - Standard practice sets with graduated difficulty
+            - Standard mastery assessments
+
+         c) ENRICHMENT LAYER (above expected level)
+            - Extension problems requiring higher Bloom's levels
+            - Cross-domain projects and applications
+            - Peer tutoring opportunities (teaching solidifies learning)
+            - Independent investigation projects
+
+      5. MOTIVATION AND ENGAGEMENT DESIGN
+         Embed motivational elements based on the student's motivational profile:
+         - Progress visualization: clear markers of how far they have come
+         - Choice: where possible, let the student choose between equivalent activities
+         - Relevance: connect every unit to student's stated goals and interests
+         - Challenge calibration: maintain flow state (not too easy, not too hard)
+         - Celebration milestones: acknowledge completion of units and mastery gates
+         - Growth mindset framing: emphasize effort and improvement, not innate ability
+
+      6. PATH SUMMARY
+         Produce:
+         - Complete weekly schedule for the entire learning path
+         - Total estimated duration (weeks) with confidence range
+         - Number of units, lessons, and mastery gates
+         - Critical path milestones and dates
+         - Decision points where the path may branch based on student performance
+         - Prerequisites that may need additional review time (buffer built in)
+    model: sonnet
+    max_turns: 10
+
+  - id: resource-matching
+    depends_on: [prerequisite-mapping]
+    prompt: |
+      You are an educational technology specialist and instructional designer. Match high-quality
+      learning resources to every concept and lesson in the prerequisite map, optimized for the
+      student's learning style and available resource types.
+
+      PREREQUISITE MAP:
+      {steps.prerequisite-mapping.output}
+
+      STUDENT PROFILE: {input.student_profile}
+      SUBJECT AREA: {input.subject_area}
+      LEARNING STYLE: {input.learning_style}
+      AVAILABLE RESOURCES: {input.available_resources}
+
+      RESOURCE MATCHING METHODOLOGY:
+
+      1. RESOURCE TYPE CLASSIFICATION
+         For each available resource type ({input.available_resources}), define the optimal
+         use case and learning style alignment:
+
+         a) VIDEO RESOURCES
+            Best for: visual and auditory learners, concept introductions, demonstrations
+            - Lecture-style explanations (Khan Academy, Coursera, MIT OCW style)
+            - Animated concept videos (3Blue1Brown, Kurzgesagt style)
+            - Worked example walkthroughs
+            - Documentary/real-world application videos
+            - Student-created explanation videos (for assessment)
+            Optimal length: 5-15 minutes per concept (shorter for younger students)
+
+         b) TEXT RESOURCES
+            Best for: reading-writing learners, reference material, detailed explanations
+            - Textbook chapters (traditional structured exposition)
+            - Online articles and tutorials
+            - Study guides and summary sheets
+            - Worked example sets with detailed solutions
+            - Reference cards and formula sheets
+            Optimal format: chunked with headers, examples every 2-3 paragraphs
+
+         c) INTERACTIVE RESOURCES
+            Best for: kinesthetic learners, practice, exploration, immediate feedback
+            - Simulations and virtual labs
+            - Interactive exercises with instant feedback
+            - Adaptive practice platforms (IXL, Brilliant, Codecademy style)
+            - Drag-and-drop concept builders
+            - Interactive visualizations (Desmos, GeoGebra, PhET style)
+            - Gamified practice (Duolingo, Prodigy style)
+
+         d) LAB/HANDS-ON RESOURCES
+            Best for: kinesthetic learners, application, deep understanding
+            - Physical experiments and activities
+            - Project-based learning tasks
+            - Real-world data analysis activities
+            - Maker/building challenges
+            - Field observations and data collection
+
+      2. RESOURCE SELECTION CRITERIA
+         For each concept in the prerequisite map, select 2-4 resources ranked by:
+
+         - Learning style fit: how well does the resource match {input.learning_style}? (1-5)
+         - Concept alignment: does the resource cover exactly what the student needs? (1-5)
+         - Quality: is the content accurate, well-produced, and engaging? (1-5)
+         - Difficulty calibration: does the resource match the student's ZPD? (1-5)
+         - Accessibility: is the resource freely available, appropriately formatted? (1-5)
+         - Engagement factor: will this specific student find it interesting? (1-5)
+
+         Total resource score = sum of all criteria. Select top-scoring resources.
+
+      3. MULTIMODAL RESOURCE PACKAGES
+         For each concept, create a resource package that covers the learning cycle:
+         - EXPLORE: 1 resource for initial exposure (typically video or interactive)
+         - EXPLAIN: 1 resource for deeper understanding (text or detailed video)
+         - PRACTICE: 1-2 resources for skill building (interactive or problem sets)
+         - APPLY: 1 resource for real-world application (lab, project, or case study)
+
+         Ensure each package includes at least 2 different modalities to support
+         multimodal encoding (dual coding theory - material encoded in both verbal
+         and visual channels is retained better).
+
+      4. ADAPTIVE RESOURCE ALTERNATIVES
+         For each concept, prepare alternative resources for common scenarios:
+         - "I don't understand the explanation" - provide alternative explanation with different approach
+         - "This is too easy" - provide advanced extension resource
+         - "This is too hard" - provide simplified prerequisite-review resource
+         - "I'm bored" - provide engaging alternative (game, video, real-world context)
+         - "I need more practice" - provide additional practice sets with varied difficulty
+
+      5. SPACED REPETITION RESOURCES
+         Select resources specifically designed for review and retention:
+         - Flashcard sets (Anki-style with spaced repetition scheduling)
+         - Quick quiz resources for daily review (5-10 minutes)
+         - Summary videos for unit review before mastery gates
+         - Cumulative practice problem sets that mix topics
+
+      6. RESOURCE CATALOG OUTPUT
+         For each concept in the prerequisite map, produce:
+         [Concept ID] | [Concept Name] | [Primary Resource (title, type, URL/description, est. time)] |
+         [Secondary Resource] | [Practice Resource] | [Application Resource] |
+         [Alternative Resources (for remediation/enrichment)] |
+         [Learning Style Match Score] | [Notes for Instructor]
+
+         Include a resource summary:
+         - Total unique resources recommended
+         - Resource type distribution (% video, text, interactive, lab)
+         - Estimated total resource consumption time
+         - Free vs. paid resource ratio
+         - Technology requirements (devices, software, internet bandwidth)
+    model: haiku
+    max_turns: 10
+
+  - id: adaptive-pacing
+    depends_on: [path-design, resource-matching]
+    prompt: |
+      You are a learning analytics specialist and adaptive learning systems designer. Create a
+      dynamic pacing system that adjusts the learning path in real-time based on student performance.
+
+      LEARNING PATH:
+      {steps.path-design.output}
+
+      RESOURCE CATALOG:
+      {steps.resource-matching.output}
+
+      DIAGNOSTIC ASSESSMENT:
+      {steps.assessment-analysis.output}
+
+      STUDENT PROFILE: {input.student_profile}
+      SUBJECT AREA: {input.subject_area}
+
+      ADAPTIVE PACING SYSTEM DESIGN:
+
+      1. PACING ALGORITHM SPECIFICATION
+         Design the rules engine that determines when and how to adjust pacing:
+
+         a) PERFORMANCE SIGNALS
+            Define the signals that trigger pacing adjustments:
+            - Formative assessment scores (after each lesson)
+            - Time-on-task compared to expected duration
+            - Error patterns (type and frequency of mistakes)
+            - Help-seeking behavior (how often, at what point in problems)
+            - Engagement indicators (completion rate, time between sessions, drop-off points)
+            - Self-reported confidence ratings
+            - Mastery gate results
+
+         b) PACING ADJUSTMENT RULES
+            ACCELERATION TRIGGERS (student is ahead of pace):
+            - Scores consistently >90% on formative assessments (3+ consecutive)
+            - Completes practice in <70% of estimated time with >85% accuracy
+            - Self-reported high confidence with assessment confirmation
+            ACTION: Skip review sessions, reduce practice volume, offer enrichment,
+            advance to next concept faster, consider grade-level advancement
+
+            DECELERATION TRIGGERS (student is behind pace):
+            - Scores consistently <70% on formative assessments (2+ consecutive)
+            - Takes >150% of estimated time on practice with <70% accuracy
+            - Repeated errors of the same type (misconception indicator)
+            - Self-reported low confidence or frustration
+            ACTION: Insert review lessons, increase scaffolding, provide alternative
+            explanations, reduce concept introduction pace, add prerequisite review
+
+            MAINTENANCE (student is on pace):
+            - Scores between 70-90% on formative assessments
+            - Time-on-task within 80-120% of estimate
+            - Steady progress through practice levels
+            ACTION: Continue as planned, standard spaced review schedule
+
+         c) GRANULARITY OF ADJUSTMENTS
+            Define three levels of pacing adjustment:
+            - MICRO (within a lesson): adjust hint frequency, problem difficulty, example count
+            - MESO (within a unit): reorder lessons, add/remove practice sessions, adjust depth
+            - MACRO (across the path): skip/add units, change target timeline, modify mastery thresholds
+
+      2. SPACED REPETITION SCHEDULE
+         Design a personalized spaced repetition schedule based on the forgetting curve:
+
+         a) INITIAL SPACING INTERVALS
+            After initial learning of a concept:
+            - Review 1: 1 day later (next session)
+            - Review 2: 3 days later
+            - Review 3: 7 days later
+            - Review 4: 14 days later
+            - Review 5: 30 days later
+            - Subsequent reviews: 60, 90, 180 days
+
+         b) ADAPTIVE INTERVAL ADJUSTMENT
+            - Correct recall with high confidence: increase interval by 2.5x
+            - Correct recall with low confidence: increase interval by 1.5x
+            - Incorrect recall: reset to 1-day interval, mark for reteaching
+            - Partial recall: maintain current interval, add focused practice
+
+         c) REVIEW SESSION DESIGN
+            Each review session should:
+            - Mix 3-5 concepts from different spacing intervals
+            - Take 10-15 minutes maximum
+            - Provide immediate feedback with brief re-explanations
+            - Track accuracy to inform next review timing
+            - Prioritize concepts with poorest retention rates
+
+      3. LEARNING VELOCITY TRACKING
+         Define metrics to monitor learning velocity over time:
+         - Concepts mastered per week (actual vs. planned)
+         - Average time to mastery per concept (tracking trend)
+         - First-attempt success rate on mastery gates
+         - Cumulative knowledge retention (periodic comprehensive assessments)
+         - Engagement trend: increasing, stable, or declining participation
+
+         VELOCITY BENCHMARKS:
+         - Fast learner: mastering concepts in <75% of estimated time
+         - On-pace learner: mastering concepts in 75-125% of estimated time
+         - Struggling learner: mastering concepts in >125% of estimated time
+         - Plateaued learner: velocity has decreased >30% from initial rate
+
+      4. MISCONCEPTION DETECTION AND CORRECTION
+         Design a system to identify and address persistent misconceptions:
+         - Pattern recognition: specific error types that repeat across problems
+         - Common misconceptions database for {input.subject_area}
+         - Diagnostic questions designed to surface specific misconceptions
+         - Targeted correction activities for each identified misconception
+         - Follow-up verification to confirm misconception has been resolved
+
+      5. FATIGUE AND OVERLOAD DETECTION
+         Monitor for signs of cognitive fatigue or information overload:
+         - Declining accuracy within a single session (start strong, end weak)
+         - Increasing time per problem within a session
+         - Increased error rate on previously mastered material
+         - Session duration exceeding optimal range for this student
+         - Multiple sessions without breaks (cramming behavior)
+
+         FATIGUE RESPONSE PROTOCOL:
+         - Suggest a break or session end
+         - Switch to lighter review material
+         - Offer a change of activity type (from reading to interactive, etc.)
+         - Reduce problem difficulty temporarily
+         - Schedule a rest day before next intensive session
+
+      6. PACING DASHBOARD SPECIFICATION
+         Design the data displays for monitoring the adaptive pacing system:
+         - Progress timeline: visual map of current position on the learning path
+         - Velocity chart: learning speed trend over time
+         - Retention heatmap: which concepts are well-retained vs. fading
+         - Upcoming schedule: next 7 days of planned activities
+         - Alert panel: any triggered pacing adjustments with explanations
+         - Mastery progress: percentage of total learning objectives met
+         - Estimated completion: dynamic projection of when learning goals will be met
+
+      Produce the complete adaptive pacing specification as a technical document that could be
+      implemented in a learning management system or used by a human tutor to manually manage pacing.
+    model: sonnet
+    max_turns: 10
+
+  - id: intervention-framework
+    depends_on: [adaptive-pacing]
+    prompt: |
+      You are a student success specialist and school psychologist with expertise in
+      Response to Intervention (RTI) frameworks. Design a comprehensive intervention system
+      that detects struggling students early and escalates support appropriately.
+
+      ADAPTIVE PACING SYSTEM:
+      {steps.adaptive-pacing.output}
+
+      LEARNING PATH:
+      {steps.path-design.output}
+
+      DIAGNOSTIC ASSESSMENT:
+      {steps.assessment-analysis.output}
+
+      STUDENT PROFILE: {input.student_profile}
+      SUBJECT AREA: {input.subject_area}
+
+      INTERVENTION FRAMEWORK:
+
+      1. EARLY WARNING INDICATOR SYSTEM
+         Define the complete set of early warning indicators that signal a student
+         needs additional support beyond standard instruction:
+
+         a) ACADEMIC INDICATORS (from learning analytics)
+            - Assessment trend: 2+ consecutive scores below 65% on formative assessments
+            - Mastery gate failures: 2+ attempts needed to pass a mastery gate
+            - Concept velocity: learning speed dropped >40% from baseline
+            - Retention decay: previously mastered concepts showing >30% error rate on review
+            - Error pattern: same misconception appearing in 3+ different problem contexts
+            - Prerequisite fragility: gaps in foundational skills causing cascading difficulties
+
+         b) BEHAVIORAL INDICATORS (from engagement data)
+            - Attendance/participation: missed 2+ scheduled sessions in a row
+            - Session duration: consistently ending sessions early (<50% of planned time)
+            - Task avoidance: starting but not completing practice assignments
+            - Help-seeking extremes: either never asking for help (struggling silently) or
+              requesting help on every problem (learned helplessness)
+            - Procrastination pattern: leaving work until the last possible moment
+            - Drop-off pattern: engagement declining over consecutive weeks
+
+         c) AFFECTIVE INDICATORS (from self-report and observation)
+            - Self-efficacy decline: student reports decreasing confidence in ability
+            - Frustration signals: expressed frustration, giving up quickly on hard problems
+            - Anxiety indicators: test anxiety, avoidance of assessment situations
+            - Motivation loss: statements like "I'll never understand this" or "What's the point"
+            - Social comparison: negative comparisons to peers affecting self-concept
+
+         COMPOSITE RISK SCORE:
+         Calculate a weighted risk score from all indicators:
+         Risk Score = (0.5 x Academic Risk) + (0.3 x Behavioral Risk) + (0.2 x Affective Risk)
+         - Score 0-30: Low risk, continue standard path
+         - Score 31-60: Moderate risk, implement Tier 1 interventions
+         - Score 61-80: High risk, implement Tier 2 interventions
+         - Score 81-100: Critical risk, implement Tier 3 interventions
+
+      2. TIERED INTERVENTION MODEL (RTI Framework)
+
+         TIER 1: UNIVERSAL INTERVENTIONS (for all students, intensified for at-risk)
+         - Differentiated instruction within the standard learning path
+         - Additional practice on weak areas during spaced review sessions
+         - Alternative resource delivery (switch from text to video, or add interactive)
+         - More frequent formative checks (every lesson instead of every 2-3 lessons)
+         - Study skills instruction embedded in subject content
+         - Goal-setting conferences: student articulates and tracks their own goals
+         - Peer study partnerships for collaborative learning
+         Duration: 4-6 weeks, then reassess
+
+         TIER 2: TARGETED INTERVENTIONS (for students not responding to Tier 1)
+         - Small group or 1-on-1 supplemental instruction sessions (2-3x per week)
+         - Explicit prerequisite reteaching using alternative approaches
+         - Structured problem-solving protocols with step-by-step scaffolds
+         - Visual organizers and concept maps for each unit
+         - Modified assessment formats (oral explanation, portfolio, demonstration)
+         - Weekly progress monitoring with specific skill benchmarks
+         - Parent/guardian communication and home support strategies
+         - Self-monitoring tools: student tracks own progress on daily checklist
+         Duration: 6-8 weeks, then reassess
+
+         TIER 3: INTENSIVE INTERVENTIONS (for students not responding to Tier 2)
+         - Individual diagnostic assessment to identify root learning barriers
+         - 1-on-1 intensive tutoring (daily, 30-45 minutes)
+         - Completely restructured learning path focused on critical prerequisites
+         - Multi-sensory instruction methods
+         - Extended time accommodations for all assessments
+         - Referral for specialized evaluation (learning disability, ADHD, vision/hearing)
+         - Possible curriculum modification: adjusted learning goals or alternative pathway
+         - Coordination with school support services (counselor, special education, 504)
+         Duration: Ongoing with biweekly progress monitoring
+
+      3. INTERVENTION DECISION TREE
+         Create a step-by-step decision flowchart:
+         START: Student triggers early warning indicator
+         -> Is this the first occurrence? YES -> Monitor, note in log, continue
+         -> Pattern emerging (2+ indicators)? -> Implement Tier 1 enhanced support
+         -> Tier 1 for 4-6 weeks with <20% improvement? -> Escalate to Tier 2
+         -> Tier 2 for 6-8 weeks with <20% improvement? -> Escalate to Tier 3
+         -> Tier 3 referral for specialized evaluation
+         At each stage: document interventions tried, data collected, and outcomes
+
+      4. INTERVENTION ACTIVITY LIBRARY
+         For each type of learning difficulty, provide specific intervention activities:
+
+         a) CONCEPTUAL UNDERSTANDING GAPS
+            - Concrete-Representational-Abstract (CRA) sequence
+            - Analogy-based instruction connecting to known concepts
+            - Worked example pairs: correct vs. incorrect solutions for comparison
+            - Concept attainment model: examples and non-examples
+            - Socratic questioning sequences to guide discovery
+
+         b) PROCEDURAL FLUENCY GAPS
+            - Explicit step-by-step procedure instruction with self-talk
+            - Massed then distributed practice schedule
+            - Timed fluency-building exercises with self-competition (beat your own score)
+            - Error analysis: student identifies and corrects procedural errors
+            - Procedure checklists and reference cards for independent use
+
+         c) PROBLEM-SOLVING DIFFICULTIES
+            - Polya's 4-step problem-solving framework explicit instruction
+            - Schema-based instruction: recognizing problem types
+            - Think-aloud protocols modeled by instructor
+            - Problem decomposition practice (breaking complex into simple)
+            - Transfer training: same concept in multiple contexts
+
+         d) MOTIVATION AND ENGAGEMENT ISSUES
+            - Interest inventories to find personally relevant contexts
+            - Choice boards: student selects from equivalent activities
+            - Gamification elements: achievement badges, progress quests
+            - Meaningful real-world projects connected to student interests
+            - Growth mindset lessons and attribution retraining
+
+      5. PARENT/TEACHER REPORTING DASHBOARD
+         Design reporting interfaces for stakeholders:
+
+         a) TEACHER/TUTOR DASHBOARD
+            - Student progress summary: current level, pace, trend
+            - Active early warning indicators highlighted in red/yellow/green
+            - Current intervention tier and active interventions
+            - Next recommended actions with rationale
+            - Comparison to typical trajectory for similar students
+            - Log of all interventions tried and their outcomes
+
+         b) PARENT/GUARDIAN REPORT
+            - Simplified progress summary in plain language
+            - Strengths celebrated and areas for growth identified
+            - Specific suggestions for home support (10-15 min activities)
+            - Communication log: history of all reports sent
+            - Conference/meeting scheduling triggers
+
+         c) STUDENT-FACING PROGRESS VIEW
+            - Visual progress map showing the journey so far
+            - Mastery badges and achievements earned
+            - Next goals and estimated time to reach them
+            - Self-reflection prompts: "What did you learn this week?"
+            - Agency elements: student can set micro-goals and track them
+
+      6. INTERVENTION EFFECTIVENESS MEASUREMENT
+         Define how to measure whether interventions are working:
+         - Response rate: percentage improvement in target skills per week
+         - Adequate response: >20% improvement in 4-6 weeks (Tier 1), >15% in 6-8 weeks (Tier 2)
+         - Comparison metric: individual growth rate vs. peer growth rate
+         - Long-term retention: do improvements persist after intervention ends?
+         - Generalization: do improvements transfer to new, untaught problems?
+         - Student satisfaction: does the student feel the intervention is helping?
+
+      Produce the complete intervention framework as an implementation guide that a teacher,
+      tutor, or learning platform could use to operationalize data-driven student support.
+    model: sonnet
+    max_turns: 10

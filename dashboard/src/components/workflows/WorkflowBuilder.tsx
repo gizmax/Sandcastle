@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bell, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Shuffle, ExternalLink } from "lucide-react";
+import { Bell, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -24,10 +24,12 @@ import {
   type ApprovalConfig,
   type SloConfig,
   type AutoPilotConfig,
+  type GateStepConfig,
+  type BrowserStepConfig,
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
-import { GenerateChatModal } from "@/components/workflows/GenerateChatModal";
+import { GenerateChatPanel } from "@/components/workflows/GenerateChatPanel";
 import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
 
@@ -50,9 +52,13 @@ const DEFAULT_CODE_CONFIG = { code: "", language: "python" };
 const DEFAULT_CONDITION_CONFIG = { expression: "", thenSteps: [] as string[], elseSteps: [] as string[] };
 const DEFAULT_CLASSIFY_CONFIG = { categories: [] as string[], input: "", model: "haiku", branches: {} as Record<string, string[]> };
 const DEFAULT_LOOP_CONFIG = { over: "", stepIds: [] as string[], maxIterations: 100 };
+const DEFAULT_RACE_CONFIG = { branches: "", validator: "" };
+const DEFAULT_SENSOR_CONFIG = { url: "", method: "GET", headers: "", checkInterval: 30, timeout: 1800, condition: "" };
+const DEFAULT_GATE_CONFIG = { strategies: [] as GateStepConfig["strategies"] };
 const DEFAULT_TRANSFORM_CONFIG = { template: "" };
 const DEFAULT_NOTIFY_CONFIG = { service: "", channel: "", message: "" };
 const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 3600 };
+const DEFAULT_BROWSER_CONFIG: BrowserStepConfig = { mode: "playwright", startUrl: "", viewportWidth: 1280, viewportHeight: 720, timeout: 120, waitAfterAction: 1.0, headless: true, credentials_env: "", screenshotOnError: true, max_actions: 100, capture_screenshots: false, output_schema: null, captcha_strategy: "pause" };
 
 function generateYaml(
   workflowName: string,
@@ -169,6 +175,60 @@ function generateYaml(
       yaml += `      over: "${step.loopConfig.over}"\n`;
       yaml += `      step_ids: [${step.loopConfig.stepIds.join(", ")}]\n`;
       yaml += `      max_iterations: ${step.loopConfig.maxIterations}\n`;
+    } else if (sType === "race") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: race\n`;
+      yaml += `    race_config:\n`;
+      yaml += `      branches:\n`;
+      const branchLines = step.raceConfig.branches.split("\n").filter((l: string) => l.trim());
+      for (const line of branchLines) {
+        const stepIds = line.split(",").map((s: string) => s.trim()).filter(Boolean);
+        yaml += `        - [${stepIds.join(", ")}]\n`;
+      }
+      if (step.raceConfig.validator) {
+        yaml += `      validator: "${step.raceConfig.validator}"\n`;
+      }
+    } else if (sType === "sensor") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: sensor\n`;
+      yaml += `    sensor_config:\n`;
+      yaml += `      url: "${step.sensorConfig.url}"\n`;
+      yaml += `      method: ${step.sensorConfig.method}\n`;
+      yaml += `      condition: "${step.sensorConfig.condition}"\n`;
+      yaml += `      check_interval: ${step.sensorConfig.checkInterval}\n`;
+      yaml += `      timeout: ${step.sensorConfig.timeout}\n`;
+      if (step.sensorConfig.headers) {
+        try {
+          const hdrs = JSON.parse(step.sensorConfig.headers);
+          if (Object.keys(hdrs).length > 0) {
+            yaml += `      headers:\n`;
+            for (const [k, v] of Object.entries(hdrs)) {
+              yaml += `        ${k}: "${v}"\n`;
+            }
+          }
+        } catch { /* skip invalid JSON */ }
+      }
+    } else if (sType === "gate") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: gate\n`;
+      yaml += `    gate_config:\n`;
+      yaml += `      strategies:\n`;
+      for (const strategy of step.gateConfig.strategies) {
+        yaml += `        - type: ${strategy.type}\n`;
+        yaml += `          config:\n`;
+        if (strategy.type === "llm_eval") {
+          if (strategy.prompt) yaml += `            prompt: "${strategy.prompt}"\n`;
+          if (strategy.input) yaml += `            input: "${strategy.input}"\n`;
+          yaml += `            model: ${strategy.model}\n`;
+        } else if (strategy.type === "human") {
+          if (strategy.message) yaml += `            message: "${strategy.message}"\n`;
+          yaml += `            timeout_hours: ${strategy.timeoutHours}\n`;
+          yaml += `            on_timeout: ${strategy.onTimeout}\n`;
+        } else if (strategy.type === "timeout") {
+          yaml += `            seconds: ${strategy.seconds}\n`;
+          yaml += `            action: ${strategy.action}\n`;
+        }
+      }
     } else if (sType === "transform") {
       yaml += `  - id: "${step.id}"\n`;
       yaml += `    type: transform\n`;
@@ -202,6 +262,44 @@ function generateYaml(
       }
       if (step.delegateConfig.timeout !== 3600) {
         yaml += `      timeout: ${step.delegateConfig.timeout}\n`;
+      }
+    } else if (sType === "browser") {
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: browser\n`;
+      yaml += `    browser_config:\n`;
+      yaml += `      mode: ${step.browserConfig.mode}\n`;
+      if (step.browserConfig.startUrl) {
+        yaml += `      start_url: "${step.browserConfig.startUrl}"\n`;
+      }
+      if (step.browserConfig.viewportWidth !== 1280 || step.browserConfig.viewportHeight !== 720) {
+        yaml += `      viewport: [${step.browserConfig.viewportWidth}, ${step.browserConfig.viewportHeight}]\n`;
+      }
+      if (step.browserConfig.timeout !== 120) {
+        yaml += `      timeout: ${step.browserConfig.timeout}\n`;
+      }
+      if (step.browserConfig.waitAfterAction !== 1.0) {
+        yaml += `      wait_after_action: ${step.browserConfig.waitAfterAction}\n`;
+      }
+      if (!step.browserConfig.headless) {
+        yaml += `      headless: false\n`;
+      }
+      if (step.browserConfig.credentials_env) {
+        yaml += `      credentials_env: "${step.browserConfig.credentials_env}"\n`;
+      }
+      if (!step.browserConfig.screenshotOnError) {
+        yaml += `      screenshot_on_error: false\n`;
+      }
+      if (step.browserConfig.max_actions !== 100) {
+        yaml += `      max_actions: ${step.browserConfig.max_actions}\n`;
+      }
+      if (step.browserConfig.captcha_strategy !== "pause") {
+        yaml += `      captcha_strategy: ${step.browserConfig.captcha_strategy}\n`;
+      }
+      if (step.browserConfig.capture_screenshots) {
+        yaml += `      capture_screenshots: true\n`;
+      }
+      if (step.browserConfig.output_schema) {
+        yaml += `      output_schema: ${JSON.stringify(step.browserConfig.output_schema)}\n`;
       }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
@@ -477,9 +575,13 @@ function buildInitialState(wf: InitialWorkflow) {
       conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
       classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
       loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      raceConfig: { ...DEFAULT_RACE_CONFIG },
+      sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
+      gateConfig: { ...DEFAULT_GATE_CONFIG },
       transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
+      browserConfig: { ...DEFAULT_BROWSER_CONFIG },
     };
   });
 
@@ -539,7 +641,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     const prefixes: Record<string, string> = {
       standard: "step", llm: "llm", http: "http", code: "code",
       condition: "check", classify: "route", loop: "loop",
+      race: "race", sensor: "sensor", gate: "gate",
       transform: "transform", notify: "notify", delegate: "delegate",
+      browser: "browser",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -569,9 +673,13 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
       classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
       loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      raceConfig: { ...DEFAULT_RACE_CONFIG },
+      sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
+      gateConfig: { ...DEFAULT_GATE_CONFIG },
       transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
+      browserConfig: { ...DEFAULT_BROWSER_CONFIG },
     };
 
     const newNode: Node = {
@@ -611,6 +719,8 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   hasSlo: updated.slo.enabled,
                   hasTools: updated.tools.length > 0,
                   toolNames: updated.tools,
+                  browserMode: updated.browserConfig.mode,
+                  browserUrl: updated.browserConfig.startUrl,
                 },
               }
             : n
@@ -785,9 +895,13 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             { type: "llm" as const, icon: MessageSquare, label: "LLM", color: "text-accent" },
             { type: "http" as const, icon: Globe, label: "HTTP", color: "text-emerald-400" },
             { type: "code" as const, icon: Code, label: "Code", color: "text-amber-400" },
+            { type: "browser" as const, icon: Monitor, label: "Browser", color: "text-fuchsia-400" },
             { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
             { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
             { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },
+            { type: "race" as const, icon: Zap, label: "Race", color: "text-purple-400" },
+            { type: "sensor" as const, icon: Radio, label: "Sensor", color: "text-teal-400" },
+            { type: "gate" as const, icon: ShieldCheck, label: "Gate", color: "text-red-400" },
             { type: "transform" as const, icon: Shuffle, label: "Transform", color: "text-cyan-400" },
             { type: "notify" as const, icon: Bell, label: "Notify", color: "text-pink-400" },
             { type: "delegate" as const, icon: ExternalLink, label: "Delegate", color: "text-indigo-400" },
@@ -957,23 +1071,41 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         <Wand2 className="h-4 w-4" />
       </button>
 
-      {/* Canvas */}
-      <div className="flex-1 pt-8 lg:pt-0">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          onNodeClick={(_, node) => setSelectedStepId(node.id)}
-          onPaneClick={() => setSelectedStepId(null)}
-          fitView
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background gap={16} size={1} color="var(--color-border)" />
-          <Controls showInteractive={false} className="!bg-surface !border-border !shadow-sm" />
-        </ReactFlow>
+      {/* Canvas + AI Chat Panel wrapper */}
+      <div className="flex flex-1 min-w-0">
+        {/* Canvas */}
+        <div className={cn(
+          "flex-1 min-w-0 pt-8 lg:pt-0 transition-all duration-300",
+          generateModalOpen ? "lg:w-[60%]" : "w-full"
+        )}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            onNodeClick={(_, node) => setSelectedStepId(node.id)}
+            onPaneClick={() => setSelectedStepId(null)}
+            fitView
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={16} size={1} color="var(--color-border)" />
+            <Controls showInteractive={false} className="!bg-surface !border-border !shadow-sm" />
+          </ReactFlow>
+        </div>
+
+        {/* AI Chat Panel - slides in from the right */}
+        {generateModalOpen && (
+          <div className="w-[40%] min-w-[380px] max-w-[500px] shrink-0">
+            <GenerateChatPanel
+              open={generateModalOpen}
+              onClose={() => { setGenerateModalOpen(false); setEditWithAiYaml(undefined); }}
+              onSelect={handleGenerateSelect}
+              existingYaml={editWithAiYaml}
+            />
+          </div>
+        )}
       </div>
 
       {/* Right config panel - sidebar on desktop, overlay on mobile */}
@@ -1034,14 +1166,6 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         open={templateBrowserOpen}
         onClose={() => setTemplateBrowserOpen(false)}
         onSelect={handleTemplateSelect}
-      />
-
-      {/* AI Generate / Edit Modal */}
-      <GenerateChatModal
-        open={generateModalOpen}
-        onClose={() => { setGenerateModalOpen(false); setEditWithAiYaml(undefined); }}
-        onSelect={handleGenerateSelect}
-        existingYaml={editWithAiYaml}
       />
 
       {/* Confirm replace dialog */}

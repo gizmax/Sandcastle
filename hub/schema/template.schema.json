@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sandcastle Hub Template Metadata",
+  "description": "Schema for validating template entries in the Sandcastle Community Hub registry",
+  "type": "object",
+  "required": ["name", "slug", "description", "author", "version", "category"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Human-readable template name"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9_/-]+$",
+      "description": "Unique identifier in author/template-name format"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Short description of what the template does"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name or GitHub username"
+    },
+    "author_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the author's profile (e.g. GitHub)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version (e.g. 1.0.0)"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["sales_crm", "marketing", "support", "engineering", "hr_legal", "general_ai"],
+      "description": "Primary category for the template"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Searchable tags for discovery"
+    },
+    "models_used": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of model short names used in steps (e.g. sonnet, haiku)"
+    },
+    "tools_used": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of tool connector names used (e.g. salesforce, slack)"
+    },
+    "step_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of steps in the workflow"
+    },
+    "license": {
+      "type": "string",
+      "default": "MIT",
+      "description": "License for the template (defaults to MIT)"
+    },
+    "estimated_cost_per_run": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Estimated cost in USD per workflow execution based on model pricing"
+    },
+    "avg_execution_time": {
+      "type": "string",
+      "description": "Average execution time (e.g. ~6s, ~12s)"
+    },
+    "downloads": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of installs/downloads"
+    },
+    "remix_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of community remixes (forks) of this template"
+    },
+    "forked_from": {
+      "type": ["string", "null"],
+      "description": "Slug of the original template this was remixed from (null if original)"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["built-in", "community"],
+      "description": "Whether this is a built-in or community-contributed template"
+    }
+  }
+}

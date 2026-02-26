@@ -3,6 +3,7 @@ import { ShieldAlert, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 
@@ -43,11 +44,13 @@ export default function ViolationsPage() {
   const [items, setItems] = useState<Violation[]>([]);
   const [stats, setStats] = useState<ViolationStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
       const params: Record<string, string> = {};
       if (filter !== "all") params.severity = filter;
       const [itemsRes, statsRes] = await Promise.all([
@@ -56,6 +59,8 @@ export default function ViolationsPage() {
       ]);
       if (itemsRes.data) setItems(itemsRes.data);
       if (statsRes.data) setStats(statsRes.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -81,11 +86,35 @@ export default function ViolationsPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchData(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
       </div>
+
+      {/* Critical violations banner */}
+      {stats && stats.violations_by_severity.critical > 0 && (
+        <ContextBanner variant="error" icon={ShieldAlert}>
+          {stats.violations_by_severity.critical} critical violation{stats.violations_by_severity.critical > 1 ? "s" : ""} detected - PII leaks or security issues require review.
+        </ContextBanner>
+      )}
 
       {/* Stats cards */}
       {stats && (

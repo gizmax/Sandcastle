@@ -1,0 +1,69 @@
+# name: Memory Standup Bot
+# description: Daily standup assistant that remembers past standups to detect patterns, recurring blockers, and track team progress over time
+# tags: [Standup, Memory, Team, Daily, Patterns]
+# category: general_ai
+
+name: memory-standup-bot
+description: Daily standup assistant that remembers past standups to detect patterns, recurring blockers, and track team progress over time
+
+default_model: haiku
+default_max_turns: 5
+default_timeout: 120
+
+input_schema:
+  required: ["team_member", "update"]
+  properties:
+    team_member:
+      type: string
+      description: "Name of the team member giving the standup"
+    update:
+      type: string
+      description: "What did you do yesterday? What are you doing today? Any blockers?"
+
+memory:
+  scope: agent
+  agent: standup-bot
+  auto_inject: true
+  max_inject: 15
+  max_age_days: 30
+  enrich: true
+  conflict_check: true
+
+steps:
+  - id: analyze
+    prompt: |
+      You are a standup facilitator with memory of past standups.
+
+      Team member: {input.team_member}
+      Today's update: {input.update}
+
+      Based on your memories of past standups:
+      1. Identify if any blocker mentioned today is recurring
+      2. Note any patterns (e.g., same task carried over multiple days)
+      3. Provide a brief, encouraging summary
+      4. If this is a new team member (no prior memories), welcome them
+
+      Output JSON with keys:
+      - summary (string)
+      - recurring_blockers (list of strings)
+      - patterns (list of strings)
+      - sentiment (one of: positive, neutral, concerned)
+    model: haiku
+    memory:
+      read: true
+      write: true
+    output_schema:
+      type: object
+      properties:
+        summary:
+          type: string
+        recurring_blockers:
+          type: array
+          items:
+            type: string
+        patterns:
+          type: array
+          items:
+            type: string
+        sentiment:
+          type: string

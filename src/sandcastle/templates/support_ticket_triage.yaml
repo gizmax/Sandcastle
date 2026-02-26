@@ -26,75 +26,244 @@ input_schema:
 steps:
   - id: fetch-tickets
     prompt: |
-      Fetch new/open Zendesk tickets from the last {input.hours_lookback} hours.
+      Fetch new/open Zendesk tickets from the last {input.hours_lookback} hours
+      with full context for intelligent triage.
 
       Use the Zendesk tool:
         node /home/user/tools/zendesk.mjs list_tickets 'new' {input.hours_lookback}
 
-      Return each ticket's ID, subject, description, requester, creation time, and current priority.
+      FOR EACH TICKET, CAPTURE:
+      - Ticket basics: ID, subject, full description, creation time, current priority, status
+      - Requester info: name, email, organization, user tags, locale/language
+      - Customer context: customer tier/plan (free, starter, pro, enterprise),
+        account age, total tickets filed historically, CSAT history
+      - Ticket metadata: channel (email, chat, phone, web form), custom fields, attachments count
+      - Previous interactions: has this requester filed similar tickets recently?
+        Check for repeat contacts in last 30 days (pattern of unresolved issues).
+
+      ALSO GATHER CONTEXTUAL DATA:
+      - Current known incidents: check if there is an active incident or maintenance
+        that could explain a cluster of similar tickets.
+      - Recent product changes: any deployment in last 24 hours that might cause regressions.
+      - Queue status: current ticket backlog size and oldest unassigned ticket age
+        (helps calibrate urgency relative to capacity).
+
+      Return tickets sorted by creation time (newest first) with full context.
+      Flag any ticket that is from a repeat requester (>2 tickets in 30 days).
     model: haiku
     max_turns: 5
 
   - id: classify
     depends_on: [fetch-tickets]
     prompt: |
-      Classify each support ticket by urgency and category:
+      Perform multi-dimensional classification on each support ticket with
+      sentiment-based priority escalation and known issue matching.
 
       Tickets: {steps.fetch-tickets.output}
 
-      For each ticket, determine:
-      1. **Urgency** (Critical/High/Normal/Low):
-         - Critical: service down, data loss, security issue
-         - High: major feature broken, blocking customer
-         - Normal: feature request, how-to question, minor bug
-         - Low: feedback, cosmetic issue
-      2. **Category**: billing, technical, account, feature-request, bug, onboarding
-      3. **Sentiment**: positive, neutral, frustrated, angry
-      4. **Suggested tags**: 1-3 tags for routing
+      FOR EACH TICKET, DETERMINE:
 
-      Return JSON array: ticket_id, subject, urgency, category, sentiment, tags, reasoning.
+      1. URGENCY (with customer tier awareness):
+         BASE URGENCY:
+         - Critical: service completely down, confirmed data loss, security breach,
+           payment processing failure, complete inability to use product
+         - High: major feature broken with no workaround, blocking customer's business
+           operations, API returning errors affecting production systems
+         - Normal: feature request, how-to question, minor bug with workaround,
+           configuration assistance, general inquiry
+         - Low: feedback, cosmetic/UI issue, documentation suggestion, general praise
+
+         TIER-BASED ESCALATION RULES:
+         - Enterprise customers: auto-escalate one level (Normal -> High, High -> Critical)
+         - Pro customers with angry/frustrated sentiment: escalate one level
+         - Free customers: no escalation, but flag if they mention upgrade interest
+         - Any customer mentioning "cancel", "refund", or competitor name: escalate one level
+
+      2. CATEGORY (primary + secondary):
+         Primary categories: billing, technical_bug, performance, account_access,
+         feature_request, integration, onboarding, data_issue, security
+         Secondary category: assign if the ticket spans two areas
+         (e.g., "billing + account_access" for a user locked out due to payment failure)
+
+      3. SENTIMENT ANALYSIS:
+         - Score: -1.0 to +1.0 continuous scale
+         - Label: positive, neutral, frustrated, angry, panicked
+         - Escalation risk: 0.0-1.0 probability of escalation
+         - Churn risk indicators: mentions of competitors, "last straw" language,
+           executive CC'd, multiple unresolved tickets
+
+      4. KNOWN ISSUE MATCHING:
+         - Compare ticket symptoms against common issue patterns:
+           * "can't login" / "password reset" / "SSO error" -> known auth patterns
+           * "slow" / "timeout" / "loading" -> known performance patterns
+           * "error 500" / "server error" / "internal error" -> known server issues
+           * "charged twice" / "wrong amount" / "billing" -> known billing patterns
+           * "data missing" / "lost" / "disappeared" -> known data sync patterns
+         - If a known issue is matched: attach the known_issue_id, standard resolution path,
+           and estimated time to fix.
+         - If a current incident is active and the ticket matches its symptoms,
+           flag as "related to incident [ID]" for batch response.
+
+      5. RESOLUTION PATH RECOMMENDATION:
+         - auto_resolve: ticket can be resolved with a standard response (known issue + solution)
+         - agent_simple: needs human agent but straightforward resolution
+         - agent_investigate: needs investigation or reproduction
+         - engineering_escalate: needs engineering involvement
+         - manager_review: sensitive situation requiring management attention
+
+      6. SLA COUNTDOWN:
+         Based on the final urgency level, calculate:
+         - First response deadline: creation_time + SLA_first_response_target
+         - Time remaining until SLA breach (in minutes)
+         - If <30 min remaining: flag as "SLA_IMMINENT"
+         - If already breached: flag as "SLA_BREACHED" with breach duration
+
+         SLA targets:
+         | Urgency  | Enterprise  | Pro      | Free     |
+         |----------|-------------|----------|----------|
+         | Critical | 30 min      | 1 hour   | 4 hours  |
+         | High     | 2 hours     | 4 hours  | 8 hours  |
+         | Normal   | 4 hours     | 8 hours  | 24 hours |
+         | Low      | 8 hours     | 24 hours | 48 hours |
+
+      Return JSON array per ticket: ticket_id, subject, final_urgency, base_urgency,
+      escalation_applied, escalation_reason, primary_category, secondary_category,
+      sentiment_score, sentiment_label, churn_risk, known_issue_match, resolution_path,
+      sla_first_response_deadline, sla_minutes_remaining, sla_status, tags, reasoning.
     model: sonnet
     max_turns: 8
 
   - id: draft-responses
     depends_on: [classify]
     prompt: |
-      Draft initial responses for each classified ticket:
+      Draft contextual, empathetic responses for each classified ticket using
+      resolution path awareness and customer tier sensitivity.
 
       Classified tickets: {steps.classify.output}
 
-      For each ticket, write a response that:
-      - Acknowledges the customer's issue with empathy
-      - Matches tone to the sentiment (more empathetic for frustrated/angry)
-      - For Critical/High urgency: include escalation notice
-      - For technical issues: ask for relevant diagnostic info
-      - For billing: reference self-service options
-      - Keep responses concise (3-5 sentences)
+      RESPONSE STRATEGY BY RESOLUTION PATH:
 
-      Return: ticket_id, subject, urgency, draft_response, needs_human_review (boolean).
-      Mark needs_human_review=true for Critical urgency or angry sentiment.
+      AUTO-RESOLVE (known issue match with solution):
+      - Provide the specific solution steps immediately.
+      - Reference the known issue ID for transparency ("This is a known issue [#ID]").
+      - Include estimated fix timeline if available.
+      - Offer workaround if permanent fix is pending.
+      - Tone: confident, helpful, proactive.
+
+      AGENT_SIMPLE (straightforward resolution):
+      - Acknowledge the issue and set clear expectations.
+      - Provide preliminary troubleshooting steps the customer can try while waiting.
+      - For how-to: give step-by-step instructions with documentation links.
+      - For billing: reference the billing portal and state the review process.
+
+      AGENT_INVESTIGATE (needs investigation):
+      - Acknowledge the issue with empathy matching the sentiment.
+      - Ask for specific diagnostic information (structured, numbered list):
+        * Steps to reproduce
+        * Expected vs actual behavior
+        * Browser/OS/environment
+        * Error messages or screenshots
+        * When the issue first appeared
+      - Set expectation: "We're investigating and will update you within [SLA timeframe]."
+
+      ENGINEERING_ESCALATE (needs engineering):
+      - Acknowledge the severity and validate the customer's frustration.
+      - Explain that the issue has been escalated to the engineering team.
+      - Provide a specific follow-up timeline.
+      - For Critical urgency: include incident-level language and status page reference.
+
+      MANAGER_REVIEW (sensitive):
+      - Draft a thoughtful, senior-level response.
+      - Take explicit ownership: "I'm personally ensuring this gets resolved."
+      - Offer direct contact (phone/meeting) for Critical + angry.
+      - For churn risk: include retention language without being desperate.
+
+      CUSTOMER TIER TONE ADJUSTMENTS:
+      - Enterprise: more formal, reference their dedicated CSM, acknowledge SLA commitment.
+      - Pro: professional, reference premium support benefits.
+      - Free: friendly, include upgrade benefits where naturally relevant
+        (NOT as a deflection, but as genuine value mention when relevant to their issue).
+
+      INCIDENT-RELATED TICKETS:
+      If the ticket matches an active incident:
+      - Acknowledge the broader issue and link to the status page.
+      - "We're aware of [issue description] and our engineering team is actively working on it."
+      - Provide estimated resolution time from incident management.
+      - Offer to notify them when resolved.
+
+      FOR EACH TICKET OUTPUT:
+      - ticket_id, subject, urgency
+      - draft_response (complete, ready-to-send text)
+      - response_template_used (for analytics)
+      - personalization_elements (what was customized beyond the template)
+      - confidence_level (0.0-1.0 - how well this response addresses the issue)
+      - needs_human_review: true for any of: Critical urgency, angry sentiment,
+        churn risk > 0.5, engineering escalation, response confidence < 0.7
+      - human_review_reason (if needs_human_review is true)
     model: sonnet
     max_turns: 8
 
   - id: notify-slack
     depends_on: [classify]
     prompt: |
-      Post a triage summary to Slack channel {input.slack_channel}.
+      Post a comprehensive triage summary to Slack channel {input.slack_channel},
+      designed for the support team's shift handoff or daily review.
 
       Classification results: {steps.classify.output}
 
       Use the Slack tool:
         node /home/user/tools/slack.mjs post_message '{input.slack_channel}' '<message>'
 
-      Format:
-      *Support Triage Summary* (last {input.hours_lookback}h)
-      - Total new tickets: <count>
-      - Critical: <count> (list ticket IDs)
-      - High: <count>
-      - Normal: <count>
-      - Low: <count>
+      FORMAT:
 
-      List Critical and High tickets with subject and category for immediate attention.
+      *Support Triage Summary* | Last {input.hours_lookback} hours | <timestamp>
+
+      IF ANY SLA BREACHES OR IMMINENT BREACHES:
+      > :rotating_light: *SLA ALERT*
+      > <count> tickets breached SLA | <count> tickets within 30 min of breach
+      > Breached: <ticket IDs with subjects>
+
+      *OVERVIEW*
+      - Total new tickets: <count>
+      - :red_circle: Critical: <count> (enterprise: <count>, other: <count>)
+      - :large_orange_circle: High: <count>
+      - :yellow_circle: Normal: <count>
+      - :white_circle: Low: <count>
+      - Avg sentiment: <score> (<trending direction>)
+      - Churn risk tickets: <count>
+
+      *CRITICAL & HIGH - IMMEDIATE ACTION REQUIRED*
+      For each Critical and High ticket:
+      > *[Ticket #ID]* - <subject>
+      > Customer: <name> (<tier>) | Sentiment: <label> | SLA: <minutes remaining> min
+      > Category: <primary> | Resolution: <path>
+      > Known issue: <match or "New issue">
+
+      *INCIDENT CORRELATION*
+      - Tickets linked to active incidents: <count>
+      - Possible new incident pattern: <if >3 tickets with similar symptoms in last 2h>
+
+      *CATEGORY BREAKDOWN*
+      - Technical bugs: <count> (<% of total>)
+      - Billing: <count>
+      - Account/access: <count>
+      - How-to/onboarding: <count>
+      - Feature requests: <count>
+      - Other: <count>
+
+      *REPEAT CONTACTS*
+      - Customers with multiple tickets in 30 days: <count>
+      - Top repeat contact: <name> (<ticket count> tickets) - possible systemic issue
+
+      *AUTO-RESOLVED*
+      - Tickets with known issue match (auto-response ready): <count>
+      - These will be auto-responded unless flagged for human review.
+
+      *NEEDS HUMAN REVIEW* :eyes:
+      - <count> tickets flagged for human review
+      - Reasons: <breakdown - angry sentiment: X, churn risk: X, critical: X, low confidence: X>
+
+      Tag @support-lead on any Critical tickets or SLA breaches.
     model: haiku
     max_turns: 5
     tools: [slack]

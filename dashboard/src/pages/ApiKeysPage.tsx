@@ -26,6 +26,7 @@ interface SettingsData {
 export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [revealKey, setRevealKey] = useState<string | null>(null);
 
@@ -46,8 +47,11 @@ export default function ApiKeysPage() {
 
   const fetchKeys = useCallback(async () => {
     try {
+      setError(null);
       const res = await api.get<ApiKeyItem[]>("/api-keys");
       if (res.data) setKeys(res.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -139,6 +143,23 @@ export default function ApiKeysPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">API Keys</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchKeys(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

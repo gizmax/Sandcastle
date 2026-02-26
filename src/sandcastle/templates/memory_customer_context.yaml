@@ -1,0 +1,76 @@
+# name: Memory Customer Context
+# description: Customer support agent that remembers customer history, preferences, and past issues to provide personalized, context-aware support
+# tags: [Customer, Memory, Support, Personalization, Context]
+# category: support
+
+name: memory-customer-context
+description: Customer support agent that remembers customer history, preferences, and past issues to provide personalized, context-aware support
+
+default_model: sonnet
+default_max_turns: 5
+default_timeout: 120
+
+input_schema:
+  required: ["customer_id", "message"]
+  properties:
+    customer_id:
+      type: string
+      description: "Unique customer identifier"
+    message:
+      type: string
+      description: "Customer's support message"
+    channel:
+      type: string
+      description: "Support channel (email, chat, phone)"
+      default: "chat"
+
+memory:
+  scope: agent
+  agent: customer-support
+  auto_inject: true
+  max_inject: 20
+  max_age_days: 180
+  enrich: true
+  conflict_check: true
+  admit_threshold: 0.4
+
+steps:
+  - id: understand
+    prompt: |
+      You are a customer support agent with memory of past interactions.
+
+      Customer ID: {input.customer_id}
+      Channel: {input.channel}
+      Message: {input.message}
+
+      Based on your memories of this customer:
+      1. Identify if this is a returning customer (reference past interactions)
+      2. Check if this issue relates to any previous issues
+      3. Note customer preferences (communication style, technical level)
+      4. Draft a personalized response that acknowledges their history
+
+      Output JSON with keys:
+      - is_returning (boolean)
+      - related_issues (list of strings)
+      - customer_preferences (object with keys like tone, technical_level)
+      - response_draft (string)
+      - priority (one of: low, medium, high)
+    model: sonnet
+    memory:
+      read: true
+      write: true
+    output_schema:
+      type: object
+      properties:
+        is_returning:
+          type: boolean
+        related_issues:
+          type: array
+          items:
+            type: string
+        customer_preferences:
+          type: object
+        response_draft:
+          type: string
+        priority:
+          type: string

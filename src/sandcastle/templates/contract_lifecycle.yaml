@@ -1,0 +1,195 @@
+# name: Contract Lifecycle Manager
+# description: End-to-end contract lifecycle from drafting through approval to obligation tracking
+# tags: [Legal, Contracts, Negotiation, CLM]
+# category: hr_legal
+
+name: contract-lifecycle
+description: End-to-end contract lifecycle from drafting through approval to obligation tracking
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["contract_type", "counterparty"]
+  properties:
+    contract_type:
+      type: string
+      description: "Type of contract to draft (e.g. SaaS, NDA, MSA, SOW, License, Employment)"
+    counterparty:
+      type: string
+      description: "Name of the counterparty or organization"
+    key_terms:
+      type: string
+      description: "Key terms and requirements to include (comma-separated or free text)"
+
+steps:
+  - id: draft-generation
+    prompt: |
+      Generate a comprehensive first draft of a {input.contract_type} agreement
+      between our organization and {input.counterparty}.
+
+      Key terms and requirements to incorporate: {input.key_terms}
+
+      The draft must include all standard sections for a {input.contract_type} agreement:
+      1. Preamble and recitals identifying the parties and purpose
+      2. Definitions section with all key terms clearly defined
+      3. Scope of services or rights granted, with specific deliverables and exclusions
+      4. Compensation and payment terms (pricing, invoicing, payment windows, late fees)
+      5. Term and renewal provisions (initial term, auto-renewal, notice periods)
+      6. Representations and warranties from both parties
+      7. Indemnification provisions with appropriate caps and baskets
+      8. Limitation of liability (direct damages, consequential damages exclusion)
+      9. Confidentiality and data protection obligations
+      10. Intellectual property ownership and licensing
+      11. Termination rights (for cause, for convenience, effect of termination)
+      12. Force majeure and dispute resolution (governing law, arbitration vs. litigation)
+      13. General provisions (notices, assignment, severability, entire agreement)
+
+      Use plain language where possible while maintaining legal precision.
+      Flag any sections where the specific terms from {input.counterparty} need to be filled in.
+      Mark optional clauses that may or may not apply depending on deal specifics.
+    model: opus
+    max_turns: 10
+
+  - id: redline-analysis
+    depends_on: [draft-generation]
+    prompt: |
+      Perform a thorough redline analysis of the generated {input.contract_type} draft
+      for the agreement with {input.counterparty}.
+
+      Draft contract: {steps.draft-generation.output}
+
+      Analyze the draft from the counterparty's likely perspective and identify:
+
+      1. Clauses the counterparty will likely push back on:
+         - Overly broad indemnification language
+         - One-sided termination rights
+         - Aggressive IP ownership claims
+         - Restrictive non-compete or exclusivity provisions
+         - Unreasonable limitation of liability caps
+
+      2. Negotiation positions for each contentious clause:
+         - Our ideal position (what we drafted)
+         - Expected counterparty position (what they will want)
+         - Acceptable middle ground (where we can compromise)
+         - Walk-away point (what we cannot concede)
+
+      3. Market standard benchmarking:
+         - Compare each key term against industry standard for {input.contract_type} agreements
+         - Flag terms that deviate significantly from market norms
+         - Note terms that are more favorable or less favorable than typical
+
+      4. Suggested pre-emptive modifications:
+         - Changes we should make proactively before sending to counterparty
+         - Language softening recommendations to reduce negotiation friction
+         - Alternative clause formulations that protect our interests while being more balanced
+
+      Produce a redline summary table with clause, current language, issue, and recommendation.
+    model: opus
+    max_turns: 10
+
+  - id: risk-scoring
+    depends_on: [redline-analysis]
+    prompt: |
+      Perform a quantitative and qualitative risk assessment of the {input.contract_type}
+      agreement with {input.counterparty}, incorporating the redline analysis findings.
+
+      Redline analysis: {steps.redline-analysis.output}
+      Original draft: {steps.draft-generation.output}
+
+      Score the contract across these risk dimensions (1-10 scale, 10 = highest risk):
+
+      1. Financial Risk:
+         - Payment default exposure and collection risk
+         - Uncapped liability provisions
+         - Penalty and liquidated damages exposure
+         - Currency and pricing escalation risk
+
+      2. Legal Risk:
+         - Enforceability concerns by jurisdiction
+         - Ambiguous or conflicting terms
+         - Missing standard protective clauses
+         - Regulatory compliance gaps
+
+      3. Operational Risk:
+         - Performance obligation feasibility
+         - Resource commitment requirements
+         - Dependency on counterparty cooperation
+         - SLA and uptime commitment exposure
+
+      4. Strategic Risk:
+         - Lock-in provisions and switching costs
+         - Exclusivity or non-compete limitations
+         - IP ownership and licensing restrictions
+         - Reputation and brand association risk
+
+      5. Overall composite risk score with weighted calculation
+      6. Risk mitigation recommendations for each high-scoring dimension
+      7. Deal-breaker identification - any risks that should prevent execution
+
+      Present the scoring as a risk matrix with visual severity indicators.
+    model: sonnet
+    max_turns: 10
+
+  - id: approval-routing
+    depends_on: [risk-scoring]
+    type: approval
+    prompt: |
+      Route the {input.contract_type} agreement with {input.counterparty} for review
+      and approval based on the risk assessment.
+    approval_config:
+      message: "Review the contract draft, redline analysis, and risk scoring before approving for execution"
+      show_data: steps.risk-scoring.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  - id: obligation-tracking
+    depends_on: [approval-routing]
+    prompt: |
+      Extract and organize all contractual obligations from the approved
+      {input.contract_type} agreement with {input.counterparty} into a structured
+      obligation tracking system.
+
+      Approved contract: {steps.draft-generation.output}
+      Risk scoring: {steps.risk-scoring.output}
+
+      Create a comprehensive obligation register:
+
+      1. Our obligations (what we must do):
+         - Obligation description and source clause reference
+         - Type (delivery, payment, reporting, compliance, notification)
+         - Frequency (one-time, recurring, triggered by event)
+         - Deadline or schedule
+         - Responsible internal team or role
+         - Penalty for non-compliance or breach
+         - Monitoring method and early warning triggers
+
+      2. Counterparty obligations (what {input.counterparty} must do):
+         - Same fields as above
+         - Remedies available to us if they fail to perform
+         - Evidence collection requirements to document breach
+
+      3. Mutual obligations:
+         - Confidentiality and data protection duties
+         - Notice and communication requirements
+         - Cooperation and good faith obligations
+
+      4. Key dates calendar:
+         - Contract effective date and expiration
+         - Renewal notice deadlines (with advance warning dates)
+         - Payment due dates
+         - Reporting and audit deadlines
+         - Option exercise windows
+         - Milestone delivery dates
+
+      5. Compliance monitoring plan:
+         - Monthly, quarterly, and annual review cadence
+         - KPIs and metrics to track obligation fulfillment
+         - Escalation procedures for obligation breaches
+         - Document retention and audit trail requirements
+
+      Format the output as a structured database-ready register.
+    model: sonnet
+    max_turns: 10

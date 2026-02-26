@@ -7,12 +7,12 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
@@ -21,9 +21,12 @@ from sqlalchemy.orm import selectinload
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
+    ApiKeyAllowlistRequest,
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
     ApiKeyResponse,
+    ApiKeyRotateRequest,
+    ApiKeyRotateResponse,
     ApiResponse,
     ApprovalRespondRequest,
     ApprovalResponse,
@@ -31,20 +34,19 @@ from sandcastle.api.schemas import (
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
     ErrorResponse,
+    EvalAssertionResponse,
+    EvalCaseResponse,
+    EvalRunResponse,
+    EvalStatsResponse,
+    EvalSuiteRunRequest,
     ExperimentResponse,
     ForkRequest,
+    GenerateChatRequest,
     HealthResponse,
     MemoryAddRequest,
     MemoryEntry,
     MemoryListResponse,
     MemorySearchRequest,
-    EvalCaseResponse,
-    EvalAssertionResponse,
-    EvalRunResponse,
-    EvalStatsResponse,
-    EvalSuiteRunRequest,
-    GenerateChatRequest,
-    WorkflowGenerateRequest,
     OptimizerStatsResponse,
     PaginationMeta,
     PolicyViolationResponse,
@@ -70,6 +72,7 @@ from sandcastle.api.schemas import (
     ToolFunctionResponse,
     ToolListResponse,
     ToolResponse,
+    WorkflowGenerateRequest,
     WorkflowInfoResponse,
     WorkflowPromoteRequest,
     WorkflowRollbackRequest,
@@ -92,7 +95,6 @@ from sandcastle.models.db import (
     AutoPilotExperiment,
     AutoPilotSample,
     DeadLetterItem,
-    EvalCaseResult,
     EvalRun,
     EvalRunStatus,
     ExperimentStatus,
@@ -123,12 +125,8 @@ def _duration_seconds_expr():
     """Avg duration expression portable across PostgreSQL and SQLite."""
     if settings.is_local_mode:
         # SQLite: timestamps stored as ISO strings, julianday gives fractional days
-        return func.avg(
-            (func.julianday(Run.completed_at) - func.julianday(Run.started_at)) * 86400
-        )
-    return func.avg(
-        func.extract("epoch", Run.completed_at) - func.extract("epoch", Run.started_at)
-    )
+        return func.avg((func.julianday(Run.completed_at) - func.julianday(Run.started_at)) * 86400)
+    return func.avg(func.extract("epoch", Run.completed_at) - func.extract("epoch", Run.started_at))
 
 
 def _trunc_day(column):
@@ -176,14 +174,13 @@ async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, i
         # Fallback to disk and auto-import
         yaml_content = _load_workflow_yaml(request.workflow_name)
         try:
-            ver = await _auto_import_workflow(
-                request.workflow_name, yaml_content
-            )
+            ver = await _auto_import_workflow(request.workflow_name, yaml_content)
             return (yaml_content, ver)
         except Exception as e:
             logger.warning(
                 "Auto-import failed for workflow '%s': %s",
-                request.workflow_name, e,
+                request.workflow_name,
+                e,
             )
             return (yaml_content, None)
     raise ValueError("Either 'workflow' or 'workflow_name' must be provided")
@@ -196,9 +193,7 @@ def _apply_tenant_filter(stmt, tenant_id: str | None, column):
     return stmt
 
 
-async def _resolve_budget(
-    request_budget: float | None, tenant_id: str | None
-) -> float | None:
+async def _resolve_budget(request_budget: float | None, tenant_id: str | None) -> float | None:
     """Resolve max_cost_usd with precedence: request > tenant > env.
 
     Returns None if no budget is set (unlimited).
@@ -210,10 +205,14 @@ async def _resolve_budget(
     if tenant_id and settings.auth_required:
         try:
             async with async_session() as session:
-                stmt = select(ApiKey.max_cost_per_run_usd).where(
-                    ApiKey.tenant_id == tenant_id,
-                    ApiKey.is_active.is_(True),
-                ).limit(1)
+                stmt = (
+                    select(ApiKey.max_cost_per_run_usd)
+                    .where(
+                        ApiKey.tenant_id == tenant_id,
+                        ApiKey.is_active.is_(True),
+                    )
+                    .limit(1)
+                )
                 result = await session.scalar(stmt)
                 if result and result > 0:
                     return result
@@ -288,9 +287,7 @@ async def _auto_import_workflow(name: str, yaml_content: str) -> int:
     async with async_session() as session:
         # Check if already imported
         existing = await session.scalar(
-            select(WorkflowVersion.id).where(
-                WorkflowVersion.workflow_name == name
-            ).limit(1)
+            select(WorkflowVersion.id).where(WorkflowVersion.workflow_name == name).limit(1)
         )
         if existing:
             return 1  # Already imported
@@ -455,11 +452,13 @@ async def browse_directory(
             # Skip hidden files/dirs
             if item.name.startswith("."):
                 continue
-            entries.append({
-                "name": item.name,
-                "path": str(item),
-                "is_dir": item.is_dir(),
-            })
+            entries.append(
+                {
+                    "name": item.name,
+                    "path": str(item),
+                    "is_dir": item.is_dir(),
+                }
+            )
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -493,6 +492,7 @@ async def list_templates() -> ApiResponse:
                 "step_count": t.step_count,
                 "input_schema": t.input_schema,
                 "category": t.category,
+                "source": t.source,
             }
             for t in templates
         ]
@@ -522,6 +522,306 @@ async def get_template(template_name: str) -> ApiResponse:
             "content": content,
             "input_schema": info.input_schema,
             "category": info.category,
+            "source": info.source,
+        }
+    )
+
+
+# --- Community Hub & Export ---
+
+
+def _sanitize_workflow_yaml(yaml_content: str) -> str:
+    """Remove sensitive data from workflow YAML for safe sharing."""
+    # Remove env var references like ${API_KEY} or $API_KEY
+    sanitized = re.sub(r"\$\{[A-Z_]+\}", "<REDACTED>", yaml_content)
+    sanitized = re.sub(r"\$[A-Z_]{3,}", "<REDACTED>", sanitized)
+    # Remove lines that look like they contain secrets
+    lines: list[str] = []
+    for line in sanitized.split("\n"):
+        lower = line.lower()
+        if (
+            any(kw in lower for kw in ("password:", "secret:", "token:", "api_key:"))
+            and "<REDACTED>" not in line
+        ):
+            # Check if it's a key-value with an actual value (not a variable reference)
+            if ":" in line:
+                key, _, val = line.partition(":")
+                val = val.strip()
+                if val and not val.startswith("{") and not val.startswith("<"):
+                    line = f"{key}: <REDACTED>"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+@router.get("/hub/registry")
+async def get_hub_registry() -> ApiResponse:
+    """Proxy the community hub registry for dashboard consumption.
+
+    Public endpoint - no authentication required.
+    """
+    registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(registry_url)
+            resp.raise_for_status()
+            return ApiResponse(data=resp.json())
+    except Exception:
+        # Fallback: return empty registry
+        return ApiResponse(
+            data={
+                "version": 1,
+                "templates": [],
+                "categories": [],
+                "stats": {"total_templates": 0},
+            }
+        )
+
+
+@router.get("/hub/collections")
+async def get_hub_collections() -> ApiResponse:
+    """Get curated workflow collections from the community hub.
+
+    Public endpoint - no authentication required.
+    """
+    registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(registry_url)
+            resp.raise_for_status()
+            data = resp.json()
+            collections = data.get("collections", [])
+            # Enrich with template details
+            templates_by_slug: dict[str, dict] = {t["slug"]: t for t in data.get("templates", [])}
+            for col in collections:
+                col["templates"] = [
+                    templates_by_slug[slug]
+                    for slug in col.get("template_slugs", [])
+                    if slug in templates_by_slug
+                ]
+                col["template_count"] = len(col["templates"])
+            return ApiResponse(data=collections)
+    except Exception:
+        return ApiResponse(data=[])
+
+
+@router.post("/hub/playground")
+async def hub_playground(request: Request) -> ApiResponse:
+    """Simulate a workflow execution for the community hub playground.
+
+    Returns a mock result - no actual execution happens.
+    Public endpoint - no authentication required.
+    """
+    body = await request.json()
+    template_slug = body.get("slug", "")
+    inputs = body.get("inputs", {})
+
+    # Generate a simulated result based on the template
+    result = {
+        "slug": template_slug,
+        "status": "completed",
+        "execution_time": "3.2s",
+        "steps_completed": body.get("step_count", 3),
+        "output": (
+            f"Simulated output for '{template_slug}' with {len(inputs)} input(s). "
+            "Install this workflow and connect your tools to see real results."
+        ),
+        "note": "This is a demo preview - install the workflow for actual execution.",
+    }
+    return ApiResponse(data=result)
+
+
+@router.post("/hub/install/{slug:path}")
+async def install_hub_template(slug: str) -> ApiResponse:
+    """Install a community workflow from the hub registry.
+
+    Downloads the YAML from GitHub and saves it to the community
+    templates directory. Returns the installed template metadata.
+    """
+    # Validate slug format (author/name)
+    if "/" not in slug or len(slug.split("/")) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SLUG",
+                    message="Slug must be in format 'author/name'",
+                )
+            ).model_dump(),
+        )
+
+    # Fetch registry to find the template
+    registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(registry_url)
+            resp.raise_for_status()
+            registry = resp.json()
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="REGISTRY_UNAVAILABLE",
+                    message="Could not fetch community hub registry",
+                )
+            ).model_dump(),
+        )
+
+    # Find template by slug
+    template_meta = None
+    for t in registry.get("templates", []):
+        if t.get("slug") == slug:
+            template_meta = t
+            break
+
+    if template_meta is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Template '{slug}' not found in community hub",
+                )
+            ).model_dump(),
+        )
+
+    download_url = template_meta.get("download_url")
+    if not download_url:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NO_DOWNLOAD_URL",
+                    message=f"No download URL for '{slug}'",
+                )
+            ).model_dump(),
+        )
+
+    # Download the YAML content
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            yaml_resp = await client.get(download_url)
+            yaml_resp.raise_for_status()
+            yaml_content = yaml_resp.text
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="DOWNLOAD_FAILED",
+                    message=f"Failed to download template: {exc}",
+                )
+            ).model_dump(),
+        )
+
+    # Save to community templates directory
+    community_dir = Path(__file__).parent.parent / "templates" / "community"
+    community_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = slug.split("/")[-1] + ".yaml"
+    target_path = community_dir / filename
+
+    # Check if already installed
+    already_existed = target_path.exists()
+    target_path.write_text(yaml_content, encoding="utf-8")
+
+    logger.info("Installed community template '%s' to %s", slug, target_path)
+
+    return ApiResponse(
+        data={
+            "installed": True,
+            "slug": slug,
+            "name": template_meta.get("name", ""),
+            "filename": filename,
+            "path": str(target_path),
+            "updated": already_existed,
+        }
+    )
+
+
+@router.delete("/hub/install/{slug:path}")
+async def uninstall_hub_template(slug: str) -> ApiResponse:
+    """Uninstall a community workflow."""
+    if "/" not in slug or len(slug.split("/")) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SLUG",
+                    message="Slug must be in format 'author/name'",
+                )
+            ).model_dump(),
+        )
+
+    community_dir = Path(__file__).parent.parent / "templates" / "community"
+    filename = slug.split("/")[-1] + ".yaml"
+    target_path = community_dir / filename
+
+    if not target_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Template '{slug}' is not installed",
+                )
+            ).model_dump(),
+        )
+
+    target_path.unlink()
+    return ApiResponse(data={"uninstalled": True, "slug": slug})
+
+
+@router.get("/hub/installed")
+async def list_installed_hub_templates() -> ApiResponse:
+    """List all community templates installed locally."""
+    community_dir = Path(__file__).parent.parent / "templates" / "community"
+    if not community_dir.exists():
+        return ApiResponse(data=[])
+
+    installed = []
+    for yaml_file in sorted(community_dir.glob("*.yaml")):
+        installed.append(
+            {
+                "filename": yaml_file.name,
+                "name": yaml_file.stem.replace("_", " ").replace("-", " ").title(),
+                "size_bytes": yaml_file.stat().st_size,
+            }
+        )
+
+    return ApiResponse(data=installed)
+
+
+@router.get("/workflows/{name}/export")
+async def export_workflow(name: str, request: Request) -> ApiResponse:
+    """Export a saved workflow as sanitized YAML for sharing.
+
+    Removes environment variable references and sensitive data.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(WorkflowVersion)
+            .where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+            )
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        wv = result.scalar_one_or_none()
+        if not wv:
+            raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+
+    # Sanitize the YAML content
+    sanitized = _sanitize_workflow_yaml(wv.yaml_content)
+
+    return ApiResponse(
+        data={
+            "name": wv.workflow_name,
+            "description": wv.description or "",
+            "yaml_content": sanitized,
+            "step_count": wv.steps_count,
+            "version": wv.version,
         }
     )
 
@@ -564,9 +864,7 @@ async def get_stats(request: Request) -> ApiResponse:
         cost_q = _apply_tenant_filter(cost_q, tenant_id, Run.tenant_id)
         total_cost = await session.scalar(cost_q)
 
-        dur_q = select(
-            _duration_seconds_expr()
-        ).where(
+        dur_q = select(_duration_seconds_expr()).where(
             Run.created_at >= today_start,
             Run.completed_at.isnot(None),
             Run.started_at.isnot(None),
@@ -869,7 +1167,7 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
 @router.post("/workflows/run/sync")
 async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow synchronously. Blocks until complete."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -906,9 +1204,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     except ValueError as e:
         raise HTTPException(
             status_code=400,
-            detail=ApiResponse(
-                error=ErrorResponse(code="PLAN_ERROR", message=str(e))
-            ).model_dump(),
+            detail=ApiResponse(error=ErrorResponse(code="PLAN_ERROR", message=str(e))).model_dump(),
         )
 
     # Resolve budget
@@ -1000,7 +1296,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
 @router.post("/workflows/run")
 async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow asynchronously. Returns immediately with run_id."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -1119,13 +1415,9 @@ async def compare_runs(
         raise HTTPException(status_code=400, detail="Invalid run ID format")
 
     async with async_session() as session:
-        stmt_a = (
-            select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_a)
-        )
+        stmt_a = select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_a)
         stmt_a = _apply_tenant_filter(stmt_a, tenant_id, Run.tenant_id)
-        stmt_b = (
-            select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_b)
-        )
+        stmt_b = select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_b)
         stmt_b = _apply_tenant_filter(stmt_b, tenant_id, Run.tenant_id)
 
         result_a = await session.execute(stmt_a)
@@ -1248,10 +1540,7 @@ async def compare_runs(
                 total_cost_usd=db_run_a.total_cost_usd,
                 started_at=db_run_a.started_at,
                 completed_at=db_run_a.completed_at,
-                parent_run_id=(
-                    str(db_run_a.parent_run_id)
-                    if db_run_a.parent_run_id else None
-                ),
+                parent_run_id=(str(db_run_a.parent_run_id) if db_run_a.parent_run_id else None),
             ),
             run_b=RunListItem(
                 run_id=str(db_run_b.id),
@@ -1260,22 +1549,15 @@ async def compare_runs(
                 total_cost_usd=db_run_b.total_cost_usd,
                 started_at=db_run_b.started_at,
                 completed_at=db_run_b.completed_at,
-                parent_run_id=(
-                    str(db_run_b.parent_run_id)
-                    if db_run_b.parent_run_id else None
-                ),
+                parent_run_id=(str(db_run_b.parent_run_id) if db_run_b.parent_run_id else None),
             ),
             total_cost_a=db_run_a.total_cost_usd,
             total_cost_b=db_run_b.total_cost_usd,
-            total_cost_delta=round(
-                db_run_b.total_cost_usd - db_run_a.total_cost_usd, 6
-            ),
+            total_cost_delta=round(db_run_b.total_cost_usd - db_run_a.total_cost_usd, 6),
             total_duration_a=dur_a,
             total_duration_b=dur_b,
             total_duration_delta=(
-                round(dur_b - dur_a, 2)
-                if dur_a is not None and dur_b is not None
-                else None
+                round(dur_b - dur_a, 2) if dur_a is not None and dur_b is not None else None
             ),
             same_workflow=same_workflow,
             steps=step_diffs,
@@ -1374,7 +1656,9 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
                     "sub_workflow_of_step": c.sub_workflow_of_step,
                 }
                 for c in run.children
-            ] if run.children else None,
+            ]
+            if run.children
+            else None,
         )
     )
 
@@ -1392,11 +1676,7 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         raise HTTPException(status_code=400, detail="Invalid run ID format")
 
     async with async_session() as session:
-        stmt = (
-            select(Run)
-            .options(selectinload(Run.steps))
-            .where(Run.id == run_uuid)
-        )
+        stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
         stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
@@ -1455,9 +1735,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
 
         for _ in range(600):  # Max 10 minutes of polling (1s intervals)
             async with async_session() as session:
-                stmt = (
-                    select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
-                )
+                stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
                 result = await session.execute(stmt)
                 run = result.scalar_one_or_none()
 
@@ -1469,11 +1747,14 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
 
             # Emit status change events
             if current_status != last_status:
-                yield _sse_event("status", {
-                    "run_id": str(run.id),
-                    "status": current_status,
-                    "total_cost_usd": run.total_cost_usd,
-                })
+                yield _sse_event(
+                    "status",
+                    {
+                        "run_id": str(run.id),
+                        "status": current_status,
+                        "total_cost_usd": run.total_cost_usd,
+                    },
+                )
                 last_status = current_status
 
             # Emit step update events
@@ -1482,27 +1763,37 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                     step_status = (
                         step.status.value if hasattr(step.status, "value") else step.status
                     )
-                    yield _sse_event("step", {
-                        "step_id": step.step_id,
-                        "parallel_index": step.parallel_index,
-                        "status": step_status,
-                        "cost_usd": step.cost_usd,
-                        "duration_seconds": step.duration_seconds,
-                    })
+                    yield _sse_event(
+                        "step",
+                        {
+                            "step_id": step.step_id,
+                            "parallel_index": step.parallel_index,
+                            "status": step_status,
+                            "cost_usd": step.cost_usd,
+                            "duration_seconds": step.duration_seconds,
+                        },
+                    )
                 last_step_count = len(run.steps)
 
             # Terminal states - emit final result and stop
             if current_status in (
-                "completed", "failed", "partial", "cancelled",
-                "budget_exceeded", "awaiting_approval",
+                "completed",
+                "failed",
+                "partial",
+                "cancelled",
+                "budget_exceeded",
+                "awaiting_approval",
             ):
-                yield _sse_event("result", {
-                    "run_id": str(run.id),
-                    "status": current_status,
-                    "outputs": run.output_data,
-                    "total_cost_usd": run.total_cost_usd,
-                    "error": run.error,
-                })
+                yield _sse_event(
+                    "result",
+                    {
+                        "run_id": str(run.id),
+                        "status": current_status,
+                        "outputs": run.output_data,
+                        "total_cost_usd": run.total_cost_usd,
+                        "error": run.error,
+                    },
+                )
                 return
 
             await asyncio.sleep(1.0)
@@ -1784,7 +2075,7 @@ async def delete_run(run_id: str, req: Request) -> ApiResponse:
 @router.post("/runs/{run_id}/replay")
 async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiResponse:
     """Replay a run from a specific step using saved checkpoints."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -1924,7 +2215,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
 @router.post("/runs/{run_id}/fork")
 async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiResponse:
     """Fork a run from a specific step with overrides (prompt, model, etc.)."""
-    execution_limiter.check(req)
+    await execution_limiter.check(req)
     tenant_id = get_tenant_id(req)
 
     try:
@@ -2089,6 +2380,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
     # Validate cron expression before saving
     try:
         from apscheduler.triggers.cron import CronTrigger
+
         CronTrigger.from_crontab(request.cron_expression)
     except (ValueError, KeyError) as e:
         raise HTTPException(
@@ -2221,7 +2513,9 @@ async def list_schedules(
 
 @router.patch("/schedules/{schedule_id}")
 async def update_schedule(
-    schedule_id: str, request: ScheduleUpdateRequest, req: Request,
+    schedule_id: str,
+    request: ScheduleUpdateRequest,
+    req: Request,
 ) -> ApiResponse:
     """Update a schedule (cron, enabled, input_data)."""
     tenant_id = get_tenant_id(req)
@@ -2401,12 +2695,8 @@ async def list_dead_letter(
         # Tenant isolation via join on parent Run
         if settings.auth_required and tenant_id is not None:
             join_cond = DeadLetterItem.run_id == Run.id
-            base = base.join(Run, join_cond).where(
-                Run.tenant_id == tenant_id
-            )
-            count_base = count_base.join(Run, join_cond).where(
-                Run.tenant_id == tenant_id
-            )
+            base = base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
+            count_base = count_base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
 
         if not resolved:
             base = base.where(DeadLetterItem.resolved_at.is_(None))
@@ -2538,7 +2828,8 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
 
 @router.post("/dead-letter/{item_id}/resolve")
 async def resolve_dead_letter(
-    item_id: str, req: Request,
+    item_id: str,
+    req: Request,
     request: DeadLetterResolveRequest | None = None,
 ) -> ApiResponse:
     """Manually resolve a dead letter queue item."""
@@ -2742,9 +3033,7 @@ async def deploy_experiment(experiment_id: str) -> ApiResponse:
             raise HTTPException(
                 status_code=400,
                 detail=ApiResponse(
-                    error=ErrorResponse(
-                        code="NO_SAMPLES", message="No samples to deploy from"
-                    )
+                    error=ErrorResponse(code="NO_SAMPLES", message="No samples to deploy from")
                 ).model_dump(),
             )
 
@@ -2792,9 +3081,40 @@ async def reset_experiment(experiment_id: str) -> ApiResponse:
         experiment.status = ExperimentStatus.RUNNING
         experiment.deployed_variant_id = None
         experiment.completed_at = None
+        experiment.rollout_stage = None
         await session.commit()
 
     return ApiResponse(data={"reset": True, "experiment_id": experiment_id})
+
+
+@router.post("/autopilot/experiments/{experiment_id}/advance-rollout")
+async def advance_experiment_rollout(experiment_id: str) -> ApiResponse:
+    """Advance a deploying experiment to the next rollout stage."""
+    try:
+        exp_uuid = uuid.UUID(experiment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid experiment ID")
+            ).model_dump(),
+        )
+
+    from sandcastle.engine.autopilot import advance_rollout
+
+    result = await advance_rollout(exp_uuid)
+    if result is None:
+        raise HTTPException(
+            status_code=409,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_STATE",
+                    message="Experiment is not in deploying state",
+                )
+            ).model_dump(),
+        )
+
+    return ApiResponse(data=result)
 
 
 @router.get("/autopilot/stats")
@@ -2807,6 +3127,12 @@ async def autopilot_stats() -> ApiResponse:
                 AutoPilotExperiment.status == ExperimentStatus.RUNNING
             )
         )
+        # Count deploying experiments separately
+        deploying = await session.scalar(
+            select(func.count(AutoPilotExperiment.id)).where(
+                AutoPilotExperiment.status == ExperimentStatus.DEPLOYING
+            )
+        )
         completed = await session.scalar(
             select(func.count(AutoPilotExperiment.id)).where(
                 AutoPilotExperiment.status == ExperimentStatus.COMPLETED
@@ -2814,12 +3140,64 @@ async def autopilot_stats() -> ApiResponse:
         )
         total_samples = await session.scalar(select(func.count(AutoPilotSample.id)))
 
+        # Calculate actual quality improvement and cost savings
+        avg_quality_improvement = 0.0
+        total_cost_savings = 0.0
+
+        completed_exps_q = select(AutoPilotExperiment).where(
+            AutoPilotExperiment.status == ExperimentStatus.COMPLETED,
+            AutoPilotExperiment.deployed_variant_id.is_not(None),
+        )
+        completed_exps = (await session.execute(completed_exps_q)).scalars().all()
+
+        improvements = []
+        for exp in completed_exps:
+            # Get per-variant stats for this experiment
+            variant_stats_q = (
+                select(
+                    AutoPilotSample.variant_id,
+                    func.avg(AutoPilotSample.quality_score).label("avg_quality"),
+                    func.avg(AutoPilotSample.cost_usd).label("avg_cost"),
+                )
+                .where(AutoPilotSample.experiment_id == exp.id)
+                .group_by(AutoPilotSample.variant_id)
+            )
+            rows = (await session.execute(variant_stats_q)).all()
+            stats_map = {r.variant_id: r for r in rows}
+
+            winner = stats_map.get(exp.deployed_variant_id)
+            if not winner:
+                continue
+
+            # Baseline = first non-winner variant
+            baseline_quality = 0.0
+            baseline_cost = 0.0
+            for vid, s in stats_map.items():
+                if vid != exp.deployed_variant_id:
+                    baseline_quality = float(s.avg_quality or 0)
+                    baseline_cost = float(s.avg_cost or 0)
+                    break
+
+            winner_quality = float(winner.avg_quality or 0)
+            winner_cost = float(winner.avg_cost or 0)
+
+            if baseline_quality > 0:
+                improvements.append((winner_quality - baseline_quality) / baseline_quality)
+            if baseline_cost > 0:
+                total_cost_savings += (baseline_cost - winner_cost) * (total_samples or 0)
+
+        if improvements:
+            avg_quality_improvement = sum(improvements) / len(improvements)
+
     return ApiResponse(
         data=AutoPilotStatsResponse(
             total_experiments=total or 0,
-            active_experiments=active or 0,
+            active_experiments=(active or 0) + (deploying or 0),
+            deploying_experiments=deploying or 0,
             completed_experiments=completed or 0,
             total_samples=total_samples or 0,
+            avg_quality_improvement=round(avg_quality_improvement, 4),
+            total_cost_savings_usd=round(total_cost_savings, 2),
         )
     )
 
@@ -3012,9 +3390,7 @@ async def approve_approval(
             await session.commit()
 
     # Resume the workflow
-    await _resume_after_approval(
-        approval, output_data=response_data or {"approved": True}
-    )
+    await _resume_after_approval(approval, output_data=response_data or {"approved": True})
 
     return ApiResponse(
         data={"approved": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
@@ -3246,6 +3622,8 @@ async def list_api_keys(
             name=k.name,
             is_active=k.is_active,
             max_cost_per_run_usd=k.max_cost_per_run_usd,
+            expires_at=k.expires_at,
+            allowed_cidrs=k.allowed_cidrs,
             created_at=k.created_at,
             last_used_at=k.last_used_at,
         )
@@ -3427,12 +3805,16 @@ async def violations_stats(request: Request) -> ApiResponse:
         by_policy = {row.policy_id: row.count for row in pol_rows}
 
         # By day (last 30 days)
-        day_q = _base_filter(
-            select(
-                _trunc_day(PolicyViolation.created_at).label("day"),
-                func.count(PolicyViolation.id).label("count"),
+        day_q = (
+            _base_filter(
+                select(
+                    _trunc_day(PolicyViolation.created_at).label("day"),
+                    func.count(PolicyViolation.id).label("count"),
+                )
             )
-        ).group_by("day").order_by("day")
+            .group_by("day")
+            .order_by("day")
+        )
         day_rows = (await session.execute(day_q)).all()
         by_day = []
         for row in day_rows:
@@ -3570,6 +3952,8 @@ async def get_run_routing_decisions(run_id: str, request: Request) -> ApiRespons
 @router.get("/optimizer/stats")
 async def optimizer_stats(request: Request) -> ApiResponse:
     """Get optimizer overview statistics."""
+    from sandcastle.engine.optimizer import get_optimizer
+
     tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
     thirty_days_ago = now - timedelta(days=30)
@@ -3603,13 +3987,77 @@ async def optimizer_stats(request: Request) -> ApiResponse:
         conf_q = _base(select(func.avg(RoutingDecision.confidence)))
         avg_conf = await session.scalar(conf_q)
 
+        # Calculate actual savings: compare selected cost vs default (most expensive) model
+        estimated_savings = 0.0
+        decisions_q = _base(select(RoutingDecision)).limit(1000)  # Cap at 1000 for performance
+        decisions_result = await session.execute(decisions_q)
+        for dec in decisions_result.scalars().all():
+            alts = dec.alternatives or []
+            if not alts:
+                continue
+            # Find the most expensive alternative (what would have been used without optimizer)
+            max_cost = 0.0
+            selected_cost = 0.0
+            for alt in alts:
+                cost = alt.get("avg_cost") or 0
+                if alt.get("id") == "thorough" or alt.get("model") == "opus":
+                    max_cost = max(max_cost, cost)
+                if alt.get("model") == dec.selected_model:
+                    selected_cost = cost
+            # Default baseline: most expensive model in pool
+            if max_cost == 0:
+                max_cost = max((a.get("avg_cost") or 0) for a in alts) if alts else 0
+            if max_cost > selected_cost:
+                estimated_savings += max_cost - selected_cost
+
+    optimizer = get_optimizer()
+    active_alerts = len(optimizer.get_recent_alerts())
+
     return ApiResponse(
         data=OptimizerStatsResponse(
             total_decisions_30d=total or 0,
             model_distribution=model_dist,
             avg_confidence=round(float(avg_conf or 0), 3),
+            estimated_savings_30d_usd=round(estimated_savings, 2),
+            active_alerts=active_alerts,
         )
     )
+
+
+@router.get("/optimizer/alerts")
+async def optimizer_alerts() -> ApiResponse:
+    """Get recent model degradation alerts."""
+    from sandcastle.engine.optimizer import get_optimizer
+
+    optimizer = get_optimizer()
+    alerts = optimizer.get_recent_alerts(limit=50)
+
+    return ApiResponse(
+        data=[
+            {
+                "model": a.model,
+                "step_id": a.step_id,
+                "workflow_name": a.workflow_name,
+                "metric": a.metric,
+                "current_value": round(a.current_value, 4),
+                "threshold": round(a.threshold, 4),
+                "severity": a.severity,
+                "recommended_action": a.recommended_action,
+                "detected_at": a.detected_at,
+            }
+            for a in alerts
+        ]
+    )
+
+
+@router.delete("/optimizer/alerts")
+async def clear_optimizer_alerts() -> ApiResponse:
+    """Clear all degradation alerts."""
+    from sandcastle.engine.optimizer import get_optimizer
+
+    optimizer = get_optimizer()
+    count = optimizer.clear_alerts()
+    return ApiResponse(data={"cleared": count})
 
 
 # --- API Keys ---
@@ -3649,15 +4097,141 @@ async def deactivate_api_key(key_id: str, request: Request) -> ApiResponse:
     return ApiResponse(data={"deactivated": True, "id": key_id})
 
 
+@router.post("/api-keys/{key_id}/rotate")
+async def rotate_api_key(
+    key_id: str, body: ApiKeyRotateRequest, req: Request
+) -> ApiResponse:
+    """Rotate an API key. Creates a new key and sets expiry on the old one. Admin only."""
+    _require_admin(req)
+
+    grace_hours = body.grace_period_hours or settings.key_rotation_grace_hours
+
+    try:
+        key_uuid = uuid.UUID(key_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid key ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        old_key = await session.get(ApiKey, key_uuid)
+        if not old_key or not old_key.is_active:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="API key not found or inactive")
+                ).model_dump(),
+            )
+
+        # Set expiry on old key
+        old_expires_at = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
+        old_key.expires_at = old_expires_at
+
+        # Generate new key
+        plaintext_key = generate_api_key()
+        key_hash_value = hash_key(plaintext_key)
+        new_db_key = ApiKey(
+            key_hash=key_hash_value,
+            key_prefix=plaintext_key[:8],
+            tenant_id=old_key.tenant_id,
+            name=old_key.name,
+            max_cost_per_run_usd=old_key.max_cost_per_run_usd,
+            allowed_cidrs=old_key.allowed_cidrs,
+            rotated_from_id=old_key.id,
+        )
+        session.add(new_db_key)
+        await session.commit()
+        await session.refresh(new_db_key)
+
+    return ApiResponse(
+        data=ApiKeyRotateResponse(
+            new_key=plaintext_key,
+            new_key_id=str(new_db_key.id),
+            old_key_id=key_id,
+            old_key_expires_at=old_expires_at,
+            grace_period_hours=grace_hours,
+        )
+    )
+
+
+@router.put("/api-keys/{key_id}/allowlist")
+async def update_api_key_allowlist(
+    key_id: str, body: ApiKeyAllowlistRequest, req: Request
+) -> ApiResponse:
+    """Update the IP allowlist for an API key. Admin only."""
+    import ipaddress
+
+    _require_admin(req)
+
+    try:
+        key_uuid = uuid.UUID(key_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid key ID format")
+            ).model_dump(),
+        )
+
+    # Validate all CIDRs
+    for cidr in body.cidrs:
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_CIDR",
+                        message=f"Invalid CIDR notation: {cidr}",
+                    )
+                ).model_dump(),
+            )
+
+    async with async_session() as session:
+        db_key = await session.get(ApiKey, key_uuid)
+        if not db_key or not db_key.is_active:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="API key not found or inactive")
+                ).model_dump(),
+            )
+
+        db_key.allowed_cidrs = body.cidrs if body.cidrs else None
+        await session.commit()
+        await session.refresh(db_key)
+
+    return ApiResponse(
+        data=ApiKeyResponse(
+            id=str(db_key.id),
+            key_prefix=db_key.key_prefix,
+            tenant_id=db_key.tenant_id,
+            name=db_key.name,
+            is_active=db_key.is_active,
+            max_cost_per_run_usd=db_key.max_cost_per_run_usd,
+            expires_at=db_key.expires_at,
+            allowed_cidrs=db_key.allowed_cidrs,
+            created_at=db_key.created_at,
+            last_used_at=db_key.last_used_at,
+        )
+    )
+
+
 # --- Settings ---
 
-_SENSITIVE_KEYS = frozenset({
-    "anthropic_api_key",
-    "e2b_api_key",
-    "database_url",
-    "redis_url",
-    "webhook_secret",
-})
+_SENSITIVE_KEYS = frozenset(
+    {
+        "anthropic_api_key",
+        "e2b_api_key",
+        "database_url",
+        "redis_url",
+        "webhook_secret",
+    }
+)
 
 
 def _mask(value: str) -> str:
@@ -3720,7 +4294,8 @@ async def get_settings(req: Request) -> ApiResponse:
 
 @router.patch("/settings")
 async def update_settings(
-    request: SettingsUpdateRequest, req: Request,
+    request: SettingsUpdateRequest,
+    req: Request,
 ) -> ApiResponse:
     """Update server settings and persist to database."""
     _require_admin(req)
@@ -3760,15 +4335,14 @@ async def update_settings(
             )
 
     # Collect non-None updates
-    updates = {
-        k: v
-        for k, v in request.model_dump().items()
-        if v is not None
-    }
+    updates = {k: v for k, v in request.model_dump().items() if v is not None}
 
     # Block mutation of security-critical settings via API
     immutable = {
-        "auth_required", "webhook_secret", "database_url", "redis_url",
+        "auth_required",
+        "webhook_secret",
+        "database_url",
+        "redis_url",
         "dashboard_origin",  # CORS origins are built at startup; runtime changes have no effect
     }
     blocked = immutable & updates.keys()
@@ -3805,9 +4379,7 @@ async def update_settings(
 
     # Special handling: update root logger level
     if request.log_level is not None:
-        logging.getLogger().setLevel(
-            getattr(logging, request.log_level.upper())
-        )
+        logging.getLogger().setLevel(getattr(logging, request.log_level.upper()))
 
     logger.info(f"Settings updated: {list(updates.keys())}")
     return ApiResponse(data=_build_settings_response())
@@ -3975,10 +4547,12 @@ async def promote_workflow(name: str, request: WorkflowPromoteRequest) -> ApiRes
                 select(WorkflowVersion)
                 .where(
                     WorkflowVersion.workflow_name == name,
-                    WorkflowVersion.status.in_([
-                        WorkflowVersionStatus.STAGING,
-                        WorkflowVersionStatus.DRAFT,
-                    ]),
+                    WorkflowVersion.status.in_(
+                        [
+                            WorkflowVersionStatus.STAGING,
+                            WorkflowVersionStatus.DRAFT,
+                        ]
+                    ),
                 )
                 .order_by(
                     # Prefer staging over draft
@@ -4189,27 +4763,35 @@ async def _get_tool_connections(tool_name: str) -> list[ToolConnectionResponse]:
         )
         rows = result.scalars().all()
     from sandcastle.engine.tools.registry import get_tool as _get_tool
+
     try:
         tool = _get_tool(tool_name)
     except KeyError:
         return []
+    from sandcastle.engine.crypto import decrypt_credentials
+
     required_vars = set(tool.credential_env_vars)
     connections: list[ToolConnectionResponse] = []
     for row in rows:
-        present = [k for k in required_vars if row.credentials.get(k)]
-        missing = [k for k in required_vars if not row.credentials.get(k)]
-        connections.append(ToolConnectionResponse(
-            name=row.connection_name,
-            tool_name=row.tool_name,
-            credentials_configured=sorted(present),
-            credentials_missing=sorted(missing),
-            created_at=row.created_at,
-        ))
+        creds = decrypt_credentials(row.credentials)
+        present = [k for k in required_vars if creds.get(k)]
+        missing = [k for k in required_vars if not creds.get(k)]
+        connections.append(
+            ToolConnectionResponse(
+                name=row.connection_name,
+                tool_name=row.tool_name,
+                credentials_configured=sorted(present),
+                credentials_missing=sorted(missing),
+                created_at=row.created_at,
+            )
+        )
     return connections
 
 
 async def _build_tool_response(
-    tool, status: dict, connections: list[ToolConnectionResponse] | None = None,
+    tool,
+    status: dict,
+    connections: list[ToolConnectionResponse] | None = None,
 ) -> ToolResponse:
     """Build a ToolResponse from a ToolDefinition, cred status, and connections."""
     return ToolResponse(
@@ -4218,7 +4800,9 @@ async def _build_tool_response(
         category=tool.category,
         functions=[
             ToolFunctionResponse(
-                name=f.name, description=f.description, parameters=f.parameters,
+                name=f.name,
+                description=f.description,
+                parameters=f.parameters,
             )
             for f in tool.functions
         ],
@@ -4234,8 +4818,8 @@ async def _build_tool_response(
 @router.get("/tools")
 async def list_tools(category: str | None = Query(None)) -> ApiResponse:
     """List all available tool connectors with credential status."""
-    from sandcastle.engine.tools.registry import list_tools as _list_tools
     from sandcastle.engine.tools.credentials import validate_tool_credentials
+    from sandcastle.engine.tools.registry import list_tools as _list_tools
 
     tools = _list_tools(category=category)
     tool_names = [t.name for t in tools]
@@ -4246,25 +4830,32 @@ async def list_tools(category: str | None = Query(None)) -> ApiResponse:
     async with async_session() as session:
         result = await session.execute(select(ToolConnection))
         rows = result.scalars().all()
+    from sandcastle.engine.crypto import decrypt_credentials
+
     for row in rows:
         all_connections.setdefault(row.tool_name, [])
         tool_def = next((t for t in tools if t.name == row.tool_name), None)
         required_vars = set(tool_def.credential_env_vars) if tool_def else set()
-        present = [k for k in required_vars if row.credentials.get(k)]
-        missing = [k for k in required_vars if not row.credentials.get(k)]
-        all_connections[row.tool_name].append(ToolConnectionResponse(
-            name=row.connection_name,
-            tool_name=row.tool_name,
-            credentials_configured=sorted(present),
-            credentials_missing=sorted(missing),
-            created_at=row.created_at,
-        ))
+        creds = decrypt_credentials(row.credentials)
+        present = [k for k in required_vars if creds.get(k)]
+        missing = [k for k in required_vars if not creds.get(k)]
+        all_connections[row.tool_name].append(
+            ToolConnectionResponse(
+                name=row.connection_name,
+                tool_name=row.tool_name,
+                credentials_configured=sorted(present),
+                credentials_missing=sorted(missing),
+                created_at=row.created_at,
+            )
+        )
 
     result_list = []
     for tool in tools:
         status = cred_status.get(tool.name, {})
         resp = await _build_tool_response(
-            tool, status, all_connections.get(tool.name, []),
+            tool,
+            status,
+            all_connections.get(tool.name, []),
         )
         result_list.append(resp)
 
@@ -4274,8 +4865,8 @@ async def list_tools(category: str | None = Query(None)) -> ApiResponse:
 @router.get("/tools/{tool_name}")
 async def get_tool(tool_name: str) -> ApiResponse:
     """Get details of a specific tool connector."""
-    from sandcastle.engine.tools.registry import get_tool as _get_tool
     from sandcastle.engine.tools.credentials import validate_tool_credentials
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
 
     try:
         tool = _get_tool(tool_name)
@@ -4290,12 +4881,14 @@ async def get_tool(tool_name: str) -> ApiResponse:
 
 @router.put("/tools/{tool_name}/credentials")
 async def update_tool_credentials(
-    tool_name: str, body: ToolCredentialUpdateRequest, req: Request,
+    tool_name: str,
+    body: ToolCredentialUpdateRequest,
+    req: Request,
 ) -> ApiResponse:
     """Save or update credentials for a specific tool connector."""
     _require_admin(req)
-    from sandcastle.engine.tools.registry import get_tool as _get_tool
     from sandcastle.engine.tools.credentials import validate_tool_credentials
+    from sandcastle.engine.tools.registry import get_tool as _get_tool
 
     try:
         tool = _get_tool(tool_name)
@@ -4311,7 +4904,10 @@ async def update_tool_credentials(
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_CREDENTIALS",
-                    message=f"Unknown credential keys for {tool_name}: {', '.join(sorted(rejected))}",
+                    message=(
+                        f"Unknown credential keys for {tool_name}:"
+                        f" {', '.join(sorted(rejected))}"
+                    ),
                 )
             ).model_dump(),
         )
@@ -4357,7 +4953,9 @@ async def list_tool_connections(tool_name: str) -> ApiResponse:
 
 @router.post("/tools/{tool_name}/connections")
 async def create_tool_connection(
-    tool_name: str, body: ToolConnectionCreateRequest, req: Request,
+    tool_name: str,
+    body: ToolConnectionCreateRequest,
+    req: Request,
 ) -> ApiResponse:
     """Create a named connection for a tool."""
     _require_admin(req)
@@ -4377,7 +4975,10 @@ async def create_tool_connection(
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_CREDENTIALS",
-                    message=f"Unknown credential keys for {tool_name}: {', '.join(sorted(rejected))}",
+                    message=(
+                        f"Unknown credential keys for {tool_name}:"
+                        f" {', '.join(sorted(rejected))}"
+                    ),
                 )
             ).model_dump(),
         )
@@ -4401,31 +5002,41 @@ async def create_tool_connection(
                 ).model_dump(),
             )
 
+        from sandcastle.engine.crypto import encrypt_credentials
+
         conn = ToolConnection(
             tool_name=tool_name,
             connection_name=body.name,
-            credentials=body.credentials,
+            credentials=encrypt_credentials(body.credentials),
         )
         session.add(conn)
         await session.commit()
         await session.refresh(conn)
 
-    required_vars = set(tool.credential_env_vars)
-    present = [k for k in required_vars if conn.credentials.get(k)]
-    missing = [k for k in required_vars if not conn.credentials.get(k)]
+    from sandcastle.engine.crypto import decrypt_credentials
 
-    return ApiResponse(data=ToolConnectionResponse(
-        name=conn.connection_name,
-        tool_name=conn.tool_name,
-        credentials_configured=sorted(present),
-        credentials_missing=sorted(missing),
-        created_at=conn.created_at,
-    ))
+    required_vars = set(tool.credential_env_vars)
+    creds = decrypt_credentials(conn.credentials)
+    present = [k for k in required_vars if creds.get(k)]
+    missing = [k for k in required_vars if not creds.get(k)]
+
+    return ApiResponse(
+        data=ToolConnectionResponse(
+            name=conn.connection_name,
+            tool_name=conn.tool_name,
+            credentials_configured=sorted(present),
+            credentials_missing=sorted(missing),
+            created_at=conn.created_at,
+        )
+    )
 
 
 @router.put("/tools/{tool_name}/connections/{conn_name}")
 async def update_tool_connection(
-    tool_name: str, conn_name: str, body: ToolConnectionUpdateRequest, req: Request,
+    tool_name: str,
+    conn_name: str,
+    body: ToolConnectionUpdateRequest,
+    req: Request,
 ) -> ApiResponse:
     """Update credentials for a named connection."""
     _require_admin(req)
@@ -4444,7 +5055,10 @@ async def update_tool_connection(
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_CREDENTIALS",
-                    message=f"Unknown credential keys for {tool_name}: {', '.join(sorted(rejected))}",
+                    message=(
+                        f"Unknown credential keys for {tool_name}:"
+                        f" {', '.join(sorted(rejected))}"
+                    ),
                 )
             ).model_dump(),
         )
@@ -4460,29 +5074,38 @@ async def update_tool_connection(
         if not conn:
             raise HTTPException(404, f"Connection '{conn_name}' not found for {tool_name}")
 
-        # Merge new credentials into existing
-        merged = dict(conn.credentials)
+        from sandcastle.engine.crypto import decrypt_credentials, encrypt_credentials
+
+        # Merge new credentials into existing (decrypt first)
+        merged = dict(decrypt_credentials(conn.credentials))
         merged.update(body.credentials)
-        conn.credentials = merged
+        conn.credentials = encrypt_credentials(merged)
         await session.commit()
         await session.refresh(conn)
 
-    required_vars = set(tool.credential_env_vars)
-    present = [k for k in required_vars if conn.credentials.get(k)]
-    missing = [k for k in required_vars if not conn.credentials.get(k)]
+    from sandcastle.engine.crypto import decrypt_credentials as _dc
 
-    return ApiResponse(data=ToolConnectionResponse(
-        name=conn.connection_name,
-        tool_name=conn.tool_name,
-        credentials_configured=sorted(present),
-        credentials_missing=sorted(missing),
-        created_at=conn.created_at,
-    ))
+    required_vars = set(tool.credential_env_vars)
+    creds = _dc(conn.credentials)
+    present = [k for k in required_vars if creds.get(k)]
+    missing = [k for k in required_vars if not creds.get(k)]
+
+    return ApiResponse(
+        data=ToolConnectionResponse(
+            name=conn.connection_name,
+            tool_name=conn.tool_name,
+            credentials_configured=sorted(present),
+            credentials_missing=sorted(missing),
+            created_at=conn.created_at,
+        )
+    )
 
 
 @router.delete("/tools/{tool_name}/connections/{conn_name}")
 async def delete_tool_connection(
-    tool_name: str, conn_name: str, req: Request,
+    tool_name: str,
+    conn_name: str,
+    req: Request,
 ) -> ApiResponse:
     """Delete a named connection."""
     _require_admin(req)
@@ -4521,7 +5144,6 @@ async def run_eval_suite_endpoint(body: EvalSuiteRunRequest) -> ApiResponse:
     from sandcastle.engine.eval import (
         parse_eval_suite_string,
         run_eval_suite,
-        save_eval_run,
     )
 
     try:
@@ -4582,6 +5204,7 @@ async def run_eval_suite_endpoint(body: EvalSuiteRunRequest) -> ApiResponse:
             run.completed_at = completed_at
 
             from sandcastle.models.db import EvalCaseResult as EvalCaseResultModel
+
             for cr in result.cases:
                 assertion_data = [
                     {
@@ -4594,17 +5217,19 @@ async def run_eval_suite_endpoint(body: EvalSuiteRunRequest) -> ApiResponse:
                     }
                     for ar in cr.assertions
                 ]
-                session.add(EvalCaseResultModel(
-                    eval_run_id=eval_run_id,
-                    case_name=cr.name,
-                    passed=cr.passed,
-                    run_id=uuid.UUID(cr.run_id) if cr.run_id else None,
-                    cost_usd=cr.cost_usd,
-                    duration_seconds=cr.duration_seconds,
-                    assertions=assertion_data,
-                    output_summary=str(cr.output)[:500] if cr.output else None,
-                    error=cr.error,
-                ))
+                session.add(
+                    EvalCaseResultModel(
+                        eval_run_id=eval_run_id,
+                        case_name=cr.name,
+                        passed=cr.passed,
+                        run_id=uuid.UUID(cr.run_id) if cr.run_id else None,
+                        cost_usd=cr.cost_usd,
+                        duration_seconds=cr.duration_seconds,
+                        assertions=assertion_data,
+                        output_summary=str(cr.output)[:500] if cr.output else None,
+                        error=cr.error,
+                    )
+                )
             await session.commit()
 
     # Build response
@@ -4662,12 +5287,7 @@ async def list_eval_runs(
         count_stmt = select(func.count(EvalRun.id))
         total = await session.scalar(count_stmt)
 
-        stmt = (
-            select(EvalRun)
-            .order_by(EvalRun.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        stmt = select(EvalRun).order_by(EvalRun.created_at.desc()).offset(offset).limit(limit)
         result = await session.execute(stmt)
         items = result.scalars().all()
 
@@ -4733,9 +5353,7 @@ async def get_eval_run(eval_run_id: str) -> ApiResponse:
             run_id=str(cr.run_id) if cr.run_id else None,
             cost_usd=cr.cost_usd,
             duration_seconds=cr.duration_seconds,
-            assertions=[
-                EvalAssertionResponse(**a) for a in (cr.assertions or [])
-            ],
+            assertions=[EvalAssertionResponse(**a) for a in (cr.assertions or [])],
             output_summary=cr.output_summary,
             error=cr.error,
         )
@@ -4771,9 +5389,7 @@ async def eval_stats() -> ApiResponse:
         total_cost = await session.scalar(select(func.sum(EvalRun.total_cost_usd)))
 
         # Last run
-        last_run_stmt = select(EvalRun.completed_at).order_by(
-            EvalRun.created_at.desc()
-        ).limit(1)
+        last_run_stmt = select(EvalRun.completed_at).order_by(EvalRun.created_at.desc()).limit(1)
         last_run_at = await session.scalar(last_run_stmt)
 
         # 30-day pass rate trend
@@ -4821,11 +5437,14 @@ async def eval_stats() -> ApiResponse:
 
 @router.get("/memories")
 async def list_memories(
-    scope_id: str = Query(..., description="Scope ID (e.g. 'workflow:my-wf', 'agent:bot', 'global')"),
+    scope_id: str = Query(
+        ..., description="Scope ID (e.g. 'workflow:my-wf', 'agent:bot', 'global')"
+    ),
     limit: int = Query(50, ge=1, le=200),
 ):
     """List all memories for a given scope."""
     from sandcastle.engine.memory import load_memories
+
     memories = await load_memories(scope_id, limit=limit)
     entries = [MemoryEntry(**m) for m in memories]
     return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
@@ -4835,6 +5454,7 @@ async def list_memories(
 async def add_memory(body: MemoryAddRequest):
     """Add a new memory. Mem0 auto-extracts facts and deduplicates."""
     from sandcastle.engine.memory import save_memory
+
     result = await save_memory(
         scope_id=body.scope_id,
         content=body.content,
@@ -4847,6 +5467,7 @@ async def add_memory(body: MemoryAddRequest):
 async def search_memories(body: MemorySearchRequest):
     """Semantic search over memories."""
     from sandcastle.engine.memory import load_memories
+
     memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
     entries = [MemoryEntry(**m) for m in memories]
     return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
@@ -4856,6 +5477,7 @@ async def search_memories(body: MemorySearchRequest):
 async def remove_memory(memory_id: str):
     """Delete a specific memory by ID."""
     from sandcastle.engine.memory import delete_memory
+
     ok = await delete_memory(memory_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Memory not found or delete failed")
@@ -4868,6 +5490,7 @@ async def remove_all_memories(
 ):
     """Delete all memories for a given scope."""
     from sandcastle.engine.memory import delete_all_memories
+
     ok = await delete_all_memories(scope_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to delete memories")

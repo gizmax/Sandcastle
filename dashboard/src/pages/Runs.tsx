@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { PlayCircle, Trash2, XCircle, Search } from "lucide-react";
+import { PlayCircle, Trash2, XCircle, Search, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
@@ -7,6 +7,7 @@ import { RunsTable } from "@/components/runs/RunsTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { cn } from "@/lib/utils";
 
 const STATUS_OPTIONS = ["all", "queued", "running", "completed", "failed", "partial"];
@@ -24,11 +25,15 @@ export default function Runs() {
   const [bulkAction, setBulkAction] = useState<"delete" | "cancel" | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
+  const [successRate, setSuccessRate] = useState<number | null>(null);
   const limit = 20;
 
   useEffect(() => {
     api.get<WorkflowItem[]>("/workflows").then((res) => {
       if (res.data) setWorkflows(res.data);
+    });
+    api.get<{ success_rate: number }>("/stats").then((res) => {
+      if (res.data) setSuccessRate(res.data.success_rate);
     });
   }, []);
 
@@ -86,6 +91,13 @@ export default function Runs() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Runs</h1>
+
+      {/* Failure rate banner */}
+      {successRate != null && successRate < 0.9 && (
+        <ContextBanner variant={successRate < 0.5 ? "error" : "warning"} icon={AlertTriangle}>
+          {Math.round(successRate * 100)}% success rate today - filter by "failed" to investigate.
+        </ContextBanner>
+      )}
 
       {/* Filters */}
       <div className="space-y-3">

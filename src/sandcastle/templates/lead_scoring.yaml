@@ -30,65 +30,163 @@ steps:
       Use the Salesforce tool:
         node /home/user/tools/salesforce.mjs query_leads '{input.lead_source}' 30
 
-      Return the list of leads with name, company, title, email, and creation date.
+      For each lead, capture ALL available Salesforce fields:
+      - Identity: full name, email, phone, company, title, department
+      - Source tracking: lead source, source detail, campaign, referrer
+      - Engagement data: last activity date, number of activities, email opt-in status
+      - Behavioral data (if available from Salesforce): page views, content downloads,
+        webinar registrations, demo requests, pricing page visits
+      - CRM metadata: created date, last modified, owner, status, existing score
+
+      Also fetch any related Campaign Member records to understand marketing touchpoints.
+      If the lead has an associated Account, note whether it is a new logo or existing customer.
+
+      Return the full list with a data_completeness flag per lead (complete/partial/minimal).
     model: haiku
     max_turns: 5
 
   - id: enrich-data
     depends_on: [fetch-leads]
     prompt: |
-      Research and enrich these leads with additional company data:
+      Research and enrich these leads with comprehensive company and contact intelligence:
 
       Leads: {steps.fetch-leads.output}
       Minimum company size filter: {input.min_company_size} employees
 
-      For each lead, research:
-      1. Company size (employees) and revenue estimate
-      2. Industry and sub-industry
-      3. Recent funding or growth signals
-      4. Technology stack (if available)
-      5. Any relevant news in the past 90 days
+      FIRMOGRAPHIC ENRICHMENT (per company):
+      - Employee count (exact or range) and 12-month headcount trend (% change)
+      - Revenue estimate (ARR or annual) and growth rate
+      - Industry vertical and NAICS/SIC code for precise classification
+      - Headquarters, office locations, and geographic footprint
+      - Company stage: startup (<50 emp), scaleup (50-500), mid-market (500-5000), enterprise (5000+)
+      - Founded year and ownership type (private, PE-backed, public, subsidiary)
 
-      Filter out companies below the minimum size threshold.
-      Return enriched data as structured JSON.
+      FUNDING AND FINANCIAL SIGNALS:
+      - All known funding rounds with dates, amounts, and investors
+      - Total funding raised, estimated runway, IPO/acquisition signals
+      - Recent financial events: layoffs, restructuring, new market entry
+
+      TECHNOGRAPHIC PROFILING:
+      - Current technology stack relevant to our solution space
+      - Competitor products in use (check job postings, review sites, tech directories)
+      - Technology hiring patterns as proxy for stack evolution
+      - IT budget indicators (cloud spend signals, vendor diversity)
+
+      GROWTH SIGNALS (weighted by recency):
+      - Hiring velocity: total open roles, department breakdown, growth rate vs 3 months ago
+      - Office expansion or new location announcements
+      - Product launches, major releases, or new business lines
+      - Executive changes signaling strategic shifts (new CTO, VP Eng, CIO)
+      - Conference sponsorships, speaking engagements, community activity
+
+      DISQUALIFICATION FILTERS:
+      - Filter out companies below {input.min_company_size} employees
+      - Flag companies showing contraction signals (layoffs, office closures, negative news)
+      - Flag companies already in our CRM as customers or active opportunities
+      - Flag companies in industries we cannot serve (sanctions, compliance restrictions)
+
+      Return enriched data as structured JSON. Mark each data point with source
+      and freshness (how recent the information is).
     model: sonnet
     max_turns: 10
 
   - id: score-leads
     depends_on: [enrich-data]
     prompt: |
-      Score each enriched lead on a 1-100 scale:
+      Score each enriched lead using a multi-dimensional scoring model.
 
       Enriched leads: {steps.enrich-data.output}
 
-      Scoring criteria:
-      - Company fit (size, industry, tech stack): 0-30 points
-      - Role relevance (decision maker, influencer, end user): 0-25 points
-      - Timing signals (funding, growth, hiring): 0-25 points
-      - Engagement potential (reachability, mutual connections): 0-20 points
+      DIMENSION 1 - FIT SCORE (0-35 points) - How well does this lead match our ICP?
+      - Company size match: 0-10 (exact ICP range = 10, adjacent = 6, outside = 2)
+      - Industry match: 0-8 (target vertical = 8, adjacent = 5, non-target = 1)
+      - Technology stack compatibility: 0-8 (uses complementary tech = 8, competitor = 3, unknown = 4)
+      - Role/title relevance: 0-9 (decision maker = 9, influencer = 6, end user = 3, unknown = 1)
 
-      Classify as:
-      - Hot (80-100): Immediate outreach
-      - Warm (50-79): Nurture sequence
-      - Cold (0-49): Monitor only
+      DIMENSION 2 - BEHAVIORAL SCORE (0-30 points) - What engagement signals exist?
+      - Website activity (page views, pricing page visit): 0-8
+        * Pricing page visit in last 7 days: +8, last 30 days: +5, none: 0
+      - Content engagement (downloads, webinar attendance): 0-7
+        * Multiple content downloads: +7, single: +4, none: 0
+      - Email engagement (opens, clicks in last 30 days): 0-5
+        * Multiple clicks: +5, opens only: +2, no engagement: 0
+      - Meeting/demo interactions: 0-10
+        * Demo completed: +10, demo scheduled: +7, meeting requested: +5, none: 0
 
-      Return JSON array: lead_name, company, score, classification, score_breakdown, recommended_action.
+      DIMENSION 3 - TIMING/INTENT SCORE (0-20 points) - Are the stars aligning?
+      - Recent funding (last 6 months): +8
+      - Active hiring in relevant departments (last 30 days): +6
+      - Competitor contract likely up for renewal: +5
+      - New executive hire in buying role (last 90 days): +4
+      - Negative signals: recent layoffs (-5), funding drought (-3)
+
+      DIMENSION 4 - ENGAGEMENT POTENTIAL (0-15 points) - How reachable are they?
+      - Direct email available and verified: +5
+      - Active on LinkedIn (posts/comments weekly): +4
+      - Mutual connections with our team: +3
+      - Attended our events or downloaded our content: +3
+
+      PROPENSITY MODEL ADJUSTMENT:
+      - If the lead's company profile closely matches our 3 best-performing customer
+        segments (based on enrichment data), apply a +5 bonus.
+      - If the lead source historically converts well (e.g., "Referral" > "Web" > "Event"),
+        apply source-based modifier: Referral +5, Demo request +8, Content +2, Event +3, Web 0.
+
+      CLASSIFICATION:
+      - Hot (80-100): Immediate sales outreach within 24 hours. Assign to senior AE.
+      - Warm (60-79): Enter into high-touch nurture sequence. SDR qualification call within 3 days.
+      - Cool (40-59): Enter standard nurture sequence. Marketing-driven engagement.
+      - Cold (0-39): Monitor only. Re-score in 30 days or on trigger event.
+
+      Return JSON array per lead: lead_name, company, fit_score, behavioral_score,
+      timing_score, engagement_score, total_score, classification, confidence_level,
+      top_3_scoring_factors, recommended_action, recommended_owner, next_step_deadline.
     model: sonnet
     max_turns: 8
 
   - id: update-crm
     depends_on: [score-leads]
     prompt: |
-      Update the Salesforce lead records with scoring results:
+      Update the Salesforce lead records with comprehensive scoring results:
 
       Scored leads: {steps.score-leads.output}
 
       For each lead, use the Salesforce tool to update the record:
         node /home/user/tools/salesforce.mjs update_lead '<lead_id>' '<score>' '<classification>'
 
-      Set the lead score field, add a note with the scoring breakdown,
-      and move Hot leads to the "Qualified" status.
+      CRM UPDATES BY CLASSIFICATION:
 
-      Report the update results for each lead.
+      HOT LEADS (80-100):
+      - Set Lead Score field to the total score
+      - Update Lead Status to "Qualified"
+      - Set Rating to "Hot"
+      - Add a detailed note with full scoring breakdown and recommended outreach angle
+      - Create a Task for the assigned AE: "High-priority lead - outreach within 24h"
+        with due date = tomorrow
+      - If lead source = "Demo Request", create an Event for demo scheduling
+
+      WARM LEADS (60-79):
+      - Set Lead Score and Lead Status to "Working"
+      - Set Rating to "Warm"
+      - Add scoring breakdown note
+      - Create a Task for SDR: "Qualification call within 3 business days"
+      - Enroll in high-touch nurture campaign if available
+
+      COOL LEADS (40-59):
+      - Set Lead Score, keep status as "Open"
+      - Set Rating to "Warm" (Salesforce standard, no "Cool" option)
+      - Add scoring breakdown note
+      - Enroll in standard marketing nurture sequence
+
+      COLD LEADS (0-39):
+      - Set Lead Score, keep status as "Open"
+      - Set Rating to "Cold"
+      - Add brief scoring note with key disqualification reasons
+      - Set a follow-up Task for re-scoring in 30 days
+
+      SUMMARY REPORT:
+      Report a pipeline summary: total leads processed, breakdown by classification,
+      total estimated pipeline value (Hot + Warm), and any leads that failed to update
+      with error details.
     model: haiku
     max_turns: 15

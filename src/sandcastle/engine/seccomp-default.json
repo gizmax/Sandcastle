@@ -1,0 +1,33 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "mount",
+        "umount2",
+        "kexec_load",
+        "kexec_file_load",
+        "keyctl",
+        "add_key",
+        "request_key",
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "reboot",
+        "swapon",
+        "swapoff",
+        "pivot_root",
+        "acct",
+        "settimeofday",
+        "clock_settime",
+        "sethostname",
+        "setdomainname",
+        "unshare",
+        "setns"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    }
+  ]
+}

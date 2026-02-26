@@ -1,4 +1,4 @@
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getPackById } from "@/lib/templatePacks";
 
@@ -8,6 +8,8 @@ interface Template {
   tags: string[];
   step_count: number;
   category?: string | null;
+  source?: "community";
+  author?: string;
 }
 
 const TAG_COLORS = [
@@ -56,6 +58,12 @@ export function TemplateCard({ template, isSelected, onClick }: TemplateCardProp
           <span className="text-sm font-semibold text-foreground">
             {template.name.replace(/_/g, " ")}
           </span>
+          {template.source === "community" && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500">
+              <Globe className="h-2.5 w-2.5" />
+              Community
+            </span>
+          )}
         </div>
         <ArrowRight className="h-4 w-4 text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
@@ -76,9 +84,16 @@ export function TemplateCard({ template, isSelected, onClick }: TemplateCardProp
             </span>
           ))}
         </div>
-        <span className="text-[11px] text-muted-foreground shrink-0 ml-2">
-          {template.step_count} {template.step_count === 1 ? "step" : "steps"}
-        </span>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {template.source === "community" && template.author && (
+            <span className="text-[10px] text-muted-foreground font-mono">
+              @{template.author}
+            </span>
+          )}
+          <span className="text-[11px] text-muted-foreground font-mono">
+            {template.step_count} {template.step_count === 1 ? "step" : "steps"}
+          </span>
+        </div>
       </div>
     </button>
   );

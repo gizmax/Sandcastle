@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { EventStreamProvider } from "@/components/providers/EventStreamProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
@@ -25,6 +26,7 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const IntegrationsPage = lazy(() => import("@/pages/IntegrationsPage"));
 const EvaluationsPage = lazy(() => import("@/pages/EvaluationsPage"));
+const SystemHealthPage = lazy(() => import("@/pages/SystemHealthPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 function NotFound() {
@@ -59,6 +61,7 @@ export default function App() {
 
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
+      <ErrorBoundary>
       <EventStreamProvider>
         <Suspense
           fallback={
@@ -68,6 +71,9 @@ export default function App() {
           }
         >
           <Routes>
+            {/* Onboarding lives outside Layout (full-screen, no sidebar) */}
+            <Route path="/onboarding" element={<Onboarding />} />
+
             <Route element={<Layout />}>
               <Route path="/" element={<Overview />} />
               <Route path="/runs" element={<Runs />} />
@@ -87,12 +93,13 @@ export default function App() {
               <Route path="/dead-letter" element={<DeadLetterPage />} />
               <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/system-health" element={<SystemHealthPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
         </Suspense>
       </EventStreamProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

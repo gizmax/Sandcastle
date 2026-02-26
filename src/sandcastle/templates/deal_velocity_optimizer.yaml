@@ -1,0 +1,230 @@
+# name: Deal Velocity Optimizer
+# description: Analyze pipeline health, score deal risks, recommend actions, and build competitive battle cards to accelerate deal closure
+# tags: [Sales, Pipeline, CRM, Forecasting]
+# category: sales_crm
+
+name: deal-velocity-optimizer
+description: Analyze pipeline health, score deal risks, recommend actions, and build competitive battle cards to accelerate deal closure
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [salesforce]
+
+input_schema:
+  required: ["pipeline_stage"]
+  properties:
+    pipeline_stage:
+      type: string
+      description: "Pipeline stage to focus on (e.g. 'Negotiation', 'Proposal Sent', 'Discovery', or 'All')"
+    min_deal_size:
+      type: number
+      description: "Minimum deal size in USD to include in analysis (default: 10000)"
+      default: 10000
+    crm_source:
+      type: string
+      description: "CRM system to pull pipeline data from (default: 'salesforce')"
+      default: "salesforce"
+
+steps:
+  - id: pipeline-snapshot
+    prompt: |
+      Pull a comprehensive snapshot of the current sales pipeline from {input.crm_source}.
+
+      Use the Salesforce tool to query active opportunities:
+        node /home/user/tools/salesforce.mjs query_opportunities '{input.pipeline_stage}' {input.min_deal_size}
+
+      Filter criteria:
+      - Stage: {input.pipeline_stage} (or all stages if 'All')
+      - Minimum deal value: ${input.min_deal_size}
+      - Status: Open/Active only
+
+      For each deal in the pipeline, retrieve:
+      1. Deal name, ID, and current stage
+      2. Deal amount and expected close date
+      3. Days in current stage and total days in pipeline
+      4. Number of activities in the last 14 days (emails, calls, meetings)
+      5. Last activity date and type
+      6. Deal owner and any secondary contacts
+      7. Competitor mentioned (if tracked)
+      8. Next scheduled activity (if any)
+      9. Number of stakeholders/contacts associated
+      10. Win probability (if CRM-calculated)
+
+      Also pull pipeline-level aggregates:
+      - Total pipeline value by stage
+      - Average deal age by stage
+      - Stage conversion rates for the last quarter
+
+      Return all data as structured JSON with both deal-level and aggregate sections.
+    model: sonnet
+    max_turns: 10
+
+  - id: deal-health-scoring
+    depends_on: [pipeline-snapshot]
+    prompt: |
+      Score the health and velocity of each deal in the pipeline using a multi-factor model.
+
+      Pipeline data: {steps.pipeline-snapshot.output}
+
+      Evaluate each deal across five health dimensions:
+
+      **Engagement Velocity (0-20 points):**
+      - Frequency of buyer interactions in the last 14 days
+      - Trend direction (increasing, steady, declining activity)
+      - Multi-threading depth (number of stakeholders engaged)
+      - Responsiveness (time between our outreach and their responses)
+
+      **Stage Progression (0-20 points):**
+      - Days in current stage vs historical average for similar deals
+      - Whether deal has moved backward at any point
+      - Alignment of stage with expected close date timeline
+      - Completion of stage-specific milestones (demo, technical eval, legal review)
+
+      **Deal Structure (0-20 points):**
+      - Clear decision criteria and process documented
+      - Budget confirmed or still TBD
+      - Authority - access to economic buyer established
+      - Timeline - customer-stated urgency level
+
+      **Competitive Position (0-20 points):**
+      - Known competitors in the deal
+      - Our differentiation strength against those competitors
+      - Customer sentiment toward alternatives
+      - Exclusive access to any evaluation criteria
+
+      **Forecast Reliability (0-20 points):**
+      - Consistency of close date (how many times pushed)
+      - Deal amount stability (increases vs decreases over time)
+      - CRM data completeness (missing fields = lower confidence)
+      - Historical win rate for this owner at this stage
+
+      Calculate a composite Deal Health Score (0-100) for each deal.
+      Classify deals as: Healthy (80+), At Risk (50-79), Critical (25-49), Stalled (<25).
+      Return JSON with per-deal scores, dimension breakdowns, and overall pipeline health grade.
+    model: sonnet
+    max_turns: 10
+
+  - id: risk-identification
+    depends_on: [deal-health-scoring]
+    prompt: |
+      Identify specific risk factors and deal blockers for every at-risk and critical deal.
+
+      Deal health scores: {steps.deal-health-scoring.output}
+      Pipeline snapshot: {steps.pipeline-snapshot.output}
+
+      For each deal scoring below 80 (At Risk, Critical, or Stalled), perform a deep
+      risk analysis:
+
+      1. **Primary Blocker** - The single biggest obstacle preventing this deal from advancing.
+         Be specific (e.g. "No meeting with VP Engineering since Jan 15" not just "lack of engagement").
+
+      2. **Secondary Risks** - Up to 3 additional risk factors that could cause slippage or loss.
+         For each risk, state the evidence from the pipeline data.
+
+      3. **Competitor Threat Level** (High/Medium/Low/Unknown):
+         - Which competitor(s) are involved
+         - What their likely pitch angle is
+         - Where they may have an advantage over us
+
+      4. **Stakeholder Gaps**:
+         - Key personas not yet engaged (economic buyer, technical evaluator, end user champion)
+         - Political dynamics that could block progress
+         - Champion health - is our internal advocate still engaged and empowered
+
+      5. **Timeline Risk**:
+         - Probability the close date holds (High/Medium/Low)
+         - Likely realistic close date based on current velocity
+         - External timing factors (budget cycles, regulatory deadlines, competing projects)
+
+      6. **Deal Loss Probability** - Estimate the chance this deal is lost entirely (0-100%)
+         with a brief rationale.
+
+      Sort deals by total revenue at risk (deal amount x loss probability).
+      Return structured JSON with all risk factors per deal.
+    model: sonnet
+    max_turns: 10
+
+  - id: action-recommendations
+    depends_on: [risk-identification]
+    prompt: |
+      Generate specific, actionable recommendations to accelerate each deal and mitigate risks.
+
+      Risk analysis: {steps.risk-identification.output}
+      Deal health scores: {steps.deal-health-scoring.output}
+      Pipeline snapshot: {steps.pipeline-snapshot.output}
+
+      For each at-risk deal, create a concrete action plan:
+
+      **This Week (Immediate):**
+      - Specific outreach action (who contacts whom, via what channel)
+      - Exact meeting or call to schedule with agenda points
+      - Internal preparation needed (pricing approval, technical resources, exec sponsor)
+      - Information or content to send to the prospect
+
+      **Next 14 Days (Short-term):**
+      - Multi-threading actions to engage additional stakeholders
+      - Competitive differentiation moves (proof points, case studies, ROI analysis to share)
+      - Deal structure adjustments (phased rollout, pilot program, different pricing model)
+      - Internal escalation if needed (when to involve VP Sales or CRO)
+
+      **Deal Acceleration Tactics:**
+      - Urgency creation levers specific to this deal context
+      - Mutual action plan milestones to propose to the buyer
+      - Value engineering or ROI calculation to reinforce business case
+      - Reference customer introduction that matches their industry/use case
+
+      **Exit Criteria** - Define clear signals that would indicate:
+      - The deal is back on track (specific observable actions from the buyer)
+      - The deal should be deprioritized or moved to nurture
+      - The close date should be formally pushed
+
+      Prioritize recommendations by expected impact on deal velocity.
+      Return as structured JSON with action items, owners, and deadlines.
+    model: sonnet
+    max_turns: 10
+
+  - id: battle-card-builder
+    depends_on: [action-recommendations]
+    prompt: |
+      Build competitive battle cards for each deal where a competitor has been identified.
+
+      Action recommendations: {steps.action-recommendations.output}
+      Risk analysis: {steps.risk-identification.output}
+      Pipeline snapshot: {steps.pipeline-snapshot.output}
+
+      For each deal with known competitor involvement, create a sales battle card:
+
+      **Header Section:**
+      - Deal name, value, and stage
+      - Competitor name and their likely product/tier being pitched
+      - Overall competitive threat level
+
+      **Positioning Matrix:**
+      | Category | Us | Competitor | Advantage |
+      - List 5-7 key evaluation criteria the buyer likely cares about
+      - Mark who has the advantage in each category with specific proof points
+
+      **Killer Questions:**
+      - 3-5 questions our sales rep should ask the prospect that expose competitor weaknesses
+      - Frame each question neutrally so it does not appear as a direct attack
+      - Include the expected buyer response and our follow-up talk track
+
+      **Objection Handling:**
+      - Top 3 objections the prospect might raise about us (based on competitor strengths)
+      - A concise, evidence-backed response for each objection
+      - A customer quote or case study reference to reinforce the response
+
+      **Win Theme:**
+      - A single compelling narrative (2-3 sentences) for why we are the better choice
+         for THIS specific prospect given their unique situation and requirements
+
+      **Trap Setting:**
+      - 1-2 technical or business requirements we can encourage the prospect to add
+         to their evaluation criteria that play to our strengths
+
+      Return battle cards as structured JSON, one per deal with competitor involvement.
+      For deals without known competitors, return a brief "no competitor identified" note
+      with a recommendation to probe for competitive alternatives.
+    model: sonnet
+    max_turns: 10

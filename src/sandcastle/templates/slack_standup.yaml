@@ -23,49 +23,150 @@ input_schema:
     lookback_hours:
       type: number
       description: "Hours to look back for messages (default: 24)"
+    sprint_goal:
+      type: string
+      description: "Current sprint goal for alignment tracking (e.g. 'Ship v2.0 checkout flow')"
+    team_members:
+      type: string
+      description: "Comma-separated list of expected team members for missing-update detection"
 
 steps:
   - id: collect-updates
     prompt: |
-      Read the recent messages from the Slack channel {input.standup_channel}.
-      Get messages from the last {input.lookback_hours} hours (default 24 if not specified).
+      You are an engineering team coordinator responsible for collecting
+      daily standup data from Slack. Fetch and organize all standup
+      messages from the specified channel.
+
+      Channel: {input.standup_channel}
+      Lookback period: {input.lookback_hours} hours (default 24 if not specified)
+      Expected team members: {input.team_members}
 
       Use the Slack tool to fetch the messages:
         node /home/user/tools/slack.mjs get_messages '{input.standup_channel}' 50
 
-      Return the raw messages as a JSON array.
+      After fetching, organize the raw data as follows:
+
+      1. Parse each message and identify the author, timestamp, and content.
+      2. Group messages by team member (handle thread replies as continuations).
+      3. For each team member's update, extract:
+         - What they completed yesterday
+         - What they are working on today
+         - Any blockers or issues mentioned
+         - Any @mentions of other team members (indicates collaboration or dependency)
+      4. Flag messages that don't follow standup format (just chat, reactions, etc.)
+         and exclude them from the standup data.
+      5. Identify team members from the expected list who did NOT post an update.
+
+      Return structured JSON with all parsed updates and metadata.
     model: haiku
     max_turns: 5
 
   - id: summarize-standup
     depends_on: [collect-updates]
     prompt: |
-      Analyze these standup messages from {input.standup_channel}:
+      You are a senior engineering manager who synthesizes standup data
+      into actionable intelligence for the team and leadership. Analyze
+      the collected updates and produce a comprehensive standup summary.
 
-      {steps.collect-updates.output}
+      Raw updates: {steps.collect-updates.output}
+      Sprint goal: {input.sprint_goal}
+      Expected team members: {input.team_members}
 
-      Create a concise standup summary with these sections:
-      1. **Completed Yesterday** - what was finished
-      2. **In Progress Today** - what people are working on
-      3. **Blockers** - any blockers or issues mentioned
-      4. **Key Highlights** - notable achievements or decisions
+      Generate the following sections:
 
-      Format using Slack mrkdwn syntax (*bold*, _italic_, bullet points).
-      Keep it brief and actionable.
+      1. SPRINT ALIGNMENT CHECK:
+         - Restate the sprint goal: "{input.sprint_goal}"
+         - For each team member's work today, assess: Aligned / Partially
+           Aligned / Not Aligned with the sprint goal
+         - Calculate alignment percentage (X of Y team members directly
+           working on sprint goal items)
+         - If alignment is below 70%, flag this prominently
+
+      2. COMPLETED YESTERDAY:
+         - Group completed items by project/epic (not by person)
+         - Highlight items that represent milestone completions
+         - Note any items that were completed ahead of or behind schedule
+         - Use checkmark emoji for visual scanning
+
+      3. IN PROGRESS TODAY:
+         - Group by project/epic with owner names
+         - Flag items that have been "in progress" for 3+ consecutive days
+           (potential stall indicator - reference previous standup data if
+           available from context)
+         - Identify parallel work on the same feature (collaboration or
+           potential merge conflict risk)
+
+      4. BLOCKERS & ESCALATION:
+         - List every blocker with severity assessment:
+           - CRITICAL: Blocking multiple people or sprint goal items
+           - HIGH: Blocking one person's primary work
+           - MEDIUM: Slowing progress but workaround exists
+           - LOW: Minor inconvenience, self-resolvable
+         - For CRITICAL and HIGH blockers, suggest specific escalation
+           actions (who to contact, what to unblock, suggested resolution)
+         - Identify CROSS-TEAM DEPENDENCIES: any blockers that require
+           action from people outside this team
+
+      5. TEAM HEALTH SIGNALS:
+         - Sentiment analysis: Scan update language for stress indicators
+           ("struggling with", "frustrated by", "overwhelmed"), positive
+           signals ("excited about", "great progress", "shipped"), or
+           neutral/mechanical updates
+         - Overall team mood: Positive / Neutral / Concerning
+         - Participation rate: X of Y expected members posted (list missing)
+         - Update quality: Are updates specific and actionable, or vague?
+
+      6. PRODUCTIVITY PATTERNS:
+         - Completion velocity: How many items were completed vs. started?
+         - Carryover rate: Items mentioned as "today" yesterday but still
+           "in progress" today (indicates estimation or scope issues)
+         - Collaboration density: How many cross-references between team
+           members' updates? (higher = good teamwork signal)
+
+      Format the entire summary using Slack mrkdwn syntax:
+      - *bold* for headers and important items
+      - Use :white_check_mark: :construction: :octagonal_sign: emojis
+      - Keep each section concise (3-7 bullet points max)
+      - Total summary should be readable in under 60 seconds
     model: sonnet
     max_turns: 5
 
   - id: post-summary
     depends_on: [summarize-standup]
     prompt: |
-      Post the following standup summary to the Slack channel.
-      Use the summary channel if provided: {input.summary_channel}
-      Otherwise post to the standup channel: {input.standup_channel}
+      Post the standup summary to Slack and handle follow-up notifications
+      for blockers and missing updates.
 
-      Summary to post:
-      {steps.summarize-standup.output}
+      Summary to post: {steps.summarize-standup.output}
+      Summary channel: {input.summary_channel}
+      Standup channel: {input.standup_channel}
 
-      Use the Slack tool:
-        node /home/user/tools/slack.mjs send_message '<channel>' '<summary>'
+      Execute the following posting sequence:
+
+      1. POST MAIN SUMMARY: Send the full standup summary to the summary
+         channel (if provided) or the standup channel.
+         Use: node /home/user/tools/slack.mjs send_message '<channel>' '<summary>'
+
+      2. BLOCKER NOTIFICATIONS: If any CRITICAL or HIGH blockers were
+         identified, send a separate focused message to the summary channel
+         formatted as:
+         ":rotating_light: *Blockers Requiring Escalation*"
+         - Blocker description
+         - Blocked team member
+         - Suggested action and owner
+         This ensures blockers don't get buried in the full summary.
+
+      3. MISSING UPDATE REMINDERS: For any team members who didn't post,
+         consider posting a gentle reminder in the standup channel:
+         "Friendly reminder: standup updates help the team stay aligned.
+         @[name] - when you get a chance, please share your update."
+
+      4. THREAD CONTEXT: If the summary is long, post the detailed
+         sections (health signals, productivity patterns) as a thread
+         reply to the main summary to keep the channel clean.
+
+      Use the appropriate Slack channel for each message:
+      - Main summary goes to: {input.summary_channel} (or {input.standup_channel} if not set)
+      - Reminders go to: {input.standup_channel}
     model: haiku
     max_turns: 5

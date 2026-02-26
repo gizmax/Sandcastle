@@ -1,0 +1,652 @@
+# name: QBR Autopilot
+# description: Generate complete Quarterly Business Review packages - pull CRM data, usage metrics, support trends, and renewal status into executive summaries, health scorecards, and strategic recommendations
+# tags: [QBR, Customer Success, CRM, Account Management, Retention]
+# category: sales_crm
+
+name: qbr-autopilot
+description: Generate complete Quarterly Business Review packages - pull CRM data, usage metrics, support trends, and renewal status into executive summaries, health scorecards, and strategic recommendations
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["account_name", "crm_source", "reporting_quarter"]
+  properties:
+    account_name:
+      type: string
+      description: "Name of the customer account for the QBR"
+    crm_source:
+      type: string
+      description: "CRM platform containing account data (e.g., Salesforce, HubSpot, Pipedrive)"
+    reporting_quarter:
+      type: string
+      description: "Quarter under review (e.g., Q1 2026, Q4 2025)"
+    account_tier:
+      type: string
+      description: "Account tier classification for service level expectations"
+      default: "enterprise"
+    csm_name:
+      type: string
+      description: "Customer Success Manager name for personalization"
+
+steps:
+  - id: data-aggregation
+    prompt: |
+      You are a senior data analyst preparing raw data aggregation for a Quarterly Business Review
+      for {input.account_name}. The CRM source is {input.crm_source} and this report covers
+      {input.reporting_quarter}. The account is classified as {input.account_tier} tier.
+      The CSM responsible is {input.csm_name}.
+
+      Your task is to produce a comprehensive, structured data collection brief that maps out every
+      data point needed and simulates the aggregation from multiple enterprise systems. Treat this
+      as if you are pulling data from live integrations and organizing it for downstream analysis.
+
+      Perform the following data aggregation across all relevant systems:
+
+      1. CRM Account Data (from {input.crm_source}):
+         - Account profile: company size, industry vertical, geographic region, contract start date,
+           current contract value (ARR/ACV), payment terms, billing frequency
+         - Contact hierarchy: executive sponsor, day-to-day champion, technical lead, procurement
+           contact, and any recently added or departed stakeholders
+         - Opportunity history: all open opportunities, pipeline value, stage distribution,
+           expected close dates, any stalled deals and their age
+         - Activity log summary: number of meetings (executive vs. operational), emails exchanged,
+           support escalations routed through CRM, last touch date per contact
+         - Account notes and flags: any CSM notes, risk flags, executive alerts, or special
+           handling instructions recorded in {input.crm_source}
+         - Contract timeline: original start date, renewal history, any amendments or addendums,
+           next renewal date, auto-renewal terms, cancellation notice period
+
+      2. Product Usage Metrics:
+         - License utilization: total seats/licenses purchased vs. active users (daily active,
+           weekly active, monthly active) with trend over the quarter
+         - Feature adoption matrix: for each major product module or feature set, calculate
+           adoption percentage (users who accessed at least once), frequency of use (daily/weekly/monthly),
+           depth of use (basic vs. advanced features), and quarter-over-quarter change
+         - Usage patterns: peak usage times, geographic distribution of usage, device/platform
+           breakdown, API call volumes if applicable
+         - Onboarding completion: percentage of users who completed onboarding milestones,
+           average time to first value, users stuck in onboarding stages
+         - Power user identification: top 10% users by activity, their roles and departments,
+           features they use that others do not
+         - Dormant user analysis: users with zero or minimal activity in the last 30/60/90 days,
+           their roles, last active date, and any known reasons for disengagement
+         - Data volume and storage: if applicable, how much data the account is storing,
+           growth rate, proximity to plan limits
+
+      3. Support and Service Data:
+         - Ticket volume: total tickets opened this quarter, broken down by priority (P1/P2/P3/P4),
+           category (bug, feature request, how-to, configuration, integration), and channel
+           (email, chat, phone, self-service portal)
+         - Resolution metrics: average first response time, average resolution time, first contact
+           resolution rate, escalation rate, reopened ticket rate
+         - CSAT/NPS data: most recent survey scores, trend over last 4 quarters, verbatim comments
+           from this quarter (positive and negative), response rate
+         - SLA compliance: number of SLA breaches this quarter by severity, root cause of breaches,
+           comparison to previous quarters
+         - Top support themes: the 5 most common issue categories, whether they are trending up
+           or down, any systemic issues requiring engineering attention
+         - Escalation history: any executive escalations, their status and resolution, lessons
+           learned, preventive measures implemented
+
+      4. Financial and Billing Data:
+         - Revenue summary: current ARR, revenue recognized this quarter, invoices issued and
+           payment status, any outstanding receivables, DSO (days sales outstanding)
+         - Expansion revenue: any upsells, cross-sells, or add-on purchases this quarter,
+           value of each, who initiated, what triggered the expansion
+         - Contraction signals: any downgrades, seat reductions, module cancellations, or
+           requests for pricing concessions
+         - Billing issues: any disputed invoices, credit notes issued, payment delays,
+           changes in billing contact or purchase order requirements
+         - Renewal economics: current contract value vs. expected renewal value, any known
+           budget constraints, competitive pressure on pricing
+
+      5. Competitive and Market Context:
+         - Known competitive evaluations: any mention of competitors in support tickets, sales
+           notes, or meeting notes
+         - Industry trends affecting the account: regulatory changes, market shifts, M&A activity,
+           leadership changes at the customer
+         - Peer benchmarking: how this account's usage, health, and engagement compares to
+           similar accounts in the same tier and industry
+
+      Output format: Produce a structured data brief with clear sections, quantitative data points
+      (use realistic representative figures), and data quality notes flagging any gaps or
+      uncertainties. This will be consumed by downstream steps for health scoring, trend analysis,
+      risk assessment, and strategic recommendations.
+    model: haiku
+    max_turns: 10
+
+  - id: health-scorecard
+    depends_on: [data-aggregation]
+    prompt: |
+      You are a Customer Success analytics specialist building a comprehensive customer health
+      scorecard for {input.account_name}'s {input.reporting_quarter} QBR. The account is
+      {input.account_tier} tier.
+
+      Aggregated data from all systems:
+      {steps.data-aggregation.output}
+
+      Build a multi-dimensional health scorecard following this rigorous methodology:
+
+      1. Overall Health Score (0-100):
+         - Calculate a weighted composite score using the dimension scores below
+         - Provide letter grade (A/B/C/D/F) and color coding (Green/Yellow/Orange/Red)
+         - Show quarter-over-quarter trend (improving, stable, declining) with delta
+         - Compare to cohort average for {input.account_tier} tier accounts
+         - Include confidence level in the score (high/medium/low) based on data completeness
+
+      2. Adoption Score (weight: 25%):
+         - License utilization rate: (active users / purchased seats) x 100
+         - Feature breadth: percentage of available features/modules actively used
+         - Feature depth: ratio of advanced feature usage vs. basic feature usage
+         - Onboarding completion rate across all user cohorts
+         - Time-to-value: how quickly new users reach activation milestones
+         - Scoring rubric: 90-100 = Exceptional, 70-89 = Healthy, 50-69 = At Risk,
+           below 50 = Critical
+         - Provide specific adoption score with detailed calculation breakdown
+
+      3. Engagement Score (weight: 25%):
+         - Executive engagement: frequency and quality of executive sponsor interactions
+           (quarterly business reviews, ad-hoc check-ins, strategic planning sessions)
+         - Champion engagement: frequency of champion interactions, responsiveness to
+           outreach, participation in beta programs or advisory boards
+         - Breadth of engagement: number of distinct departments/teams actively using
+           the product, number of stakeholders engaged in relationship
+         - Community participation: attendance at webinars, user conferences, online
+           community activity, case study or reference willingness
+         - Communication responsiveness: average response time to CSM outreach, meeting
+           attendance rate, proactive outreach from customer
+         - Scoring rubric with detailed calculation
+
+      4. Satisfaction Score (weight: 20%):
+         - NPS/CSAT trend analysis: current score, direction, velocity of change
+         - Support experience quality: resolution time satisfaction, agent quality ratings,
+           effort score
+         - Qualitative sentiment: analysis of verbatim feedback, tone of communications,
+           social media mentions if any
+         - Expectation alignment: gap between customer expectations and delivered value
+         - Unresolved pain points: persistent issues that reduce satisfaction despite
+           overall positive metrics
+         - Scoring rubric with detailed calculation
+
+      5. Expansion Potential Score (weight: 15%):
+         - Whitespace analysis: unused modules, features, or capacity available for growth
+         - Department penetration: percentage of addressable departments currently using
+           the product vs. total opportunity
+         - Budget signals: known budget cycles, growth plans, strategic initiatives that
+           align with expansion
+         - Product roadmap alignment: upcoming features that match customer needs or requests
+         - Competitive position: strength of relationship vs. likelihood of competitive
+           displacement for expansion
+         - Historical expansion pattern: frequency and value of past expansions
+         - Scoring rubric with detailed calculation
+
+      6. Support Health Score (weight: 15%):
+         - Ticket volume trend: is volume increasing (potential frustration), stable
+           (mature usage), or decreasing (either good resolution or disengagement)
+         - Severity distribution: ratio of critical vs. routine tickets
+         - SLA compliance rate and trend
+         - Escalation frequency and pattern
+         - Self-service adoption: ratio of self-resolved vs. agent-assisted issues
+         - Open issue aging: any long-standing unresolved issues
+         - Scoring rubric with detailed calculation
+
+      7. Health Score Summary Dashboard:
+         - Visual-ready table with all dimension scores, weights, weighted contributions
+         - Overall score with trend arrow and QoQ comparison
+         - Peer comparison (where this account ranks in its tier/industry cohort)
+         - Key score drivers: top 3 factors pulling score up, top 3 pulling it down
+         - Data quality assessment: which dimensions have strong data vs. gaps
+
+      8. Health Score Interpretation Guide:
+         - What the score means for renewal probability
+         - What the score means for expansion likelihood
+         - Recommended engagement cadence based on score range
+         - Escalation triggers: specific score thresholds that warrant action
+
+      Format the scorecard for executive consumption - clean, quantitative, with clear visual
+      hierarchy. Every score must have a specific number, not just a range or qualitative label.
+    model: sonnet
+    max_turns: 10
+
+  - id: trend-analysis
+    depends_on: [health-scorecard]
+    prompt: |
+      You are a business intelligence analyst performing deep trend analysis for
+      {input.account_name}'s {input.reporting_quarter} QBR. The account is {input.account_tier} tier
+      and the CSM is {input.csm_name}.
+
+      Aggregated data:
+      {steps.data-aggregation.output}
+
+      Health scorecard:
+      {steps.health-scorecard.output}
+
+      Perform comprehensive trend analysis across all dimensions:
+
+      1. Quarter-over-Quarter (QoQ) Trend Analysis:
+         - For every key metric identified in the data aggregation, calculate the QoQ change
+           as both absolute delta and percentage change
+         - Categorize each metric trend as: Accelerating Growth, Steady Growth, Plateauing,
+           Early Decline, Accelerating Decline, or Volatile
+         - Identify inflection points: metrics that changed trajectory this quarter compared
+           to prior quarters
+         - Calculate rate of change (second derivative): is growth accelerating or decelerating?
+         - Highlight any metrics showing divergent trends (e.g., usage growing but satisfaction
+           declining - which could indicate scaling pains)
+
+      2. Year-over-Year (YoY) Comparison:
+         - Compare {input.reporting_quarter} metrics to the same quarter one year ago
+         - Account for seasonality: flag metrics with known seasonal patterns and adjust
+           the comparison accordingly
+         - Calculate compound quarterly growth rate (CQGR) for key metrics over the trailing
+           four quarters
+         - Identify structural shifts: metrics that have fundamentally changed level (step
+           change) vs. gradual trends
+         - Benchmark YoY growth against the account's contract growth expectations and
+           against cohort averages
+
+      3. Usage Trend Deep Dive:
+         - Daily/weekly active user trends with trendline and moving average
+         - Feature adoption velocity: which features are being adopted fastest, which are
+           stagnating, which are declining in use
+         - User cohort analysis: do newer users adopt differently than original users?
+           Are early adopters still engaged?
+         - Seasonal and cyclical patterns in usage (end of month, quarter close, fiscal year)
+         - Usage concentration risk: is usage becoming more concentrated in fewer power users
+           or more distributed? What does this mean for retention?
+         - Time-in-product trends: are sessions getting longer (deeper engagement) or shorter
+           (quick-hit usage or disengagement)?
+
+      4. Support Trend Analysis:
+         - Ticket volume trendline with forecasted next-quarter volume
+         - Severity mix shift: is the proportion of critical tickets increasing?
+         - Resolution time trends: are we getting faster or slower? Why?
+         - Repeat issue analysis: issues that recur despite being "resolved" - chronic pain points
+         - Self-service deflection trend: more or fewer users resolving issues without agent help
+         - Satisfaction trend within support interactions specifically
+         - Correlation analysis: does ticket volume correlate with usage growth, new feature
+           releases, or specific time periods?
+
+      5. Financial Trend Analysis:
+         - Revenue trajectory: is the account on track for flat renewal, growth, or contraction?
+         - Expansion revenue velocity: compare this quarter's expansion to prior quarters
+         - Price sensitivity signals: any pushback on pricing, requests for discounts, mentions
+           of competitor pricing
+         - Payment behavior trends: are payments coming faster or slower? Any new friction?
+         - Cost-to-serve trend: is the account becoming more or less expensive to support
+           relative to revenue?
+
+      6. Engagement Trend Analysis:
+         - Stakeholder engagement depth over time: number and seniority of engaged contacts
+         - Champion health: is the primary champion more or less engaged than last quarter?
+         - Executive sponsor relationship trajectory: improving, stable, or weakening
+         - New stakeholder emergence: any new decision makers or influencers entering the picture
+         - Meeting quality trend: are discussions becoming more strategic or more tactical/reactive?
+
+      7. Trend Synthesis and Signals:
+         - Create a trend dashboard summary: top 5 most important positive trends, top 5 most
+           important negative trends
+         - Leading indicators: which current trends, if they continue, will impact renewal
+           6-12 months from now?
+         - Lagging indicators: which current metrics reflect decisions or events from earlier
+           quarters?
+         - Anomaly detection: any metrics showing unusual behavior that warrants investigation
+         - Correlation insights: non-obvious relationships between metrics (e.g., support
+           ticket increase preceded by a usage pattern change)
+
+      8. Trend-Based Forecasts:
+         - Project key metrics forward one and two quarters based on current trajectory
+         - Identify the "do nothing" scenario: where does this account end up if current
+           trends continue unchanged?
+         - Identify breakpoints: at what point do declining trends become critical?
+         - Scenario modeling: best case, base case, worst case projections with probabilities
+
+      Format all trends with specific data points, percentages, and clear directional indicators.
+      Use consistent notation: upward arrows for growth, downward for decline, horizontal for flat.
+    model: sonnet
+    max_turns: 10
+
+  - id: risk-assessment
+    depends_on: [health-scorecard]
+    prompt: |
+      You are a customer retention strategist performing a comprehensive churn risk assessment
+      for {input.account_name} during {input.reporting_quarter}. The account is {input.account_tier}
+      tier, managed by {input.csm_name}, with data sourced from {input.crm_source}.
+
+      Aggregated data:
+      {steps.data-aggregation.output}
+
+      Health scorecard:
+      {steps.health-scorecard.output}
+
+      Conduct a thorough risk assessment covering all dimensions of potential churn, contraction,
+      and relationship degradation:
+
+      1. Overall Risk Rating:
+         - Assign an overall risk level: Low (green), Moderate (yellow), Elevated (orange),
+           High (red), Critical (flashing red)
+         - Provide risk probability as a percentage (e.g., "15% probability of churn within
+           12 months")
+         - Revenue at risk: calculate the dollar amount of ARR at stake across scenarios
+           (full churn, partial contraction, flat renewal vs. expected growth)
+         - Confidence level in the assessment (high/medium/low) with justification
+         - Compare risk level to this time last quarter and this time last year
+
+      2. Adoption Risk Signals:
+         - Low utilization alert: if license utilization is below 70%, detail which user
+           segments are underutilizing and likely reasons
+         - Feature adoption gaps: critical features that competitors offer and the customer
+           is not using - are they getting value from alternatives?
+         - Declining usage patterns: any user segments, departments, or features showing
+           declining engagement over the quarter
+         - Shadow IT risk: signals that the customer may be using competing tools alongside
+           your product for overlapping functionality
+         - "Quiet quitting" indicators: users who technically log in but do minimal meaningful
+           work in the product (shallow sessions, no data creation)
+         - Onboarding stalls: new users stuck in onboarding or failing to reach activation
+           milestones
+         - Single-threaded risk: if product value is concentrated in a single department or
+           use case, assess the fragility of that dependency
+
+      3. Relationship Risk Signals:
+         - Champion risk: assessment of champion stability - are they likely to leave the
+           company, change roles, or lose influence? What happens if they depart?
+         - Executive sponsor engagement: has the sponsor been responsive? Have they attended
+           recent QBRs? Do they understand and articulate the value your product provides?
+         - Stakeholder turnover: any key contacts who left the customer organization this
+           quarter, and the impact on the relationship
+         - New stakeholder risk: new decision makers or influencers who may not have existing
+           loyalty to your product or may prefer competitors from previous companies
+         - Organizational change risk: any M&A activity, leadership changes, restructuring,
+           or strategic pivots at the customer that could affect the relationship
+         - Communication deterioration: declining responsiveness, cancelled meetings, shorter
+           interactions, more transactional tone
+
+      4. Support and Satisfaction Risk Signals:
+         - Escalation patterns: frequency and severity of escalations, whether they are being
+           resolved satisfactorily, lingering frustration from past incidents
+         - NPS/CSAT trajectory: if trending downward, identify the velocity and root causes
+         - Unresolved chronic issues: long-standing bugs, feature gaps, or performance problems
+           that erode confidence over time
+         - Support dependency: is the account overly dependent on support (indicating product
+           is not intuitive enough) or disengaged from support (indicating they have given up)?
+         - Competitive mentions in support: any tickets where the customer references competitor
+           capabilities, asks about migration paths, or questions product direction
+         - Negative verbatim analysis: detailed review of any negative survey responses, social
+           media mentions, or G2/Capterra reviews
+
+      5. Financial and Contractual Risk Signals:
+         - Renewal timing risk: how far away is the renewal? Is there enough time to address
+           issues before the decision window?
+         - Budget pressure signals: customer mentions of cost-cutting, hiring freezes, or
+           budget reviews that could affect renewal
+         - Competitive pricing pressure: known situations where competitors are offering
+           aggressive discounts or migration incentives
+         - Contraction signals: any requests to reduce seats, downgrade plans, or eliminate
+           modules
+         - Payment behavior changes: late payments, disputes, requests for extended payment
+           terms
+         - Multi-year vs. annual: if on annual terms, the risk is higher than multi-year;
+           assess the likelihood of securing multi-year at renewal
+
+      6. External and Market Risk Signals:
+         - Customer's business health: any public signals about the customer's financial health,
+           layoffs, revenue challenges, or strategic pivots
+         - Regulatory or compliance changes: new requirements that affect how the customer can
+           use your product or create new needs you cannot yet address
+         - Market consolidation: if the customer's industry is consolidating, are they an
+           acquirer (potential expansion) or a target (potential disruption)?
+         - Technology shift risk: emerging technologies or platforms that could make your
+           solution less relevant to this customer's future architecture
+
+      7. Risk Matrix and Prioritization:
+         - Create a risk matrix: for each identified risk, rate likelihood (1-5) and impact (1-5)
+         - Calculate risk score (likelihood x impact) and rank all risks
+         - Categorize risks: immediate (address this quarter), near-term (address next quarter),
+           strategic (address within 12 months), and monitoring (watch but no action yet)
+         - Identify risk clusters: groups of related risks that compound each other
+         - Map risks to the customer health scorecard dimensions
+
+      8. Mitigation Recommendations (Preview):
+         - For each high-priority risk, provide a brief mitigation approach (detailed plans
+           will be developed in the strategic recommendations step)
+         - Identify risks that require cross-functional response (product, engineering, support,
+           executive leadership)
+         - Flag any risks that require immediate executive attention before the QBR meeting
+         - Estimate resources needed for mitigation (CSM time, engineering time, executive
+           involvement)
+
+      Be specific, data-driven, and honest in the assessment. Avoid both alarmism and false
+      optimism. Every risk signal should be tied to specific data points from the aggregated data
+      and health scorecard. Flag areas where data is insufficient to make a confident assessment.
+    model: sonnet
+    max_turns: 10
+
+  - id: strategic-recommendations
+    depends_on: [health-scorecard, trend-analysis, risk-assessment]
+    prompt: |
+      You are a senior Customer Success leader preparing strategic recommendations for
+      {input.account_name}'s {input.reporting_quarter} QBR. The account is {input.account_tier}
+      tier. CSM: {input.csm_name}. CRM: {input.crm_source}.
+
+      Health scorecard:
+      {steps.health-scorecard.output}
+
+      Trend analysis:
+      {steps.trend-analysis.output}
+
+      Risk assessment:
+      {steps.risk-assessment.output}
+
+      Synthesize all findings into actionable, prioritized strategic recommendations:
+
+      1. Account Strategy Summary:
+         - Overall account health narrative: one-paragraph executive summary that a VP of
+           Customer Success can read in 30 seconds and understand the situation
+         - Account trajectory: is this account on a path toward strong renewal and expansion,
+           flat renewal, contraction, or churn? What is the most likely outcome?
+         - Strategic intent: what should our overall strategic posture be with this account?
+           Options include: Defend (at-risk, focus on retention), Nurture (healthy, steady
+           growth), Accelerate (high potential, invest in expansion), Transform (needs
+           fundamental relationship reset), or Optimize (mature account, maximize efficiency)
+         - CSM priority level recommendation for {input.csm_name}'s portfolio
+
+      2. Retention Action Plan (if risk signals exist):
+         - For each identified risk signal rated as elevated or higher:
+           - Specific mitigation action with clear owner (CSM, manager, executive, product,
+             engineering, support)
+           - Timeline: when the action must start and expected completion
+           - Success criteria: how to know the risk has been adequately addressed
+           - Escalation trigger: what happens if the mitigation does not work by deadline
+         - Executive engagement plan: if executive intervention is needed, provide talking
+           points, meeting format recommendation, and desired outcomes
+         - Champion reinforcement plan: how to strengthen the champion relationship and
+           develop backup champions
+         - Emergency playbook: if the account enters crisis before the next QBR, what are
+           the immediate steps?
+
+      3. Expansion Opportunities:
+         - Identify the top 3-5 expansion opportunities ranked by revenue potential and
+           probability of success
+         - For each opportunity:
+           - Opportunity description: what product, module, seats, or services to offer
+           - Revenue potential: estimated incremental ARR
+           - Customer business case: what problem does this solve for the customer? How
+             does it tie to their stated business objectives?
+           - Internal champion: who would advocate for this expansion within the customer org
+           - Competitive landscape: are competitors bidding for this same budget?
+           - Timeline: when is the optimal time to introduce this (aligned with budget cycles,
+             business needs, contract milestones)
+           - Required enablement: do we need to provide POC, trial, training, or professional
+             services to facilitate adoption?
+         - Total expansion pipeline value for the next 4 quarters
+         - Cross-sell motion: map how current usage creates a natural bridge to additional products
+
+      4. Adoption and Value Realization Plan:
+         - Adoption gap closure: for each underutilized feature or module, create a specific
+           adoption campaign with timeline, target users, and enablement approach
+         - Training recommendations: identify user segments that need training, the format
+           (self-paced, instructor-led, office hours, embedded guidance), and scheduling
+         - Success milestones: define 3-5 concrete outcomes the customer should achieve next
+           quarter that demonstrate increased value from the product
+         - Use case expansion: identify new workflows or use cases the customer could adopt
+           based on their industry, size, and current usage patterns
+         - Internal marketing plan: help the champion communicate product value to their
+           leadership (provide ROI data, success metrics, peer benchmarks)
+
+      5. Relationship Development Plan:
+         - Stakeholder mapping update: who to engage, deepen relationships with, or develop
+           as new champions
+         - Executive alignment: if executive sponsors are disengaged, plan to re-engage with
+           value-driven executive briefings
+         - Multi-threading strategy: plan to build relationships across departments to reduce
+           single-point-of-failure risk
+         - Customer advisory board invitation: if the customer is a good candidate, recommend
+           for CAB participation
+         - Reference and advocacy: if the account is healthy, plan to develop them as a
+           reference customer, case study, or conference speaker
+
+      6. QBR Meeting Agenda Recommendations:
+         - Recommended QBR duration and format (in-person vs. virtual, presentation vs.
+           workshop, attendees from both sides)
+         - Proposed agenda with time allocation for each section
+         - Topics to lead with (positive momentum items)
+         - Topics to address carefully (risk items, requiring diplomatic framing)
+         - Topics to avoid or defer (not ready for discussion, needs more data)
+         - Desired meeting outcomes: what specific commitments or agreements to secure
+
+      7. 90-Day Action Plan:
+         - Week-by-week action calendar with specific tasks, owners, and milestones
+         - Month 1: immediate priorities and quick wins
+         - Month 2: strategic initiatives and relationship building
+         - Month 3: expansion motions and QBR follow-through
+         - Resource requirements: CSM time allocation, specialist involvement, executive
+           engagement calendar
+         - Progress check-in schedule: weekly internal reviews, bi-weekly customer touchpoints
+
+      8. Success Metrics for Next QBR:
+         - Define the metrics that will be reviewed at the next QBR
+         - Set specific targets for each metric (health score improvement, adoption increase,
+           expansion closed, risks mitigated)
+         - Create accountability framework: who is responsible for each metric improvement
+         - Early warning triggers: metrics to watch monthly that could indicate plan is off track
+
+      Every recommendation must be specific, actionable, and tied to data from the analysis.
+      Avoid generic best practices - make everything contextual to {input.account_name}'s
+      actual situation, tier, and relationship history.
+    model: sonnet
+    max_turns: 10
+
+  - id: qbr-package
+    depends_on: [strategic-recommendations]
+    prompt: |
+      You are an executive communications specialist assembling the final QBR presentation
+      package for {input.account_name}'s {input.reporting_quarter} review. Account tier:
+      {input.account_tier}. CSM: {input.csm_name}. CRM source: {input.crm_source}.
+
+      Health scorecard:
+      {steps.health-scorecard.output}
+
+      Trend analysis:
+      {steps.trend-analysis.output}
+
+      Risk assessment:
+      {steps.risk-assessment.output}
+
+      Strategic recommendations:
+      {steps.strategic-recommendations.output}
+
+      Assemble the complete QBR package with all required deliverables:
+
+      1. EXECUTIVE SUMMARY (1 page):
+         - Account health score with visual indicator (green/yellow/red) and QoQ trend
+         - Three most important wins/successes this quarter (lead with positives)
+         - Top 3 areas of focus for next quarter
+         - Key metrics at a glance: ARR, license utilization, NPS, support health
+         - One-sentence strategic recommendation
+         - Write in clear, confident prose appropriate for C-level executives
+         - Avoid jargon; every metric should be accompanied by plain-English interpretation
+
+      2. CUSTOMER HEALTH SCORECARD (1 page):
+         - Dashboard-ready layout with all dimension scores
+         - Color-coded indicators for each dimension
+         - Trend arrows showing QoQ direction
+         - Peer benchmark comparison (where applicable)
+         - Brief interpretation note under each dimension score
+         - Overall score prominently displayed with letter grade
+
+      3. QUARTER IN REVIEW - NARRATIVE (2-3 pages):
+         - Opening: frame the quarter in the context of the customer's business objectives
+           and strategic priorities
+         - Usage highlights: tell the story of how the customer used the product this quarter,
+           leading with successes and positive adoption trends
+         - Support partnership: frame support interactions as collaborative problem-solving,
+           highlight improvements, acknowledge any frustrations diplomatically
+         - Engagement recap: summarize key meetings, milestones achieved together, decisions made
+         - Value delivered: quantify the business impact in terms the customer cares about
+           (time saved, revenue generated, errors prevented, efficiency gained)
+         - Challenges addressed: honestly address any issues that occurred, what was done to
+           resolve them, and what preventive measures are in place
+         - Tone: conversational yet professional, partnership-oriented, forward-looking
+
+      4. TREND ANALYSIS SLIDES (2 pages):
+         - Key metric trend charts described in text (ready for visualization):
+           - Usage over time (DAU/WAU/MAU)
+           - Support volume and resolution time
+           - NPS/CSAT trajectory
+           - Feature adoption progression
+         - YoY comparison highlights
+         - Cohort analysis insights
+         - Forecast projections for next quarter
+         - Clear callouts for the most significant trends (both positive and concerning)
+
+      5. STRATEGIC ROADMAP (1-2 pages):
+         - Next quarter priorities organized in a clear framework:
+           - Priority 1 (Critical): items that must be addressed immediately
+           - Priority 2 (Important): items that drive significant value
+           - Priority 3 (Opportunistic): items to pursue if resources allow
+         - For each priority: description, owner, timeline, expected outcome
+         - Expansion opportunities with business case summaries
+         - Adoption acceleration plan highlights
+         - Mutual commitments: what we will do, and what we ask from the customer
+
+      6. PRE-DRAFTED TALKING POINTS (internal use):
+         - Opening and rapport-building talking points (reference recent customer wins,
+           industry news, or personal connections)
+         - How to present health scores and trends (framing, emphasis, tone)
+         - How to introduce expansion opportunities (consultative, not salesy)
+         - How to address known concerns or risks (acknowledge, explain, commit)
+         - How to handle difficult questions (prepared responses for 15-20 likely
+           challenging questions including: "Why is our usage declining?", "Why did that
+           outage happen?", "We're evaluating competitors", "We need a discount",
+           "Our budget is being cut", "We're not seeing ROI", "When will feature X ship?",
+           "We want to reduce seats", "Our new VP wants to consolidate vendors")
+         - Closing and next-steps talking points (secure commitments, schedule follow-ups)
+         - Red flag responses: how to pivot if the meeting takes an unexpected negative turn
+
+      7. FOLLOW-UP ACTION PLAN TEMPLATE:
+         - Pre-filled action item template ready to customize during the QBR
+         - Categories: customer actions, our actions, joint actions
+         - Each action has: description, owner, due date, success criteria
+         - 30-day follow-up meeting agenda template
+         - Thank-you email draft to send within 24 hours of the QBR
+         - Internal debrief template: what did we learn, what changed, what do we need
+           to adjust in our strategy
+
+      8. APPENDICES:
+         - Detailed data tables referenced in the narrative
+         - Full feature adoption matrix
+         - Complete support ticket analysis
+         - Competitive positioning notes (internal only - not for customer sharing)
+         - Product roadmap items relevant to this customer
+         - Contract terms summary and renewal timeline
+         - Glossary of metrics and scoring methodology
+
+      The package should be structured so that {input.csm_name} can walk into the QBR
+      meeting feeling fully prepared, with every likely scenario anticipated and every
+      question pre-answered. The customer-facing materials should convey partnership,
+      transparency, and strategic value - not just vendor reporting.
+    model: sonnet
+    max_turns: 10

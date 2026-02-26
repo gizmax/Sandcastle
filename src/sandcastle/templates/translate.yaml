@@ -1,14 +1,14 @@
 # name: Language Translator
-# description: Detects the source language and translates text to the target language
+# description: Professional-grade translation with source analysis, cultural adaptation, precise translation, and quality review
 # tags: [translation, language, i18n]
 # category: general_ai
 
 name: language-translator
-description: Detects the source language and translates text to the target language
+description: Professional-grade translation with source analysis, cultural adaptation, precise translation, and quality review
 
 default_model: sonnet
-default_max_turns: 5
-default_timeout: 120
+default_max_turns: 8
+default_timeout: 180
 
 input_schema:
   required: ["text", "target_language"]
@@ -18,29 +18,218 @@ input_schema:
       description: "The text to translate"
     target_language:
       type: string
-      description: "The target language to translate into"
+      description: "The target language to translate into (e.g. 'Spanish', 'Japanese', 'Czech')"
+    tone:
+      type: string
+      description: "Desired tone - professional, casual, formal, literary, technical, or marketing"
+      default: "professional"
+    domain:
+      type: string
+      description: "Subject domain for terminology accuracy - general, legal, medical, technical, financial, academic, or marketing"
+      default: "general"
 
 steps:
-  - id: detect-language
-    prompt: >
-      Analyze the following text and detect its language.
-      Return the language name and ISO 639-1 code.
-      Text: {input.text}
-    model: haiku
-    max_turns: 3
+  - id: source-analysis
+    prompt: |
+      Perform a comprehensive linguistic analysis of the source text to
+      prepare for high-quality translation into {input.target_language}.
+
+      Source text:
+      {input.text}
+
+      Target language: {input.target_language}
+      Domain: {input.domain}
+      Desired tone: {input.tone}
+
+      Analyze the following dimensions:
+
+      1. **Source language identification** - Detect the language and regional
+         variant (e.g. Brazilian Portuguese vs. European Portuguese, Simplified
+         vs. Traditional Chinese). Return the language name and ISO 639-1 code.
+         If the text contains code-switching or loanwords, note those.
+
+      2. **Register and formality analysis** - What register is the source
+         text written in? (formal, informal, technical, colloquial, literary)
+         Identify specific markers: pronoun usage, sentence complexity,
+         vocabulary level, passive vs. active voice patterns.
+
+      3. **Domain terminology inventory** - List all domain-specific terms,
+         technical vocabulary, proper nouns, brand names, and abbreviations.
+         For each term, note whether it has a standard translation in
+         {input.target_language} or needs special handling.
+
+      4. **Structural elements** - Identify formatting that affects translation:
+         numbered lists, headings, quoted speech, parentheticals, footnotes,
+         URLs, email addresses, code snippets (these should not be translated).
+
+      5. **Translation challenge map** - Flag specific segments that will
+         be challenging to translate:
+         - Idioms, metaphors, and culturally-bound expressions
+         - Wordplay, puns, or alliteration
+         - Ambiguous pronouns or references
+         - Sentences with complex nested clauses
+         - Humor or sarcasm that may not transfer
+
+      6. **Estimated complexity** - Rate overall translation difficulty
+         as ROUTINE, MODERATE, or COMPLEX with justification.
+    model: sonnet
+    max_turns: 5
     output_schema:
       type: object
       properties:
-        language:
+        source_language:
           type: string
         iso_code:
           type: string
+        register:
+          type: string
+        complexity:
+          type: string
+        challenges:
+          type: array
+          items:
+            type: string
 
-  - id: translate
-    depends_on: [detect-language]
-    prompt: >
-      Translate the following text from {steps.detect-language.output.language}
-      to {input.target_language}. Preserve the original tone and meaning.
-      Text: {input.text}
+  - id: cultural-adaptation
+    depends_on: [source-analysis]
+    prompt: |
+      Develop a cultural adaptation strategy for translating this text
+      from {steps.source-analysis.output.source_language} to {input.target_language}.
+
+      Source text: {input.text}
+      Source analysis: {steps.source-analysis.output}
+      Target tone: {input.tone}
+      Domain: {input.domain}
+
+      Address each of these cultural dimensions:
+
+      1. **Idiomatic equivalence** - For every idiom, metaphor, or culturally-bound
+         expression identified in the source analysis, propose the best
+         equivalent in {input.target_language}. Provide:
+         - The source expression
+         - A literal translation (to show why it does not work)
+         - The recommended cultural equivalent
+         - Reasoning for the choice
+
+      2. **Formality calibration** - Map the source register to the
+         appropriate level in {input.target_language}, accounting for the
+         requested tone "{input.tone}". Consider:
+         - Pronoun systems (tu/vous, du/Sie, etc.) if applicable
+         - Honorifics and titles
+         - Sentence-final particles or politeness markers
+         - Whether the target culture expects more or less formality
+           in this domain ({input.domain})
+
+      3. **Measurement and format localization** - Identify any dates,
+         numbers, currencies, units of measurement, phone numbers, or
+         addresses that need format adaptation. Specify the target format
+         conventions for {input.target_language}.
+
+      4. **Cultural sensitivity check** - Flag any content that might be
+         offensive, confusing, or inappropriate in the target culture.
+         Propose alternatives that preserve the original intent while
+         being culturally appropriate.
+
+      5. **Brand and proper noun strategy** - For each brand name, product
+         name, and proper noun, decide: keep original, transliterate,
+         translate, or use established local name. Justify each decision.
+
+      Output a complete adaptation guide that the translation step can follow.
     model: sonnet
-    max_turns: 5
+    max_turns: 8
+
+  - id: translation
+    depends_on: [cultural-adaptation]
+    prompt: |
+      Produce the complete translation from {steps.source-analysis.output.source_language}
+      to {input.target_language}, applying the cultural adaptation strategy.
+
+      Source text:
+      {input.text}
+
+      Cultural adaptation guide: {steps.cultural-adaptation.output}
+      Source analysis: {steps.source-analysis.output}
+
+      Translation directives:
+
+      1. **Accuracy first** - Every factual claim, number, date, and proper
+         noun in the source must appear correctly in the translation. Do not
+         add information not present in the source. Do not omit any content
+         unless the adaptation guide specifically recommends it.
+
+      2. **Apply cultural adaptations** - Follow the adaptation guide for
+         idioms, formality level, measurement formats, and cultural adjustments.
+         When the guide offers multiple options, choose the one that best
+         matches the requested tone: {input.tone}.
+
+      3. **Natural fluency** - The translation must read as if originally
+         written in {input.target_language} by a native speaker. Avoid
+         translationese - do not calque source language sentence structures
+         when the target language has different natural patterns. Restructure
+         sentences freely to achieve native-sounding flow.
+
+      4. **Domain accuracy** - For the {input.domain} domain, use standard
+         established terminology. If a technical term has multiple accepted
+         translations, prefer the most widely recognized one in professional
+         contexts.
+
+      5. **Preserve formatting** - Maintain paragraph breaks, list structures,
+         headings, emphasis (bold/italic), and any other formatting from the
+         source. Do not translate URLs, code snippets, or email addresses.
+
+      6. **Consistent terminology** - Use the same translation for recurring
+         terms throughout. Do not alternate between synonyms for the same
+         source term unless there is a strong stylistic reason.
+
+      Output ONLY the translated text, preserving the original structure
+      and formatting. No commentary or notes.
+    model: sonnet
+    max_turns: 10
+
+  - id: quality-review
+    depends_on: [translation]
+    prompt: |
+      Perform a rigorous quality review of the translation, comparing it
+      against the source text and adaptation guide.
+
+      Source text: {input.text}
+      Translation: {steps.translation.output}
+      Source analysis: {steps.source-analysis.output}
+      Adaptation guide: {steps.cultural-adaptation.output}
+
+      Apply this professional QA framework:
+
+      1. **Accuracy audit** - Compare source and translation segment by segment.
+         Flag any:
+         - Omissions (source content missing from translation)
+         - Additions (content in translation not in source)
+         - Mistranslations (meaning changed or distorted)
+         - Number/date/proper noun errors
+         Rate accuracy on a scale of 1-10.
+
+      2. **Fluency assessment** - Read the translation as a standalone text
+         in {input.target_language}. Flag any:
+         - Unnatural phrasing or calques from the source language
+         - Grammatical errors (gender, agreement, conjugation, case)
+         - Awkward word order or sentence structure
+         - Inconsistent terminology
+         Rate fluency on a scale of 1-10.
+
+      3. **Tone and register verification** - Does the translation match
+         the requested tone "{input.tone}"? Is the formality level consistent
+         throughout? Are the cultural adaptations applied correctly?
+         Rate tone match on a scale of 1-10.
+
+      4. **Domain terminology check** - For {input.domain} domain, verify
+         all technical terms use standard accepted translations. Flag any
+         non-standard or potentially confusing terminology choices.
+
+      5. **Final corrected translation** - Apply all corrections found
+         in steps 1-4. If the translation scored 8+ on all dimensions,
+         output it unchanged. Otherwise, output the corrected version
+         with all issues resolved.
+
+      Output the final quality-assured translation, followed by a brief
+      quality scorecard (accuracy, fluency, tone scores).
+    model: sonnet
+    max_turns: 8

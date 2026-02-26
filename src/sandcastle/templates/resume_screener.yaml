@@ -19,14 +19,69 @@ input_schema:
     job_description:
       type: string
       description: "The job description to match the resume against"
+    hiring_priority:
+      type: string
+      description: "What matters most for this hire: 'technical-depth', 'leadership', 'culture-add', 'speed-to-productivity', or 'growth-potential'"
 
 steps:
   - id: parse-resume
-    prompt: >
-      Extract structured data from the following resume. Identify and organize: work
-      experience (company, role, duration, achievements), technical and soft skills,
-      education and certifications, notable projects, and any quantified accomplishments.
+    prompt: |
+      You are a talent intelligence analyst who extracts structured data from
+      resumes with precision and objectivity. Parse the following resume into
+      a comprehensive candidate profile.
+
       Resume: {input.resume_text}
+
+      IMPORTANT BIAS MITIGATION RULES - follow these strictly:
+      - DO NOT factor in candidate's name, gender, age, ethnicity, or photo
+      - DO NOT penalize employment gaps (they indicate nothing about ability)
+      - DO NOT weight prestigious company names or university names beyond
+        the relevance of the actual work/education described
+      - DO factor in: skills demonstrated, impact achieved, complexity of
+        work, growth trajectory, and relevance to the role
+
+      Extract and structure the following:
+
+      1. PROFESSIONAL SUMMARY:
+         - Total years of professional experience (approximate)
+         - Career trajectory pattern: Linear Growth / Pivot / Specialist /
+           Generalist / Entrepreneurial / Non-Traditional
+         - Current/most recent role level estimate: Junior / Mid / Senior /
+           Staff / Principal / Management / Executive
+
+      2. WORK EXPERIENCE (for each role):
+         - Company, title, duration (in months for precision)
+         - Scope indicators: team size managed, budget owned, users served
+         - Key achievements: extract QUANTIFIED results wherever possible
+           (revenue generated, costs reduced, efficiency gained, users grown)
+         - Technologies and methodologies used
+         - Complexity signals: scale of systems, cross-functional work,
+           ambiguity of problems solved
+
+      3. SKILLS INVENTORY:
+         - Technical hard skills (programming languages, tools, platforms)
+         - Domain expertise (industry knowledge, functional specializations)
+         - Soft skills evidenced by accomplishments (not self-reported claims)
+         - Certifications and their current validity
+         Rate each skill's evidence level: Demonstrated (project/achievement
+         backs it up) / Claimed (listed but no supporting evidence) / Inferred
+         (implied by role or context)
+
+      4. EDUCATION & CONTINUOUS LEARNING:
+         - Formal education (degree, institution, graduation year)
+         - Professional development (courses, certifications, bootcamps)
+         - Self-directed learning signals (open-source, side projects, writing)
+         Note: Treat bootcamp graduates, self-taught professionals, and
+         degree-holders EQUALLY. Evaluate the skills, not the credential source.
+
+      5. RED FLAG SCAN (factual only, no speculation):
+         - Inconsistent dates or overlapping employment
+         - Claims that seem disproportionate to role level (e.g. "saved $50M"
+           as a junior analyst - may need verification, not rejection)
+         - Buzzword density without supporting specifics
+         - Very short tenures (<6 months) at multiple companies
+         IMPORTANT: Red flags are verification items, NOT rejection criteria.
+         People leave jobs for many valid reasons.
     model: sonnet
     max_turns: 5
     output_schema:
@@ -69,33 +124,178 @@ steps:
 
   - id: match-analysis
     depends_on: [parse-resume]
-    prompt: >
-      Compare the parsed resume data against the job description requirements. Score the
-      overall match from 0-100, break down scoring by category (skills, experience, education),
-      identify specific gaps, and highlight standout qualifications that exceed requirements.
+    prompt: |
+      You are a hiring decision scientist who uses structured evaluation
+      frameworks to assess candidate-role fit objectively. Compare the
+      parsed resume against the job requirements using a rigorous scoring
+      methodology.
+
       Parsed resume: {steps.parse-resume.output}
       Job description: {input.job_description}
+      Hiring priority: {input.hiring_priority}
+
+      BIAS MITIGATION PROTOCOL - apply these throughout:
+      - Score based on DEMONSTRATED capabilities, not proxies (school name,
+        company brand, years of experience as a raw number)
+      - Experience QUALITY matters more than QUANTITY. 3 years of high-impact
+        work at a startup can equal 7 years at a large company.
+      - Non-linear career paths (career changers, returners, self-taught)
+        should be evaluated on transferable skills and learning velocity.
+      - If the candidate's background is non-traditional, actively look for
+        equivalent evidence of the required competencies.
+
+      Perform the following analysis:
+
+      1. SKILLS-TO-REQUIREMENTS MATCHING MATRIX:
+         Create a detailed comparison table:
+         | Requirement | Required/Preferred | Candidate Evidence | Match Level | Score |
+         - Match Level: Exceeds / Meets / Partial / Gap / Not Assessable
+         - Score: 0 (gap) to 4 (exceeds) per requirement
+         - For each "Gap", note whether it is trainable (< 3 months to learn)
+           or fundamental (would take 6+ months)
+
+      2. EXPERIENCE QUALITY SCORING (not just years):
+         - Relevance: How closely does their experience map to this role? (0-25)
+         - Impact: Were they a contributor or a driver of outcomes? (0-25)
+         - Complexity: Did they handle problems of similar scale/difficulty? (0-25)
+         - Growth: Does their trajectory show increasing responsibility? (0-25)
+         Total Experience Quality Score: /100
+
+      3. TECHNICAL DEPTH ASSESSMENT (if applicable):
+         - For each required technical skill, assess depth level:
+           Awareness / Working Knowledge / Proficient / Expert
+         - Evidence basis for each assessment (specific projects or achievements)
+         - Technology currency: Are their skills current or dated?
+
+      4. LEADERSHIP & COLLABORATION SIGNALS:
+         - Evidence of mentoring, team leadership, or cross-functional influence
+         - Communication quality indicators from resume writing itself
+         - Scope of autonomy in previous roles
+
+      5. OVERALL MATCH SCORE (0-100):
+         - Technical Skills Fit: X/30 (weighted by must-have vs nice-to-have)
+         - Experience Relevance: X/25
+         - Impact & Achievement: X/20
+         - Growth Potential: X/15
+         - Culture-Add Indicators: X/10
+         Adjust weights based on hiring priority: {input.hiring_priority}
+
+      6. COMPARABLE CANDIDATE CONTEXT:
+         - Where would this candidate likely fall in a typical applicant pool
+           for this role? Top 10% / Top 25% / Top 50% / Below Average
+         - What would make this candidate stronger? (developmental feedback)
     model: sonnet
     max_turns: 5
 
   - id: interview-questions
     depends_on: [parse-resume, match-analysis]
-    prompt: >
-      Generate targeted interview questions based on the candidate's profile and identified
-      gaps. Include questions to verify claimed experience, probe skill gaps, explore
-      career motivations, and assess cultural fit. Prioritize questions by importance.
+    prompt: |
+      You are a structured interviewing expert designing a targeted question
+      set for this specific candidate. Create interview questions that
+      efficiently validate the most important unknowns.
+
       Parsed resume: {steps.parse-resume.output}
       Match analysis: {steps.match-analysis.output}
+      Job description: {input.job_description}
+
+      Design interview questions in these categories:
+
+      1. GAP VERIFICATION QUESTIONS (top priority - 3-4 questions):
+         For each identified skill gap or partial match, design a question
+         that assesses whether the candidate has more depth than the resume
+         shows, or can learn quickly:
+         - Question text (behavioral or situational format)
+         - What to listen for (strong answer indicators)
+         - Red flag answers (concerning responses)
+         - Follow-up probe to go deeper
+
+      2. ACHIEVEMENT VERIFICATION QUESTIONS (3-4 questions):
+         For the candidate's top claimed achievements, design questions
+         using the STAR framework (Situation, Task, Action, Result) to
+         verify the scope of their contribution:
+         - "Tell me about [specific achievement]. What was your specific
+           role vs. the team's contribution?"
+         - Probe for: metrics, timelines, obstacles, and what they'd do
+           differently
+         - Look for: specificity (real experience) vs. vagueness (inflated)
+
+      3. GROWTH POTENTIAL ASSESSMENT (2-3 questions):
+         - "Describe a time you had to learn something completely new in a
+           short timeframe. How did you approach it?"
+         - "What's the biggest professional mistake you've made, and what
+           did you change as a result?"
+         - Design questions that assess learning agility, self-awareness,
+           and adaptability
+
+      4. ROLE-SPECIFIC SCENARIO (1-2 questions):
+         - Design a realistic scenario the candidate would face in the first
+           90 days of this role
+         - The scenario should test their approach to a real problem, not
+           their theoretical knowledge
+         - Include a scoring guide (1-4 scale with behavioral anchors)
+
+      5. CANDIDATE'S QUESTIONS: Suggest 2-3 topics the interviewer should
+         be prepared to answer about (based on what a candidate with this
+         profile would likely care about - compensation, growth path, team
+         dynamics, technical stack, etc.)
+
+      LEGAL COMPLIANCE: Ensure NO questions touch on protected categories:
+      age, race, religion, marital/family status, disability, national
+      origin, genetic information, or pregnancy status.
     model: sonnet
     max_turns: 5
 
   - id: summary-card
     depends_on: [match-analysis, interview-questions]
-    prompt: >
-      Create a concise candidate summary card with a clear recommendation (proceed, hold,
-      or reject). Include the match score, top 3 strengths, top 3 concerns, recommended
-      interview focus areas, and a brief justification for the recommendation.
+    prompt: |
+      You are a talent acquisition director making a screening decision.
+      Create a concise, decision-ready candidate summary card that a hiring
+      manager can review in under 2 minutes.
+
       Match analysis: {steps.match-analysis.output}
       Interview questions: {steps.interview-questions.output}
+      Hiring priority: {input.hiring_priority}
+
+      Format the summary card as follows:
+
+      1. HEADER:
+         - Candidate name (from resume)
+         - Current/most recent title and company
+         - Overall match score: XX/100
+         - RECOMMENDATION: STRONG PROCEED / PROCEED / HOLD / PASS
+           (use HOLD when score is borderline and interview could clarify)
+
+      2. FIT SNAPSHOT (visual-friendly format):
+         - Technical Skills:  [====----] 6/10
+         - Experience Depth:  [=======--] 8/10
+         - Growth Potential:  [======---] 7/10
+         - Culture-Add:      [=====----] 5/10
+         (Use bracket-bar format for quick visual scanning)
+
+      3. TOP 3 STRENGTHS: Why this candidate stands out. Be specific -
+         reference actual achievements, not generic phrases like "strong
+         communicator". Each strength should be backed by resume evidence.
+
+      4. TOP 3 CONCERNS: Honest assessment of risks. For each concern,
+         note whether it is:
+         - Addressable in interview (needs verification)
+         - Trainable on the job (skill gap, not ability gap)
+         - Fundamental mismatch (unlikely to resolve)
+
+      5. INTERVIEW FOCUS AREAS: The 3 most important things the interview
+         must answer about this candidate. Link to specific questions from
+         the interview question bank.
+
+      6. COMPENSATION CONTEXT: Based on their experience level and market
+         positioning, flag if there might be a compensation expectation
+         mismatch with the role's budget.
+
+      7. DIVERSITY NOTE: If this candidate brings a non-traditional
+         background, unique perspective, or underrepresented experience to
+         the team, note the value-add. Diverse teams outperform homogeneous
+         ones - this is a business advantage, not charity.
+
+      Keep the entire card under 400 words. Every sentence should help
+      the hiring manager make a faster, better decision.
     model: haiku
     max_turns: 3

@@ -1,0 +1,962 @@
+# name: Crisis Communication Commander
+# description: Real-time PR crisis management - monitor channels, draft holding statements, generate Q&A documents, coordinate multi-channel response, and track sentiment recovery
+# tags: [Marketing, PR, Crisis Management, Communications, Reputation]
+# category: marketing
+
+name: crisis-communication-commander
+description: Real-time PR crisis management - monitor channels, draft holding statements, generate Q&A documents, coordinate multi-channel response, and track sentiment recovery
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [web_search, slack]
+
+input_schema:
+  required: ["crisis_description", "company_name"]
+  properties:
+    crisis_description:
+      type: string
+      description: "Detailed description of the crisis situation, including known facts, timeline, and scope"
+    company_name:
+      type: string
+      description: "Company name facing the crisis"
+    affected_channels:
+      type: string
+      description: "Comma-separated list of affected channels (e.g. 'twitter, linkedin, press, reddit, internal')"
+    severity_level:
+      type: string
+      description: "Crisis severity: critical, high, medium, low (default: high)"
+      default: "high"
+    spokesperson_name:
+      type: string
+      description: "Primary spokesperson name for media responses"
+
+steps:
+  - id: situation-assessment
+    prompt: |
+      Perform a comprehensive crisis situation assessment to establish facts, scope,
+      stakeholder impact, and initial response priority.
+
+      Crisis description: {input.crisis_description}
+      Company: {input.company_name}
+      Affected channels: {input.affected_channels}
+      Severity level: {input.severity_level}
+      Spokesperson: {input.spokesperson_name}
+
+      You are a Senior Crisis Communications Consultant with 25 years of experience
+      managing PR crises for Fortune 500 companies. You have handled data breaches,
+      product failures, executive scandals, regulatory actions, and social media
+      firestorms. Your first priority is always to ASSESS before RESPONDING.
+
+      **CRISIS CLASSIFICATION**
+
+      Classify this crisis along multiple dimensions:
+
+      **Crisis Type:**
+      - DATA_BREACH: Customer data exposed, security incident
+      - PRODUCT_FAILURE: Product defect, service outage, safety issue
+      - EXECUTIVE_SCANDAL: Leadership misconduct, fraud, legal issues
+      - REGULATORY_ACTION: Government investigation, fine, compliance failure
+      - SOCIAL_MEDIA_FIRESTORM: Viral negative attention, cancel culture event
+      - EMPLOYEE_INCIDENT: Workplace issue, discrimination claim, labor dispute
+      - ENVIRONMENTAL: Environmental damage, sustainability failure
+      - FINANCIAL: Earnings miss, layoffs, bankruptcy concerns
+      - LEGAL: Lawsuit, IP dispute, class action
+      - SUPPLY_CHAIN: Supplier issues, product recall, quality control failure
+
+      **Severity Assessment:**
+      Using the Coombs Situational Crisis Communication Theory (SCCT) framework:
+      - Crisis responsibility: Victim cluster, Accidental cluster, or Intentional cluster?
+      - Performance history: Does {input.company_name} have prior crises? (reputation halo or deficit)
+      - Relationship history: How is the company perceived by stakeholders pre-crisis?
+      - Severity of damage: Physical harm, financial harm, reputational harm?
+
+      Re-evaluate the severity level ({input.severity_level}) based on analysis:
+      - CRITICAL: Immediate physical safety risk, massive data breach, CEO arrested,
+        regulatory shutdown. News cycle domination. Board-level response required.
+      - HIGH: Significant brand damage, trending on social media, press inquiries active.
+        C-suite response required within hours.
+      - MEDIUM: Localized issue with potential to escalate, moderate press interest.
+        VP-level response required within 24 hours.
+      - LOW: Minor issue, limited public awareness, manageable through standard processes.
+
+      **FACT PATTERN ANALYSIS**
+
+      Establish what is known, unknown, and uncertain:
+
+      **Known Facts (verified):**
+      - What exactly happened? (Event description)
+      - When did it happen? (Timeline)
+      - Who is affected? (Scope)
+      - What actions have been taken so far?
+      - What is the current status?
+
+      **Unknown Facts (need investigation):**
+      - Root cause (if not yet determined)
+      - Full scope of impact
+      - Duration of the issue
+      - Whether the issue is ongoing or resolved
+      - Legal liability exposure
+
+      **Assumptions (working hypotheses):**
+      - Likely root cause
+      - Probable scope
+      - Expected media and public reaction
+
+      **Red Lines (things we must NOT say until confirmed):**
+      - Cause statements without root cause analysis
+      - Scope statements without full investigation
+      - Promises about resolution timeline without engineering confirmation
+      - Liability admissions without legal counsel
+
+      **STAKEHOLDER MAPPING**
+
+      Identify every stakeholder group and their concerns:
+
+      | Stakeholder | Primary Concern | Urgency | Channel | Tone |
+      |-------------|----------------|---------|---------|------|
+      | Customers | Safety, data, service continuity | Immediate | Email, in-app, social | Empathetic, actionable |
+      | Employees | Job security, company values, talking points | Immediate | Internal, Slack, all-hands | Transparent, reassuring |
+      | Media/Press | Facts, accountability, timeline | Hours | Press release, spokesperson | Professional, factual |
+      | Investors/Board | Financial impact, liability, leadership | Hours | Direct briefing | Measured, strategic |
+      | Partners | Partnership impact, shared liability | Same day | Direct contact | Collaborative, transparent |
+      | Regulators | Compliance, remediation plan | As required | Formal filing | Legal, thorough |
+      | General Public | Accountability, values | As story develops | Social media, website | Genuine, humble |
+
+      For each stakeholder group:
+      - What do they already know?
+      - What will they learn and when?
+      - What is their likely reaction?
+      - What is our message to them?
+      - Who delivers the message?
+
+      **TIMELINE AND VELOCITY ASSESSMENT**
+
+      Analyze crisis velocity:
+      - How fast is information spreading? (social media monitoring metrics)
+      - What is the current sentiment trajectory? (worsening, stable, improving)
+      - Are there amplifiers? (influencers, journalists, politicians engaging)
+      - Is there a news cycle deadline creating time pressure?
+      - What is the "golden hour" window for response?
+
+      **RESPONSE PRIORITY MATRIX**
+
+      Based on assessment, prioritize response actions:
+
+      | Priority | Action | Owner | Deadline | Status |
+      |----------|--------|-------|----------|--------|
+      | P0 | [Safety actions if applicable] | | Immediate | |
+      | P0 | [Internal briefing for employees] | | Within 1 hour | |
+      | P0 | [Holding statement] | | Within 2 hours | |
+      | P1 | [Full customer communication] | | Within 4 hours | |
+      | P1 | [Press response/statement] | | Within 4 hours | |
+      | P2 | [Detailed Q&A document] | | Within 8 hours | |
+      | P2 | [Channel-specific responses] | | Within 8 hours | |
+      | P3 | [Long-form public response] | | Within 24 hours | |
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "crisis_classification" - Type, severity, SCCT analysis
+      2. "fact_pattern" - Known, unknown, assumptions, red lines
+      3. "stakeholder_map" - All stakeholder groups with concerns and messaging
+      4. "velocity_assessment" - Speed, trajectory, amplifiers, timeline pressure
+      5. "response_priority_matrix" - Prioritized action list with owners and deadlines
+      6. "risk_scenarios" - 3 scenarios: best case, expected case, worst case
+      7. "legal_considerations" - Items to verify with legal counsel before communication
+      8. "immediate_recommendations" - Top 5 actions to take in the next 60 minutes
+    model: sonnet
+    max_turns: 10
+
+  - id: holding-statement
+    depends_on: [situation-assessment]
+    prompt: |
+      Draft holding statements and initial communications for all stakeholder groups,
+      calibrated to the crisis type, severity, and audience.
+
+      Crisis: {input.crisis_description}
+      Company: {input.company_name}
+      Severity: {input.severity_level}
+      Spokesperson: {input.spokesperson_name}
+      Situation assessment: {steps.situation-assessment.output}
+
+      You are a Crisis Communications Writer who has drafted holding statements for
+      major corporate crises including data breaches at financial institutions, product
+      recalls for consumer goods companies, and executive misconduct at tech companies.
+      Every word matters. One wrong phrase can escalate the crisis exponentially.
+
+      **HOLDING STATEMENT PRINCIPLES**
+
+      The holding statement is the FIRST public communication. It must:
+      1. Acknowledge the situation (do not deny or minimize)
+      2. Express appropriate concern for affected parties
+      3. State what is known (only verified facts)
+      4. Describe actions being taken
+      5. Commit to transparency and updates
+      6. Provide a channel for questions/concerns
+      7. NOT speculate about cause, scope, or liability
+      8. NOT make promises that cannot be kept
+      9. NOT blame others (even if warranted - that comes later)
+      10. Be human, not corporate - people are scared/angry, not reading a 10-K
+
+      **LANGUAGE CALIBRATION BY CRISIS TYPE**
+
+      **Data Breach / Security Incident:**
+      - Lead with customer safety and data protection
+      - Be specific about what data was/was not affected (if known)
+      - Outline protective actions customers should take
+      - Reference incident response and security measures
+      - Tone: Serious, protective, action-oriented
+      - AVOID: "sophisticated attack" (sounds like excuse), "small number" (minimizing)
+
+      **Product Failure / Safety Issue:**
+      - Lead with customer safety
+      - Be clear about the risk and who is affected
+      - Provide immediate safety instructions
+      - Outline recall/remediation process
+      - Tone: Urgent, caring, responsible
+      - AVOID: "isolated incident" (until proven), "within normal parameters" (dismissive)
+
+      **Executive Scandal / Misconduct:**
+      - Separate the individual from the company
+      - Affirm company values
+      - State actions taken (suspension, investigation, etc.)
+      - Do not pre-judge the outcome
+      - Tone: Firm, values-driven, forward-looking
+      - AVOID: "shocked and surprised" (sounds rehearsed), "one bad apple" (minimizing)
+
+      **Regulatory Action:**
+      - Acknowledge the action professionally
+      - Express commitment to compliance
+      - Outline cooperation with authorities
+      - Reassure about business continuity
+      - Tone: Professional, cooperative, measured
+      - AVOID: "disagree with the findings" (confrontational), "routine matter" (dismissive)
+
+      **Social Media Firestorm:**
+      - Acknowledge the concern directly
+      - Show you understand why people are upset
+      - Take responsibility where appropriate
+      - Outline concrete steps being taken
+      - Tone: Humble, genuine, action-oriented
+      - AVOID: "taken out of context" (defensive), "sorry if you were offended" (non-apology)
+
+      **HOLDING STATEMENT DRAFTS**
+
+      Draft the following communications:
+
+      **1. External Holding Statement (Press/Public)**
+      - 150-300 words
+      - For immediate release
+      - Attribution: {input.spokesperson_name} or "{input.company_name} spokesperson"
+      - Format: press release style
+      - Include: media contact information
+      - Draft THREE versions:
+        * Version A: Minimal (bare acknowledgment, for when facts are still emerging)
+        * Version B: Standard (acknowledgment + known facts + actions being taken)
+        * Version C: Comprehensive (for when full picture is known within hours)
+
+      **2. Customer Communication**
+      - 200-400 words
+      - Email and/or in-app notification format
+      - Direct, personal tone
+      - Include: what customers need to do (if anything)
+      - Include: how to get help (support channel, dedicated line)
+      - Include: when they will receive the next update
+      - Draft for each affected customer segment if impacts vary
+
+      **3. Employee Communication**
+      - 300-500 words
+      - Internal memo / Slack message format
+      - Transparent but reassuring
+      - Include: what employees should say if asked by customers, friends, press
+      - Include: what employees should NOT say (redirect to official channels)
+      - Include: who to contact with questions internally
+      - Include: timeline for next internal update
+
+      **4. Social Media Responses**
+      Draft responses for each affected channel in [{input.affected_channels}]:
+      - Twitter/X: 280-character response + longer thread if needed
+      - LinkedIn: Professional, 200-300 word post
+      - Reddit: Authentic, transparent, 200-400 word response
+      - Facebook: Community-focused, 200-300 word post
+      - Instagram: Short caption + story text if applicable
+      Each should be platform-appropriate in tone and format.
+
+      **5. Investor/Board Communication**
+      - 300-500 words
+      - Formal memo format
+      - Focus on: facts, business impact assessment, response plan, timeline
+      - Include: preliminary financial impact estimate (if applicable)
+      - Include: legal risk assessment summary
+
+      **6. Partner/Vendor Communication**
+      - 200-300 words
+      - Professional, collaborative tone
+      - Focus on: what partners need to know, any action required from them
+      - Reassurance about partnership continuity
+
+      **STATEMENT REVIEW CHECKLIST**
+
+      For each statement, verify:
+      - [ ] No speculation about unverified facts
+      - [ ] No admission of liability (verify with legal)
+      - [ ] No promises about timelines or outcomes
+      - [ ] Appropriate empathy expressed
+      - [ ] Clear next steps communicated
+      - [ ] Contact information provided
+      - [ ] Consistent with all other statements (no contradictions)
+      - [ ] Reviewed for potential misinterpretation
+      - [ ] Appropriate reading level (aim for 8th grade)
+      - [ ] No jargon that could confuse or alienate
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "press_statements" - Three versions (minimal, standard, comprehensive)
+      2. "customer_communications" - Email/notification drafts per segment
+      3. "employee_communication" - Internal memo with talking points
+      4. "social_media_responses" - Per-platform response drafts
+      5. "investor_communication" - Board/investor briefing
+      6. "partner_communication" - Vendor/partner notification
+      7. "review_checklist_results" - Per-statement review verification
+      8. "escalation_triggers" - Conditions under which to upgrade to next version
+    model: sonnet
+    max_turns: 10
+
+  - id: qa-document
+    depends_on: [situation-assessment]
+    prompt: |
+      Generate a comprehensive Q&A document preparing the spokesperson and support
+      team for every possible question, including hostile media questions and trap
+      questions.
+
+      Crisis: {input.crisis_description}
+      Company: {input.company_name}
+      Spokesperson: {input.spokesperson_name}
+      Situation assessment: {steps.situation-assessment.output}
+
+      You are a Media Training Coach and Crisis Q&A Specialist. You have prepared
+      CEOs for hostile CNN interviews, Congressional hearings, and angry town halls.
+      Your Q&A documents are designed to ensure spokespeople never get caught off-guard.
+
+      **Q&A DOCUMENT STRUCTURE**
+
+      For every question, provide:
+      - **Question**: The exact question as a reporter/customer/employee would ask it
+      - **Intent**: What is the questioner really trying to learn or prove?
+      - **Key Message**: The one thing we want the audience to take away
+      - **Recommended Answer**: Full scripted response (2-4 sentences)
+      - **Bridge Statement**: If the question is a trap, how to bridge to our message
+      - **Do NOT Say**: Specific phrases or claims to avoid
+      - **Worst-Case Follow-Up**: The hardest follow-up question and how to handle it
+
+      **QUESTION CATEGORIES**
+
+      **Category 1: Basic Facts (20 questions)**
+      Questions about what happened:
+      - "What exactly happened?"
+      - "When did you first become aware of this?"
+      - "How many people are affected?"
+      - "Is the situation ongoing or has it been resolved?"
+      - "What caused this?"
+      - "Who is responsible?"
+      - "Have you notified the authorities?"
+      - "How long has this been going on?"
+      - "What is the full scope of the impact?"
+      - "What are you doing about it right now?"
+      [Generate 10 more specific to this crisis type]
+
+      **Category 2: Accountability Questions (15 questions)**
+      Questions about responsibility and blame:
+      - "Did {input.company_name} know about this before it became public?"
+      - "Were there warning signs that were ignored?"
+      - "Who at {input.company_name} is accountable for this?"
+      - "Will anyone be fired over this?"
+      - "Has your CEO personally addressed this?"
+      - "Are you admitting fault?"
+      - "How can you say you take X seriously when this happened?"
+      - "Isn't this a pattern of negligence?"
+      [Generate 7 more specific to this crisis type]
+
+      **Category 3: Impact and Harm Questions (15 questions)**
+      Questions about who was hurt and how:
+      - "What is the worst-case scenario for affected [customers/users/people]?"
+      - "Are there financial implications for affected parties?"
+      - "Will you compensate affected parties?"
+      - "What should affected people do right now to protect themselves?"
+      - "Have any [customers/users] reported [harm/loss] as a result?"
+      - "Could this get worse before it gets better?"
+      [Generate 9 more specific to this crisis type]
+
+      **Category 4: Trap Questions (15 questions)**
+      Questions designed to create headlines or admissions:
+      - "Would you say this is the biggest failure in {input.company_name}'s history?"
+      - "Your competitor [X] says this would never happen to their customers. How do you respond?"
+      - "Can you guarantee this will never happen again?"
+      - "If a [customer/user] asked you to look them in the eye and explain this, what would you say?"
+      - "Some people are calling for [boycott/regulation/lawsuit]. Do you think that is fair?"
+      - "Did you prioritize [profits/growth/speed] over [safety/security/customers]?"
+      - "Are you willing to [resign/testify/open your books] to show accountability?"
+      - "How much money did {input.company_name} save by not preventing this?"
+      [Generate 7 more specific to this crisis type]
+
+      For each trap question, provide:
+      - Why it is a trap (what headline they want)
+      - Bridge technique to escape the trap
+      - Example answer that addresses the concern without creating a damaging headline
+
+      **Category 5: Forward-Looking Questions (10 questions)**
+      Questions about what happens next:
+      - "What are the next steps?"
+      - "When will we know the full extent of this?"
+      - "What changes are you making to prevent this in the future?"
+      - "Will you release a full investigation report?"
+      - "How long until things are back to normal?"
+      [Generate 5 more]
+
+      **Category 6: Internal/Employee Questions (10 questions)**
+      Questions employees will ask:
+      - "Is my job safe?"
+      - "What should I say if a customer asks me about this?"
+      - "What should I say if a reporter contacts me?"
+      - "Are we changing our practices as a result?"
+      - "Can I share information about this on social media?"
+      [Generate 5 more]
+
+      **Category 7: Customer Support Scripts (10 scenarios)**
+      For support agents handling inbound inquiries:
+      - Angry customer demanding explanation
+      - Worried customer asking about personal impact
+      - Customer threatening to leave
+      - Customer asking for compensation
+      - Media pretending to be a customer
+      [Generate 5 more]
+
+      For each scenario: opening statement, key messages, de-escalation techniques,
+      escalation criteria, and closing statement.
+
+      **SPOKESPERSON BRIEFING GUIDE**
+
+      Prepare the spokesperson ({input.spokesperson_name}) for media appearances:
+
+      **Appearance Preparation:**
+      - Key messages (maximum 3, memorize these)
+      - Bridge phrases (techniques to redirect difficult questions)
+        * "What I can tell you is..."
+        * "The important thing right now is..."
+        * "Let me be clear about what we know..."
+        * "I understand the concern, and here is what we are doing..."
+      - Body language guidance (open posture, eye contact, measured pace)
+      - What to wear (appropriate for severity level)
+      - What NOT to do (no smiling, no phone-checking, no defensive gestures)
+
+      **Media Interview Simulation:**
+      Script a simulated hostile interview:
+      - 10 progressively harder questions with ideal responses
+      - Interruption handling techniques
+      - "No comment" alternatives (never say "no comment")
+      - Emotional control techniques for provocative questions
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "factual_qa" - Category 1 questions and answers
+      2. "accountability_qa" - Category 2 questions and answers
+      3. "impact_qa" - Category 3 questions and answers
+      4. "trap_qa" - Category 4 with trap analysis and bridge techniques
+      5. "forward_looking_qa" - Category 5 questions and answers
+      6. "employee_qa" - Category 6 questions and answers
+      7. "support_scripts" - Category 7 customer support scenarios
+      8. "spokesperson_briefing" - Complete media appearance preparation
+      9. "interview_simulation" - Simulated hostile interview script
+      10. "key_messages_card" - Pocket card with 3 key messages and bridge phrases
+    model: sonnet
+    max_turns: 10
+
+  - id: channel-strategy
+    depends_on: [situation-assessment]
+    prompt: |
+      Develop a detailed multi-channel crisis response coordination plan, specifying
+      exact timing, sequencing, and channel-specific tactics.
+
+      Crisis: {input.crisis_description}
+      Company: {input.company_name}
+      Affected channels: {input.affected_channels}
+      Severity: {input.severity_level}
+      Situation assessment: {steps.situation-assessment.output}
+
+      You are a Multi-Channel Crisis Response Coordinator. Your specialty is
+      orchestrating simultaneous communications across diverse channels during
+      crises, ensuring message consistency while adapting tone and format for
+      each platform.
+
+      **CHANNEL INVENTORY AND PRIORITY**
+
+      For the affected channels [{input.affected_channels}], plus any additional
+      channels identified in the situation assessment:
+
+      Assess each channel on:
+      - **Velocity**: How fast does information spread? (Twitter > Reddit > Press > LinkedIn)
+      - **Amplification risk**: How likely are messages to be screenshotted and shared?
+      - **Audience**: Who is on this channel? (customers, prospects, employees, press, public)
+      - **Sentiment**: What is the current mood on this channel?
+      - **Control level**: How much control do we have? (owned, earned, social)
+      - **Response expectation**: How fast do people expect a response? (Twitter: minutes, email: hours)
+
+      **CHANNEL SEQUENCING FRAMEWORK**
+
+      Crisis communications must be sequenced carefully. Wrong order = internal
+      leaks, confused messaging, and lost trust.
+
+      **Recommended Sequence:**
+      1. **T+0 (Immediate)**: Internal notification - employees first, always
+         - They should NOT learn about the crisis from the press or social media
+         - Internal Slack/Teams message from CEO or crisis lead
+      2. **T+15min**: Social media acknowledgment on fastest channels
+         - Short acknowledgment that you are aware and investigating
+         - Prevents vacuum that others fill with speculation
+      3. **T+30min**: Customer-facing channels (in-app, status page, support)
+         - Direct communication to affected customers
+         - Status page update if service-related
+      4. **T+1h**: Press holding statement
+         - Distribute to reporters who have inquired
+         - Post to newsroom/press page
+      5. **T+2h**: Detailed social media responses
+         - Respond to specific questions and concerns on each platform
+         - Pin/highlight official response
+      6. **T+4h**: Customer email communication
+         - Detailed email to all customers (or affected subset)
+      7. **T+8h**: Investor/partner briefings
+         - Direct outreach to key stakeholders
+      8. **T+24h**: Long-form blog post or CEO letter
+         - Full account of situation, response, and path forward
+      9. **T+48h**: Follow-up communications
+         - Progress updates across all channels
+
+      Adjust timeline based on severity: CRITICAL compresses everything to half time.
+
+      **CHANNEL-SPECIFIC TACTICS**
+
+      **Twitter/X:**
+      - Pin official statement to profile
+      - Create dedicated thread (numbered tweets for full context)
+      - Monitor mentions and quote tweets for misinformation
+      - Respond to high-follower-count critics directly
+      - Use @replies sparingly (each reply shows up in followers' feeds)
+      - Do NOT delete negative comments (screenshots already exist)
+      - Character count constraint: lead with most important info
+      - Hashtag strategy: do we create one or is there an existing one to monitor?
+
+      **LinkedIn:**
+      - CEO/executive personal post (higher engagement than company page)
+      - Longer, more detailed response appropriate for professional audience
+      - Address business impact and professional implications
+      - Engage with comments thoughtfully (slower pace is acceptable)
+      - Update company page with statement
+
+      **Reddit:**
+      - Identify relevant subreddits where discussion is happening
+      - Post from official verified account (NOT anonymous)
+      - Be extremely transparent - Reddit detects corporate-speak instantly
+      - Do an AMA if appropriate for the crisis type
+      - Address top comments directly with specific answers
+      - Do NOT use marketing language or PR polish
+
+      **Press/Media:**
+      - Press release distribution (via wire service if CRITICAL severity)
+      - Embargoed briefing for tier-1 reporters if possible
+      - Newsroom page update with official statement
+      - Media inquiries response protocol (who responds, approval chain, turnaround time)
+      - Press conference logistics if severity warrants
+
+      **Email:**
+      - Segment customer list by impact level
+      - Personalize where possible (not "Dear Customer")
+      - Plain text preferred over HTML (feels more genuine)
+      - Subject line: clear and honest, not clickbait
+      - Reply-to address that is monitored
+      - Unsubscribe considerations (crisis emails should be transactional, not marketing)
+
+      **Internal (Slack/Teams):**
+      - Dedicated crisis channel with leadership updates
+      - All-hands meeting scheduling
+      - FAQ document for employee reference
+      - Clear guidelines on external communication
+      - Regular cadence of internal updates (hourly during peak)
+
+      **Website/Blog:**
+      - Dedicated crisis page or blog post
+      - Banner on homepage if severity warrants
+      - Status page updates (if service-related)
+      - Search engine considerations (crisis page should rank for crisis-related queries)
+
+      **MONITORING AND RAPID RESPONSE PLAN**
+
+      Set up monitoring across all channels:
+      - Social listening keywords to track
+      - Sentiment tracking metrics and thresholds
+      - Misinformation detection and correction protocol
+      - Escalation criteria (when does a channel need executive intervention?)
+      - Response SLAs by channel and severity
+      - Nighttime/weekend coverage plan
+
+      **DARK SITE / CRISIS PAGE SPECIFICATION**
+
+      If severity is HIGH or CRITICAL:
+      - Spec for a dedicated crisis information page
+      - URL structure (e.g., {company}.com/update or {company}.com/security-notice)
+      - Content sections: situation overview, timeline, actions taken, resources,
+        FAQ, updates log
+      - SEO considerations for crisis-related search queries
+      - Update cadence commitment
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "channel_assessment" - Each channel with velocity, risk, audience, and priority
+      2. "sequencing_timeline" - Minute-by-minute channel activation plan
+      3. "channel_tactics" - Per-channel detailed tactical playbook
+      4. "monitoring_plan" - Social listening setup, keywords, tools, SLAs
+      5. "dark_site_spec" - Crisis page specification and content outline
+      6. "coordination_matrix" - Who posts what, where, and when (the master schedule)
+      7. "escalation_protocol" - When and how to escalate channel-specific issues
+      8. "resource_requirements" - People, tools, and access needed for execution
+    model: haiku
+    max_turns: 10
+
+  - id: response-coordination
+    depends_on: [holding-statement, qa-document, channel-strategy]
+    prompt: |
+      Synthesize all crisis response materials into a unified command center action
+      plan, resolving any inconsistencies and creating an executable minute-by-minute
+      coordination playbook.
+
+      Crisis: {input.crisis_description}
+      Company: {input.company_name}
+      Spokesperson: {input.spokesperson_name}
+      Severity: {input.severity_level}
+      Situation assessment: {steps.situation-assessment.output}
+      Holding statements: {steps.holding-statement.output}
+      Q&A document: {steps.qa-document.output}
+      Channel strategy: {steps.channel-strategy.output}
+
+      You are the Crisis Command Center Director. All materials have been prepared.
+      Your job is to orchestrate the execution - making sure every message goes out
+      on the right channel, at the right time, to the right audience, in the right
+      order, with complete consistency.
+
+      **CONSISTENCY VERIFICATION**
+
+      Before execution, verify all materials are aligned:
+
+      1. **Message Consistency Audit**
+         Compare all drafted communications for:
+         - Factual consistency: Do all statements present the same facts?
+         - Tone consistency: Is empathy level consistent across channels?
+         - Timeline consistency: Do all communications reference the same events?
+         - Promise consistency: Are commitments the same everywhere?
+         - Attribution consistency: Same spokesperson cited everywhere?
+         Flag and resolve any discrepancies.
+
+      2. **Legal Review Checklist**
+         Items requiring legal sign-off before publication:
+         - Liability language in all external statements
+         - Any admission of fault or negligence
+         - Customer data specifics in data breach scenarios
+         - Regulatory compliance of communications (GDPR, SEC, etc.)
+         - Indemnification language in partner communications
+
+      3. **Factual Accuracy Gate**
+         Verify every factual claim in every document against known facts:
+         - Numbers (affected users, timeline, financial impact)
+         - Names and titles
+         - Technical details
+         - Regulatory references
+
+      **COMMAND CENTER STRUCTURE**
+
+      Define the crisis response team:
+
+      **Roles and Responsibilities:**
+      | Role | Person | Responsibilities | Contact |
+      |------|--------|-----------------|---------|
+      | Crisis Commander | [CEO/CMO] | Final approval, executive decisions | |
+      | Communications Lead | [VP Comms] | Message approval, media coordination | |
+      | Spokesperson | {input.spokesperson_name} | Media interviews, public statements | |
+      | Social Media Lead | [SM Manager] | All social channel management | |
+      | Customer Comms Lead | [CS VP] | Customer emails, support scripting | |
+      | Internal Comms Lead | [People/HR] | Employee communications | |
+      | Legal Advisor | [GC/Outside Counsel] | Legal review of all communications | |
+      | Technical SME | [CTO/Engineering Lead] | Technical accuracy verification | |
+      | Monitoring Lead | [PR/SM Analyst] | Real-time monitoring and reporting | |
+
+      **Decision Authority Matrix:**
+      | Decision Type | Authority Level | Escalation Path |
+      |---------------|----------------|-----------------|
+      | Social media response | Social Media Lead | -> Comms Lead if sensitive |
+      | Press statement update | Comms Lead | -> Crisis Commander if material change |
+      | Customer email | Customer Comms Lead | -> Comms Lead + Legal |
+      | Employee communication | Internal Comms Lead | -> Crisis Commander |
+      | New fact disclosure | Crisis Commander | -> Legal Advisor first |
+      | Compensation/remediation offer | Crisis Commander + Legal | -> Board if significant |
+
+      **MINUTE-BY-MINUTE EXECUTION PLAN**
+
+      Create a detailed execution timeline:
+
+      **Hour 0 (Crisis Detected)**
+      - 0:00 - Crisis team assembled (virtual war room link sent)
+      - 0:05 - Situation briefing by whoever detected the crisis
+      - 0:10 - Fact verification begins
+      - 0:15 - Social media acknowledgment posted (Version A - minimal)
+      - 0:20 - Internal Slack message sent to all employees
+      - 0:25 - Customer support briefed with initial talking points
+      - 0:30 - Status page updated (if service-related)
+
+      **Hour 1**
+      - 0:45 - Legal review of holding statement draft
+      - 1:00 - Holding statement Version B approved and published
+      - 1:00 - Media responses begin using approved Q&A
+      - 1:15 - Social media detailed thread posted
+      - 1:30 - Customer email queued for send (segment by impact)
+
+      **Hours 2-4**
+      - 2:00 - Customer email sent
+      - 2:00 - Partner notifications sent
+      - 2:30 - Investor briefing calls scheduled
+      - 3:00 - First monitoring report: sentiment, volume, media pickup
+      - 4:00 - Holding statement update if new facts available
+
+      **Hours 4-8**
+      - 4:00 - Spokesperson media availability (if needed)
+      - 6:00 - Second monitoring report
+      - 8:00 - Comprehensive update published (blog post or CEO letter)
+
+      **Hours 8-24**
+      - Regular monitoring reports every 4 hours
+      - Social media response continues
+      - Update all channels with new information as available
+
+      **Day 2-7**
+      - Daily internal briefings
+      - Daily external updates (reduce frequency as crisis stabilizes)
+      - Root cause analysis communication (when ready)
+      - Remediation plan communication
+
+      **SCENARIO PLAYBOOKS**
+
+      Prepare contingency plans for likely escalation scenarios:
+
+      **Scenario A: Crisis Escalates (media pile-on, new facts emerge)**
+      - Trigger: 10x increase in mentions, new damaging information surfaces
+      - Action: Upgrade to comprehensive statement, CEO involvement, press conference
+      - Updated messaging templates
+
+      **Scenario B: Internal Leak (employee shares confidential details)**
+      - Trigger: Internal information appears on social media or press
+      - Action: Identify source, reinforce internal guidelines, update external messaging
+      - Updated talking points
+
+      **Scenario C: Legal Action Announced (lawsuit filed, regulatory investigation)**
+      - Trigger: Legal filing or regulatory statement
+      - Action: Shift to legal-approved messaging only, limit spokesperson availability
+      - Updated messaging templates
+
+      **Scenario D: Competitor Exploitation (competitor runs attack ads or statements)**
+      - Trigger: Competitor publicly references our crisis
+      - Action: Stay above the fray, focus on customer care, prepare counter if needed
+      - Decision criteria for whether to respond
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "consistency_audit" - Cross-document consistency verification results
+      2. "legal_review_items" - Items requiring legal sign-off
+      3. "command_center_structure" - Roles, responsibilities, decision authority
+      4. "execution_timeline" - Minute-by-minute plan for first 24 hours
+      5. "scenario_playbooks" - Contingency plans for escalation scenarios
+      6. "communication_package" - Final approved versions of all communications
+      7. "monitoring_dashboard_spec" - Real-time metrics to track
+      8. "daily_briefing_template" - Template for ongoing crisis team briefings
+    model: sonnet
+    max_turns: 10
+
+  - id: recovery-monitoring
+    depends_on: [response-coordination]
+    prompt: |
+      Design a comprehensive crisis recovery monitoring framework with sentiment
+      tracking, brand health metrics, and milestone-based communication strategy
+      for the recovery period.
+
+      Crisis: {input.crisis_description}
+      Company: {input.company_name}
+      Severity: {input.severity_level}
+      Response coordination: {steps.response-coordination.output}
+      Situation assessment: {steps.situation-assessment.output}
+
+      You are a Crisis Recovery Strategist specializing in post-crisis brand
+      rehabilitation. You have guided dozens of companies from crisis through
+      recovery, rebuilding stakeholder trust and brand equity.
+
+      **RECOVERY PHASE DEFINITION**
+
+      Define the recovery phases and their characteristics:
+
+      **Phase 1: Acute Response (Days 1-3)**
+      - Active crisis management
+      - Hourly monitoring cadence
+      - All communications focused on transparency and action
+      - Success metric: Sentiment stops declining
+
+      **Phase 2: Stabilization (Days 4-14)**
+      - Crisis contained, root cause being addressed
+      - Daily monitoring cadence
+      - Communications shift from reactive to proactive
+      - Success metric: Neutral sentiment exceeds negative
+
+      **Phase 3: Recovery (Weeks 3-8)**
+      - Remediation actions demonstrably underway
+      - Weekly monitoring cadence
+      - Communications focus on progress and prevention
+      - Success metric: Positive sentiment exceeds negative
+
+      **Phase 4: Rehabilitation (Months 3-6)**
+      - Long-term brand rebuilding
+      - Monthly monitoring cadence
+      - Communications return to normal marketing with trust themes
+      - Success metric: Brand metrics return to pre-crisis baseline
+
+      **SENTIMENT RECOVERY TRACKING**
+
+      **Real-Time Sentiment Dashboard:**
+      Design metrics to track across all channels:
+
+      1. **Net Sentiment Score (NSS)**: (Positive mentions - Negative mentions) / Total mentions
+         - Track hourly during acute phase, daily during stabilization
+         - Benchmark against pre-crisis baseline
+         - Separate by channel, stakeholder group, and geography
+
+      2. **Crisis Mention Volume**: Total mentions of crisis-related keywords
+         - Volume trajectory: increasing, stable, declining
+         - New vs rehashed mentions (fresh outrage vs old news)
+         - Media pickup rate (how many outlets covered vs just social)
+
+      3. **Share of Voice Recovery**: Brand mentions as % of category mentions
+         - Pre-crisis baseline
+         - During crisis nadir
+         - Recovery trajectory
+
+      4. **Stakeholder Trust Index**: Composite of:
+         - Customer NPS change (survey if possible)
+         - Employee engagement signals (internal survey, Glassdoor)
+         - Analyst/investor sentiment (coverage tone, stock price if public)
+         - Partner sentiment (direct feedback)
+
+      5. **Message Penetration**: Did our key messages land?
+         - Track which of our talking points appear in media coverage
+         - Track customer communications that reference our response
+         - Track social media users defending/supporting our response
+
+      **RECOVERY MILESTONES AND COMMUNICATIONS**
+
+      Define specific milestones that trigger communications:
+
+      | Milestone | Trigger | Communication | Channel |
+      |-----------|---------|---------------|---------|
+      | Root cause identified | Investigation complete | Public statement with findings | All channels |
+      | Remediation started | Fix deployed/action taken | Progress update | Customer email + blog |
+      | Affected parties whole | Compensation/fix complete | Closure communication | Direct + public |
+      | Prevention measures live | New controls implemented | Forward-looking announcement | Blog + press |
+      | External validation | Audit/certification complete | Trust rebuilding content | Press + LinkedIn |
+      | Recovery baseline reached | Metrics return to normal | Quiet transition, no fanfare | Internal only |
+
+      For each milestone, draft:
+      - Trigger criteria (how do we know we have reached it?)
+      - Communication content (key messages and draft text)
+      - Approval chain
+      - Channel strategy
+
+      **BRAND REHABILITATION STRATEGY**
+
+      Long-term actions to rebuild brand equity:
+
+      **Trust Rebuilding Initiatives:**
+      - Transparency report: Regular public reports on prevention measures
+      - Customer advisory board: Involve customers in rebuilding trust
+      - Industry leadership: Contribute to industry standards and best practices
+      - Third-party validation: Obtain external audits, certifications, or endorsements
+      - Goodwill gestures: Appropriate compensation, community investment
+
+      **Content Strategy Pivot:**
+      - Shift content themes to emphasize: responsibility, improvement, customer focus
+      - Develop "what we learned" content (turns crisis into credibility)
+      - Customer success stories (social proof of recovery)
+      - Behind-the-scenes content showing new processes/safeguards
+      - Avoid: premature "everything is fine" messaging, ignoring the elephant in the room
+
+      **Reputation Repair SEO:**
+      - Create content targeting crisis-related search queries
+      - Ensure branded search results show recovery narrative, not just crisis coverage
+      - Develop positive content to push down negative crisis coverage in SERPs
+      - Update Wikipedia / knowledge panel if affected
+      - Monitor and respond to negative reviews tied to the crisis
+
+      **LESSONS LEARNED FRAMEWORK**
+
+      After the crisis, capture institutional knowledge:
+
+      1. **Crisis Timeline**: Detailed minute-by-minute record of events and responses
+      2. **What Worked**: Communications, actions, and decisions that were effective
+      3. **What Failed**: Missteps, delays, and missed opportunities
+      4. **Process Improvements**: Changes to crisis response process
+      5. **Prevention Measures**: Operational changes to prevent recurrence
+      6. **Playbook Updates**: Updates to crisis communications playbook for future use
+      7. **Training Needs**: Skills or knowledge gaps exposed by the crisis
+      8. **Tool/Infrastructure Needs**: Monitoring or response tools needed
+
+      **KPI TARGETS FOR RECOVERY**
+
+      Set specific, measurable targets:
+
+      | KPI | Pre-Crisis Baseline | Crisis Nadir (Estimated) | 30-Day Target | 90-Day Target |
+      |-----|---------------------|--------------------------|---------------|---------------|
+      | Net Sentiment Score | | | | |
+      | Customer NPS | | | | |
+      | Media Tone Index | | | | |
+      | Crisis Mention Volume | 0 | | | |
+      | Support Ticket Volume | | | | |
+      | Customer Churn Rate | | | | |
+      | Employee Engagement | | | | |
+      | Social Media Followers | | | | |
+      | Website Traffic Quality | | | | |
+
+      **EARLY WARNING SYSTEM**
+
+      Design an ongoing monitoring system to prevent future crises:
+      - Social listening alerts for brand sentiment drops
+      - Customer complaint pattern detection
+      - Employee satisfaction monitoring
+      - Competitive threat monitoring
+      - Regulatory change tracking
+      - Media monitoring for emerging narratives
+      - Internal reporting channels (whistleblower, ethics hotline)
+
+      Specify alert thresholds, escalation paths, and response protocols for each.
+
+      **OUTPUT FORMAT**
+
+      Return structured JSON with:
+      1. "recovery_phases" - Phase definitions with entry/exit criteria
+      2. "sentiment_dashboard" - All tracking metrics with measurement methodology
+      3. "milestone_communications" - Per-milestone trigger criteria and draft communications
+      4. "rehabilitation_strategy" - Long-term brand rebuilding plan
+      5. "content_strategy" - Post-crisis content themes and calendar
+      6. "seo_recovery" - Search reputation repair plan
+      7. "lessons_learned_template" - Framework for post-crisis review
+      8. "kpi_targets" - Recovery targets at 30/60/90/180 day marks
+      9. "early_warning_system" - Prevention monitoring specification
+      10. "executive_summary" - Complete crisis response and recovery narrative for
+          board/leadership presentation
+    model: sonnet
+    max_turns: 10

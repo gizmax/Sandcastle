@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc"}
 
 # Path prefixes that don't require authentication
-PUBLIC_PREFIXES = ("/api/templates",)
+PUBLIC_PREFIXES = ("/api/templates", "/api/agui")
 
 # Pepper for HMAC key hashing - falls back to a stable default for dev/local mode.
 # In production, set API_KEY_PEPPER as an environment variable.
@@ -104,6 +104,27 @@ async def auth_middleware(request: Request, call_next):
 
     if not db_key:
         return _error_response(401, "UNAUTHORIZED", "Invalid API key")
+
+    # Check key expiry
+    if db_key.expires_at and db_key.expires_at <= datetime.now(timezone.utc):
+        return _error_response(401, "KEY_EXPIRED", "API key has expired")
+
+    # Check IP allowlist
+    if db_key.allowed_cidrs:
+        import ipaddress
+
+        client_ip = request.client.host if request.client else None
+        if client_ip:
+            try:
+                addr = ipaddress.ip_address(client_ip)
+                allowed = any(
+                    addr in ipaddress.ip_network(cidr, strict=False)
+                    for cidr in db_key.allowed_cidrs
+                )
+                if not allowed:
+                    return _error_response(403, "IP_BLOCKED", "IP address not in allowlist")
+            except ValueError:
+                return _error_response(403, "IP_BLOCKED", "Invalid client IP address")
 
     # Set tenant context on request
     request.state.tenant_id = db_key.tenant_id

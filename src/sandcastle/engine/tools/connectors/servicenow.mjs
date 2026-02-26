@@ -11,6 +11,8 @@ const PASSWORD = process.env.TOOL_SERVICENOW_PASSWORD || "";
 const BASE = `https://${INSTANCE}.service-now.com/api/now`;
 
 async function api(path, method = "GET", body = null) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const opts = {
     method,
     headers: {
@@ -18,14 +20,19 @@ async function api(path, method = "GET", body = null) {
       "Content-Type": "application/json",
       "Accept": "application/json",
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(`${BASE}${path}`, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`ServiceNow API ${resp.status}: ${text.slice(0, 500)}`);
+  try {
+    const resp = await fetch(`${BASE}${path}`, opts);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`ServiceNow API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return resp.json();
 }
 
 export async function get_incidents(query = "", state = "", limit = 20) {

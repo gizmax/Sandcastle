@@ -1,0 +1,1286 @@
+# name: Product Design Specification
+# description: Transform user stories and requirements into comprehensive product design specifications with wireframe descriptions, interaction patterns, and developer handoff documentation
+# tags: [Design, UX, Product, Wireframes, Accessibility]
+# category: engineering
+
+name: product-design-specification
+description: Transform user stories and requirements into comprehensive product design specifications with wireframe descriptions, interaction patterns, and developer handoff documentation
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: []
+
+input_schema:
+  required: ["product_name", "user_stories"]
+  properties:
+    product_name:
+      type: string
+      description: "Name of the product or feature being designed (e.g. 'Acme Dashboard', 'Checkout Flow Redesign')"
+    user_stories:
+      type: string
+      description: "User stories, requirements, or feature descriptions to translate into design specs (paste all stories/requirements)"
+    design_system:
+      type: string
+      description: "Design system to use or reference (e.g. 'Material Design 3', 'Apple HIG', 'Ant Design', 'custom')"
+      default: "custom"
+    target_platforms:
+      type: string
+      description: "Comma-separated target platforms (e.g. 'web, iOS, Android', 'web-only', 'responsive web, native iOS')"
+      default: "responsive web"
+    accessibility_level:
+      type: string
+      description: "Accessibility conformance target (e.g. 'WCAG 2.1 AA', 'WCAG 2.2 AAA', 'Section 508')"
+      default: "WCAG 2.1 AA"
+
+steps:
+  - id: requirements-analysis
+    prompt: |
+      Perform comprehensive requirements analysis on the user stories and product context
+      to build a complete understanding of what needs to be designed.
+
+      Product name: {input.product_name}
+      User stories: {input.user_stories}
+      Design system: {input.design_system}
+      Target platforms: {input.target_platforms}
+      Accessibility level: {input.accessibility_level}
+
+      You are a senior product designer and UX researcher who specializes in translating
+      business requirements into design specifications. Your analysis must be thorough
+      enough that a designer could start wireframing without asking a single clarifying
+      question. For anything that is ambiguous, make and document reasonable assumptions.
+
+      ## REQUIREMENTS ANALYSIS FRAMEWORK
+
+      ### Section 1: User Story Decomposition
+
+      For each user story provided, perform structured decomposition:
+
+      **Story Parsing:**
+      - Extract the role/persona: WHO is doing this?
+      - Extract the action: WHAT do they want to do?
+      - Extract the goal: WHY do they want to do it?
+      - Identify acceptance criteria (stated or implied)
+      - Classify story size: small (single screen/interaction), medium (multi-step flow),
+        large (cross-cutting feature affecting multiple screens)
+
+      **Story Dependency Mapping:**
+      - Which stories depend on other stories being completed first?
+      - Which stories share common UI components or patterns?
+      - Which stories can be designed independently in parallel?
+      - Are there stories that contradict each other? (flag for resolution)
+
+      **Story Prioritization:**
+      Using MoSCoW method, classify each story:
+      - **Must have**: core functionality, product doesn't work without it
+      - **Should have**: important but not critical for launch
+      - **Could have**: nice-to-have that enhances experience
+      - **Won't have (this iteration)**: explicitly out of scope
+
+      ### Section 2: User and Persona Analysis
+
+      Build a design-focused understanding of the users:
+
+      **Primary Personas:**
+      For each distinct user role identified in the stories, define:
+      - Name and archetype description (2-3 sentences)
+      - Technical proficiency level (novice, intermediate, expert)
+      - Usage frequency (daily power user, weekly, occasional)
+      - Primary goals when using this product
+      - Key frustrations and pain points
+      - Context of use (desktop in office, mobile on-the-go, tablet in field, etc.)
+      - Accessibility considerations (screen reader users, motor impairments,
+        cognitive considerations, visual impairments, aging users)
+
+      **User Journey Context:**
+      - What is the user doing BEFORE they interact with this product?
+      - What triggers them to start using it?
+      - What does success look like for them?
+      - What happens AFTER they complete their task?
+      - How does this product fit into their broader workflow?
+
+      ### Section 3: Functional Requirements Matrix
+
+      Create a comprehensive requirements matrix:
+
+      | Req ID | Description | Story Reference | Priority | Platform Specifics | Accessibility Impact |
+      |--------|-------------|----------------|----------|-------------------|---------------------|
+      | FR-001 | ... | US-001 | Must | All platforms | Keyboard navigation needed |
+      | FR-002 | ... | US-002 | Should | Web only | Screen reader labels needed |
+
+      For each requirement, also note:
+      - Input types required (text, selection, file upload, voice, gesture)
+      - Data dependencies (what data must exist or be fetched)
+      - State variations (empty state, loading state, error state, success state, partial state)
+      - Permission or role restrictions (who can see/do this)
+      - Real-time vs. static data (does this need live updates?)
+
+      ### Section 4: Content Requirements
+
+      Identify all content needs for the design:
+
+      **Static Content:**
+      - Page titles, section headers, and labels
+      - Help text, tooltips, and instructional copy
+      - Legal or compliance text requirements
+      - Empty state messages and onboarding content
+      - Error messages and validation feedback
+
+      **Dynamic Content:**
+      - User-generated content and its display constraints
+      - Data-driven content (lists, tables, charts, metrics)
+      - Notification and alert content
+      - Search results and filtered content
+      - Localization requirements (languages, RTL support, date/number formats)
+
+      **Media Content:**
+      - Images, icons, and illustrations needed
+      - Video or animation requirements
+      - Audio content considerations
+      - File upload types and size constraints
+
+      ### Section 5: Technical Constraints
+
+      Document constraints that affect design decisions:
+
+      **Platform Constraints:**
+      For each target platform ({input.target_platforms}):
+      - Screen size ranges and breakpoints
+      - Input methods (mouse, touch, keyboard, voice, stylus)
+      - Native capabilities to leverage (camera, GPS, biometrics, notifications)
+      - Platform-specific patterns and expectations (back button, gestures, etc.)
+      - Offline capabilities needed?
+
+      **Design System Constraints ({input.design_system}):**
+      - Available components and their variants
+      - Typography scale and font families
+      - Color palette and semantic color usage
+      - Spacing and layout grid systems
+      - Icon library and style
+      - Animation and motion principles
+      - What custom components will need to be designed beyond the system?
+
+      **Performance Constraints:**
+      - Maximum acceptable load times for each screen/component
+      - Data pagination or virtualization needs for large datasets
+      - Image optimization requirements
+      - Progressive enhancement strategy
+
+      **Accessibility Constraints ({input.accessibility_level}):**
+      - Color contrast requirements (4.5:1 for text, 3:1 for large text)
+      - Touch target minimums (44x44 CSS pixels for WCAG 2.2)
+      - Keyboard navigation requirements
+      - Screen reader compatibility requirements
+      - Motion and animation reduction (prefers-reduced-motion)
+      - Cognitive load considerations (plain language, clear structure)
+
+      ### Section 6: Edge Cases and Error Scenarios
+
+      For each major feature area, identify:
+      - What happens with no data? (first-time user, empty database)
+      - What happens with too much data? (10,000 items in a list)
+      - What happens with bad data? (malformed input, missing fields)
+      - What happens when the network fails? (offline, timeout, intermittent)
+      - What happens with concurrent users? (real-time editing conflicts)
+      - What happens on an extremely small screen? (320px width minimum)
+      - What happens on an extremely large screen? (4K ultrawide)
+      - What happens when the user navigates away mid-action? (unsaved changes)
+      - What happens with browser back/forward navigation?
+      - What happens if the user opens multiple tabs?
+
+      ### Output Format
+
+      Return:
+      1. Decomposed user stories with dependencies and priorities
+      2. Persona profiles (1-2 paragraphs each)
+      3. Complete functional requirements matrix
+      4. Content requirements inventory
+      5. Technical and design system constraint summary
+      6. Edge case catalog organized by feature area
+      7. Open questions or assumptions made (flagged for stakeholder review)
+      8. Recommended design approach summary (2-3 paragraphs)
+    model: sonnet
+    max_turns: 10
+
+  - id: information-architecture
+    depends_on: [requirements-analysis]
+    prompt: |
+      Design the information architecture for {input.product_name}, including navigation
+      structure, content hierarchy, and user flow mapping.
+
+      Requirements analysis: {steps.requirements-analysis.output}
+      Product name: {input.product_name}
+      Target platforms: {input.target_platforms}
+      Design system: {input.design_system}
+
+      You are an information architect specializing in digital products. Your role is to
+      organize and structure the product's content and functionality in a way that is
+      intuitive, scalable, and aligned with user mental models. Every architectural
+      decision must be justified by user needs, not organizational convenience.
+
+      ## INFORMATION ARCHITECTURE FRAMEWORK
+
+      ### Section 1: Site Map / App Structure
+
+      Design the complete navigational structure:
+
+      **Top-Level Structure:**
+      - Define the primary navigation sections (aim for 5-7 max items)
+      - For each section: name, purpose, what content/functionality lives here
+      - Justify why these groupings match user mental models (card sorting rationale)
+      - Consider progressive disclosure: what is visible immediately vs. behind navigation
+
+      **Hierarchy Depth:**
+      - Map the full depth of the navigation tree
+      - Apply the 3-click rule: can users reach any core functionality in 3 clicks or fewer?
+      - Identify pages that need to be reachable from multiple locations (cross-linking)
+      - Flag any sections deeper than 3 levels (redesign consideration)
+
+      **Navigation Model:**
+      Based on {input.target_platforms}:
+
+      *For web:*
+      - Top navigation bar items and their dropdowns
+      - Sidebar navigation (if applicable) with section and sub-section items
+      - Breadcrumb structure for deep content
+      - Footer navigation and utility links
+      - Search scope and priority
+
+      *For mobile (iOS/Android):*
+      - Tab bar items (5 max for iOS, 5 max for material bottom nav)
+      - Drawer/hamburger menu contents (if used)
+      - Stack navigation flows (how screens push/pop)
+      - Modal presentation patterns
+      - Deep linking structure
+
+      *For responsive web:*
+      - How does the navigation transform across breakpoints?
+      - Which elements collapse into hamburger menu on mobile?
+      - Which secondary navigation becomes hidden on smaller screens?
+      - Touch-friendly adjustments for tablet/mobile
+
+      ### Section 2: Page Inventory
+
+      Create a comprehensive list of every unique page/screen/view needed:
+
+      | Page ID | Page Name | Purpose | Key Content | Key Actions | Entry Points | Exit Points |
+      |---------|-----------|---------|-------------|-------------|-------------|-------------|
+      | P-001 | Dashboard | Overview of key metrics | KPIs, charts, recent items | Filter, drill down | Login, nav | Detail pages |
+
+      For each page, also define:
+      - Page template type (dashboard, list/table, detail, form, wizard, settings, empty/onboarding)
+      - Data requirements (what API calls or data sources feed this page)
+      - Authentication/authorization requirements
+      - SEO considerations (if web): page title, meta description, canonical URL
+      - Estimated content volume (light, moderate, heavy)
+
+      ### Section 3: User Flow Mapping
+
+      For each major user journey identified in the requirements analysis, create a
+      detailed flow map:
+
+      **Flow Format:**
+      ```
+      [Entry Point] -> [Screen A] -> {Decision Point} -> [Screen B (if yes)] / [Screen C (if no)] -> [Success State]
+      ```
+
+      **For each flow, document:**
+
+      **Primary flows (happy path):**
+      - Step-by-step screen sequence with descriptions
+      - User actions at each step (what they click, type, select)
+      - System responses to each action (what happens, what updates, what feedback)
+      - Data created, modified, or consumed at each step
+      - Estimated time to complete the flow
+
+      **Alternative paths:**
+      - What if the user goes back? (can they? is data preserved?)
+      - What if the user abandons mid-flow? (save state? confirmation dialog?)
+      - What if a step fails? (error handling, retry, alternative path)
+      - What if the user takes an unexpected path? (guard rails, redirects)
+
+      **Critical flows to map (at minimum):**
+      1. First-time user onboarding flow
+      2. Core task completion flow (the primary thing users do)
+      3. Error recovery flow
+      4. Settings/configuration flow
+      5. Search and filter flow
+      6. Any flow involving multi-step forms or wizards
+
+      ### Section 4: Content Hierarchy and Priority
+
+      For each major page, define the visual and informational hierarchy:
+
+      **Hierarchy levels (what gets the most visual prominence):**
+      - Level 1 (hero/primary): The single most important thing on the page
+      - Level 2 (section): Major content blocks that support the primary goal
+      - Level 3 (detail): Supporting information within sections
+      - Level 4 (meta): Contextual information, timestamps, secondary actions
+
+      **Above-the-fold content:**
+      For each key page, define what MUST be visible without scrolling:
+      - On desktop (1440px x 900px viewport)
+      - On tablet (768px x 1024px viewport)
+      - On mobile (375px x 667px viewport)
+      - What can be safely pushed below the fold?
+
+      **Content patterns:**
+      - Lists: how many items visible before pagination/load more?
+      - Tables: how many columns visible before horizontal scroll?
+      - Forms: how many fields per section before progressive disclosure?
+      - Dashboards: how many widgets visible simultaneously?
+
+      ### Section 5: Taxonomy and Labeling
+
+      Define the vocabulary used throughout the product:
+
+      **Navigation labels:**
+      - For each nav item: label text, icon recommendation, tooltip text
+      - Verify labels are unambiguous (would a user test show confusion?)
+      - Ensure consistency (don't use "Settings" in one place and "Preferences" in another)
+
+      **Action labels:**
+      - Primary actions: verb + noun pattern ("Create Project", "Send Report")
+      - Secondary actions: clear hierarchy ("Save as Draft" vs. "Publish")
+      - Destructive actions: explicit warnings ("Delete Permanently")
+
+      **Content categories/tags:**
+      - If the product has categorized content, define the taxonomy
+      - Maximum depth of categories
+      - Tag vs. category distinction (if both exist)
+
+      **Status labels:**
+      - Every status value and its corresponding color, icon, and description
+      - Status transitions (which statuses can transition to which)
+
+      ### Section 6: Search and Findability
+
+      If the product includes search:
+      - What is searchable? (all content, specific sections, specific attributes)
+      - Search result format (title, snippet, metadata, actions)
+      - Filter and facet options
+      - Sort options (relevance, date, alphabetical, custom)
+      - Auto-suggest behavior
+      - No-results state and recommendations
+      - Search scoping (global vs. section-level)
+
+      ### Output Format
+
+      Return:
+      1. Complete site map as an indented hierarchy
+      2. Page inventory table
+      3. User flow diagrams (text-based flow notation)
+      4. Content hierarchy definitions per key page
+      5. Navigation model specification per platform
+      6. Taxonomy and labeling guide
+      7. Search architecture specification
+      8. IA validation criteria (how to test this architecture works)
+    model: sonnet
+    max_turns: 10
+
+  - id: wireframe-specs
+    depends_on: [information-architecture]
+    prompt: |
+      Create detailed wireframe specifications for every screen in {input.product_name},
+      describing layout, component placement, content zones, and responsive behavior.
+
+      Information architecture: {steps.information-architecture.output}
+      Requirements analysis: {steps.requirements-analysis.output}
+      Design system: {input.design_system}
+      Target platforms: {input.target_platforms}
+      Accessibility level: {input.accessibility_level}
+
+      You are a UX designer creating wireframe specifications that are detailed enough
+      for a visual designer to create pixel-perfect mockups and for a developer to
+      understand the intended layout and behavior without ambiguity. Every screen must
+      be specified for all target platforms with responsive breakpoints.
+
+      ## WIREFRAME SPECIFICATION FRAMEWORK
+
+      ### For Each Screen/Page in the Page Inventory
+
+      Create a complete wireframe specification containing:
+
+      #### Layout Grid and Structure
+
+      **Grid system:**
+      - Number of columns: (12-column for web, 4-column for mobile, 8-column for tablet)
+      - Gutter width: (16px default, adjust per design system)
+      - Margin width: (24px desktop, 16px mobile)
+      - Maximum content width: (1200px for content-heavy, 960px for focused layouts)
+      - Content alignment: (centered, left-aligned, full-bleed sections)
+
+      **Layout zones (top to bottom):**
+      Describe each major zone of the screen:
+      ```
+      +--------------------------------------------------+
+      | ZONE 1: Global Header / Navigation               |
+      | Height: 64px | Fixed | Contains: logo, nav, user |
+      +--------------------------------------------------+
+      | ZONE 2: Page Header / Breadcrumbs                |
+      | Height: auto | Sticky: no | Contains: title, actions |
+      +--------------------------------------------------+
+      | ZONE 3: Content Area                             |
+      |   +----------+  +------------------------------+ |
+      |   | Sidebar  |  | Main Content                 | |
+      |   | 240px    |  | Flexible width               | |
+      |   | fixed    |  | Scrollable                   | |
+      |   +----------+  +------------------------------+ |
+      +--------------------------------------------------+
+      | ZONE 4: Footer (if applicable)                   |
+      +--------------------------------------------------+
+      ```
+
+      #### Component Inventory Per Screen
+
+      For each component on the screen, specify:
+
+      **Component Specification:**
+      - Component name (from {input.design_system} if available, or custom)
+      - Position in the layout grid (column span, row placement)
+      - Size constraints (min width, max width, height behavior)
+      - Content requirements (what text, data, or media goes in this component)
+      - State variants this component needs on this screen:
+        * Default state
+        * Hover state (if interactive)
+        * Active/pressed state
+        * Focused state (keyboard navigation)
+        * Disabled state (if applicable)
+        * Loading/skeleton state
+        * Error state (if data-driven)
+        * Empty state (if can have no content)
+      - Interaction behavior (what happens when clicked, tapped, hovered)
+
+      **Component examples by type:**
+
+      *Navigation components:*
+      - Header bar: logo (left), navigation links (center or left), user menu (right),
+        search (right or center). Mobile: hamburger menu replaces links.
+      - Sidebar: section headers, nav items with icons, active state indicator,
+        collapse/expand behavior, scroll behavior if content exceeds viewport
+      - Tab bar (mobile): icon + label for each tab, active state, badge indicators
+
+      *Content display components:*
+      - Cards: image area (ratio), title (font size, weight, max lines), description
+        (max lines, truncation), metadata (date, tags), action buttons/links
+      - Tables: column headers (sortable?), row height, cell content types, action column,
+        selection checkboxes, pagination or infinite scroll, empty state, responsive
+        behavior (scroll vs. collapse vs. card view on mobile)
+      - Lists: item structure, dividers, action buttons, swipe actions (mobile),
+        drag-to-reorder capability, grouping headers
+
+      *Form components:*
+      - Text inputs: label position (above/inline), placeholder text, helper text,
+        error message position, character counter, required indicator
+      - Select/dropdown: trigger appearance, option list behavior, search/filter,
+        multi-select, grouped options
+      - Date pickers: format, range selection, disabled dates, calendar display
+      - File upload: drag zone, accepted formats, size limits, progress indicator,
+        preview behavior
+
+      *Feedback components:*
+      - Toast/snackbar: position, duration, action button, dismissal
+      - Modal/dialog: overlay, max width, scroll behavior, close mechanisms
+      - Inline alerts: info/warning/error/success variants, dismiss button, icon
+
+      #### Responsive Breakpoint Behavior
+
+      For each screen, document behavior at these breakpoints:
+      - **Desktop large**: 1440px+ (full layout)
+      - **Desktop**: 1024px-1439px (standard layout)
+      - **Tablet landscape**: 768px-1023px
+      - **Tablet portrait**: 600px-767px
+      - **Mobile**: 320px-599px
+
+      At each breakpoint, specify:
+      - Which layout zones change or collapse?
+      - Which components reflow, stack, hide, or transform?
+      - Navigation behavior changes (horizontal to hamburger to tab bar)
+      - Typography scale adjustments
+      - Spacing adjustments
+      - Touch target size adjustments for touch breakpoints
+      - Image/media size and crop behavior
+      - Table/data display transformation
+
+      #### Content Specifications
+
+      For every text element on each screen:
+      - Content type (heading, body, label, caption, metadata)
+      - Maximum character/word count
+      - Truncation behavior (ellipsis, "Show more", wrap)
+      - Placeholder/default text
+      - Dynamic content format (dates, numbers, currencies, names)
+      - Localization expansion allowance (text can grow 40-60% for some languages)
+
+      #### Spacing and Alignment Rules
+
+      Define the spatial relationships:
+      - Vertical spacing between sections (use consistent spacing scale: 8, 16, 24, 32, 48, 64)
+      - Horizontal spacing between components
+      - Padding within containers and cards
+      - Alignment rules (left-align text, center-align CTAs, etc.)
+      - Spacing exceptions and their rationale
+
+      #### Accessibility Annotations
+
+      For each screen, annotate:
+      - Tab order (numbered sequence for keyboard navigation)
+      - Landmark regions (header, nav, main, aside, footer)
+      - Heading hierarchy (h1 through h6, one h1 per page)
+      - ARIA labels for non-text interactive elements
+      - Focus management (where does focus go after modal opens/closes, after form submit)
+      - Skip navigation link placement
+      - Color contrast compliance notes for each text/background combination
+      - Touch target sizes for all interactive elements (minimum 44x44 CSS px)
+
+      ### Output Format
+
+      For each screen, produce:
+      1. ASCII wireframe diagram showing layout zones and component placement
+      2. Component inventory table with all specifications
+      3. Responsive behavior notes for each breakpoint
+      4. Content specifications for all text elements
+      5. Spacing and alignment rules
+      6. Accessibility annotations
+      7. Notes on what differs from the design system defaults (custom elements)
+    model: sonnet
+    max_turns: 10
+
+  - id: interaction-design
+    depends_on: [information-architecture]
+    prompt: |
+      Define all interaction patterns, micro-interactions, animations, and behavioral
+      specifications for {input.product_name}.
+
+      Information architecture: {steps.information-architecture.output}
+      Requirements analysis: {steps.requirements-analysis.output}
+      Design system: {input.design_system}
+      Target platforms: {input.target_platforms}
+      Accessibility level: {input.accessibility_level}
+
+      You are an interaction designer who specializes in creating detailed behavioral
+      specifications. Your documentation must be precise enough that a developer can
+      implement every interaction correctly without a prototype video. Every animation
+      must specify exact timing, easing, and properties. Every state transition must
+      be unambiguous.
+
+      ## INTERACTION DESIGN FRAMEWORK
+
+      ### Section 1: Global Interaction Patterns
+
+      Define patterns that apply across the entire product:
+
+      **Navigation Transitions:**
+      - Page-to-page transitions:
+        * Web: describe any route transition animations (none, fade, slide)
+        * Mobile: push/pop navigation (slide direction, duration, easing)
+        * Modal presentation (slide up, fade, scale)
+        * Drawer open/close (slide from side, overlay opacity, timing)
+      - Transition duration: standard=300ms, quick=200ms, slow=400ms
+      - Easing curve: ease-out for enter, ease-in for exit (specify cubic-bezier values)
+      - Interruption behavior: can animations be interrupted? What happens mid-transition?
+
+      **Scroll Behavior:**
+      - Header: sticky or scroll-away? If scroll-away, at what scroll distance?
+      - Scroll restoration: when navigating back, restore scroll position?
+      - Infinite scroll vs. pagination: loading trigger point (200px from bottom)
+      - Pull-to-refresh (mobile): trigger threshold, animation, feedback
+      - Scroll-linked animations (parallax, fade, reveal): specify trigger points
+      - Smooth scroll for anchor links: duration and easing
+
+      **Loading Patterns:**
+      - Initial page load: skeleton screens (describe which elements show skeletons)
+      - Data fetching: inline spinners vs. skeleton vs. progress bar
+      - Image loading: blur-up, fade-in, placeholder color
+      - Lazy loading: viewport trigger offset (100px before visible)
+      - Optimistic updates: which actions update UI immediately before server confirms?
+      - Error recovery after optimistic update fails
+
+      **Gesture Support (for touch platforms):**
+      - Swipe: left/right actions (delete, archive, reply), threshold (50% of item width)
+      - Long press: context menu trigger, duration (500ms), feedback (vibration/scale)
+      - Pinch to zoom: where supported, zoom limits, double-tap to zoom/reset
+      - Pull down: refresh trigger, animation, threshold
+      - Drag and drop: drag initiation (long press + move), drop targets, feedback
+
+      ### Section 2: Component-Level Interactions
+
+      For each interactive component type, define precise behavior:
+
+      **Buttons:**
+      - Hover: background color shift (50ms, ease), cursor: pointer
+      - Press/active: scale to 0.98 (100ms, ease-out), darken color
+      - Focus (keyboard): 2px outline offset 2px, focus-visible only (not on click)
+      - Loading state: spinner replaces label, button disabled, min width preserved
+      - Success feedback: checkmark icon replaces label (400ms), then revert (1200ms)
+      - Disabled: 50% opacity, cursor: not-allowed, no hover effects
+      - Ripple effect (if material design): origin at click point, expand 300ms, fade 150ms
+
+      **Form Inputs:**
+      - Focus: border color transition (150ms), label float animation (200ms, ease-out)
+      - Input: real-time validation timing (debounce 300ms after last keystroke)
+      - Error: red border + error message slide down (200ms), shake animation (optional, 300ms)
+      - Success: green checkmark icon fade in (200ms)
+      - Character count: update in real-time, color change at 80% and 100%
+      - Auto-complete: dropdown appears after 2 characters, 200ms debounce
+      - Password: toggle visibility button, strength meter real-time update
+      - Clear button: appears when input has value, X icon, input clears + refocuses
+
+      **Dropdowns and Selects:**
+      - Open: max-height animation from 0 (200ms, ease-out), or scale-Y from 0.95 (150ms)
+      - Close: reverse of open (150ms, ease-in)
+      - Option hover: background highlight (immediate, no transition)
+      - Option select: checkmark appears, dropdown closes (100ms delay after selection)
+      - Multi-select: chip/tag appears in trigger, remove with X button
+      - Search within: filter as you type (immediate, no debounce)
+      - Keyboard: arrow keys navigate, Enter selects, Escape closes, type-ahead search
+
+      **Modals and Dialogs:**
+      - Open trigger: scale from 0.95 + fade in (250ms, ease-out), overlay fade in (200ms)
+      - Close: reverse animation (200ms, ease-in)
+      - Overlay click: closes modal (unless modal requires explicit action)
+      - Escape key: closes modal (unless destructive action in progress)
+      - Focus trap: focus cycles within modal, first focusable element gets focus on open
+      - Scroll: body scroll locked while modal is open, modal content scrolls independently
+      - Stacked modals: if applicable, how do overlapping modals behave?
+
+      **Toasts and Notifications:**
+      - Enter: slide in from top-right (300ms, ease-out) or bottom (mobile)
+      - Auto-dismiss: 5 seconds for info, 8 seconds for warnings, persistent for errors
+      - Manual dismiss: slide out (200ms, ease-in) on X click
+      - Stacking: new toasts push existing ones down, max 3 visible, queue the rest
+      - Action button: inline action ("Undo"), available for duration of toast
+      - Progress bar: subtle decreasing bar showing time until auto-dismiss
+
+      **Cards and List Items:**
+      - Hover (desktop): subtle shadow elevation (200ms, ease), or background tint
+      - Press: slight scale down (0.99, 100ms) for clickable cards
+      - Expand/collapse: height animation with content fade-in (300ms, ease-out)
+      - Drag (if reorderable): lift with shadow (150ms), smooth position tracking, drop with settle (200ms)
+      - Swipe actions (mobile): reveal action buttons behind card, snap thresholds
+
+      **Tabs:**
+      - Tab switch: indicator slides to new tab (250ms, ease-out)
+      - Content transition: crossfade (200ms) or slide direction matching tab position
+      - Scrollable tabs: left/right overflow indicators, touch swipe, arrow button navigation
+      - Tab badge: pulse animation on new badge appearance (one cycle, 400ms)
+
+      ### Section 3: State Transition Specifications
+
+      Document every state machine in the product:
+
+      **Form Submission State Machine:**
+      ```
+      [idle] --(user clicks submit)--> [validating]
+      [validating] --(all valid)--> [submitting]
+      [validating] --(errors found)--> [error] --(user fixes + resubmits)--> [validating]
+      [submitting] --(success)--> [success] --(timeout 2s)--> [idle or redirect]
+      [submitting] --(failure)--> [error] --(retry)--> [submitting]
+      ```
+      At each transition, specify the visual feedback.
+
+      **Data List State Machine:**
+      ```
+      [loading] --(data received)--> [populated]
+      [loading] --(empty result)--> [empty]
+      [loading] --(error)--> [error]
+      [populated] --(filter applied, no results)--> [no_results]
+      [populated] --(user scrolls to bottom)--> [loading_more]
+      [loading_more] --(more data)--> [populated]
+      [loading_more] --(all loaded)--> [populated_end]
+      [error] --(retry)--> [loading]
+      ```
+
+      **Authentication State Machine:**
+      ```
+      [logged_out] --(login attempt)--> [authenticating]
+      [authenticating] --(success)--> [logged_in]
+      [authenticating] --(failure)--> [login_error]
+      [logged_in] --(session timeout)--> [session_expired] --(re-auth)--> [authenticating]
+      [logged_in] --(logout)--> [logged_out]
+      ```
+
+      ### Section 4: Error Handling Interaction Patterns
+
+      Specify how errors are communicated to users:
+
+      **Validation errors:**
+      - Inline field errors: appear below field, red text, icon, described by aria-describedby
+      - Form-level error summary: appears above form on submit, links to error fields
+      - Focus management: focus moves to first error field on submit
+
+      **Network errors:**
+      - Connection lost: top banner "You're offline" with auto-retry countdown
+      - Request timeout: inline error with "Try again" button
+      - 500 server error: full-page error state with "Refresh" and "Contact support"
+      - Rate limiting: "Please wait X seconds" with countdown
+
+      **Permission errors:**
+      - Unauthorized: redirect to login with return URL preserved
+      - Forbidden: inline message explaining what permission is needed
+      - Feature gate: upgrade prompt with plan comparison
+
+      ### Section 5: Animation Timing Reference Table
+
+      | Animation Type | Duration | Easing | CSS Value |
+      |---------------|----------|--------|-----------|
+      | Micro-feedback (hover, press) | 100-150ms | ease | cubic-bezier(0.25, 0.1, 0.25, 1) |
+      | State change (open/close) | 200-300ms | ease-out | cubic-bezier(0, 0, 0.2, 1) |
+      | Page transition | 300-400ms | ease-in-out | cubic-bezier(0.4, 0, 0.2, 1) |
+      | Content reveal | 300-500ms | ease-out | cubic-bezier(0, 0, 0.2, 1) |
+      | Attention (pulse, shake) | 300-600ms | ease-in-out | cubic-bezier(0.4, 0, 0.2, 1) |
+      | Notification enter | 300ms | ease-out | cubic-bezier(0, 0, 0.2, 1) |
+      | Notification exit | 200ms | ease-in | cubic-bezier(0.4, 0, 1, 1) |
+
+      **Reduced motion behavior ({input.accessibility_level}):**
+      - When `prefers-reduced-motion: reduce` is active:
+        * Replace all slide/scale animations with simple opacity fades (150ms)
+        * Remove decorative animations entirely (parallax, pulse, bounce)
+        * Keep functional animations but reduce to crossfade (loading, state changes)
+        * Maintain instant feedback (hover, focus) without animation
+
+      ### Section 6: Keyboard and Focus Management
+
+      **Global keyboard shortcuts:**
+      - List any global shortcuts (e.g., Cmd+K for search, Escape to close)
+      - Shortcut conflicts with browser/OS defaults to avoid
+
+      **Focus management rules:**
+      - Modal open: focus to first interactive element inside modal
+      - Modal close: focus returns to the element that opened it
+      - Delete action: focus moves to next item in list (or previous if last)
+      - Tab creation: focus moves to new tab's content
+      - Notification: do not steal focus, announce via aria-live
+      - Route change: focus to main content area (skip nav pattern)
+
+      ### Output Format
+
+      Return:
+      1. Global interaction pattern specifications
+      2. Component-level interaction specifications (all components)
+      3. State machine diagrams for all stateful components
+      4. Error handling interaction patterns
+      5. Animation timing reference table with CSS values
+      6. Reduced motion specification
+      7. Keyboard and focus management rules
+      8. Gesture specification for touch platforms
+    model: sonnet
+    max_turns: 10
+
+  - id: design-tokens
+    depends_on: [wireframe-specs, interaction-design]
+    prompt: |
+      Define the complete design token system for {input.product_name}, translating
+      design decisions into a structured token hierarchy that bridges design and development.
+
+      Wireframe specs: {steps.wireframe-specs.output}
+      Interaction design: {steps.interaction-design.output}
+      Requirements analysis: {steps.requirements-analysis.output}
+      Design system: {input.design_system}
+      Accessibility level: {input.accessibility_level}
+
+      You are a design systems engineer who specializes in creating token-based design
+      systems that ensure consistency between design tools and code. Your token structure
+      must be platform-agnostic and translatable to CSS custom properties, iOS/Swift,
+      Android/Kotlin, and design tool formats.
+
+      ## DESIGN TOKEN FRAMEWORK
+
+      ### Token Layer 1: Primitive Tokens (Raw Values)
+
+      Define the base palette of raw values that all other tokens reference:
+
+      **Color primitives:**
+      ```
+      color.gray.50:  #FAFAFA
+      color.gray.100: #F5F5F5
+      color.gray.200: #EEEEEE
+      ...through...
+      color.gray.900: #212121
+
+      color.primary.50:  #E3F2FD
+      color.primary.100: #BBDEFB
+      ...through...
+      color.primary.900: #0D47A1
+
+      color.secondary.50-900: [define full scale]
+      color.success.50-900: [define full scale]
+      color.warning.50-900: [define full scale]
+      color.error.50-900: [define full scale]
+      color.info.50-900: [define full scale]
+      ```
+
+      Select colors that:
+      - Meet {input.accessibility_level} contrast requirements
+      - Work in both light and dark themes
+      - Are distinguishable by color-blind users (not relying on red/green distinction)
+      - Align with {input.design_system} palette if applicable
+
+      **Spacing primitives:**
+      ```
+      space.0:  0px
+      space.1:  4px
+      space.2:  8px
+      space.3:  12px
+      space.4:  16px
+      space.5:  20px
+      space.6:  24px
+      space.8:  32px
+      space.10: 40px
+      space.12: 48px
+      space.16: 64px
+      space.20: 80px
+      space.24: 96px
+      ```
+
+      **Typography primitives:**
+      ```
+      font.family.sans:  [primary sans-serif font stack]
+      font.family.mono:  [monospace font stack]
+      font.family.serif: [serif font stack, if used]
+
+      font.size.xs:   12px
+      font.size.sm:   14px
+      font.size.base: 16px
+      font.size.lg:   18px
+      font.size.xl:   20px
+      font.size.2xl:  24px
+      font.size.3xl:  30px
+      font.size.4xl:  36px
+      font.size.5xl:  48px
+
+      font.weight.regular:  400
+      font.weight.medium:   500
+      font.weight.semibold: 600
+      font.weight.bold:     700
+
+      font.line-height.tight:  1.25
+      font.line-height.normal: 1.5
+      font.line-height.loose:  1.75
+
+      font.letter-spacing.tight:  -0.025em
+      font.letter-spacing.normal: 0em
+      font.letter-spacing.wide:   0.025em
+      ```
+
+      **Border and radius primitives:**
+      ```
+      radius.none: 0px
+      radius.sm:   4px
+      radius.md:   8px
+      radius.lg:   12px
+      radius.xl:   16px
+      radius.full: 9999px
+
+      border.width.thin:   1px
+      border.width.medium: 2px
+      border.width.thick:  4px
+      ```
+
+      **Shadow primitives:**
+      ```
+      shadow.sm:  0 1px 2px rgba(0,0,0,0.05)
+      shadow.md:  0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06)
+      shadow.lg:  0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05)
+      shadow.xl:  0 20px 25px rgba(0,0,0,0.1), 0 8px 10px rgba(0,0,0,0.04)
+      ```
+
+      **Animation primitives:**
+      ```
+      duration.instant:  0ms
+      duration.fast:     100ms
+      duration.normal:   200ms
+      duration.slow:     300ms
+      duration.slower:   500ms
+
+      easing.ease-in:     cubic-bezier(0.4, 0, 1, 1)
+      easing.ease-out:    cubic-bezier(0, 0, 0.2, 1)
+      easing.ease-in-out: cubic-bezier(0.4, 0, 0.2, 1)
+      easing.spring:      cubic-bezier(0.175, 0.885, 0.32, 1.275)
+      ```
+
+      ### Token Layer 2: Semantic Tokens (Purpose-Based)
+
+      Map primitives to meaningful design decisions:
+
+      **Semantic colors:**
+      ```
+      color.background.page:       color.gray.50
+      color.background.surface:    color.white
+      color.background.elevated:   color.white (with shadow)
+      color.background.subtle:     color.gray.100
+      color.background.inverse:    color.gray.900
+
+      color.text.primary:          color.gray.900
+      color.text.secondary:        color.gray.600
+      color.text.tertiary:         color.gray.400
+      color.text.inverse:          color.white
+      color.text.link:             color.primary.600
+      color.text.link.hover:       color.primary.700
+
+      color.border.default:        color.gray.200
+      color.border.strong:         color.gray.400
+      color.border.focus:          color.primary.500
+
+      color.status.success:        color.success.600
+      color.status.warning:        color.warning.600
+      color.status.error:          color.error.600
+      color.status.info:           color.info.600
+
+      color.interactive.default:   color.primary.600
+      color.interactive.hover:     color.primary.700
+      color.interactive.active:    color.primary.800
+      color.interactive.disabled:  color.gray.300
+      ```
+
+      **Semantic spacing:**
+      ```
+      spacing.page.padding:        space.6 (desktop), space.4 (mobile)
+      spacing.section.gap:         space.8
+      spacing.card.padding:        space.4 (desktop), space.3 (mobile)
+      spacing.form.field.gap:      space.4
+      spacing.form.label.gap:      space.1
+      spacing.inline.gap:          space.2
+      spacing.stack.gap:           space.3
+      ```
+
+      **Semantic typography:**
+      ```
+      typography.heading.h1:       { size: font.size.4xl, weight: font.weight.bold, line-height: font.line-height.tight }
+      typography.heading.h2:       { size: font.size.3xl, weight: font.weight.semibold, line-height: font.line-height.tight }
+      typography.heading.h3:       { size: font.size.2xl, weight: font.weight.semibold, line-height: font.line-height.tight }
+      typography.heading.h4:       { size: font.size.xl, weight: font.weight.medium, line-height: font.line-height.normal }
+      typography.body.default:     { size: font.size.base, weight: font.weight.regular, line-height: font.line-height.normal }
+      typography.body.small:       { size: font.size.sm, weight: font.weight.regular, line-height: font.line-height.normal }
+      typography.caption:          { size: font.size.xs, weight: font.weight.regular, line-height: font.line-height.normal }
+      typography.label:            { size: font.size.sm, weight: font.weight.medium, line-height: font.line-height.tight }
+      typography.code:             { family: font.family.mono, size: font.size.sm, weight: font.weight.regular }
+      ```
+
+      ### Token Layer 3: Component Tokens (Component-Specific)
+
+      Define tokens scoped to specific components:
+
+      ```
+      button.primary.background:        color.interactive.default
+      button.primary.background.hover:   color.interactive.hover
+      button.primary.background.active:  color.interactive.active
+      button.primary.text:               color.text.inverse
+      button.primary.border-radius:      radius.md
+      button.primary.padding.x:          space.4
+      button.primary.padding.y:          space.2
+      button.primary.font:               typography.label
+      button.primary.min-height:         40px (desktop), 44px (mobile, accessibility)
+
+      input.background:                  color.background.surface
+      input.border:                      color.border.default
+      input.border.focus:                color.border.focus
+      input.border.error:                color.status.error
+      input.text:                        color.text.primary
+      input.placeholder:                 color.text.tertiary
+      input.border-radius:               radius.md
+      input.padding:                     space.2 space.3
+      input.min-height:                  40px (desktop), 44px (mobile)
+
+      card.background:                   color.background.surface
+      card.border:                       color.border.default
+      card.border-radius:                radius.lg
+      card.shadow:                       shadow.sm
+      card.shadow.hover:                 shadow.md
+      card.padding:                      spacing.card.padding
+      ```
+
+      Continue for all component types used in the wireframes.
+
+      ### Token Layer 4: Theme Tokens
+
+      If the product supports theming (light/dark):
+
+      **Dark theme overrides:**
+      ```
+      [dark]
+      color.background.page:       color.gray.900
+      color.background.surface:    color.gray.800
+      color.text.primary:          color.gray.50
+      color.text.secondary:        color.gray.300
+      color.border.default:        color.gray.700
+      ... (complete dark theme mapping)
+      ```
+
+      Verify all dark theme color combinations meet {input.accessibility_level} contrast.
+
+      ### Output Format
+
+      Return:
+      1. Complete primitive token list with values
+      2. Semantic token mapping (with light/dark theme variants)
+      3. Component token definitions for all component types
+      4. Accessibility compliance notes for color tokens
+      5. Platform-specific export formats:
+         - CSS custom properties format
+         - JSON format (for design tools)
+         - iOS/Swift constants format (if targeting iOS)
+         - Android XML resources format (if targeting Android)
+      6. Token naming convention documentation
+      7. Token change management rules (which tokens can change vs. which are stable)
+    model: haiku
+    max_turns: 10
+
+  - id: developer-handoff
+    depends_on: [design-tokens]
+    prompt: |
+      Compile the complete developer handoff documentation for {input.product_name},
+      integrating all design specifications into an implementation-ready reference.
+
+      Design tokens: {steps.design-tokens.output}
+      Wireframe specs: {steps.wireframe-specs.output}
+      Interaction design: {steps.interaction-design.output}
+      Information architecture: {steps.information-architecture.output}
+      Requirements analysis: {steps.requirements-analysis.output}
+      Product name: {input.product_name}
+      Target platforms: {input.target_platforms}
+      Accessibility level: {input.accessibility_level}
+      Design system: {input.design_system}
+
+      You are a design technologist who bridges design and engineering. Your handoff
+      documentation must eliminate ambiguity, reduce back-and-forth between design and
+      development, and provide everything a developer needs to implement the design
+      accurately on the first pass.
+
+      ## DEVELOPER HANDOFF FRAMEWORK
+
+      ### Section 1: Implementation Overview
+
+      **Architecture Recommendation:**
+      Based on {input.target_platforms} and the product requirements:
+      - Recommended frontend framework and rationale
+      - Component library recommendation (build custom, use existing, or hybrid)
+      - State management approach for the complexity level of this product
+      - Routing strategy (file-based, config-based, code-split considerations)
+      - API integration pattern (REST, GraphQL, real-time subscriptions)
+
+      **Project Setup Checklist:**
+      - Design token integration: how to import and consume tokens
+      - Font loading strategy (preload, font-display, subset)
+      - Icon system setup (SVG sprite, icon font, inline SVG components)
+      - CSS methodology (CSS Modules, Tailwind, Styled Components, vanilla CSS with tokens)
+      - Responsive approach (mobile-first, container queries, media queries)
+      - Accessibility testing tools to configure (axe, Lighthouse, screen reader)
+
+      ### Section 2: Component Implementation Guide
+
+      For each component in the design, provide implementation specifications:
+
+      **Component: [Name]**
+      ```
+      Purpose: [what this component does]
+      Props/API:
+        - variant: "primary" | "secondary" | "ghost" (default: "primary")
+        - size: "sm" | "md" | "lg" (default: "md")
+        - disabled: boolean (default: false)
+        - loading: boolean (default: false)
+        - [other props]
+
+      Design tokens used:
+        - background: var(--button-primary-background)
+        - color: var(--button-primary-text)
+        - border-radius: var(--button-primary-border-radius)
+        - padding: var(--button-primary-padding-y) var(--button-primary-padding-x)
+        - font: var(--typography-label)
+
+      States:
+        :hover { background: var(--button-primary-background-hover); transition: 150ms ease }
+        :active { background: var(--button-primary-background-active); transform: scale(0.98) }
+        :focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px }
+        :disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none }
+        [loading] { pointer-events: none } // show spinner, preserve width
+
+      Accessibility:
+        - role: "button" (native <button> preferred)
+        - aria-disabled: mirrors disabled prop (prefer over HTML disabled for screen readers)
+        - aria-busy: true when loading
+        - aria-label: required when icon-only variant
+        - keyboard: Enter and Space activate
+
+      Responsive:
+        - Mobile (< 600px): full-width variant, min-height: 44px
+        - Desktop: auto-width with min-width: 80px
+      ```
+
+      Repeat this specification for EVERY component type used in the wireframes:
+      - Buttons (all variants)
+      - Form inputs (text, textarea, select, checkbox, radio, switch, date picker)
+      - Cards (all variants)
+      - Tables (with sort, filter, pagination)
+      - Navigation (header, sidebar, tabs, breadcrumbs)
+      - Modals and dialogs
+      - Toasts and notifications
+      - Lists and list items
+      - Badges and tags
+      - Avatars and user elements
+      - Charts and data visualization
+      - Empty states
+      - Error states
+      - Loading states and skeletons
+
+      ### Section 3: Layout Implementation Guide
+
+      **Grid System Setup:**
+      ```css
+      /* Grid configuration */
+      --grid-columns: 12;
+      --grid-gutter: 16px;
+      --grid-margin-desktop: 24px;
+      --grid-margin-mobile: 16px;
+      --content-max-width: 1200px;
+
+      /* Breakpoints */
+      --breakpoint-sm: 600px;
+      --breakpoint-md: 768px;
+      --breakpoint-lg: 1024px;
+      --breakpoint-xl: 1440px;
+      ```
+
+      **Page Layout Templates:**
+      For each layout template identified in the wireframes, provide:
+      - CSS Grid or Flexbox implementation approach
+      - Sidebar width and collapse behavior
+      - Content area min/max constraints
+      - Sticky/fixed positioning rules
+      - Z-index stacking context
+
+      **Responsive Implementation:**
+      For each breakpoint:
+      - What changes (layout, visibility, sizing)
+      - Implementation approach (media queries, container queries, CSS grid auto-flow)
+      - Testing checklist for that breakpoint
+
+      ### Section 4: Interaction Implementation Guide
+
+      **Animation System Setup:**
+      ```css
+      /* Animation tokens as CSS custom properties */
+      --transition-fast: 100ms ease;
+      --transition-normal: 200ms ease-out;
+      --transition-slow: 300ms ease-in-out;
+      --transition-spring: 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+      /* Reduced motion */
+      @media (prefers-reduced-motion: reduce) {
+        * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      }
+      ```
+
+      **State Management Patterns:**
+      For each stateful component/feature:
+      - State shape (TypeScript interface)
+      - State transitions and their triggers
+      - Optimistic update patterns
+      - Error state recovery
+
+      **Form Implementation:**
+      - Validation library recommendation
+      - Validation rules per field (from wireframe specs)
+      - Error display timing and format
+      - Submit flow and loading states
+      - Multi-step form state persistence
+
+      ### Section 5: Accessibility Implementation Checklist
+
+      **{input.accessibility_level} Compliance Requirements:**
+
+      **Semantic HTML:**
+      - [ ] All pages have proper landmark regions (<header>, <nav>, <main>, <aside>, <footer>)
+      - [ ] Heading hierarchy is logical (h1-h6, one h1 per page)
+      - [ ] Lists use <ul>/<ol>/<dl> semantically
+      - [ ] Tables use <thead>, <tbody>, <th scope="col/row">
+      - [ ] Forms use <label>, <fieldset>, <legend> properly
+      - [ ] Interactive elements use correct roles (button, link, menuitem)
+
+      **Keyboard Navigation:**
+      - [ ] All interactive elements are reachable via Tab
+      - [ ] Tab order follows visual reading order
+      - [ ] Focus indicators are visible (2px minimum, 3:1 contrast ratio)
+      - [ ] Escape closes modals, dropdowns, and overlays
+      - [ ] Arrow keys navigate within composite widgets (menus, tabs, listboxes)
+      - [ ] Skip navigation link is the first focusable element
+
+      **Screen Reader:**
+      - [ ] All images have alt text (decorative images: alt="")
+      - [ ] All form inputs have associated labels (aria-label or <label>)
+      - [ ] Dynamic content updates use aria-live regions
+      - [ ] Loading states announced via aria-busy
+      - [ ] Error messages linked to fields via aria-describedby
+      - [ ] Custom widgets have correct ARIA roles and states
+
+      **Visual:**
+      - [ ] Text contrast meets 4.5:1 (normal text) or 3:1 (large text) ratio
+      - [ ] Non-text contrast meets 3:1 ratio (icons, borders, form controls)
+      - [ ] Information is not conveyed by color alone (icons, patterns, text)
+      - [ ] Focus is not indicated by color alone
+      - [ ] Text is resizable to 200% without content loss
+      - [ ] Content reflows at 320px width without horizontal scrolling
+
+      **Motion:**
+      - [ ] prefers-reduced-motion is respected
+      - [ ] No content flashes more than 3 times per second
+      - [ ] Auto-playing content can be paused, stopped, or hidden
+      - [ ] Animations do not block functionality
+
+      **Touch:**
+      - [ ] Touch targets are at least 44x44 CSS pixels
+      - [ ] Adequate spacing between touch targets (at least 8px)
+      - [ ] Drag actions have alternative input methods
+
+      ### Section 6: Testing and QA Specifications
+
+      **Visual Regression Testing:**
+      - Key screens to capture for visual regression baselines
+      - Breakpoints to test at each screen
+      - States to capture (default, hover, focus, error, loading, empty)
+
+      **Interaction Testing:**
+      - Keyboard navigation test scenarios per screen
+      - Screen reader test scenarios (VoiceOver, NVDA, JAWS)
+      - Touch interaction test scenarios per screen
+      - Animation and transition verification checklist
+
+      **Cross-Platform Testing Matrix:**
+      | Platform | Browser/Version | Screen Size | Priority |
+      |----------|----------------|-------------|----------|
+      | Desktop | Chrome latest | 1440x900 | P0 |
+      | Desktop | Firefox latest | 1440x900 | P0 |
+      | Desktop | Safari latest | 1440x900 | P0 |
+      | Desktop | Edge latest | 1440x900 | P1 |
+      | Tablet | Safari iOS | 768x1024 | P0 |
+      | Tablet | Chrome Android | 800x1280 | P1 |
+      | Mobile | Safari iOS | 375x667 | P0 |
+      | Mobile | Chrome Android | 360x640 | P0 |
+
+      ### Section 7: Asset and Resource Inventory
+
+      List all assets needed for implementation:
+      - Icon list with names and sizes (from wireframes)
+      - Image placeholders and their aspect ratios
+      - Font files and weights needed
+      - Third-party library dependencies
+      - API endpoints needed (from user flows and data requirements)
+      - Environment variables or configuration needed
+
+      ### Output Format
+
+      Structure the handoff document as:
+      1. Implementation overview and setup guide
+      2. Component specification reference (all components)
+      3. Layout and grid implementation guide
+      4. Interaction and animation implementation guide
+      5. Accessibility implementation checklist
+      6. Testing specifications and QA matrix
+      7. Asset inventory
+      8. Open questions for engineering (anything that needs technical decision)
+
+      Format as clean Markdown suitable for a team wiki (Confluence, Notion, or GitHub).
+      Use code blocks for all CSS, TypeScript, and configuration examples.
+      Include links/references to {input.design_system} documentation where applicable.
+    model: sonnet
+    max_turns: 10

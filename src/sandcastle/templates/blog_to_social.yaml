@@ -16,59 +16,289 @@ input_schema:
     blog_post:
       type: string
       description: "The full blog post content to transform into social media posts"
+    brand_handle:
+      type: string
+      description: "Your brand's social media handle (e.g. '@yourbrand') for consistent tagging"
+    industry:
+      type: string
+      description: "Industry vertical for hashtag and audience context (e.g. 'SaaS', 'fintech', 'health tech')"
 
 steps:
   - id: analyze-post
-    prompt: >
-      Analyze the following blog post and extract the key points, overall tone,
-      target audience, and core message. Identify the most shareable insights
-      and any statistics or quotes worth highlighting.
+    prompt: |
+      You are a social media content strategist who specializes in
+      repurposing long-form content for maximum cross-platform reach.
+      Analyze the blog post to extract the raw material for social content.
+
       Blog post: {input.blog_post}
+      Industry: {input.industry}
+
+      Perform the following analysis:
+
+      1. CONTENT EXTRACTION:
+         - Core thesis: What is the ONE main argument or insight? (1 sentence)
+         - Key takeaways: List 5-7 distinct insights, tips, or data points
+           that can each stand alone as a social media post
+         - Quotable lines: Identify 3-5 sentences from the blog that are
+           punchy, provocative, or insightful enough to use verbatim as
+           pull quotes on social media
+         - Statistics/data: Extract any specific numbers, percentages, or
+           research citations (these perform 2-3x better on social)
+
+      2. AUDIENCE ANALYSIS:
+         - Primary audience: Who is this content really for? (job title,
+           seniority, industry)
+         - Emotional hook: What emotion should the social content trigger?
+           (inspiration, FOMO, curiosity, outrage, relief, pride)
+         - Knowledge level: Is this beginner, intermediate, or advanced
+           content? This affects tone and jargon level per platform.
+
+      3. CONTENT ANGLES: Generate 3-4 different angles to present the
+         same content. Example angles for a post about "remote work tips":
+         - Practical: "5 tools that changed my remote workflow"
+         - Contrarian: "Most remote work advice is wrong. Here's why."
+         - Personal: "After 3 years remote, here's what I wish I knew"
+         - Data-driven: "Remote workers are 23% more productive - here's how"
+         Each angle works better on different platforms.
+
+      4. VISUAL CONTENT OPPORTUNITIES:
+         - Infographic ideas: What data or process could be visualized?
+         - Carousel concepts: What could be broken into 5-10 slide carousel?
+         - Video hook: If this were a 30-second Reel/TikTok, what would
+           the opening line be?
+         - Meme/relatable moment: Any humorous or highly relatable angle?
+
+      5. HASHTAG RESEARCH:
+         - Primary hashtags (5-7): High-volume, industry-standard tags
+           that your target audience follows
+         - Niche hashtags (5-7): Lower-volume but highly targeted tags
+           where your content can actually be discovered
+         - Trending/timely hashtags (2-3): Currently active hashtags that
+           relate to the content
+         - Branded hashtag: Suggest one if the brand doesn't have one
     model: sonnet
     max_turns: 5
 
   - id: linkedin-post
     depends_on: [analyze-post]
-    prompt: >
-      Using the blog analysis below, write a professional LinkedIn post that
-      drives engagement. Use a thought-leadership tone, include a compelling
-      hook in the first line, add relevant line breaks for readability, and
-      end with a call-to-action. Keep it under 1300 characters.
+    prompt: |
+      You are a LinkedIn content creator who consistently generates
+      high-engagement professional posts. Write a LinkedIn post optimized
+      for the platform's algorithm and audience behavior.
+
       Analysis: {steps.analyze-post.output}
+      Brand handle: {input.brand_handle}
+
+      LINKEDIN PLATFORM SPECS AND BEST PRACTICES:
+      - Character limit: 3,000 characters (but only first ~210 chars show
+        before "...see more" - this is your HOOK, make it irresistible)
+      - Algorithm favors: native text posts > link posts > video > shared posts
+      - Peak engagement: Tuesday-Thursday, 8-10 AM and 12-1 PM local time
+      - Dwell time matters: longer posts that people read = higher reach
+
+      WRITE THE POST FOLLOWING THIS STRUCTURE:
+
+      1. HOOK (first 2 lines, under 210 characters): Must stop the scroll.
+         Use one of these proven formats:
+         - Bold contrarian statement: "Everything you know about X is wrong."
+         - Surprising statistic: "87% of teams fail at X. Here's why."
+         - Personal confession: "I used to believe X. Then I learned..."
+         - Curiosity gap: "The #1 mistake I see [audience] making:"
+         IMPORTANT: Add a line break after the hook to force the "see more"
+         click at a high-interest point.
+
+      2. BODY (800-1500 characters): Deliver on the hook's promise.
+         - Use short paragraphs (1-2 sentences max)
+         - Add line breaks between every paragraph (white space = readability)
+         - Include a numbered list or bullet points (skimmable content
+           gets 40% more engagement)
+         - Reference specific details, numbers, or examples from the blog
+         - Write in first person - LinkedIn rewards authentic personal voice
+         - DO NOT use corporate jargon, buzzwords, or hollow motivational
+           phrases ("synergy", "game-changer", "unlock your potential")
+
+      3. CTA (last 2-3 lines): Drive specific engagement:
+         - Ask a genuine question that invites comments (the #1 engagement signal)
+         - Example: "What's your experience with X? Drop your take below."
+         - Include the blog link as a comment (not in the post body - posts
+           without external links get 3x more reach on LinkedIn)
+         - Add "Follow {input.brand_handle} for more [topic] insights"
+
+      4. HASHTAGS: Add 3-5 relevant hashtags at the very end. LinkedIn
+         penalizes posts with more than 5. Use a mix of broad (#Marketing,
+         #Leadership) and niche (#SaaSGrowth, #ProductLed).
+
+      Provide the final post with exact character count: [XXXX/3000 chars]
     model: sonnet
     max_turns: 3
 
   - id: twitter-thread
     depends_on: [analyze-post]
-    prompt: >
-      Using the blog analysis below, write an X/Twitter thread of exactly
-      5 tweets. The first tweet should hook the reader with a bold claim or
-      question. Each tweet must be under 280 characters. Number them 1/5
-      through 5/5 and make the last tweet link back to the original post.
+    prompt: |
+      You are a Twitter/X content strategist who builds viral threads that
+      drive massive reach and follower growth. Write an engaging thread
+      from the blog content.
+
       Analysis: {steps.analyze-post.output}
+      Brand handle: {input.brand_handle}
+
+      X/TWITTER PLATFORM SPECS:
+      - Character limit: 280 characters per tweet (including spaces and URLs)
+      - URLs consume 23 characters regardless of actual length
+      - Threads perform best at 5-10 tweets (sweet spot: 7)
+      - Algorithm favors: replies, retweets, bookmarks, and dwell time
+      - Peak engagement: Monday-Friday, 9 AM and 12 PM EST
+
+      WRITE A 7-TWEET THREAD:
+
+      TWEET 1/7 (THE HOOK - most important tweet):
+      - Must work as a standalone tweet (many will only see this one)
+      - Use one of: bold claim, surprising stat, "here's what I learned",
+        or "most people get X wrong"
+      - End with "A thread" or use the thread emoji (signal it's a thread)
+      - Character count: [XXX/280 chars]
+
+      TWEETS 2-6/7 (THE VALUE):
+      - Each tweet must deliver ONE standalone insight or tip
+      - Start each with a number or transition ("First...", "Next...",
+        "The biggest mistake...")
+      - Use line breaks within tweets for readability
+      - Include 1-2 tweets with specific data points or examples
+      - Make at least 1 tweet a contrarian or surprising take
+        (drives quote-tweets and replies)
+      - Character count each: [XXX/280 chars]
+
+      TWEET 7/7 (THE CTA):
+      - Summarize the key takeaway in 1 sentence
+      - Include blog post link (remember: 23 chars for URL)
+      - "If you found this useful, RT tweet 1/7 to help others find it"
+      - Or: "Follow {input.brand_handle} for daily [topic] insights"
+      - Character count: [XXX/280 chars]
+
+      BONUS - STANDALONE TWEETS (3 additional):
+      Generate 3 standalone tweets (not part of the thread) that can be
+      posted on separate days to extend the content's lifecycle:
+      - 1 quote tweet: Pull the most quotable line from the blog
+      - 1 hot take: Contrarian angle that sparks debate
+      - 1 question: Ask the audience a question related to the topic
+      Each with character count: [XXX/280 chars]
     model: sonnet
     max_turns: 3
 
   - id: instagram-caption
     depends_on: [analyze-post]
-    prompt: >
-      Using the blog analysis below, write an engaging Instagram caption.
-      Start with an attention-grabbing first line, use short paragraphs,
-      include relevant emojis sparingly, and end with 15-20 relevant hashtags
-      grouped at the bottom. Keep the caption under 2200 characters.
+    prompt: |
+      You are an Instagram content creator who writes captions that drive
+      saves, shares, and meaningful comments. Write an Instagram caption
+      optimized for engagement.
+
       Analysis: {steps.analyze-post.output}
-    model: haiku
+      Brand handle: {input.brand_handle}
+      Industry: {input.industry}
+
+      INSTAGRAM PLATFORM SPECS:
+      - Caption limit: 2,200 characters (but only first ~125 chars show
+        before "...more" - this is your hook)
+      - Hashtag limit: 30 max (but 8-15 is optimal for reach in 2025+)
+      - Algorithm prioritizes: saves > shares > comments > likes
+      - Content that teaches or inspires gets the most saves
+      - Carousel posts get 3x more engagement than single images
+      - Peak engagement: Tuesday-Friday, 11 AM-1 PM and 7-9 PM local
+
+      WRITE THE CAPTION:
+
+      1. HOOK (first 125 characters): Stop the scroll. Use:
+         - A bold statement that challenges conventional wisdom
+         - A question your audience can't ignore
+         - "Save this for later" (directly prompts the save action)
+         - A number-driven promise: "5 [things] that changed my [result]"
+
+      2. BODY (1000-1800 characters):
+         - Break content into short paragraphs (2-3 sentences max)
+         - Use line breaks generously (hit return twice between paragraphs)
+         - Include emojis as bullet points or section markers (sparingly -
+           max 5-8 total, use them for structure not decoration)
+         - Deliver genuine value: tips, insights, or frameworks the reader
+           can use immediately
+         - Include a personal anecdote or specific example to build
+           authenticity and connection
+         - For carousel posts: reference the slides ("swipe to slide 3
+           for the full framework")
+
+      3. CTA (engagement driver):
+         - Primary CTA: Ask a specific question to drive comments
+           ("Which of these resonates most with you? Tell me in the comments")
+         - Secondary CTA: "Save this post to come back to when you need it"
+         - Tertiary CTA: "Share this with someone who needs to hear it"
+         - Tag the brand: {input.brand_handle}
+
+      4. HASHTAG BLOCK: Add hashtags BELOW the caption, separated by 5 line
+         breaks (dots or dashes) to visually separate them.
+         - Use 12-15 hashtags total
+         - Mix: 4-5 broad (500K+ posts), 4-5 medium (50K-500K posts),
+           3-5 niche (5K-50K posts)
+         - Include 1 branded hashtag
+
+      5. CAROUSEL SLIDE SUGGESTIONS: Describe 5-8 carousel slides that
+         could accompany this caption:
+         - Slide 1: Hook/title slide (bold text, clean design)
+         - Slides 2-6: One key point per slide with supporting visual
+         - Final slide: CTA ("Follow for more", "Save this", blog URL)
+
+      Total character count: [XXXX/2200 chars]
+    model: sonnet
     max_turns: 3
 
   - id: compile
     depends_on: [linkedin-post, twitter-thread, instagram-caption]
-    prompt: >
-      Compile all the social media content variants into a single structured
-      output. Include sections for LinkedIn, X/Twitter, and Instagram. Add a
-      brief recommendation on optimal posting times and any platform-specific
-      tips for maximizing engagement.
+    prompt: |
+      You are a social media manager compiling a complete content
+      distribution package. Organize all generated content into a
+      ready-to-execute social media calendar.
+
       LinkedIn: {steps.linkedin-post.output}
       Twitter: {steps.twitter-thread.output}
       Instagram: {steps.instagram-caption.output}
+
+      Create the following deliverable:
+
+      1. CONTENT CALENDAR (7-day plan):
+         Structure a posting schedule that maximizes reach without
+         audience fatigue:
+         - Day 1 (Tuesday): LinkedIn post (highest B2B engagement day)
+         - Day 2 (Wednesday): Twitter thread (mid-week conversation peak)
+         - Day 3 (Thursday): Instagram carousel post
+         - Day 4 (Friday): Twitter standalone quote tweet
+         - Day 5 (Monday): Twitter hot take standalone
+         - Day 6 (Tuesday): Instagram Story repurpose of LinkedIn post
+         - Day 7 (Wednesday): Twitter question standalone + LinkedIn
+           comment engagement
+
+      2. PLATFORM-SPECIFIC TIPS:
+         - LinkedIn: Post blog link as first comment, not in the post body.
+           Engage with first 5 comments within 30 minutes (signals to algo).
+         - Twitter: Pin tweet 1/7 to profile. Engage with every reply within
+           2 hours. Quote-tweet your own thread 3 days later with new insight.
+         - Instagram: Post carousel format. Use "Add Yours" sticker in
+           Stories. Respond to every comment with a question to drive depth.
+
+      3. CROSS-PROMOTION STRATEGY:
+         - How to reference each platform's content on the others
+         - Story/reel teasers for the long-form posts
+         - Email newsletter snippet to drive social engagement
+
+      4. PERFORMANCE TRACKING:
+         - LinkedIn KPIs to watch: impressions, engagement rate (target >3%),
+           profile views, follower growth
+         - Twitter KPIs: impressions, thread completion rate (how many read
+           all 7 tweets), bookmark count, follower growth
+         - Instagram KPIs: reach, saves (most important), shares, comments,
+           carousel completion rate
+
+      5. REPURPOSING IDEAS: 3 additional content pieces that could be
+         created from this same blog post in the next 30 days:
+         - Short-form video (Reel/TikTok/YouTube Short) concept
+         - Email newsletter angle
+         - Podcast talking points or guest pitch angle
     model: haiku
     max_turns: 3

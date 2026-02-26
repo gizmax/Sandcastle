@@ -178,6 +178,9 @@ class ApiKey(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     max_cost_per_run_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    allowed_cidrs: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -211,6 +214,7 @@ class ExperimentStatus(str, enum.Enum):
     """Possible statuses for an AutoPilot experiment."""
 
     RUNNING = "running"
+    DEPLOYING = "deploying"  # Progressive rollout in progress
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
@@ -235,6 +239,8 @@ class AutoPilotExperiment(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rollout_stage: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # Stages: None -> "canary" (10%) -> "partial" (50%) -> "full" (100%)
 
     samples: Mapped[list[AutoPilotSample]] = relationship(
         back_populates="experiment", cascade="all, delete-orphan"

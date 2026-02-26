@@ -13,8 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from sandcastle import __version__
+from sandcastle.api.a2a import a2a_router
+from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
+from sandcastle.api.security_headers import security_headers_middleware
 from sandcastle.config import settings
 
 # Configure logging
@@ -29,6 +32,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
+    # Initialize telemetry (opt-in, disabled by default)
+    from sandcastle.engine.telemetry import init_sentry
+
+    init_sentry()
+
     if settings.is_local_mode:
         logger.info(
             "Sandcastle starting in local mode (SQLite + filesystem + in-process queue)"
@@ -173,10 +181,13 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# Auth (added first = inner middleware)
+# Auth (added first = innermost middleware)
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
-# CORS (added second = outer middleware, wraps everything including auth)
+# Security headers (added second = wraps auth)
+app.add_middleware(BaseHTTPMiddleware, dispatch=security_headers_middleware)
+
+# CORS (added third = outermost middleware, wraps everything including auth + security headers)
 _cors_origins = [
     settings.dashboard_origin,
     "http://localhost:5173",
@@ -205,6 +216,12 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api")
 
+# A2A protocol routes (root level - /.well-known/agent.json and /a2a)
+app.include_router(a2a_router)
+
+# AG-UI protocol routes (/api/agui/stream/{run_id})
+app.include_router(agui_router, prefix="/api/agui")
+
 # ---------------------------------------------------------------------------
 # Dashboard static files (served from the same port)
 # ---------------------------------------------------------------------------
@@ -227,6 +244,11 @@ if _dashboard_dir:
         """Serve dashboard SPA - static files or fallback to index.html."""
         # Don't intercept /api paths - let FastAPI return 404 for unknown API routes
         if path.startswith("api/") or path == "api":
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Not found")
+        # Don't intercept A2A protocol paths
+        if path.startswith(".well-known/") or path == "a2a":
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="Not found")

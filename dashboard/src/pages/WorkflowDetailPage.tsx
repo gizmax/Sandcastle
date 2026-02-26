@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, RotateCcw } from "lucide-react";
+import { ArrowLeft, RotateCcw, Upload, X, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { VersionHistory } from "@/components/workflows/VersionHistory";
@@ -37,6 +37,9 @@ export default function WorkflowDetailPage() {
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [, setSelectedYaml] = useState<string | null>(null);
   const [diffModal, setDiffModal] = useState<{ a: number; b: number } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareYaml, setShareYaml] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
 
   const fetchVersions = useCallback(async () => {
     if (!name) return;
@@ -83,6 +86,31 @@ export default function WorkflowDetailPage() {
       void fetchVersions();
     }
   }, [name, fetchVersions]);
+
+  const handleShare = useCallback(async () => {
+    if (!name) return;
+    setShareOpen(true);
+    setShareLoading(true);
+    setShareYaml(null);
+    const res = await api.get<{ yaml_content: string }>(`/workflows/${name}/export`);
+    if (res.data) {
+      setShareYaml((res.data as Record<string, unknown>).yaml_content as string);
+    } else {
+      setShareYaml("# Export not available - workflow may not have a production version");
+    }
+    setShareLoading(false);
+  }, [name]);
+
+  const handleShareDownload = useCallback(() => {
+    if (!shareYaml || !name) return;
+    const blob = new Blob([shareYaml], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [shareYaml, name]);
 
   if (loading) {
     return (
@@ -140,6 +168,17 @@ export default function WorkflowDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleShare}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5",
+                "text-sm font-medium text-muted",
+                "hover:text-foreground hover:bg-border/40 transition-colors"
+              )}
+            >
+              <Upload className="h-4 w-4" />
+              Share
+            </button>
             {hasArchived && (
               <button
                 onClick={handleRollback}
@@ -238,6 +277,65 @@ export default function WorkflowDetailPage() {
           versionA={diffModal.a}
           versionB={diffModal.b}
         />
+      )}
+
+      {/* Share modal */}
+      {shareOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-2xl mx-4">
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold text-foreground">Share Workflow</h2>
+              <button
+                onClick={() => setShareOpen(false)}
+                className="rounded-md p-1 text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {shareLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted" />
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted">
+                    Exported YAML has credentials and environment variables removed.
+                  </p>
+                  <div className="max-h-72 overflow-auto rounded-lg border border-border bg-background p-4">
+                    <pre className="font-data text-xs text-foreground whitespace-pre-wrap">{shareYaml}</pre>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      onClick={handleShareDownload}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-lg border border-border px-4 py-2",
+                        "text-sm font-medium text-foreground",
+                        "hover:bg-border/40 transition-colors"
+                      )}
+                    >
+                      <Download className="h-4 w-4" />
+                      Download YAML
+                    </button>
+                    <a
+                      href="https://github.com/gizmax/Sandcastle/tree/main/hub"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2",
+                        "text-sm font-medium text-background",
+                        "hover:bg-accent/90 transition-colors"
+                      )}
+                    >
+                      <Upload className="h-4 w-4" />
+                      Publish to Hub
+                    </a>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

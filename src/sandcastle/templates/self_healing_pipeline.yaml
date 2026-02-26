@@ -1,0 +1,284 @@
+# name: Self-Healing Pipeline
+# description: Monitor data pipelines for schema drift and anomalies, auto-fix common issues, and report on data quality recovery
+# tags: [Data, ETL, DevOps, Automation]
+# category: engineering
+
+name: self-healing-pipeline
+description: Monitor data pipelines for schema drift and anomalies, auto-fix common issues, and report on data quality recovery
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+default_tools: [slack, datadog]
+
+input_schema:
+  required: ["pipeline_name", "data_source"]
+  properties:
+    pipeline_name:
+      type: string
+      description: "Name of the data pipeline to monitor (e.g. 'orders-etl', 'user-events-pipeline')"
+    data_source:
+      type: string
+      description: "Source system description (e.g. 'PostgreSQL orders table -> Snowflake warehouse')"
+    quality_threshold:
+      type: number
+      description: "Minimum data quality score (0-100) before alerting (default: 95)"
+      default: 95
+    auto_fix:
+      type: string
+      description: "Enable automatic fix attempts for known issue patterns: 'true' or 'false' (default: 'true')"
+      default: "true"
+
+steps:
+  - id: schema-monitoring
+    prompt: |
+      Monitor the data pipeline for schema changes and configuration drift.
+
+      Pipeline: {input.pipeline_name}
+      Data source: {input.data_source}
+
+      Perform a comprehensive schema health check:
+
+      1. **Schema comparison** - compare the current source schema against the
+         expected schema baseline:
+         - New columns added (potential downstream breakage if not handled)
+         - Columns removed or renamed (critical - will break dependent queries)
+         - Data type changes (e.g. integer -> string, timestamp format change)
+         - Nullable constraints changed (NOT NULL -> NULL or vice versa)
+         - Default value modifications
+      2. **Schema drift history** - document recent schema changes:
+         - When each change was first detected
+         - Whether the change was expected (migration) or unexpected (drift)
+         - Which downstream consumers are affected by each change
+      3. **Configuration audit** - verify pipeline configuration integrity:
+         - Connection strings and credentials validity (check connectivity)
+         - Batch size and parallelism settings
+         - Retry and timeout configurations
+         - Scheduling (cron/interval) is running as expected
+         - Resource allocation (memory, CPU) is within bounds
+      4. **Dependency check** - verify all upstream dependencies:
+         - Source system availability and response time
+         - Intermediate staging tables existence and freshness
+         - Output destination writability and disk space
+         - Required API endpoints reachable
+
+      Flag any schema or configuration issues with severity levels:
+      CRITICAL (pipeline will fail), WARNING (degraded quality), INFO (cosmetic).
+    model: haiku
+    max_turns: 8
+
+  - id: anomaly-detection
+    depends_on: [schema-monitoring]
+    prompt: |
+      Detect data quality anomalies in the pipeline's recent output.
+
+      Schema monitoring results: {steps.schema-monitoring.output}
+      Pipeline: {input.pipeline_name}
+      Data source: {input.data_source}
+      Quality threshold: {input.quality_threshold}
+
+      Run anomaly detection across these dimensions:
+
+      1. **Volume anomalies**
+         - Row count vs expected range (based on historical daily/hourly averages)
+         - Significant drops (>20% below expected) could indicate source issues
+         - Significant spikes (>50% above expected) could indicate duplication
+         - Zero-row batches (pipeline ran but produced nothing)
+      2. **Freshness anomalies**
+         - Data latency (time between event creation and pipeline ingestion)
+         - Staleness check (is the most recent record within acceptable window?)
+         - Gaps in time series (missing hours, missing dates)
+         - Clock skew between source and destination timestamps
+      3. **Distribution anomalies**
+         - Null rate spikes per column (sudden increase in NULL values)
+         - Cardinality changes (e.g. a status field suddenly has new values)
+         - Statistical outliers in numeric columns (mean, std dev, min/max shifts)
+         - String pattern violations (email format, phone format, ID format)
+         - Referential integrity failures (foreign keys pointing to missing records)
+      4. **Duplicate detection**
+         - Exact duplicates (identical rows)
+         - Near-duplicates (same primary key, different values - update conflicts)
+         - Partition duplication (same batch processed multiple times)
+      5. **Business rule violations**
+         - Negative amounts where only positive expected
+         - Future dates in historical fields
+         - Impossible value combinations (e.g. end_date before start_date)
+
+      Score overall data quality 0-100 and flag if below {input.quality_threshold}.
+      Classify each anomaly by type, severity, and estimated record count affected.
+    model: sonnet
+    max_turns: 10
+
+  - id: auto-fix-attempt
+    depends_on: [anomaly-detection]
+    prompt: |
+      Attempt automatic remediation of detected anomalies where safe to do so.
+
+      Anomaly report: {steps.anomaly-detection.output}
+      Pipeline: {input.pipeline_name}
+      Auto-fix enabled: {input.auto_fix}
+
+      If auto-fix is enabled ({input.auto_fix}), apply remediation for known patterns:
+
+      1. **Duplicate removal** - for exact duplicates:
+         - Generate a deduplication query targeting the specific partition/batch
+         - Use deterministic dedup key (primary key + event timestamp)
+         - Log the number of duplicates removed and affected time range
+         - Preserve an audit trail of removed records
+      2. **Schema adaptation** - for non-breaking schema changes:
+         - New nullable columns: add to pipeline schema with default NULL handling
+         - Type widening (int -> bigint): update downstream type mappings
+         - Generate ALTER TABLE statements for destination schema sync
+         - DO NOT auto-fix breaking changes (column removal, type narrowing)
+      3. **Null backfill** - for unexpected NULL spikes:
+         - If a column has a known default value, apply it
+         - If NULL rate is >50%, flag for manual review instead of auto-fixing
+         - Generate a backfill query with WHERE clause scoped to affected records
+      4. **Gap recovery** - for missing time windows:
+         - Generate a backfill job specification for the missing time range
+         - Verify source data is still available for the gap period
+         - Estimate backfill duration and resource requirements
+      5. **Rollback preparation** - for each auto-fix applied:
+         - Store the rollback query/command
+         - Record the before/after state
+         - Set a validation checkpoint to verify the fix worked
+
+      If auto-fix is disabled, generate the fix scripts but mark them as
+      "pending manual approval" with clear execution instructions.
+
+      Return a structured fix log with: action taken, records affected,
+      success/failure status, and rollback instructions.
+    model: sonnet
+    max_turns: 10
+
+  - id: impact-assessment
+    depends_on: [anomaly-detection]
+    prompt: |
+      Assess the downstream impact of detected anomalies on dependent systems and reports.
+
+      Anomaly report: {steps.anomaly-detection.output}
+      Pipeline: {input.pipeline_name}
+      Data source: {input.data_source}
+
+      Map the blast radius of each detected anomaly:
+
+      1. **Downstream dependency map** - identify all consumers of this pipeline's output:
+         - Dashboards and reports (which metrics are affected?)
+         - Machine learning models (training data corruption risk?)
+         - API endpoints serving this data (customer-facing impact?)
+         - Other pipelines that depend on this output (cascade risk?)
+         - Regulatory reports (compliance implications?)
+      2. **Impact severity per consumer**
+         - For each downstream consumer, classify impact as:
+           BLOCKING (consumer will fail or produce incorrect output),
+           DEGRADED (consumer will work but with reduced accuracy),
+           COSMETIC (minor visual/formatting issues), or
+           NONE (consumer is not affected by this anomaly type)
+      3. **Data correctness window** - identify the time range where data may be
+         incorrect. This helps consumers know which queries/reports to distrust.
+      4. **Business impact estimation**
+         - Revenue impact: are any revenue-critical reports affected?
+         - Customer impact: will end users see incorrect data?
+         - Decision impact: are any pending business decisions relying on affected data?
+         - SLA impact: does this anomaly violate any data SLA commitments?
+      5. **Notification priority** - rank consumers by urgency of notification:
+         - P0: customer-facing or revenue-impacting - notify immediately
+         - P1: internal decision-making - notify within 1 hour
+         - P2: reporting/analytics - notify within 4 hours
+         - P3: non-critical consumers - notify in daily digest
+
+      Output a structured impact matrix with recommended notification order.
+    model: sonnet
+    max_turns: 8
+
+  - id: quality-scoring
+    depends_on: [auto-fix-attempt, impact-assessment]
+    prompt: |
+      Calculate comprehensive data quality scores after remediation and generate
+      health metrics for the pipeline.
+
+      Auto-fix results: {steps.auto-fix-attempt.output}
+      Impact assessment: {steps.impact-assessment.output}
+      Quality threshold: {input.quality_threshold}
+
+      Produce a data quality scorecard:
+
+      1. **Quality dimensions** - score each dimension 0-100:
+         - Completeness: percentage of non-null values in required fields
+         - Accuracy: percentage of records passing business rule validation
+         - Consistency: cross-field and cross-source consistency rate
+         - Timeliness: freshness score based on data latency vs SLA
+         - Uniqueness: duplicate-free rate
+         - Validity: format and type compliance rate
+      2. **Composite quality score** - weighted average of all dimensions:
+         - Weight completeness and accuracy highest (25% each)
+         - Consistency and timeliness at 20% each
+         - Uniqueness and validity at 5% each
+      3. **Before vs after remediation** - show quality score improvement:
+         - Pre-fix score per dimension
+         - Post-fix score per dimension
+         - Delta and percentage improvement
+         - Remaining issues that could not be auto-fixed
+      4. **Trend tracking** - compare current scores against:
+         - 7-day rolling average
+         - 30-day rolling average
+         - Historical best and worst scores
+         - Quality threshold ({input.quality_threshold})
+      5. **Health verdict**
+         - HEALTHY: composite score >= threshold and improving/stable
+         - DEGRADED: composite score >= threshold but declining trend
+         - UNHEALTHY: composite score < threshold
+         - CRITICAL: composite score < threshold - 20 or critical anomalies unresolved
+
+      Output the scorecard with clear pass/fail indicators per dimension.
+    model: sonnet
+    max_turns: 8
+
+  - id: recovery-report
+    depends_on: [quality-scoring]
+    prompt: |
+      Generate a complete recovery report and send alerts for any outstanding issues.
+
+      Quality scorecard: {steps.quality-scoring.output}
+      Pipeline: {input.pipeline_name}
+      Data source: {input.data_source}
+      Quality threshold: {input.quality_threshold}
+
+      Compile the final recovery report:
+
+      1. **Executive summary** (3-5 sentences)
+         - Pipeline name, monitoring window, current health status
+         - Key findings: number of anomalies detected, fixes applied, remaining issues
+         - Quality score: current vs threshold vs previous period
+      2. **Incident log** - chronological list of detected issues:
+         - Timestamp, anomaly type, severity, affected records
+         - Remediation action taken (auto-fix, manual, pending)
+         - Current status (resolved, mitigated, open)
+      3. **Remediation summary**
+         - Actions taken and their effectiveness
+         - Pending manual interventions with instructions
+         - Rollback commands (in case fixes need to be reverted)
+      4. **Root cause analysis** - for each significant anomaly:
+         - Probable root cause (source system change, infrastructure issue,
+           code deployment, data corruption, third-party dependency)
+         - Evidence supporting the diagnosis
+         - Recommended permanent fix (not just the immediate remediation)
+      5. **Prevention recommendations**
+         - Schema change detection alerts to set up
+         - Additional monitoring rules to implement
+         - Pipeline code improvements to make it more resilient
+         - Runbook updates for the on-call team
+
+      Send alerts via Slack and Datadog:
+
+      Use the Slack tool to post a pipeline health summary:
+        node /home/user/tools/slack.mjs post_message '#data-engineering' '<report summary>'
+
+      Use the Datadog tool to submit metrics:
+        node /home/user/tools/datadog.mjs submit_metric 'pipeline.quality_score' <score>
+
+      If quality is below threshold, escalate with urgency indicators.
+      If quality is healthy, send a brief "all clear" confirmation.
+    model: sonnet
+    max_turns: 10
+    tools: [slack, datadog]

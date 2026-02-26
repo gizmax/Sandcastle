@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
-import { Inbox } from "lucide-react";
+import { Inbox, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { DeadLetterTable, type DLQItem } from "@/components/dead-letter/DeadLetterTable";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 
 export default function DeadLetterPage() {
   const [items, setItems] = useState<DLQItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
     try {
+      setError(null);
       const res = await api.get<DLQItem[]>("/dead-letter");
       if (res.data) setItems(res.data);
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
     }
@@ -57,9 +62,32 @@ export default function DeadLetterPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Dead Letter Queue</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchItems(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Dead Letter Queue</h1>
+
+      {items.filter((i) => !i.resolved_at).length > 0 && (
+        <ContextBanner variant="error" icon={AlertTriangle}>
+          {items.filter((i) => !i.resolved_at).length} unresolved item{items.filter((i) => !i.resolved_at).length > 1 ? "s" : ""} - retry or resolve to clear the queue.
+        </ContextBanner>
+      )}
 
       {items.length === 0 ? (
         <EmptyState

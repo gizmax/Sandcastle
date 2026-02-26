@@ -16,59 +16,331 @@ input_schema:
     campaign_brief:
       type: string
       description: "The campaign brief describing target audience, goals, and brand guidelines"
+    email_platform:
+      type: string
+      description: "Email platform used (e.g. 'Mailchimp', 'HubSpot', 'Klaviyo', 'SendGrid') for platform-specific best practices"
+    list_size:
+      type: string
+      description: "Approximate email list size for statistical significance calculations"
+    campaign_type:
+      type: string
+      description: "Type: 'promotional', 'nurture', 'announcement', 'onboarding', 're-engagement', 'event'"
 
 steps:
   - id: audience-brief
-    prompt: >
-      Analyze the target audience and campaign goal described below. Identify
-      the audience demographics, pain points, motivations, and the primary
-      action you want them to take. Define the tone of voice and any brand
-      guidelines to follow.
+    prompt: |
+      You are an email marketing strategist who has managed campaigns
+      generating millions in revenue. Analyze the campaign brief and build
+      a detailed audience and strategy foundation.
+
       Campaign brief: {input.campaign_brief}
+      Email platform: {input.email_platform}
+      List size: {input.list_size}
+      Campaign type: {input.campaign_type}
+
+      Produce the following analysis:
+
+      1. AUDIENCE PROFILE:
+         - Demographics: age range, job titles, industry, company size
+         - Psychographics: motivations, fears, aspirations, values
+         - Email behavior patterns: when do they check email? On mobile
+           or desktop? (B2B = desktop morning, B2C = mobile evening)
+         - Where are they in the buyer's journey? (Awareness, Consideration,
+           Decision, Retention, Advocacy)
+         - What is their current relationship with the brand? (Cold lead,
+           warm lead, existing customer, churned customer)
+
+      2. CAMPAIGN OBJECTIVE:
+         - Primary goal: What is the ONE action we want recipients to take?
+         - Primary KPI and target: Open rate (industry avg 21.3%), CTR
+           (industry avg 2.6%), conversion rate, revenue per email
+         - Secondary goals: brand awareness, list hygiene, segmentation
+           data collection
+
+      3. SEGMENTATION STRATEGY:
+         - Recommend 2-4 audience segments that should receive different
+           versions of this email. For each segment:
+           - Segment definition (criteria)
+           - Estimated size (% of total list)
+           - Messaging angle that would resonate most
+           - Subject line tone variation
+
+      4. COMPETITIVE INBOX ANALYSIS:
+         - What other emails are likely in your audience's inbox?
+         - How to stand out visually and in subject line preview
+         - Optimal send time recommendation based on audience profile
+           and campaign type
+
+      5. COMPLIANCE CHECKLIST:
+         - CAN-SPAM Act requirements (US): physical address, unsubscribe
+           link, accurate from/reply-to, honest subject lines
+         - GDPR requirements (EU): consent verification, data processing
+           legal basis, right to erasure
+         - CASL requirements (Canada): express or implied consent
+         - California CCPA: opt-out of sale, privacy notice
+         Flag any requirements specific to the campaign type.
+
+      6. BRAND VOICE GUIDELINES: Distill the brand voice into actionable
+         writing rules: tone (formal/casual), vocabulary (technical/simple),
+         humor (yes/no), emoji usage (never/sparingly/liberally).
     model: sonnet
     max_turns: 5
 
   - id: subject-lines
     depends_on: [audience-brief]
-    prompt: >
-      Generate 5 email subject line variants for this campaign. For each
-      variant, use a different persuasion technique (curiosity, urgency,
-      personalization, benefit-driven, social proof). Explain the reasoning
-      behind each and predict which audience segment it would resonate with most.
+    prompt: |
+      You are a subject line specialist. The subject line determines whether
+      the email is opened or ignored - it is the most important element of
+      the entire campaign. Generate high-performing subject line variants.
+
       Audience brief: {steps.audience-brief.output}
+      Campaign type: {input.campaign_type}
+
+      Generate 8 SUBJECT LINE VARIANTS using different proven techniques:
+
+      1. CURIOSITY GAP: Creates an information gap the reader must open to
+         resolve. Example: "The one metric most marketers ignore"
+         - Subject: [max 50 chars] - show count [XX/50]
+         - Preview text: [max 90 chars] - show count [XX/90]
+         (Preview text = first line of email body OR explicit preheader)
+
+      2. URGENCY/SCARCITY: Time-limited or quantity-limited framing.
+         Example: "Last chance: 40% off ends tonight"
+         - Subject + preview text with counts
+
+      3. PERSONALIZATION: Uses recipient's name, company, or behavior data.
+         Example: "[First Name], your Q2 benchmark report is ready"
+         - Subject + preview text with counts
+
+      4. BENEFIT-DRIVEN: Leads with the value the reader will get.
+         Example: "Cut your onboarding time by 60%"
+         - Subject + preview text with counts
+
+      5. SOCIAL PROOF: References others' behavior or endorsements.
+         Example: "Why 10,000+ teams switched this quarter"
+         - Subject + preview text with counts
+
+      6. QUESTION: Asks something the reader wants answered.
+         Example: "Are you making this common pricing mistake?"
+         - Subject + preview text with counts
+
+      7. NUMBER/LIST: Uses a specific number for concreteness.
+         Example: "7 templates that doubled our response rate"
+         - Subject + preview text with counts
+
+      8. CONTRARIAN/PROVOCATIVE: Challenges conventional wisdom.
+         Example: "Stop doing X (here's what works instead)"
+         - Subject + preview text with counts
+
+      FOR EACH VARIANT ALSO PROVIDE:
+      - Character count (aim for 30-50 chars - 41 chars is the sweet spot)
+      - Mobile preview compatibility (most mobile clients show 30-40 chars)
+      - Spam trigger risk: flag any words that commonly trigger spam filters
+        (free, guarantee, act now, limited time, click here, winner)
+      - Predicted open rate relative to baseline: +X% or -X% with reasoning
+      - Recommended audience segment match (from segmentation strategy)
+
+      A/B TEST RECOMMENDATION:
+      - Recommend which 2 subject lines to test first (most different approaches)
+      - Minimum sample size needed for statistical significance (95% confidence)
+        based on list size: {input.list_size}
+      - Test duration recommendation (typically 2-4 hours before sending winner)
     model: sonnet
     max_turns: 3
 
   - id: body-variant-a
     depends_on: [audience-brief]
-    prompt: >
-      Write email body Variant A using a benefit-focused approach. Lead with
-      the key value proposition, use bullet points to highlight benefits,
-      include one testimonial placeholder, and end with a clear CTA button
-      text. Keep the email concise - under 200 words for the body copy.
+    prompt: |
+      You are an email copywriter specializing in benefit-driven direct
+      response copy. Write email Variant A using a logical, benefit-focused
+      approach optimized for conversions.
+
       Audience brief: {steps.audience-brief.output}
+      Campaign type: {input.campaign_type}
+
+      WRITE THE EMAIL FOLLOWING THIS STRUCTURE:
+
+      1. PREHEADER TEXT (40-90 characters): This appears after the subject
+         line in inbox preview. Must complement (not repeat) the subject line.
+         Think of it as a second headline.
+
+      2. OPENING (2-3 sentences): Hook the reader with the primary benefit
+         or a pain point they recognize. The first sentence MUST be
+         compelling - 80% of readers decide to continue or delete based
+         on the first line. Use "you" language (not "we").
+
+      3. VALUE PROPOSITION SECTION:
+         - Lead with the #1 benefit (not feature)
+         - Use 3-5 bullet points for additional benefits
+         - Each bullet: start with a bold benefit, follow with supporting
+           detail. Format: "**Save 10 hours/week** - Our automation handles
+           the repetitive tasks you hate"
+         - Include one social proof element: customer quote, stat, or logo
+
+      4. SINGLE CTA (Call-to-Action):
+         - ONE primary CTA button (not multiple competing CTAs)
+         - Button text: Action-oriented, specific, first-person
+           Good: "Start My Free Trial" / "Get My Report"
+           Bad: "Submit" / "Click Here" / "Learn More"
+         - Place CTA after the core value section (above the fold on
+           desktop, within 3 scrolls on mobile)
+         - Add urgency reinforcement near CTA if appropriate
+
+      5. TRUST ELEMENTS:
+         - One-liner testimonial or case study snippet
+         - Trust badges mention (security, guarantee, social proof)
+         - Risk reversal: "30-day money-back guarantee" or "no credit card required"
+
+      6. CLOSING (1-2 sentences): Brief sign-off that reinforces the benefit.
+         Repeat CTA as a text link for accessibility.
+
+      7. FOOTER: Unsubscribe link, physical address (CAN-SPAM required),
+         privacy policy link, social media links.
+
+      FORMATTING RULES:
+      - Total word count: 150-200 words (body copy only, excluding footer)
+      - Line width: 600px max (standard email width)
+      - Font: system fonts (Arial, Helvetica, Georgia) for email compatibility
+      - Single column layout (mobile-first)
+      - Alt text for every image (many clients block images by default)
+      - Dark mode compatibility: avoid pure white backgrounds, use
+        transparent PNGs
     model: sonnet
     max_turns: 3
 
   - id: body-variant-b
     depends_on: [audience-brief]
-    prompt: >
-      Write email body Variant B using a story-focused approach. Open with
-      a relatable scenario or customer story, build emotional connection,
-      then transition to the product as the solution. End with a soft CTA
-      that feels like a natural next step. Keep it under 250 words.
+    prompt: |
+      You are an email copywriter specializing in narrative-driven emotional
+      copy. Write email Variant B using a storytelling approach that builds
+      connection before conversion.
+
       Audience brief: {steps.audience-brief.output}
+      Campaign type: {input.campaign_type}
+
+      WRITE THE EMAIL FOLLOWING THIS STRUCTURE:
+
+      1. PREHEADER TEXT (40-90 characters): Complement the subject line with
+         a curiosity hook or emotional teaser.
+
+      2. OPENING STORY (3-5 sentences): Start with a relatable scenario or
+         customer story that mirrors the reader's experience. Use specific
+         details (names, numbers, situations) to make it feel real.
+         Frameworks to choose from:
+         - "Before/After": Paint the painful before, hint at the beautiful after
+         - "The Moment": "Last Tuesday, Sarah realized she'd spent 6 hours on
+           something that should take 20 minutes..."
+         - "The Question": Start with a question that makes the reader nod
+         The goal: make the reader think "that's exactly my situation."
+
+      3. THE BRIDGE (2-3 sentences): Transition from the story's problem to
+         your solution. This is the "but then everything changed" moment.
+         Keep it natural - not salesy. The product should feel like a
+         discovery, not a pitch.
+
+      4. SOCIAL PROOF SECTION:
+         - A short customer testimonial (2-3 sentences with name and title)
+         - A specific result metric ("reduced churn by 34% in 60 days")
+         - If possible, reference a case study the reader can relate to
+
+      5. SOFT CTA: The call-to-action should feel like the logical next
+         step in the story, not a hard sell.
+         Good: "See how [company] did it" / "Try it yourself - free for 14 days"
+         Bad: "BUY NOW" / "Don't miss out"
+         Place the CTA where it naturally follows the story's resolution.
+
+      6. P.S. LINE: Add a P.S. at the bottom (research shows 79% of readers
+         scan directly to the P.S.). Use it for:
+         - A deadline reminder ("P.S. This offer expires Friday at midnight")
+         - A secondary benefit not mentioned above
+         - A personal touch from the sender
+
+      7. FOOTER: Same compliance requirements as Variant A.
+
+      WRITING GUIDELINES:
+      - Total word count: 200-250 words (body copy only)
+      - Tone: conversational, warm, empathetic. Write like a helpful friend,
+        not a corporation
+      - Sentence length: vary between short (5-8 words) and medium (12-18
+        words). No sentences over 25 words.
+      - Use "you" at least 3x more than "we" or "our"
+      - Read it aloud: if it sounds like a brochure, rewrite it
     model: sonnet
     max_turns: 3
 
+  - id: drip-sequence
+    depends_on: [audience-brief, subject-lines, body-variant-a, body-variant-b]
+    prompt: |
+      You are an email automation architect who designs drip sequences that
+      nurture leads through the funnel. Design a follow-up drip sequence
+      based on recipient behavior.
+
+      Audience brief: {steps.audience-brief.output}
+      Subject lines: {steps.subject-lines.output}
+      Variant A: {steps.body-variant-a.output}
+      Variant B: {steps.body-variant-b.output}
+
+      Design a 4-EMAIL DRIP SEQUENCE triggered by the initial campaign:
+
+      1. EMAIL 2 - FOLLOW-UP (sent 3 days after Email 1):
+         - Trigger: Opened Email 1 but did NOT click CTA
+         - Angle: Address the most likely objection to clicking
+         - Subject line (with preview text)
+         - Body outline (100-150 words): new angle, different proof point
+         - CTA: same action, different framing
+
+      2. EMAIL 3 - SOCIAL PROOF (sent 5 days after Email 1):
+         - Trigger: Did not open Email 1 OR opened but didn't convert
+         - Angle: Heavy social proof - customer stories and results
+         - Subject line (with preview text) - different approach than Email 1
+         - Body outline (100-150 words): 2-3 customer success snippets
+         - CTA: lower-commitment ask (watch a demo vs. start a trial)
+
+      3. EMAIL 4 - URGENCY (sent 7 days after Email 1):
+         - Trigger: Engaged with any prior email but hasn't converted
+         - Angle: Limited time offer or expiring access
+         - Subject line (with preview text)
+         - Body outline: Short, direct, deadline-focused
+         - CTA: Clear deadline with countdown framing
+
+      4. EMAIL 5 - BREAKUP (sent 14 days after Email 1):
+         - Trigger: No engagement with any email in the sequence
+         - Angle: "Is this still relevant to you?" / last chance
+         - Subject line: "Should I stop sending these?"
+         - Body: Short, respectful, with one final value hook
+         - CTA: "Yes, keep me updated" or "No, unsubscribe me"
+         - This email cleans your list and often gets the highest reply rate
+
+      FOR THE FULL SEQUENCE, ALSO PROVIDE:
+
+      5. TIMING OPTIMIZATION:
+         - Best send days and times for each email in the sequence
+         - Time zone handling recommendation
+         - Weekday vs. weekend considerations by campaign type
+
+      6. PERFORMANCE BENCHMARKS:
+         - Expected open rates per email (Email 1: ~21%, declining ~15% per
+           subsequent email)
+         - Expected CTR per email (baseline 2.6%, adjust for campaign type)
+         - Expected unsubscribe rate (keep under 0.5% per send)
+         - Revenue per email estimate if transactional campaign
+
+      7. SEGMENT BRANCHING: How the sequence should branch based on behavior:
+         - Opened + clicked -> fast-track to sales/conversion sequence
+         - Opened + no click -> objection-handling sequence
+         - No opens -> re-engagement or list cleanup
+    model: sonnet
+    max_turns: 5
+
   - id: review
-    depends_on: [subject-lines, body-variant-a, body-variant-b]
+    depends_on: [subject-lines, body-variant-a, body-variant-b, drip-sequence]
     type: approval
     prompt: >
       Review the complete email campaign package before sending. Verify
-      subject lines, both body variants, and overall brand alignment.
+      subject lines, both body variants, drip sequence, and overall brand
+      alignment. Check CAN-SPAM/GDPR compliance.
     approval_config:
-      message: "Review the email campaign variants and approve for sending"
+      message: "Review the email campaign variants, drip sequence, and approve for sending"
       show_data: steps.body-variant-a.output
       timeout_hours: 24
       on_timeout: abort

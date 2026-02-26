@@ -1,0 +1,632 @@
+# name: Board Meeting Prep
+# description: Aggregate financial metrics, KPIs, competitive developments, and team updates into comprehensive board meeting packages with executive narratives and discussion prompts
+# tags: [Board, Finance, Strategy, Executive, Governance]
+# category: general_ai
+
+name: board-meeting-prep
+description: Aggregate financial metrics, KPIs, competitive developments, and team updates into comprehensive board meeting packages with executive narratives and discussion prompts
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required: ["company_name", "reporting_period"]
+  properties:
+    company_name:
+      type: string
+      description: "Name of the company preparing the board meeting"
+    reporting_period:
+      type: string
+      description: "Reporting period for the board meeting (e.g., Q1 2026, FY 2025)"
+    board_members:
+      type: string
+      description: "Comma-separated list of board member names and roles"
+    key_metrics_sources:
+      type: string
+      description: "Comma-separated list of data sources for key metrics (e.g., Stripe, QuickBooks, Mixpanel)"
+    strategic_priorities:
+      type: string
+      description: "Comma-separated list of current strategic priorities being tracked by the board"
+
+steps:
+  - id: data-collection
+    prompt: |
+      You are a Chief of Staff preparing comprehensive data collection for {input.company_name}'s
+      board meeting covering {input.reporting_period}. Board members: {input.board_members}.
+      Key metrics sources: {input.key_metrics_sources}. Strategic priorities being tracked:
+      {input.strategic_priorities}.
+
+      Aggregate all relevant data across every business function. Treat this as pulling from
+      live systems and produce structured, quantitative outputs with realistic representative
+      figures appropriate for a venture-backed or growth-stage company.
+
+      1. Financial Performance Data:
+         - Income Statement Highlights:
+           - Total revenue: actual vs. budget vs. prior period, with variance analysis
+           - Revenue breakdown by product line, geography, customer segment, and channel
+           - Cost of goods sold / cost of revenue: actual vs. budget, gross margin analysis
+           - Operating expenses by department (Engineering, Sales, Marketing, G&A, Customer
+             Success) with budget variance for each
+           - EBITDA: actual vs. plan, bridge from prior period showing what drove changes
+           - Net income/loss with one-time items called out separately
+         - Balance Sheet Highlights:
+           - Cash and equivalents: current balance, change from prior period
+           - Accounts receivable: aging analysis (current, 30, 60, 90+ days), DSO trend
+           - Accounts payable: aging analysis, DPO trend
+           - Deferred revenue: current balance, change from prior period (leading indicator)
+           - Debt: current balances, upcoming maturity dates, covenant compliance status
+         - Cash Flow:
+           - Operating cash flow: actual vs. prior period
+           - Capital expenditures: actual vs. budget
+           - Free cash flow and FCF margin
+           - Cash burn rate: monthly average and trend
+           - Runway: months of cash remaining at current burn rate
+
+      2. SaaS / Subscription Metrics (if applicable):
+         - ARR/MRR: current, QoQ growth rate, YoY growth rate
+         - ARR bridge: beginning ARR + new business + expansion - contraction - churn = ending ARR
+         - Net Revenue Retention (NRR): percentage, trend over last 4 quarters
+         - Gross Revenue Retention (GRR): percentage, trend
+         - New ARR bookings: total, by source (inbound, outbound, channel, expansion)
+         - Average Contract Value (ACV): trend, by segment
+         - Logo churn rate and revenue churn rate
+         - Customer count: total, new, churned, net adds
+         - LTV/CAC ratio by segment and channel
+         - CAC payback period in months
+         - Rule of 40 score (growth rate + profit margin)
+
+      3. Sales and Pipeline Data:
+         - Pipeline: total value, by stage, stage conversion rates, pipeline coverage ratio
+           (pipeline/quota for next quarter)
+         - Win rate: this period vs. prior periods, by segment and deal size
+         - Sales cycle length: average days, trend, by segment
+         - Quota attainment: percentage of reps at or above quota, team-level attainment
+         - New logos vs. expansion bookings mix
+         - Top 10 deals in pipeline with status and expected close dates
+         - Lost deal analysis: top reasons for lost deals, competitor mentions
+
+      4. Product and Engineering Data:
+         - Product roadmap status: features delivered this period, features in development,
+           features delayed (with reasons for delays)
+         - Engineering velocity: sprint velocity trend, cycle time, deployment frequency
+         - Quality metrics: bug count by severity, SLA adherence, uptime percentage
+         - Product usage metrics: DAU/MAU ratio, feature adoption, user engagement trends
+         - Technical debt status: any major architectural decisions or tech debt items
+         - R&D spend as percentage of revenue, trend, benchmark vs. peers
+
+      5. People and Organization Data:
+         - Headcount: total, by department, actual vs. plan
+         - Hiring pipeline: open roles, candidates in pipeline, time to hire, offer acceptance rate
+         - Attrition: voluntary and involuntary turnover rates, regrettable departures
+         - Key hires and departures this period
+         - Employee engagement/satisfaction scores (if available)
+         - Compensation and benefits cost trends
+         - Diversity and inclusion metrics (if tracked)
+
+      6. Customer and Market Data:
+         - NPS/CSAT: current scores, trends, verbatim highlights
+         - Customer acquisition: new customers by segment, channel, geography
+         - Customer concentration: revenue from top 10 customers as percentage of total
+         - Market size estimates: TAM, SAM, SOM with any updates
+         - Win/loss insights: why customers chose us or chose competitors
+
+      7. Strategic Priority Progress:
+         - For each priority in "{input.strategic_priorities}":
+           - Current status (on track, at risk, behind, completed)
+           - Key milestones achieved this period
+           - Key milestones planned for next period
+           - Blockers or risks to completing the priority
+           - Resource allocation: investment to date, remaining budget
+
+      Output a structured data package with clear sections, specific numbers, and data source
+      references. Flag any data gaps or quality concerns for the board package team.
+    model: haiku
+    max_turns: 10
+
+  - id: financial-narrative
+    depends_on: [data-collection]
+    prompt: |
+      You are a CFO preparing the financial narrative section of {input.company_name}'s
+      board meeting materials for {input.reporting_period}. Board members: {input.board_members}.
+      Strategic priorities: {input.strategic_priorities}.
+
+      Collected data:
+      {steps.data-collection.output}
+
+      Build a comprehensive financial narrative and analysis for board consumption:
+
+      1. CFO Letter / Financial Summary (1 page):
+         - Open with a confident, clear assessment of the company's financial position
+         - Three key financial highlights (what went well)
+         - Two key financial concerns or watch items (transparent, not alarmist)
+         - Cash position and runway statement with confidence level
+         - One-paragraph forward outlook for next quarter/period
+         - Tone: authoritative, transparent, balanced between confidence and honesty
+
+      2. Revenue Analysis (detailed):
+         - Revenue performance narrative: why did we beat/miss/meet plan?
+         - Revenue quality assessment: is revenue durable? Is it from desired sources?
+         - Cohort revenue analysis: how are different customer vintages performing?
+         - Revenue concentration risk: top customer dependency analysis
+         - Seasonality and one-time items: separate run-rate revenue from anomalies
+         - Revenue trajectory: extrapolate current trends to year-end, identify scenarios
+           where trajectory changes
+         - For SaaS companies: detailed ARR bridge narrative explaining each component
+           (new, expansion, contraction, churn) with underlying drivers
+         - Net Revenue Retention deep dive: what is driving NRR up or down? Which segments
+           contribute most to expansion vs. contraction?
+
+      3. Profitability and Margin Analysis:
+         - Gross margin trend and drivers: product mix effects, pricing changes, infrastructure
+           costs, support costs
+         - Operating expense analysis by department: which teams are over/under plan and why?
+         - Unit economics deep dive: LTV, CAC, LTV/CAC ratio, CAC payback period, with
+           trend analysis and segment-level detail
+         - Path to profitability: if not yet profitable, what is the plan and timeline?
+           What levers can be pulled to accelerate breakeven?
+         - Contribution margin by segment/product: which parts of the business are most
+           and least profitable?
+         - Rule of 40 analysis: how does the company score and what is the trend?
+
+      4. Cash Flow and Runway:
+         - Operating cash flow commentary: major drivers of cash generation or consumption
+         - Working capital analysis: changes in AR, AP, deferred revenue, prepaid expenses
+         - Capital allocation: how was capital deployed this period (R&D, sales, infrastructure)?
+         - Cash burn analysis: monthly burn rate, trend, and what is driving changes
+         - Runway scenarios:
+           - Current trajectory: months of runway at current burn
+           - Optimistic: runway if growth accelerates and expenses are controlled
+           - Pessimistic: runway if growth slows or unexpected expenses arise
+           - Break-even scenario: what revenue/expense combination achieves cash flow breakeven
+         - Fundraising timing: if applicable, recommended timing for next raise based on
+           runway and market conditions
+
+      5. Budget vs. Actual Variance Analysis:
+         - Revenue: actual vs. budget with detailed variance explanation
+         - Expenses by department: actual vs. budget with variance explanation for each
+           significant variance (>5%)
+         - Headcount: actual vs. plan, impact of hiring timing on expenses
+         - Capital expenditures: actual vs. plan
+         - Forecast accuracy: how accurate were our projections? What should we adjust?
+         - Reforecast recommendation: does the annual budget/plan need revision based on
+           YTD actuals? What specifically should change?
+
+      6. Financial Risk Assessment:
+         - Concentration risks: customer, geography, product, vendor
+         - Currency exposure: if applicable, FX impact and hedging status
+         - Regulatory and tax risks: any pending matters or changes
+         - Accounts receivable risk: any customers with collection concerns
+         - Debt covenants: compliance status and headroom
+         - Insurance coverage adequacy review
+
+      7. Board-Ready Financial Tables:
+         - Formatted income statement (actual, budget, prior year, variances)
+         - Key SaaS metrics dashboard table (ARR, NRR, CAC, LTV, etc.)
+         - Cash flow summary with beginning/ending cash reconciliation
+         - Headcount summary by department (actual vs. plan)
+         - AR aging summary
+         - Monthly revenue and expense trend (trailing 12 months)
+
+      8. Forward Financial Outlook:
+         - Next quarter revenue and expense guidance
+         - Full-year outlook update (reiterate, raise, or lower)
+         - Key assumptions underlying the forecast
+         - Scenarios: bull case, base case, bear case with trigger conditions
+         - Capital needs assessment: any anticipated raises, credit facilities, or
+           major expenditures
+         - Strategic investment recommendations with expected ROI
+
+      Write every section for a sophisticated financial audience. Board members expect
+      precision, transparency, and forward-looking insight - not just backward-looking
+      reporting. Every claim should be supported by specific numbers.
+    model: sonnet
+    max_turns: 10
+
+  - id: competitive-update
+    depends_on: [data-collection]
+    prompt: |
+      You are a VP of Strategy preparing the competitive intelligence update for
+      {input.company_name}'s board meeting covering {input.reporting_period}.
+      Board members: {input.board_members}. Strategic priorities: {input.strategic_priorities}.
+
+      Collected data:
+      {steps.data-collection.output}
+
+      Produce a thorough competitive landscape update:
+
+      1. Competitive Landscape Overview:
+         - Market positioning map: where does {input.company_name} sit relative to key
+           competitors on the two most important axes (e.g., ease of use vs. feature depth,
+           SMB focus vs. enterprise focus, price vs. capability)
+         - Market share estimates: our share, top competitor shares, trend direction
+         - Competitive intensity assessment: is the market becoming more or less competitive?
+           What is driving changes in intensity?
+         - Total addressable market update: any changes in TAM estimate based on new data,
+           analyst reports, or market developments
+
+      2. Competitor Deep Dives (top 3-5 competitors):
+         For each major competitor, provide:
+         - Company overview: funding stage/public status, estimated revenue, headcount,
+           recent growth trajectory
+         - Product moves this period: new features shipped, product direction shifts,
+           platform changes, pricing changes
+         - Go-to-market moves: new sales motions, channel partnerships, geographic expansion,
+           marketing campaigns, analyst relations
+         - Customer moves: notable customer wins or losses (especially any that affect us),
+           target market shifts
+         - Leadership changes: new executives, board additions, key departures
+         - Funding and M&A: recent fundraises, acquisition activity (as acquirer or target),
+           rumored deals
+         - Threat assessment: rate each competitor's threat level (Low/Medium/High) for the
+           next 12 months with justification
+         - Our differentiation: where we are clearly ahead, where they are ahead, where it
+           is a toss-up
+
+      3. Emerging Competitors and Disruptors:
+         - New entrants to the market this period
+         - Adjacent market players expanding into our space
+         - Open-source or free alternatives gaining traction
+         - AI/automation tools that could disrupt the category
+         - Technology shifts that could change competitive dynamics
+         - For each emerging threat: likelihood of material impact (1-5) and timeline
+
+      4. Win/Loss Analysis:
+         - Win rate this period vs. prior periods (overall and by competitor)
+         - Top 5 competitive wins: what worked, how we differentiated
+         - Top 5 competitive losses: why we lost, what the competitor offered that we did not
+         - Competitive displacement: any customers we won from competitors or lost to competitors
+         - Feature gap analysis: features cited in losses that we do not have
+         - Pricing competitiveness: how our pricing compares in competitive deals
+         - Sales cycle impact: how competitive dynamics affect deal velocity
+
+      5. Market and Industry Trends:
+         - Analyst coverage: recent analyst reports mentioning our category, key findings
+         - Industry conferences and events: notable announcements, themes, sentiment
+         - Regulatory developments: new regulations or policy changes affecting the market
+         - Technology trends: AI/ML adoption, platform shifts, integration ecosystem changes
+         - Buyer behavior shifts: changes in how customers evaluate and buy solutions
+         - Economic factors: how macro conditions are affecting the market
+
+      6. Strategic Implications and Recommendations:
+         - Product strategy implications: features to prioritize based on competitive dynamics
+         - Go-to-market strategy implications: positioning, messaging, or sales motion changes
+         - Pricing strategy implications: any pricing adjustments warranted by competitive moves
+         - Partnership opportunities: potential alliances to strengthen competitive position
+         - M&A considerations: competitors or complementary companies to consider acquiring
+         - Defensive plays: actions to protect existing customers from competitive displacement
+
+      7. Competitive Intelligence Sources and Confidence:
+         - List key sources: customer feedback, sales team intel, public filings, analyst
+           reports, job postings, patent filings, social media, news
+         - Rate confidence level for each major assertion (high/medium/low)
+         - Identify intelligence gaps: what we do not know but should
+         - Recommended intelligence investments: tools, processes, or roles to improve
+           competitive awareness
+
+      Write this for board members who need to understand competitive dynamics at a strategic
+      level. Lead with the "so what" for each insight - what does it mean for {input.company_name}
+      and what should we do about it?
+    model: sonnet
+    max_turns: 10
+
+  - id: operational-review
+    depends_on: [data-collection]
+    prompt: |
+      You are a COO preparing the operational review section for {input.company_name}'s
+      board meeting covering {input.reporting_period}. Board members: {input.board_members}.
+      Strategic priorities: {input.strategic_priorities}.
+
+      Collected data:
+      {steps.data-collection.output}
+
+      Prepare a comprehensive operational review:
+
+      1. Operational Scorecard:
+         - Create a scorecard with 15-20 key operational metrics organized by function
+         - For each metric: current value, target, prior period, YoY comparison, status
+           (green/yellow/red)
+         - Include: engineering velocity, product delivery, customer success metrics, support
+           metrics, sales productivity, marketing efficiency, G&A efficiency
+         - Highlight the 3 best-performing and 3 worst-performing metrics with explanations
+
+      2. Product and Engineering Review:
+         - Product roadmap status report: what shipped on time, what is delayed, what is
+           newly planned
+         - Key feature releases this period: description, customer impact, adoption data
+         - Engineering capacity: total headcount, allocation across new features vs. tech debt
+           vs. maintenance vs. infrastructure
+         - Platform reliability: uptime percentage, incidents by severity, MTTR, post-incident
+           review status
+         - Technical debt assessment: current state, trend, plan to address
+         - Security posture: any vulnerabilities, audit findings, compliance status
+         - Product quality metrics: bug escape rate, customer-reported defects, release rollback rate
+         - Architecture and scalability: any capacity concerns or infrastructure investments needed
+         - Innovation pipeline: R&D projects in exploration or prototyping phase
+
+      3. Sales and Revenue Operations:
+         - Sales team performance: quota attainment by rep and team, ramp time for new hires,
+           productivity metrics
+         - Pipeline health: total pipeline, coverage ratio, stage conversion rates, velocity
+         - Sales process effectiveness: win rate by stage, deal progression speed, forecast
+           accuracy
+         - Channel and partnership program status: partner revenue contribution, partner
+           pipeline, partner satisfaction
+         - Revenue operations: CRM hygiene score, process compliance, data quality metrics
+         - Sales enablement: content utilization, training completion, competitive battle
+           card effectiveness
+         - Territory and capacity planning: are we appropriately staffed for the pipeline?
+
+      4. Marketing Performance:
+         - Demand generation: leads generated, MQL to SQL conversion, pipeline contribution,
+           cost per lead by channel
+         - Content marketing: traffic, engagement, lead magnets performance, SEO improvements
+         - Brand awareness: share of voice, PR coverage, social media growth, analyst relations
+         - Event marketing: events attended/hosted, leads generated, ROI
+         - Customer marketing: case studies produced, reviews generated, referral program performance
+         - Marketing spend efficiency: CAC by channel, budget utilization, ROI by program
+
+      5. Customer Success and Support:
+         - Retention metrics: logo retention, revenue retention (gross and net)
+         - Customer health: distribution of health scores, trend, accounts requiring intervention
+         - Onboarding metrics: time to value, onboarding completion rate, early churn rate
+         - Support performance: ticket volume, resolution time, CSAT, SLA compliance
+         - Expansion metrics: upsell and cross-sell performance, expansion pipeline
+         - Professional services: utilization, revenue, customer satisfaction, project delivery
+
+      6. People Operations:
+         - Headcount: actual vs. plan, by department, net change this period
+         - Hiring: open roles, pipeline health, time to hire, offer acceptance rate, quality
+           of hire indicators
+         - Retention: turnover rate (voluntary/involuntary), regrettable departures, retention
+           of key talent
+         - Engagement: eNPS or engagement survey results, trends, action items from prior surveys
+         - Compensation: market competitiveness assessment, pay equity analysis status
+         - Culture and values: notable cultural initiatives, values recognition, any concerns
+         - Key organizational changes: promotions, reorganizations, new teams formed
+
+      7. Operational Risks and Issues:
+         - Top 5 operational risks with likelihood, impact, and mitigation status
+         - Compliance and regulatory: any pending audits, certifications, legal matters
+         - Vendor and supply chain: any dependencies at risk, contract renewals pending
+         - Business continuity: disaster recovery readiness, insurance adequacy
+         - Capacity constraints: any functions approaching capacity limits
+
+      8. Strategic Priority Execution Update:
+         - For each strategic priority in "{input.strategic_priorities}":
+           - Detailed progress report with milestones achieved and missed
+           - Current confidence level in achieving the priority (High/Medium/Low)
+           - Key decisions needed from the board (if any)
+           - Resource requirements: are they adequate? Do we need more?
+           - Timeline update: on track, accelerating, or delayed?
+           - Dependencies: cross-functional or external dependencies and their status
+
+      Write this for operational governance - board members want to know that the company
+      is being run well, that teams are executing, and that risks are being managed. Be candid
+      about problems while showing that management has plans to address them.
+    model: sonnet
+    max_turns: 10
+
+  - id: risk-register
+    depends_on: [financial-narrative, competitive-update, operational-review]
+    prompt: |
+      You are a Chief Risk Officer synthesizing all business risks for {input.company_name}'s
+      board meeting covering {input.reporting_period}. Board members: {input.board_members}.
+      Strategic priorities: {input.strategic_priorities}.
+
+      Financial analysis:
+      {steps.financial-narrative.output}
+
+      Competitive update:
+      {steps.competitive-update.output}
+
+      Operational review:
+      {steps.operational-review.output}
+
+      Build a comprehensive enterprise risk register with board-level analysis:
+
+      1. Risk Register Summary:
+         - Total risks identified and tracked: count by severity level
+         - New risks added this period: description and rationale
+         - Risks retired this period: what was resolved and how
+         - Overall risk posture: improving, stable, or deteriorating (with justification)
+         - Risk appetite alignment: are current risk levels within the board's stated appetite?
+
+      2. Strategic Risks (top 5):
+         For each risk:
+         - Risk title and description (clear, concise, specific to {input.company_name})
+         - Likelihood: 1-5 scale with justification
+         - Impact: 1-5 scale with financial quantification where possible
+         - Risk score: likelihood x impact
+         - Velocity: how quickly this risk could materialize (immediate, months, quarters, years)
+         - Trend: increasing, stable, or decreasing since last review
+         - Current mitigations: what is already in place
+         - Recommended additional mitigations: what else should be done
+         - Owner: who is accountable for managing this risk
+         - Board action required: yes/no, and if yes, what decision is needed
+
+      3. Financial Risks (top 5):
+         - Cash and liquidity risks: runway scenarios, funding market conditions
+         - Revenue risks: concentration, churn, competitive displacement, pricing pressure
+         - Cost risks: unexpected expense categories, vendor price increases, hiring costs
+         - Currency and market risks: FX exposure, interest rate sensitivity
+         - Tax and regulatory financial risks: pending audits, changing tax treatment
+         - For each: same structure as strategic risks (likelihood, impact, mitigations, owner)
+
+      4. Operational Risks (top 5):
+         - Technology and platform risks: outage potential, security vulnerabilities, tech debt
+         - People risks: key person dependency, hiring challenges, retention concerns
+         - Process risks: scaling bottlenecks, quality control gaps, compliance gaps
+         - Vendor risks: critical vendor dependencies, contract expirations, price increases
+         - For each: same structured analysis
+
+      5. Market and External Risks (top 5):
+         - Competitive risks: disruptive entrants, aggressive competitor moves
+         - Regulatory risks: pending legislation, enforcement changes, data privacy
+         - Economic risks: recession impact, customer budget cuts, market slowdown
+         - Technology disruption risks: AI impact on category, platform shifts
+         - Geopolitical risks: if applicable, supply chain or market access concerns
+         - For each: same structured analysis
+
+      6. Risk Heat Map:
+         - Create a text-based risk heat map plotting all risks on likelihood (x-axis)
+           vs. impact (y-axis)
+         - Highlight risks that are in the "red zone" (high likelihood AND high impact)
+         - Identify risks that are trending toward the red zone (approaching critical)
+         - Call out any risks where likelihood and impact are uncertain (need more data)
+
+      7. Risk Interdependencies:
+         - Map connections between risks: which risks could trigger or amplify others?
+         - Identify risk clusters: groups of risks that share common root causes
+         - Scenario analysis: describe 2-3 "perfect storm" scenarios where multiple risks
+           materialize simultaneously, and the combined impact
+         - Stress test: what happens to the business if the top 3 risks all materialize
+           within the same quarter?
+
+      8. Board Discussion Questions:
+         - Present 10 risk-related questions for board discussion
+         - Group questions by theme: strategic direction, resource allocation, risk appetite,
+           contingency planning
+         - For each question: provide context (why this matters now), the management
+           recommendation, and the decision being asked of the board
+         - Flag any questions where management is genuinely uncertain and seeks board guidance
+           vs. questions where management has a view and seeks board ratification
+
+      9. Mitigation Investment Recommendations:
+         - Ranked list of recommended risk mitigation investments
+         - For each: estimated cost, expected risk reduction, timeline, responsible executive
+         - Total investment request and expected improvement in risk posture
+         - ROI framing: cost of mitigation vs. expected loss if risk materializes
+         - Quick wins: mitigations that can be implemented with minimal investment
+
+      This register should demonstrate to the board that management has a mature, systematic
+      approach to risk management. Be honest about uncertainty and areas where more data is needed.
+    model: sonnet
+    max_turns: 10
+
+  - id: board-package
+    depends_on: [risk-register]
+    prompt: |
+      You are the CEO's Chief of Staff assembling the final board meeting package for
+      {input.company_name} covering {input.reporting_period}. Board members: {input.board_members}.
+      Strategic priorities: {input.strategic_priorities}. Data sources: {input.key_metrics_sources}.
+
+      Financial narrative:
+      {steps.financial-narrative.output}
+
+      Competitive update:
+      {steps.competitive-update.output}
+
+      Operational review:
+      {steps.operational-review.output}
+
+      Risk register:
+      {steps.risk-register.output}
+
+      Assemble the complete board meeting package:
+
+      1. CEO LETTER TO THE BOARD (1 page):
+         - Open with the most important message: is the company on track?
+         - Top 3 wins this period (specific, quantified achievements)
+         - Top 2 challenges and what management is doing about them
+         - Strategic pivot or major decision update (if any)
+         - Team and culture highlight: something that demonstrates organizational health
+         - Forward outlook: confidence level and key drivers for next period
+         - Tone: candid, confident but not overconfident, shows strategic thinking
+         - Close with the 1-2 decisions the CEO wants from the board at this meeting
+
+      2. DASHBOARD SUMMARY (1 page):
+         - "Company at a Glance" dashboard with the 10-12 most important metrics
+         - Each metric: current value, target, prior period, trend indicator
+         - Organized in logical groupings: Growth, Efficiency, Health, Risk
+         - Color-coded status for instant visual scanning
+         - Include: ARR/Revenue, Growth Rate, Burn Rate, Runway, NRR, CAC Payback,
+           Rule of 40, Headcount, NPS, Pipeline Coverage, Win Rate, Uptime
+
+      3. FINANCIAL DEEP DIVE (2-3 pages):
+         - Pull the most important elements from the financial narrative
+         - Income statement summary with budget comparison
+         - ARR/MRR bridge (if applicable)
+         - Cash flow and runway analysis
+         - Unit economics summary
+         - Forward guidance and assumptions
+         - Formatted for quick scanning with bold highlights on key figures
+
+      4. BUSINESS UPDATE (2-3 pages):
+         - Product: key shipments, roadmap highlights, technical wins
+         - Go-to-market: pipeline, notable deals, competitive wins/losses
+         - Customer success: retention, expansion, notable customer stories
+         - People: hiring, org changes, engagement
+         - Each section: 1-2 paragraphs max, data-driven, forward-looking
+
+      5. COMPETITIVE AND MARKET INTELLIGENCE (1-2 pages):
+         - Market positioning summary
+         - Top competitor moves and our response
+         - Win/loss trends
+         - Emerging threats
+         - Strategic implications for board discussion
+
+      6. RISK REGISTER SUMMARY (1 page):
+         - Heat map visualization (text-based)
+         - Top 5 risks with one-line descriptions and status
+         - New risks since last meeting
+         - Mitigation progress on previously identified risks
+         - Board decisions requested regarding risk management
+
+      7. STRATEGIC PRIORITIES UPDATE (1-2 pages):
+         - Status dashboard for each priority in "{input.strategic_priorities}"
+         - Progress, confidence, blockers, decisions needed
+         - Resource allocation review: are we investing in the right places?
+         - Proposed priority changes for next period (add, remove, or re-prioritize)
+
+      8. PRE-DRAFTED RESPONSES TO 20 LIKELY BOARD QUESTIONS:
+         Prepare thorough, data-backed responses to these common board questions:
+         - "What is our current burn rate and runway?"
+         - "Are we on track to hit our annual plan?"
+         - "Why did we miss/beat revenue this quarter?"
+         - "What is our biggest competitive threat right now?"
+         - "How is the sales team performing? Do we need to make changes?"
+         - "What is the status of [specific strategic priority]?"
+         - "When will we be profitable / cash flow positive?"
+         - "Should we be raising more capital? When?"
+         - "How is employee morale? Are we retaining key people?"
+         - "What is our customer churn rate and what is driving it?"
+         - "Are we spending too much / too little on [department]?"
+         - "What would you do differently if you had 20% more / less budget?"
+         - "What is the biggest risk to the business right now?"
+         - "How does our growth compare to competitors / the market?"
+         - "What are the top 3 things keeping you up at night?"
+         - "Is the product roadmap aligned with customer needs?"
+         - "What is our M&A strategy?"
+         - "Should we be expanding into new markets / segments?"
+         - "How effective is our go-to-market motion?"
+         - "What board-level decisions do you need from us today?"
+         For each: concise answer (3-5 sentences), supporting data point, and if
+         applicable, the decision or input being sought from the board member
+
+      9. BOARD MEETING AGENDA (proposed):
+         - Recommended meeting duration (typically 2-3 hours)
+         - Detailed agenda with time allocations
+         - Consent agenda items (approve quickly): minutes, routine matters
+         - Discussion items: strategic topics requiring board input
+         - Decision items: specific votes or approvals needed
+         - Executive session: time for board-only discussion
+         - Pre-read list: which materials to review before the meeting
+         - Action items template: for capturing commitments during the meeting
+
+      10. APPENDICES:
+          - Detailed financial statements
+          - Full operational scorecard
+          - Complete risk register
+          - Headcount details
+          - Product roadmap
+          - Customer metrics deep dive
+          - Competitive intelligence details
+          - Minutes from prior board meeting (template)
+          - Stock option / equity summary (if applicable)
+
+      The package should enable board members to prepare in 30-45 minutes of pre-reading
+      and arrive ready for strategic discussion, not tactical review. Every section should
+      answer "so what?" and "now what?" rather than just reporting data.
+    model: sonnet
+    max_turns: 10
