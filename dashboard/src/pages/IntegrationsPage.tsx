@@ -189,9 +189,9 @@ export default function IntegrationsPage() {
       </div>
 
       {/* Context banner */}
-      {configuredTools.filter((t) => t.missing_credentials.length > 0).length > 0 && (
+      {unconfiguredTools.length > 0 && (
         <ContextBanner variant="warning" icon={KeyRound}>
-          {configuredTools.filter((t) => t.missing_credentials.length > 0).length} configured tool{configuredTools.filter((t) => t.missing_credentials.length > 0).length > 1 ? "s" : ""} missing credentials - click any to configure.
+          {unconfiguredTools.length} integration{unconfiguredTools.length > 1 ? "s" : ""} available but not configured - scroll down to set up.
         </ContextBanner>
       )}
 
