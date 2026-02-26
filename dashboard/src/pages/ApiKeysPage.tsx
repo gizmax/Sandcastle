@@ -7,8 +7,8 @@ import { CreateApiKeyModal } from "@/components/api-keys/CreateApiKeyModal";
 import { KeyRevealModal } from "@/components/api-keys/KeyRevealModal";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { SectionCard, FieldLabel, HelperText, inputClass } from "@/components/ui/SectionCard";
-import { cn } from "@/lib/utils";
+import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
+import { cn, inputClass } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
 

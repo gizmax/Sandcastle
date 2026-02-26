@@ -47,7 +47,7 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
     if (res.data) {
       setResult(res.data);
     }
-  }, [description]);
+  }, [description, selectedTools]);
 
   const handleRefine = useCallback(async () => {
     if (!refineText.trim() || !result) return;

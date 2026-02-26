@@ -68,6 +68,14 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
     }
   }, [open]);
 
+  const handleClose = useCallback(() => {
+    setMessages([]);
+    setInput("");
+    setLatestResult(null);
+    setError(null);
+    onClose();
+  }, [onClose]);
+
   // Close on Escape key
   useEffect(() => {
     if (!open) return;
@@ -78,7 +86,7 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, handleClose]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -150,14 +158,6 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
     setLatestResult(null);
     setError(null);
   }, [latestResult, onSelect]);
-
-  const handleClose = useCallback(() => {
-    setMessages([]);
-    setInput("");
-    setLatestResult(null);
-    setError(null);
-    onClose();
-  }, [onClose]);
 
   if (!open) return null;
 

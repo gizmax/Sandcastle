@@ -1,5 +1,3 @@
-import { cn } from "@/lib/utils";
-
 export function SectionCard({
   icon: Icon,
   title,
@@ -38,10 +36,3 @@ export function FieldLabel({ htmlFor, children }: { htmlFor: string; children: R
 export function HelperText({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-muted-foreground mt-1">{children}</p>;
 }
-
-export const inputClass = cn(
-  "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground",
-  "placeholder:text-muted-foreground",
-  "focus:outline-none focus:ring-2 focus:ring-ring/30",
-  "transition-colors"
-);
