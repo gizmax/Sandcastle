@@ -48,6 +48,7 @@ class TestDoctorCommand:
                 mock_cfg.cloudflare_worker_url = ""
                 mock_cfg.telemetry_enabled = False
                 mock_cfg.sentry_dsn = ""
+                mock_cfg.license_key = ""
                 with pytest.raises(SystemExit) as exc_info:
                     _cmd_doctor(None)
                 output = capsys.readouterr().out
@@ -64,6 +65,7 @@ class TestDoctorCommand:
                 mock_cfg.e2b_api_key = ""
                 mock_cfg.sandbox_backend = "e2b"
                 mock_cfg.cloudflare_worker_url = ""
+                mock_cfg.license_key = ""
                 with pytest.raises(SystemExit) as exc_info:
                     _cmd_doctor(None)
                 output = capsys.readouterr().out

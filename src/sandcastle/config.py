@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     docker_cpu_period: int = 100_000  # CPU period in microseconds
     docker_cpu_quota: int = 50_000  # CPU quota in microseconds (50% of one core)
 
+    # License
+    license_key: str = ""  # Ed25519-signed license key (sc_lic_...)
+
     # Telemetry (opt-in error reporting)
     telemetry_enabled: bool = False  # Set to True to send error reports via Sentry
     sentry_dsn: str = ""  # Sentry DSN - get one free at sentry.io

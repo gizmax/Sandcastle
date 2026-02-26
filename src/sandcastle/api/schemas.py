@@ -222,6 +222,16 @@ class HealthResponse(BaseModel):
     database: bool
 
 
+class LicenseInfoResponse(BaseModel):
+    """License key status."""
+
+    status: str  # "valid" | "expired" | "invalid" | "missing"
+    tier: str  # "community" | "pro" | "enterprise"
+    licensee: str = ""
+    max_seats: int = 0
+    expires: str = ""
+
+
 class RuntimeInfoResponse(BaseModel):
     """Runtime mode information."""
 
@@ -232,6 +242,7 @@ class RuntimeInfoResponse(BaseModel):
     sandbox_backend: str = "e2b"  # "e2b" | "docker" | "local" | "cloudflare"
     data_dir: str | None = None  # Only set in local mode
     version: str | None = None
+    license: LicenseInfoResponse | None = None
 
 
 class RunListItem(BaseModel):

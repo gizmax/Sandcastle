@@ -272,6 +272,13 @@ def _cmd_init(args: argparse.Namespace) -> None:
             )
             sandbox_backend = "e2b"
 
+    # License key (optional)
+    print()
+    print(_color("  License key (optional):", _C.DIM))
+    print(_color("    Contact tom@pflanzer.cz for Pro/Enterprise keys", _C.DIM))
+    print()
+    license_key = input("  LICENSE_KEY (optional, Enter to skip): ").strip()
+
     # Write .env
     lines = [
         f"ANTHROPIC_API_KEY={anthropic_key}",
@@ -288,6 +295,9 @@ def _cmd_init(args: argparse.Namespace) -> None:
         f"MINIMAX_API_KEY={minimax_key}" if minimax_key else "# MINIMAX_API_KEY=",
         f"OPENAI_API_KEY={openai_key}" if openai_key else "# OPENAI_API_KEY=",
         f"OPENROUTER_API_KEY={openrouter_key}" if openrouter_key else "# OPENROUTER_API_KEY=",
+        "",
+        "# License key (Pro/Enterprise)",
+        f"LICENSE_KEY={license_key}" if license_key else "# LICENSE_KEY=",
         "",
         "# Local mode (SQLite + in-process queue) - leave empty",
         "DATABASE_URL=",
@@ -739,6 +749,27 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
         _warn("TELEMETRY_ENABLED=true but SENTRY_DSN not set")
     else:
         _pass("Telemetry disabled (opt-in with TELEMETRY_ENABLED=true)")
+
+    # --- Section 7: License ---
+    print()
+    print(_color("  License", _C.BOLD))
+    print(_color("  -------", _C.BOLD))
+
+    if cfg:
+        from sandcastle.engine.license import LicenseStatus, validate_license_key
+
+        lic = validate_license_key(cfg.license_key)
+        if lic.status == LicenseStatus.valid:
+            _pass(
+                f"{lic.tier.value.capitalize()} license - {lic.licensee}"
+                + (f" (expires {lic.expires})" if lic.expires else "")
+            )
+        elif lic.status == LicenseStatus.missing:
+            _warn("No license key (community mode)")
+        elif lic.status == LicenseStatus.expired:
+            _fail(f"License expired: {lic.detail}")
+        else:
+            _fail(f"License invalid: {lic.detail}")
 
     # --- Summary ---
     print()
