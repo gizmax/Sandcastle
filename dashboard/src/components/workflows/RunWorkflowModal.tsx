@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Play } from "lucide-react";
+import { X, Play, FileText, FormInput, Braces } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { JsonEditor } from "@/components/shared/JsonEditor";
 
@@ -22,11 +22,20 @@ interface RunWorkflowModalProps {
   onRun: (input: Record<string, unknown>, callbackUrl?: string) => void;
 }
 
+type InputMode = "form" | "text" | "json";
+
+const MODE_OPTIONS: { value: InputMode; label: string; icon: typeof FileText }[] = [
+  { value: "form", label: "Form", icon: FormInput },
+  { value: "text", label: "Text", icon: FileText },
+  { value: "json", label: "JSON", icon: Braces },
+];
+
 export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onRun }: RunWorkflowModalProps) {
   const fields = inputSchema?.properties ? Object.entries(inputSchema.properties) : [];
   const hasSchema = fields.length > 0;
   const requiredFields = new Set(inputSchema?.required || []);
 
+  const [mode, setMode] = useState<InputMode>(hasSchema ? "form" : "text");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const [key, prop] of fields) {
@@ -35,6 +44,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
     return init;
   });
   const [inputJson, setInputJson] = useState("{}");
+  const [inputText, setInputText] = useState("");
   const [callbackUrl, setCallbackUrl] = useState("");
 
   if (!open) return null;
@@ -42,10 +52,12 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     let parsed: Record<string, unknown> = {};
-    if (hasSchema) {
+    if (mode === "form" && hasSchema) {
       for (const [key, val] of Object.entries(fieldValues)) {
         if (val) parsed[key] = val;
       }
+    } else if (mode === "text") {
+      parsed = { text: inputText };
     } else {
       try {
         parsed = JSON.parse(inputJson);
@@ -55,6 +67,9 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
     }
     onRun(parsed, callbackUrl || undefined);
   }
+
+  // Filter mode options - show Form only if schema exists
+  const availableModes = hasSchema ? MODE_OPTIONS : MODE_OPTIONS.filter((m) => m.value !== "form");
 
   return (
     <>
@@ -68,8 +83,32 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
             </button>
           </div>
 
+          {/* Mode selector */}
+          <div className="mb-4 flex gap-1 rounded-lg border border-border bg-background p-1">
+            {availableModes.map((opt) => {
+              const Icon = opt.icon;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setMode(opt.value)}
+                  className={cn(
+                    "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                    mode === opt.value
+                      ? "bg-accent text-accent-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            {hasSchema ? (
+            {/* Form mode */}
+            {mode === "form" && hasSchema && (
               fields.map(([key, prop]) => (
                 <div key={key}>
                   <label className="mb-1 block text-xs font-medium text-muted">
@@ -92,7 +131,33 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                   />
                 </div>
               ))
-            ) : (
+            )}
+
+            {/* Text mode */}
+            {mode === "text" && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">
+                  Your input
+                </label>
+                <p className="mb-1.5 text-xs text-muted-foreground">
+                  Write anything - accessible in workflow as <code className="rounded bg-background px-1 font-mono text-accent">{"{input.text}"}</code>
+                </p>
+                <textarea
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="Describe what you need..."
+                  rows={5}
+                  className={cn(
+                    "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-y",
+                    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
+                    "placeholder:text-muted-foreground/50"
+                  )}
+                />
+              </div>
+            )}
+
+            {/* JSON mode */}
+            {mode === "json" && (
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted">Input Data (JSON)</label>
                 <JsonEditor value={inputJson} onChange={setInputJson} rows={6} />
