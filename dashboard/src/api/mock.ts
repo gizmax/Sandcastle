@@ -3256,13 +3256,55 @@ steps:
 `,
 };
 
+function generateFallbackYaml(template: { name: string; description: string; step_count: number; tags: string[] }): string {
+  const models = ["sonnet", "haiku", "sonnet", "opus", "haiku"];
+  const n = template.step_count || 3;
+  const slug = template.name.replace(/-/g, "_");
+  const lines: string[] = [
+    `name: "${slug}"`,
+    `description: "${template.description.replace(/"/g, '\\"')}"`,
+    `default_model: sonnet`,
+    `default_max_turns: 10`,
+    `default_timeout: 300`,
+    ``,
+    `steps:`,
+  ];
+
+  const stepNames: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const stepId = i === 0 ? "research" : i === n - 1 ? "finalize" : `step_${i + 1}`;
+    stepNames.push(stepId);
+    const model = models[i % models.length];
+    lines.push(`  - id: "${stepId}"`);
+    if (i > 0) {
+      lines.push(`    depends_on: ["${stepNames[i - 1]}"]`);
+    }
+    lines.push(`    model: ${model}`);
+    if (i === 0) {
+      lines.push(`    prompt: |`);
+      lines.push(`      ${template.description}`);
+      lines.push(`      Input: {input.query}`);
+    } else if (i === n - 1) {
+      lines.push(`    prompt: |`);
+      lines.push(`      Synthesize all previous results into a final deliverable.`);
+      lines.push(`      Previous output: {steps.${stepNames[i - 1]}.output}`);
+    } else {
+      lines.push(`    prompt: |`);
+      lines.push(`      Continue processing based on previous results.`);
+      lines.push(`      Input: {steps.${stepNames[i - 1]}.output}`);
+    }
+    lines.push(``);
+  }
+  return lines.join("\n");
+}
+
 function getTemplateDetail(name: string) {
   const template = MOCK_TEMPLATES.find((t) => t.name === name);
   if (!template) return null;
   return {
     ...template,
     file_name: `${name}.yaml`,
-    content: TEMPLATE_YAMLS[name] || `name: "${name}"\nsteps: []`,
+    content: TEMPLATE_YAMLS[name] || generateFallbackYaml(template as { name: string; description: string; step_count: number; tags: string[] }),
     input_schema: (template as Record<string, unknown>).input_schema || null,
   };
 }
