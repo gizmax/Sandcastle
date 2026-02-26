@@ -76,7 +76,13 @@ export default function Overview() {
     );
   }
 
-  if (!stats || stats.total_runs_today === 0) {
+  const hasHistoricalRuns = stats && (
+    stats.total_runs_today > 0
+    || stats.runs_by_day.length > 0
+    || recentRuns.length > 0
+  );
+
+  if (!stats || !hasHistoricalRuns) {
     return (
       <div>
         <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
