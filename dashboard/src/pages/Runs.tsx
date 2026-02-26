@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { PlayCircle, Trash2, XCircle, Search, TrendingDown } from "lucide-react";
+import { PlayCircle, Trash2, XCircle, Search, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
@@ -25,11 +25,15 @@ export default function Runs() {
   const [bulkAction, setBulkAction] = useState<"delete" | "cancel" | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
+  const [successRate, setSuccessRate] = useState<number | null>(null);
   const limit = 20;
 
   useEffect(() => {
     api.get<WorkflowItem[]>("/workflows").then((res) => {
       if (res.data) setWorkflows(res.data);
+    });
+    api.get<{ success_rate: number }>("/stats").then((res) => {
+      if (res.data) setSuccessRate(res.data.success_rate);
     });
   }, []);
 
@@ -89,15 +93,11 @@ export default function Runs() {
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Runs</h1>
 
       {/* Failure rate banner */}
-      {(() => {
-        const failed = runs.filter((r) => r.status === "failed").length;
-        const rate = runs.length > 0 ? failed / runs.length : 0;
-        return rate > 0.3 && runs.length >= 5 ? (
-          <ContextBanner variant={rate > 0.5 ? "error" : "warning"} icon={TrendingDown}>
-            {Math.round(rate * 100)}% failure rate across recent runs - filter by "failed" to investigate.
-          </ContextBanner>
-        ) : null;
-      })()}
+      {successRate != null && successRate < 0.9 && (
+        <ContextBanner variant={successRate < 0.5 ? "error" : "warning"} icon={AlertTriangle}>
+          {Math.round(successRate * 100)}% success rate today - filter by "failed" to investigate.
+        </ContextBanner>
+      )}
 
       {/* Filters */}
       <div className="space-y-3">
