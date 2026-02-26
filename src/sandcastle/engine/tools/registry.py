@@ -2375,7 +2375,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "contact_id": {"type": "string", "description": "Contact (partner) ID"},
                         "items": {
                             "type": "array",
-                            "description": "Invoice line items [{description, quantity, unit_price}]",
+                            "description": "Invoice line items [{desc, qty, unit_price}]",
                         },
                         "due_days": {
                             "type": "integer",

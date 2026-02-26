@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import dataclasses
 import json
 import logging
 import re
 import uuid
-import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
