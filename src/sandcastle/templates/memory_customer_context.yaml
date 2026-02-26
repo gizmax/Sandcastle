@@ -64,13 +64,18 @@ steps:
       properties:
         is_returning:
           type: boolean
+          description: "whether this customer has interacted with support before"
         related_issues:
           type: array
           items:
             type: string
+          description: "list of past issues related to the current support request"
         customer_preferences:
           type: object
+          description: "detected preferences like communication tone and technical level"
         response_draft:
           type: string
+          description: "personalized response draft based on customer history"
         priority:
           type: string
+          description: "ticket priority level: low, medium, or high"

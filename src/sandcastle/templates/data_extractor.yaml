@@ -119,32 +119,42 @@ steps:
       properties:
         document_type:
           type: string
+          description: "detected document type, e.g. invoice, contract, report"
         fields:
           type: array
+          description: "list of extracted key-value fields from the document"
           items:
             type: object
             properties:
               field_name:
                 type: string
+                description: "name of the extracted field"
               value:
                 type: string
+                description: "extracted value for this field"
               confidence:
                 type: number
+                description: "confidence score from 0.0 to 1.0 for the extraction"
               source_location:
                 type: string
+                description: "location in the document where this field was found"
         tables:
           type: array
+          description: "list of tables extracted from the document"
           items:
             type: object
             properties:
               table_name:
                 type: string
+                description: "descriptive name or label for the table"
               headers:
                 type: array
+                description: "column header names for the table"
                 items:
                   type: string
               rows:
                 type: array
+                description: "table rows, each row is an array of cell values"
                 items:
                   type: array
                   items:

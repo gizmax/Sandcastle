@@ -136,23 +136,30 @@ steps:
       properties:
         triage_results:
           type: array
+          description: "list of triage assessments for each analyzed issue"
           items:
             type: object
             properties:
               issue_key:
                 type: string
+                description: "Jira issue key, e.g. PROJ-123"
               priority:
                 type: string
+                description: "assigned priority: Critical, High, Medium, or Low"
               labels:
                 type: array
+                description: "suggested labels for categorization"
                 items:
                   type: string
               assignee_suggestion:
                 type: string
+                description: "recommended team member to assign based on expertise"
               effort:
                 type: string
+                description: "estimated effort in story points using modified Fibonacci"
               reasoning:
                 type: string
+                description: "explanation of priority and assignment rationale"
 
   - id: apply-triage
     depends_on: [analyze-issues]

@@ -74,41 +74,55 @@ steps:
       properties:
         parties:
           type: array
+          description: "list of parties involved in the contract"
           items:
             type: object
             properties:
               name:
                 type: string
+                description: "full legal name of the party"
               role:
                 type: string
+                description: "role in the contract, e.g. licensor, vendor, employer"
         effective_date:
           type: string
+          description: "date the contract takes effect (ISO 8601 format)"
         termination_date:
           type: string
+          description: "date the contract ends or is up for renewal"
         obligations:
           type: array
+          description: "list of obligations extracted from the contract"
           items:
             type: object
             properties:
               party:
                 type: string
+                description: "name of the party responsible for this obligation"
               description:
                 type: string
+                description: "plain-language description of the obligation"
         payment_terms:
           type: object
+          description: "financial terms and payment schedule"
           properties:
             amount:
               type: string
+              description: "total payment amount or fee structure"
             schedule:
               type: string
+              description: "payment schedule, e.g. monthly, quarterly, upon delivery"
             conditions:
               type: string
+              description: "conditions or contingencies tied to payment"
         termination_clauses:
           type: array
+          description: "list of termination triggers and conditions"
           items:
             type: string
         governing_law:
           type: string
+          description: "jurisdiction and governing law for dispute resolution"
 
   - id: risk-analysis
     depends_on: [extract-terms]

@@ -70,17 +70,18 @@ steps:
     output_schema:
       type: object
       properties:
-        has_openapi_spec: { type: boolean }
+        has_openapi_spec: { type: boolean, description: "whether an OpenAPI/Swagger spec was found in the repo" }
         source_files:
           type: array
+          description: "list of API source files retrieved from the repository"
           items:
             type: object
             properties:
-              path: { type: string }
-              category: { type: string }
-              content: { type: string }
-        framework: { type: string }
-        language: { type: string }
+              path: { type: string, description: "file path within the repository" }
+              category: { type: string, description: "file category, e.g. route, model, middleware, spec" }
+              content: { type: string, description: "raw file content" }
+        framework: { type: string, description: "detected API framework, e.g. FastAPI, Express, Spring" }
+        language: { type: string, description: "detected programming language of the API" }
 
   - id: parse-endpoints
     depends_on: [fetch-specs]
@@ -138,18 +139,20 @@ steps:
       properties:
         endpoints:
           type: array
+          description: "catalog of all discovered API endpoints"
           items:
             type: object
             properties:
-              method: { type: string }
-              path: { type: string }
-              summary: { type: string }
-              group: { type: string }
-              auth_required: { type: boolean }
+              method: { type: string, description: "HTTP method, e.g. GET, POST, PUT, DELETE" }
+              path: { type: string, description: "URL path with parameter placeholders, e.g. /users/{id}" }
+              summary: { type: string, description: "one-line description of what the endpoint does" }
+              group: { type: string, description: "logical group or tag, e.g. users, billing, admin" }
+              auth_required: { type: boolean, description: "whether the endpoint requires authentication" }
         groups:
           type: array
+          description: "list of endpoint group/tag names found in the API"
           items: { type: string }
-        total_endpoints: { type: integer }
+        total_endpoints: { type: integer, description: "total number of endpoints discovered" }
 
   - id: generate-docs
     depends_on: [parse-endpoints]

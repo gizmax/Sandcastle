@@ -70,12 +70,12 @@ steps:
           items:
             type: object
             properties:
-              ticket_id: { type: string }
-              subject: { type: string }
-              description: { type: string }
-              resolution_summary: { type: string }
-              tags: { type: array, items: { type: string } }
-        total_count: { type: integer }
+              ticket_id: { type: string, description: "unique Zendesk ticket identifier" }
+              subject: { type: string, description: "original ticket subject line" }
+              description: { type: string, description: "first 500 chars of the customer message" }
+              resolution_summary: { type: string, description: "final resolution provided by the agent" }
+              tags: { type: array, items: { type: string }, description: "ticket tags for categorization" }
+        total_count: { type: integer, description: "total number of resolved tickets fetched" }
 
   - id: cluster-topics
     depends_on: [fetch-resolved]
@@ -166,11 +166,11 @@ steps:
           items:
             type: object
             properties:
-              question: { type: string }
-              answer: { type: string }
-              category: { type: string }
-              keywords: { type: array, items: { type: string } }
-        total_entries: { type: integer }
+              question: { type: string, description: "FAQ question in the customer's natural voice" }
+              answer: { type: string, description: "polished answer with steps and edge cases" }
+              category: { type: string, description: "FAQ category like billing, technical, or account" }
+              keywords: { type: array, items: { type: string }, description: "search keywords including synonyms and misspellings" }
+        total_entries: { type: integer, description: "total number of FAQ entries generated" }
 
   - id: write-to-notion
     depends_on: [generate-faq]
