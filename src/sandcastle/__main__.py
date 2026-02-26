@@ -315,14 +315,73 @@ def _cmd_init(args: argparse.Namespace) -> None:
     print()
 
 
+def _port_in_use(port: int) -> bool:
+    """Check whether a TCP port is already bound on localhost."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _kill_port(port: int) -> bool:
+    """Kill the process occupying *port*. Returns True on success."""
+    import signal
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        pids = result.stdout.strip().split()
+        if not pids:
+            return False
+        for pid in pids:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except (ProcessLookupError, ValueError):
+                pass
+        # Give processes a moment to exit
+        import time
+
+        time.sleep(0.5)
+        return not _port_in_use(port)
+    except Exception:
+        return False
+
+
 def _cmd_serve(args: argparse.Namespace) -> None:
     """Start the Sandcastle API server."""
     import uvicorn
 
+    port = args.port
+    if _port_in_use(port):
+        print(
+            f"\n  {_color('Port ' + str(port) + ' is already in use.', _C.YELLOW)}"
+        )
+        try:
+            answer = input(f"  Kill the existing process and restart? [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+
+        if answer in ("", "y", "yes"):
+            if _kill_port(port):
+                print(f"  {_color('Freed port ' + str(port), _C.GREEN)}\n")
+            else:
+                print(f"  {_color('Could not free port ' + str(port) + '. Try: sudo lsof -ti :' + str(port) + ' | xargs kill', _C.RED)}")
+                sys.exit(1)
+        else:
+            print("  Aborted.")
+            sys.exit(0)
+
     uvicorn.run(
         "sandcastle.main:app",
         host=args.host,
-        port=args.port,
+        port=port,
         reload=args.reload,
     )
 
