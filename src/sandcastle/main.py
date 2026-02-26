@@ -37,6 +37,27 @@ async def lifespan(app: FastAPI):
 
     init_sentry()
 
+    # Validate license key
+    from sandcastle.engine.license import LicenseStatus, get_license
+
+    lic = get_license()
+    if lic.status == LicenseStatus.valid:
+        logger.info(
+            "License: %s tier, licensed to %s (expires %s)",
+            lic.tier.value,
+            lic.licensee,
+            lic.expires or "never",
+        )
+    elif lic.status == LicenseStatus.missing:
+        logger.warning(
+            "Running in community mode - not licensed for production use. "
+            "Set LICENSE_KEY in .env for production deployments."
+        )
+    elif lic.status == LicenseStatus.expired:
+        logger.warning("License expired: %s", lic.detail)
+    else:
+        logger.warning("License invalid: %s", lic.detail)
+
     if settings.is_local_mode:
         logger.info(
             "Sandcastle starting in local mode (SQLite + filesystem + in-process queue)"

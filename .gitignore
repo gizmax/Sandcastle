@@ -16,3 +16,4 @@ venv/
 *.sqlite3
 .DS_Store
 .claude/
+scripts/license_keys/

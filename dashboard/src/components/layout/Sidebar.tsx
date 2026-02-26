@@ -164,7 +164,19 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </nav>
 
         <div className="border-t border-border px-5 py-4">
-          <p className="text-xs text-muted-foreground">Sandcastle v{version}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground">Sandcastle v{version}</p>
+            {info?.license && info.license.status === "valid" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success/15 border border-success/30 text-success">
+                {info.license.tier === "enterprise" ? "Enterprise" : "Pro"}
+              </span>
+            )}
+            {info?.license && info.license.status === "expired" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-warning/15 border border-warning/30 text-warning">
+                Expired
+              </span>
+            )}
+          </div>
         </div>
       </aside>
     </>

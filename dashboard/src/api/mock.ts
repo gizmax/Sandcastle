@@ -3940,6 +3940,42 @@ const MOCK_TOOLS: MockTool[] = [
     connections: [],
   },
   {
+    name: "helios",
+    description: "Helios iNuvio (Asseco) - invoices, orders, contacts, and stock queries via REST API",
+    category: "erp",
+    icon: "helios",
+    configured: true,
+    missing_credentials: [],
+    credential_env_vars: ["TOOL_HELIOS_BASE_URL", "TOOL_HELIOS_API_KEY"],
+    functions: [
+      { name: "get_contacts", description: "Search contacts (business partners)", parameters: {} },
+      { name: "get_invoices", description: "List issued invoices", parameters: {} },
+      { name: "create_invoice", description: "Create a new issued invoice", parameters: {} },
+      { name: "get_orders", description: "List sales orders", parameters: {} },
+      { name: "get_stock", description: "Query warehouse stock levels", parameters: {} },
+    ],
+    connections: [
+      { name: "production", tool_name: "helios", credentials_configured: ["TOOL_HELIOS_BASE_URL", "TOOL_HELIOS_API_KEY"], credentials_missing: [], created_at: h(72) },
+    ],
+  },
+  {
+    name: "abra",
+    description: "ABRA Gen (ABRA Software) - business partners, invoices, orders, and warehouse management",
+    category: "erp",
+    icon: "abra",
+    configured: false,
+    missing_credentials: ["TOOL_ABRA_BASE_URL", "TOOL_ABRA_USERNAME", "TOOL_ABRA_PASSWORD"],
+    credential_env_vars: ["TOOL_ABRA_BASE_URL", "TOOL_ABRA_USERNAME", "TOOL_ABRA_PASSWORD"],
+    functions: [
+      { name: "get_firms", description: "Search business partners (firms)", parameters: {} },
+      { name: "get_issued_invoices", description: "List issued invoices", parameters: {} },
+      { name: "create_issued_invoice", description: "Create a new issued invoice", parameters: {} },
+      { name: "get_orders", description: "List sales orders", parameters: {} },
+      { name: "get_store_cards", description: "Query warehouse store cards", parameters: {} },
+    ],
+    connections: [],
+  },
+  {
     name: "calendly",
     description: "List events, create scheduling links in Calendly",
     category: "general",
@@ -5651,7 +5687,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.15.0", sandbox_backend: "e2b" }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.15.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,

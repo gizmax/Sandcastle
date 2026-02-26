@@ -45,6 +45,7 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "tool_salesforce_refresh_token",
     "tool_zendesk_api_token",
     "tool_smtp_password", "tool_google_service_account",
+    "license_key",
 })
 
 _initialized = False

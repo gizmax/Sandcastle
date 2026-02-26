@@ -43,6 +43,7 @@ from sandcastle.api.schemas import (
     ForkRequest,
     GenerateChatRequest,
     HealthResponse,
+    LicenseInfoResponse,
     MemoryAddRequest,
     MemoryEntry,
     MemoryListResponse,
@@ -398,6 +399,17 @@ async def runtime_info() -> ApiResponse:
     queue_type = "in-process" if not settings.redis_url else "redis"
     storage_type = settings.storage_backend
 
+    from sandcastle.engine.license import get_license
+
+    lic = get_license()
+    license_info = LicenseInfoResponse(
+        status=lic.status.value,
+        tier=lic.tier.value,
+        licensee=lic.licensee,
+        max_seats=lic.max_seats,
+        expires=lic.expires,
+    )
+
     return ApiResponse(
         data=RuntimeInfoResponse(
             mode="local" if settings.is_local_mode else "production",
@@ -407,6 +419,7 @@ async def runtime_info() -> ApiResponse:
             sandbox_backend=settings.sandbox_backend,
             data_dir=settings.data_dir if settings.is_local_mode else None,
             version=__version__,
+            license=license_info,
         )
     )
 

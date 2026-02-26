@@ -9,6 +9,7 @@ import {
   Loader2,
   AlertCircle,
   LogOut,
+  BadgeCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -244,6 +245,68 @@ export default function SettingsPage() {
           Settings
         </h1>
       </div>
+
+      {/* License */}
+      <SectionCard
+        icon={BadgeCheck}
+        title="License"
+        description="Sandcastle license status and tier"
+      >
+        {runtimeInfo?.license ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-foreground">Status</span>
+              <span
+                className={cn(
+                  "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+                  runtimeInfo.license.status === "valid"
+                    ? "bg-success/15 border border-success/30 text-success"
+                    : runtimeInfo.license.status === "expired"
+                      ? "bg-warning/15 border border-warning/30 text-warning"
+                      : runtimeInfo.license.status === "missing"
+                        ? "bg-muted/15 border border-border text-muted-foreground"
+                        : "bg-error/15 border border-error/30 text-error"
+                )}
+              >
+                {runtimeInfo.license.status === "valid"
+                  ? `${runtimeInfo.license.tier.charAt(0).toUpperCase() + runtimeInfo.license.tier.slice(1)} License`
+                  : runtimeInfo.license.status === "missing"
+                    ? "Community Mode"
+                    : runtimeInfo.license.status.charAt(0).toUpperCase() + runtimeInfo.license.status.slice(1)}
+              </span>
+            </div>
+            {runtimeInfo.license.status === "valid" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Licensee</p>
+                  <p className="text-sm text-muted-foreground">{runtimeInfo.license.licensee || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Expires</p>
+                  <p className="text-sm text-muted-foreground">{runtimeInfo.license.expires || "Never"}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Max Seats</p>
+                  <p className="text-sm text-muted-foreground">{runtimeInfo.license.max_seats || "Unlimited"}</p>
+                </div>
+              </div>
+            )}
+            {runtimeInfo.license.status === "missing" && (
+              <p className="text-sm text-muted-foreground">
+                All features are available. Set <code className="text-xs bg-muted px-1 rounded">LICENSE_KEY</code> in your .env for production use.{" "}
+                <a
+                  href="mailto:tom@pflanzer.cz"
+                  className="text-accent hover:underline"
+                >
+                  Contact sales
+                </a>
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Loading license info...</p>
+        )}
+      </SectionCard>
 
       {/* Security */}
       <SectionCard
