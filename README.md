@@ -1,16 +1,16 @@
 # Sandcastle
 
-**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Pluggable sandbox backends, multi-provider model routing, and a full-featured dashboard included.
+**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Pluggable sandbox backends, multi-provider model routing, 55 built-in integrations, and a full-featured dashboard included.
 
 [![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-1060%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-1378%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
   <a href="https://gizmax.github.io/Sandcastle/">
-    <img src="docs/screenshots/overview-dark.png" alt="Sandcastle Dashboard" width="720" />
+    <img src="docs/screenshots/overview.png" alt="Sandcastle Dashboard" width="720" />
   </a>
 </p>
 
@@ -29,17 +29,23 @@
 - [Features](#features)
 - [Pluggable Sandbox Backends](#pluggable-sandbox-backends)
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
+- [55 Built-in Integrations](#55-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
+- [15 Step Types](#15-step-types)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
 - [Policy Engine](#policy-engine)
 - [Cost-Latency Optimizer](#cost-latency-optimizer)
+- [Agent Memory](#agent-memory)
+- [Evaluations](#evaluations)
 - [Directory Input & CSV Export](#directory-input--csv-export)
-- [23 Built-in Workflow Templates](#23-built-in-workflow-templates)
+- [Community Hub](#community-hub)
 - [Real-time Event Stream](#real-time-event-stream)
 - [Run Time Machine](#run-time-machine)
 - [Budget Guardrails](#budget-guardrails)
+- [Security](#security)
+- [A2A & AG-UI Protocols](#a2a--ag-ui-protocols)
 - [Dashboard](#dashboard)
 - [API Reference](#api-reference)
 - [Multi-Tenant Auth](#multi-tenant-auth)
@@ -66,7 +72,8 @@ AI agent frameworks give you building blocks - LLM calls, tool use, maybe a grap
 - **"Pick the cheapest model that still meets quality SLOs."** - You need cost-latency optimization.
 - **"Use Claude for quality, GPT for speed, Gemini for cost."** - You need multi-provider routing.
 - **"Run on E2B cloud, Docker locally, or Cloudflare at the edge."** - You need pluggable runtimes.
-- **"Show me what's running, what failed, and what it cost."** - You need a dashboard.
+- **"Connect to Slack, Jira, GitHub, Salesforce, SAP..."** - You need integrations.
+- **"Show me what's running, what failed, and what needs attention."** - You need a dashboard.
 
 Sandcastle handles all of that. Define workflows in YAML, pick your sandbox backend, choose your models, and ship to production.
 
@@ -88,7 +95,7 @@ You'll need API keys for your chosen setup:
 
 Or use the `docker` backend (needs Docker installed) or `local` backend (dev only, no sandbox isolation) and skip the E2B key.
 
-Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 23 workflow templates included.
+Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 23 workflow templates included, 55 integrations ready to connect.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
@@ -335,11 +342,17 @@ sandcastle ls schedules
 sandcastle schedule create lead-enrichment "0 9 * * *" -i target_url=https://example.com
 sandcastle schedule delete <schedule-id>
 
+# Community Hub - browse and install templates
+sandcastle hub search "lead scoring"
+sandcastle hub install competitive-radar
+sandcastle hub collections
+sandcastle hub install-collection marketing-pro
+
 # Cancel a running workflow
 sandcastle cancel <run-id>
 
 # Health check
-sandcastle health
+sandcastle doctor
 ```
 
 Connection defaults to `http://localhost:8080`. Override with `--url` or `SANDCASTLE_URL` env var. Auth via `--api-key` or `SANDCASTLE_API_KEY`.
@@ -452,6 +465,8 @@ Once connected, ask your AI assistant to:
 |---|---|
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
+| **55 built-in integrations** across 9 categories | Yes |
+| **15 step types** (standard, llm, http, code, race, sensor, gate...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -473,6 +488,7 @@ Once connected, ask your AI assistant to:
 | **Docker one-command deploy** | Yes |
 | **Dashboard with real-time monitoring** | Yes |
 | **23 built-in workflow templates** | Yes |
+| **118 community templates** (Community Hub) | Yes |
 | **Visual workflow builder** | Yes |
 | **Directory input (file processing)** | Yes |
 | **CSV export per step** | Yes |
@@ -482,6 +498,18 @@ Once connected, ask your AI assistant to:
 | **Policy engine (PII redaction, secret guard)** | Yes |
 | **Cost-latency optimizer (SLO-based routing)** | Yes |
 | **Concurrency control** (rate limiter, semaphores) | Yes |
+| **Agent memory** (semantic search, decay, conflict detection) | Yes |
+| **Evaluations** (test suites, assertions, pass rate tracking) | Yes |
+| **Credential encryption** (Fernet AES-128-CBC) | Yes |
+| **API key rotation + IP allowlisting** | Yes |
+| **Security headers + CSP** | Yes |
+| **Distributed rate limiting** (in-memory + Redis) | Yes |
+| **A2A protocol** (Google Agent-to-Agent) | Yes |
+| **AG-UI protocol** (CopilotKit SSE streaming) | Yes |
+| **Guided onboarding wizard** | Yes |
+| **Global search** (runs, workflows, integrations) | Yes |
+| **Health insights** (system health score + per-page banners) | Yes |
+| **License key system** (community / pro / enterprise tiers) | Yes |
 
 ---
 
@@ -492,7 +520,7 @@ Sandcastle uses the **Sandshore runtime** with pluggable backends for agent exec
 | Backend | Description | Best For |
 |---------|-------------|----------|
 | **e2b** (default) | Cloud sandboxes via [E2B](https://e2b.dev/) SDK | Production, zero-infra setup |
-| **docker** | Local Docker containers via aiodocker | Self-hosted, air-gapped environments |
+| **docker** | Local Docker containers with seccomp + CapDrop ALL | Self-hosted, air-gapped environments |
 | **local** | Direct subprocess on the host (no isolation) | Development and testing only |
 | **cloudflare** | Edge sandboxes via Cloudflare Workers | Low-latency, globally distributed |
 
@@ -505,6 +533,8 @@ SANDBOX_BACKEND=cloudflare # requires deployed CF Worker
 ```
 
 All backends share the same `SandboxBackend` protocol - same YAML, same API, same dashboard. Switch backends without changing workflows.
+
+**Docker hardening:** When using the Docker backend, containers run with all capabilities dropped, a seccomp profile restricting syscalls, PID limits (default 100), CPU quotas (default 50%), memory limits (default 512 MiB), and an unprivileged user (1000:1000). All configurable via environment variables.
 
 ---
 
@@ -539,13 +569,37 @@ steps:
     prompt: "Classify the industry."
 ```
 
-Set the API keys in `.env` for each provider you want to use:
+Automatic failover: if a provider returns 429 or 5xx, Sandcastle retries with the next provider in the fallback chain. Per-key cooldown prevents hammering a failing endpoint.
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-...       # Claude models
-OPENAI_API_KEY=sk-...              # OpenAI models
-MINIMAX_API_KEY=...                # MiniMax models
-OPENROUTER_API_KEY=sk-or-...       # Google Gemini via OpenRouter
+---
+
+## 55 Built-in Integrations
+
+<p align="center">
+  <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
+</p>
+
+Sandcastle ships with 55 zero-config tool connectors across 9 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
+
+| Category | Tools |
+|----------|-------|
+| **Communication** | Slack, Microsoft Teams, Discord, Twilio, SendGrid, Resend, WhatsApp |
+| **Project Management** | Jira, Linear, Notion, Airtable, Google Sheets, Figma |
+| **CRM** | HubSpot, Salesforce, Zendesk, Intercom |
+| **Data** | MongoDB, Snowflake, Supabase, Pinecone, Redis, Database, Google Drive |
+| **ERP** | SAP, ServiceNow, Helios, ABRA |
+| **Payments** | Stripe, Shopify, QuickBooks, Plaid, DocuSign |
+| **AI** | OpenAI, Anthropic, ElevenLabs |
+| **DevOps** | GitHub, AWS S3, Vercel, Cloudflare Workers, Datadog, PagerDuty |
+| **General** | Webhook, Zapier, Calendly, Firecrawl, Tavily, MCP Bridge, Human Input, Filesystem, Shell, Python Runtime, Code Interpreter, Browser |
+
+```yaml
+steps:
+  - id: "notify"
+    type: notify
+    service: slack
+    connection: production-slack
+    template: "Lead {steps.score.output.company} scored {steps.score.output.score}/100"
 ```
 
 ---
@@ -651,6 +705,60 @@ For fine-grained control, you can still reference specific outputs explicitly us
 - Unreferenced dependency outputs are appended as context automatically
 - Explicitly referenced outputs (`{steps.X.output}`) are placed exactly where you write them
 - `{input.X}` references workflow input parameters passed at run time
+
+---
+
+## 15 Step Types
+
+Sandcastle supports 15 step types for building complex workflows beyond simple LLM prompts:
+
+| Phase | Type | Description |
+|-------|------|-------------|
+| **Core** | `standard` | Default LLM prompt execution in sandbox |
+| **Core** | `llm` | Direct LLM call without sandbox overhead |
+| **Core** | `http` | HTTP request (GET/POST/PUT/DELETE) with response parsing |
+| **Core** | `code` | Execute code snippets (Python/JS) in sandbox |
+| **Core** | `condition` | Branch workflow based on expression evaluation |
+| **Core** | `classify` | Route to different branches based on LLM classification |
+| **Core** | `loop` | Iterate over a list, executing sub-steps for each item |
+| **Advanced** | `race` | Run parallel branches, take the first to complete |
+| **Advanced** | `sensor` | Poll a URL until a condition is met (webhook alternative) |
+| **Advanced** | `gate` | Multi-strategy approval (human, LLM judge, quorum) |
+| **Advanced** | `transform` | Jinja2 template rendering for data transformation |
+| **Advanced** | `notify` | Send alerts via Slack, Teams, email, or webhook |
+| **Advanced** | `delegate` | Spawn a sub-workflow and collect results |
+| **Built-in** | `approval` | Human approval gate with timeout and auto-action |
+| **Built-in** | `sub_workflow` | Execute another workflow as a step |
+
+```yaml
+steps:
+  - id: "check-api"
+    type: sensor
+    sensor:
+      url: "https://api.example.com/status"
+      interval_seconds: 30
+      timeout_seconds: 300
+      condition: "response.status == 'ready'"
+
+  - id: "fastest-wins"
+    type: race
+    depends_on: ["check-api"]
+    branches:
+      - id: "openai-branch"
+        model: openai/codex-mini
+        prompt: "Analyze {steps.check-api.output}"
+      - id: "claude-branch"
+        model: haiku
+        prompt: "Analyze {steps.check-api.output}"
+
+  - id: "format"
+    type: transform
+    depends_on: ["fastest-wins"]
+    template: |
+      ## Analysis Report
+      **Result:** {{ steps['fastest-wins'].output.summary }}
+      **Generated:** {{ now() }}
+```
 
 ---
 
@@ -814,6 +922,37 @@ The optimizer scores each model option across multiple objectives, filters out o
 
 ---
 
+## Agent Memory
+
+Sandcastle includes a built-in memory system that gives agents persistent context across workflow runs. Memories are semantically searchable, automatically enriched with keywords and tags, and decay over time based on relevance.
+
+- **Write admission control** - Scores incoming memories (0.0-1.0) based on length, structure, and novelty. Rejects low-value or duplicate information automatically.
+- **Semantic search** - Sentence-transformer embeddings for finding relevant memories by meaning, not just keywords.
+- **Automatic decay** - Memories expire after a configurable TTL (default 90 days). Relevance scores decrease linearly with age.
+- **Conflict detection** - Flags new memories that overlap >40% with existing entries, preventing duplication.
+- **Auto-enrichment** - Extracts keywords, auto-tags (issue, preference, insight, data), and timestamps.
+- **Optional graph backend** - Neo4j support for relationship-aware memory queries.
+
+```python
+# Configured via environment variables
+MEMORY_BACKEND=local        # "local" (SQLite + embeddings) or "cloud" (Mem0)
+MEMORY_GRAPH_ENABLED=false  # Enable Neo4j graph backend
+MEMORY_MAX_AGE_DAYS=90      # TTL for memory decay (0 = keep forever)
+MEMORY_ADMIT_THRESHOLD=0.3  # Minimum quality score for admission
+```
+
+---
+
+## Evaluations
+
+<p align="center">
+  <img src="docs/screenshots/evaluations.png" alt="Evaluations" width="720" />
+</p>
+
+Run test suites against your workflows to measure quality over time. Define assertions (exact match, contains, schema validation, LLM judge), track pass rates, cost per test, and duration. Trend charts show quality regression before it hits production.
+
+---
+
 ## Directory Input & CSV Export
 
 Process files from a directory and export results to CSV - all configured in YAML. The workflow builder includes a directory browser and CSV export toggle per step.
@@ -866,15 +1005,15 @@ Works with any output shape - dicts become columns, lists of dicts become rows, 
 
 ---
 
-## 23 Built-in Workflow Templates
+## Community Hub
 
 <p align="center">
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
 </p>
 
-Sandcastle ships with production-ready workflow templates across 6 categories:
+Sandcastle ships with 23 built-in workflow templates. The [Community Hub](https://gizmax.cz/sandcastle/hub) adds 118 more from the community - curated collections for marketing, sales, DevOps, and more.
 
-| Category | Templates |
+| Category | Built-in Templates |
 |----------|-----------|
 | **Marketing** | Blog to Social, SEO Content, Email Campaign, Competitor Analysis, Ad Copy Generator, Competitive Radar, Content Atomizer |
 | **Sales** | Lead Enrichment, Proposal Generator, Meeting Recap, Lead Outreach |
@@ -882,18 +1021,22 @@ Sandcastle ships with production-ready workflow templates across 6 categories:
 | **HR** | Job Description, Resume Screener |
 | **Legal** | Contract Review |
 | **Product** | Release Notes, Data Extractor |
-
-Plus 5 foundational templates: Summarize, Translate, Research Agent, Chain of Thought, Review and Approve.
+| **Foundational** | Summarize, Translate, Research Agent, Chain of Thought, Review and Approve |
 
 ```bash
-# List all available templates
-sandcastle templates
+# Browse the community hub
+sandcastle hub search "lead scoring"
 
-# Use a template
-curl http://localhost:8080/api/templates
+# Install a community template
+sandcastle hub install competitive-radar
+
+# Install a whole collection
+sandcastle hub collections
+sandcastle hub install-collection marketing-pro
+
+# Publish your own template
+sandcastle hub publish my-workflow.yaml
 ```
-
-Each template includes parallel execution stages, structured output schemas, and human approval gates where appropriate. Use them directly or as starting points in the Workflow Builder.
 
 ---
 
@@ -959,28 +1102,100 @@ curl -X POST http://localhost:8080/api/workflows/run \
 
 ---
 
+## Security
+
+Sandcastle includes multiple layers of security hardening for production deployments:
+
+### Credential Encryption
+
+All integration credentials are encrypted at rest using Fernet (AES-128-CBC + HMAC-SHA256). Set `CREDENTIAL_ENCRYPTION_KEY` in your environment - without it, credentials are stored as plaintext (backwards compatible for local dev).
+
+### API Key Rotation
+
+Rotate API keys with zero downtime. The old key remains valid during a configurable grace period (default 24 hours), giving clients time to switch over.
+
+```bash
+# Rotate a key
+curl -X POST http://localhost:8080/api/api-keys/{key_id}/rotate
+
+# Response includes new key + old key expiry time
+```
+
+### IP Allowlisting
+
+Restrict API keys to specific IP ranges. Supports IPv4 and IPv6 CIDR notation. Empty list means allow all.
+
+```bash
+curl -X PUT http://localhost:8080/api/api-keys/{key_id}/allowlist \
+  -d '{ "cidrs": ["10.0.0.0/8", "2001:db8::/32"] }'
+```
+
+### Security Headers
+
+All responses include hardened security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` denying camera/microphone/geolocation/payment. Dashboard pages get a full Content-Security-Policy (configurable as report-only via `CSP_REPORT_ONLY`).
+
+### Rate Limiting
+
+Sliding-window rate limiting on expensive endpoints (workflow execution). Per-tenant when authenticated, per-IP when anonymous. Two backends:
+
+- **In-memory** (default) - single-process, zero deps
+- **Redis** (auto-detected from `REDIS_URL`) - distributed, uses sorted sets with atomic check+increment
+
+### Docker Sandbox Hardening
+
+When using the Docker backend, every container runs with:
+- All capabilities dropped (`CapDrop: ALL`)
+- Seccomp profile restricting dangerous syscalls
+- PID limit (default 100, configurable)
+- CPU quota (default 50%, configurable)
+- Memory limit (default 512 MiB, configurable)
+- Unprivileged user (1000:1000)
+- Auto-remove on exit
+
+---
+
+## A2A & AG-UI Protocols
+
+### A2A (Agent-to-Agent)
+
+Sandcastle implements [Google's A2A protocol](https://google.github.io/A2A/) for agent interoperability. Any A2A-compatible agent can discover and call Sandcastle workflows via standard JSON-RPC 2.0.
+
+- **Discovery:** `GET /.well-known/agent.json` - returns capabilities, skills, and supported methods
+- **Execute:** `POST /a2a` - `tasks/send` to run workflows, `tasks/get` to poll status, `tasks/cancel` to abort
+- **Status mapping:** Internal states (queued, running, completed, failed, awaiting_approval) map to A2A standard states
+
+### AG-UI (Agent-User Interaction)
+
+Sandcastle streams workflow execution via the [CopilotKit AG-UI protocol](https://docs.copilotkit.ai/), enabling real-time UI integration with compatible frontends.
+
+- **Endpoint:** `GET /api/agui/stream/{run_id}` (Server-Sent Events)
+- **Events:** `run_started`, `run_finished`, `run_error`, `step_started`, `text_message`, `tool_call_start`, `tool_call_end`, `state_delta`
+- **Timeout:** 10-minute streaming window with 1s polling interval
+
+---
+
 ## Dashboard
 
-Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS. Dark and light theme, real-time updates, and zero configuration - just open `http://localhost:8080` after `sandcastle serve`. For frontend development, run `cd dashboard && npm run dev`.
+Sandcastle ships with a full-featured dashboard built with React, TypeScript, and Tailwind CSS v4. Dark and light theme, real-time updates via SSE, global search across runs/workflows/integrations, and zero configuration - just open `http://localhost:8080` after `sandcastle serve`. For frontend development, run `cd dashboard && npm run dev`.
 
 ### Overview
 
-KPI cards, 30-day run trends, cost breakdown per workflow, recent runs at a glance.
+KPI cards, 30-day run trends, cost breakdown per workflow, recent runs at a glance. The Lighthouse health score surfaces actionable insights when something needs attention - DLQ items, critical violations, failing runs, unconfigured integrations.
 
 <p align="center">
-  <img src="docs/screenshots/overview-dark.png" alt="Overview - Dark Mode" width="720" />
+  <img src="docs/screenshots/overview.png" alt="Overview" width="720" />
 </p>
 
 <details>
-<summary>Light mode</summary>
+<summary>Dark mode</summary>
 <p align="center">
-  <img src="docs/screenshots/overview-light.png" alt="Overview - Light Mode" width="720" />
+  <img src="docs/screenshots/overview-dark.png" alt="Overview - Dark Mode" width="720" />
 </p>
 </details>
 
 ### Runs
 
-Filterable run history with status badges, duration, cost per run. Auto-refreshes every 5 seconds for active runs.
+Filterable run history with status badges, duration, cost per run. Bulk actions (cancel, delete) with multi-select. Contextual banner warns when success rate drops below 90%.
 
 <p align="center">
   <img src="docs/screenshots/runs.png" alt="Runs" width="720" />
@@ -1042,6 +1257,14 @@ Visual drag-and-drop editor for building workflows. Add steps, connect dependenc
   <img src="docs/screenshots/workflow-builder.png" alt="Workflow Builder" width="720" />
 </p>
 
+### Integrations
+
+55 tool connectors across 9 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
+
+<p align="center">
+  <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
+</p>
+
 ### Schedules
 
 Cron-based scheduling with human-readable descriptions, enable/disable toggle, and inline edit. Click "Edit" to change the cron expression or toggle a schedule without leaving the page.
@@ -1052,7 +1275,7 @@ Cron-based scheduling with human-readable descriptions, enable/disable toggle, a
 
 ### API Keys
 
-Create, view, and deactivate multi-tenant API keys. Key prefix shown in monospace, full key revealed only once on creation with a copy-to-clipboard flow and warning banner.
+Create, view, rotate, and deactivate multi-tenant API keys. IP allowlisting per key. Key prefix shown in monospace, full key revealed only once on creation with a copy-to-clipboard flow.
 
 <p align="center">
   <img src="docs/screenshots/api-keys.png" alt="API Keys" width="720" />
@@ -1060,7 +1283,7 @@ Create, view, and deactivate multi-tenant API keys. Key prefix shown in monospac
 
 ### Dead Letter Queue
 
-Failed steps that exhausted all retries land here. Retry triggers a full re-run. Resolve marks the issue as handled. Sidebar badge shows unresolved count.
+Failed steps that exhausted all retries land here. Retry triggers a full re-run. Resolve marks the issue as handled. Sidebar badge shows unresolved count. Contextual banner surfaces when items need attention.
 
 <p align="center">
   <img src="docs/screenshots/dead-letter.png" alt="Dead Letter Queue" width="720" />
@@ -1068,7 +1291,7 @@ Failed steps that exhausted all retries land here. Retry triggers a full re-run.
 
 ### Approval Gates
 
-Any workflow step can pause execution and wait for human review before continuing. The approvals page shows all pending, approved, rejected, and skipped gates with filterable tabs. Each pending approval has Approve, Reject, and Skip buttons. Configurable timeouts auto-resolve approvals if nobody responds. Webhook notifications fire when approval is needed.
+Pending, approved, rejected, and skipped gates with filterable tabs. Each pending approval has Approve, Reject, and Skip buttons. Configurable timeouts auto-resolve approvals if nobody responds.
 
 <p align="center">
   <img src="docs/screenshots/approvals.png" alt="Approval Gates" width="720" />
@@ -1077,7 +1300,7 @@ Any workflow step can pause execution and wait for human review before continuin
 <details>
 <summary>Expanded with request data</summary>
 
-Click any approval to expand it and see the full request data the agent produced. If `allow_edit` is enabled, reviewers can modify the data before approving - giving humans final control over what the next step receives.
+Click any approval to expand it and see the full request data the agent produced. If `allow_edit` is enabled, reviewers can modify the data before approving.
 
 <p align="center">
   <img src="docs/screenshots/approvals-detail.png" alt="Approval Gate Detail" width="720" />
@@ -1086,7 +1309,7 @@ Click any approval to expand it and see the full request data the agent produced
 
 ### AutoPilot - Self-Optimizing Workflows
 
-A/B test different models, prompts, and configurations on any workflow step. Sandcastle automatically runs variants, evaluates quality (LLM judge or schema completeness), and tracks cost vs latency vs quality. Stats cards show active experiments, total samples collected, average quality improvement, and total cost savings. Once enough samples are collected, the best-performing variant is auto-deployed.
+A/B test different models, prompts, and configurations on any workflow step. Stats cards show active experiments, total samples, average quality improvement, and cost savings.
 
 <p align="center">
   <img src="docs/screenshots/autopilot.png" alt="AutoPilot Experiments" width="720" />
@@ -1095,16 +1318,24 @@ A/B test different models, prompts, and configurations on any workflow step. San
 <details>
 <summary>Expanded with variant comparison</summary>
 
-Expand an experiment to see the variant comparison table. Each variant shows sample count, average quality score (color-coded), average cost, and average duration. The "BEST" badge highlights the current leader. Deploy any variant manually, or let AutoPilot pick the winner automatically based on your optimization target (quality, cost, latency, or pareto).
+Each variant shows sample count, average quality score, cost, and duration. The "BEST" badge highlights the current leader.
 
 <p align="center">
   <img src="docs/screenshots/autopilot-detail.png" alt="AutoPilot Variant Comparison" width="720" />
 </p>
 </details>
 
+### Evaluations
+
+Test suite management with pass rate tracking, cost per test, assertion details, and trend analysis over time.
+
+<p align="center">
+  <img src="docs/screenshots/evaluations.png" alt="Evaluations" width="720" />
+</p>
+
 ### Policy Violations
 
-Every policy trigger is logged with severity, action taken, and full context. Stats cards show 30-day totals, critical and high counts, and the most-triggered policy. Filter by severity (Critical, High, Medium, Low). Color-coded badges show what action was taken - blocked, redacted, flagged, or logged. Green checkmark indicates the output was automatically modified.
+Every policy trigger logged with severity, action taken, and full context. Filter by severity (Critical, High, Medium, Low). Color-coded badges for blocked, redacted, flagged, or logged actions.
 
 <p align="center">
   <img src="docs/screenshots/violations.png" alt="Policy Violations" width="720" />
@@ -1113,7 +1344,7 @@ Every policy trigger is logged with severity, action taken, and full context. St
 <details>
 <summary>Expanded with trigger details</summary>
 
-Click any violation to expand and see the full trigger details - what pattern matched, what was detected, and what action was taken. Includes links to the originating run and step for quick investigation.
+Click any violation to see what pattern matched, what was detected, and what action was taken. Includes links to the originating run and step.
 
 <p align="center">
   <img src="docs/screenshots/violations-detail.png" alt="Violation Detail" width="720" />
@@ -1122,7 +1353,7 @@ Click any violation to expand and see the full trigger details - what pattern ma
 
 ### Cost-Latency Optimizer
 
-Real-time view of the optimizer's model routing decisions. Stats cards show total decisions, average confidence, top model with distribution percentage, and estimated savings. Each decision shows the selected model as a color-coded badge, a confidence bar, and the reasoning. Budget pressure indicators pulse red when spending approaches limits.
+Real-time view of model routing decisions. Stats cards show total decisions, average confidence, top model, and estimated savings. Budget pressure indicators pulse red when spending approaches limits.
 
 <p align="center">
   <img src="docs/screenshots/optimizer.png" alt="Cost-Latency Optimizer" width="720" />
@@ -1131,12 +1362,36 @@ Real-time view of the optimizer's model routing decisions. Stats cards show tota
 <details>
 <summary>Expanded with alternatives and SLO config</summary>
 
-Expand a decision to see the full alternatives table with scores, and the SLO configuration that drove the selection. The "SELECTED" badge highlights which model won.
+Full alternatives table with scores and the SLO configuration that drove the selection.
 
 <p align="center">
   <img src="docs/screenshots/optimizer-detail.png" alt="Optimizer Decision Detail" width="720" />
 </p>
 </details>
+
+### Settings
+
+Editable configuration sections for connections (API keys for providers), security (auth settings), budget (cost limits), webhooks, and system settings (log levels, depth limits, storage). License tier display.
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="Settings" width="720" />
+</p>
+
+### System Health
+
+Service status checks (Runtime, Redis, Database), uptime tracking, and quick stats (workflows, runs, templates, API keys).
+
+<p align="center">
+  <img src="docs/screenshots/system.png" alt="System Health" width="720" />
+</p>
+
+### Onboarding Wizard
+
+First-run guided setup that walks new users through API key configuration, sandbox backend selection, and first workflow execution.
+
+<p align="center">
+  <img src="docs/screenshots/onboarding.png" alt="Onboarding Wizard" width="720" />
+</p>
 
 ---
 
@@ -1215,18 +1470,22 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 | `GET` | `/api/optimizer/decisions/{run_id}` | Decisions for a specific run |
 | `GET` | `/api/optimizer/stats` | Model distribution, confidence, savings |
 
-### Templates
+### Integrations
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/templates` | List all built-in workflow templates |
-| `GET` | `/api/templates/{id}` | Get template detail with YAML |
+| `GET` | `/api/tools` | List all available integrations with status |
+| `GET` | `/api/tools/{id}` | Get tool detail and configuration |
+| `PUT` | `/api/tools/{id}/credentials` | Save encrypted credentials for a tool |
+| `DELETE` | `/api/tools/{id}/credentials` | Remove credentials |
 
-### Events
+### Evaluations
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/events` | Global SSE stream (run, step, DLQ events) |
+| `GET` | `/api/eval/suites` | List evaluation test suites |
+| `GET` | `/api/eval/runs` | List eval runs with results |
+| `GET` | `/api/eval/stats` | Pass rates, cost stats, trends |
 
 ### API Keys
 
@@ -1235,15 +1494,32 @@ Expand a decision to see the full alternatives table with scores, and the SLO co
 | `POST` | `/api/api-keys` | Create API key (returns plaintext once) |
 | `GET` | `/api/api-keys` | List active keys (prefix only) |
 | `DELETE` | `/api/api-keys/{id}` | Deactivate key |
+| `POST` | `/api/api-keys/{id}/rotate` | Rotate key with grace period |
+| `PUT` | `/api/api-keys/{id}/allowlist` | Set IP allowlist (CIDR notation) |
 
-### System
+### Templates
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/api/templates` | List all built-in workflow templates |
+| `GET` | `/api/templates/{id}` | Get template detail with YAML |
+
+### Events & System
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/events` | Global SSE stream (run, step, DLQ events) |
 | `GET` | `/api/health` | Health check (sandbox backend, DB, Redis) |
-| `GET` | `/api/runtime` | Current mode info (database, queue, storage) |
-| `GET` | `/api/events` | Global SSE event stream |
+| `GET` | `/api/runtime` | Current mode info (database, queue, storage, license) |
 | `GET` | `/api/stats` | Aggregated stats and cost trends |
+
+### Protocols
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/.well-known/agent.json` | A2A agent discovery |
+| `POST` | `/a2a` | A2A JSON-RPC 2.0 endpoint |
+| `GET` | `/api/agui/stream/{run_id}` | AG-UI SSE streaming |
 
 All responses follow the envelope format: `{ "data": ..., "error": null }` or `{ "data": null, "error": { "code": "...", "message": "..." } }`.
 
@@ -1251,7 +1527,7 @@ All responses follow the envelope format: `{ "data": ..., "error": null }` or `{
 
 ## Multi-Tenant Auth
 
-Sandcastle supports strict multi-tenant isolation via API keys. Every API key maps to a `tenant_id`, and all queries are automatically scoped.
+Sandcastle supports strict multi-tenant isolation via API keys. Every API key maps to a `tenant_id`, and all queries are automatically scoped. Keys are hashed with HMAC-SHA256 and a server-side pepper - plaintext keys are never stored.
 
 ```bash
 # Create an API key
@@ -1264,7 +1540,7 @@ curl http://localhost:8080/api/runs -H "X-API-Key: sc_abc123..."
 # Only sees runs belonging to acme-corp
 ```
 
-Toggle with `AUTH_REQUIRED=true|false` (default: false for local dev). When enabled, all endpoints except `/api/health` require a valid API key.
+Toggle with `AUTH_REQUIRED=true|false` (default: false for local dev). When enabled, all endpoints except `/api/health` require a valid API key. Expired keys return 401 `KEY_EXPIRED`. Blocked IPs return 403 `IP_BLOCKED`.
 
 ---
 
@@ -1290,17 +1566,22 @@ Header: `X-Sandcastle-Signature` for verification against your `WEBHOOK_SECRET`.
 ```mermaid
 flowchart TD
     App["Your App"] -->|"POST /api/workflows/run"| API["Sandcastle API\n(FastAPI)"]
-    API --> Engine["Workflow Engine\n(DAG executor)"]
+    A2A["A2A Agents"] -->|"POST /a2a"| API
+    AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
+
+    API --> Engine["Workflow Engine\n(DAG executor, 15 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
+    Engine --> Advanced["Advanced Steps\n(race, sensor, gate, transform, notify, delegate)"]
 
     Standard --> Sandshore["Sandshore Runtime\n(pluggable backends)"]
     Sub --> Child["Child Engine"]
+    Advanced --> Sandshore
     Child --> SandshoreChild["Sandshore (child)"]
 
     Sandshore --> E2B["E2B\n(cloud)"]
-    Sandshore --> Docker["Docker\n(local)"]
+    Sandshore --> Docker["Docker\n(seccomp + caps)"]
     Sandshore --> Local["Local\n(subprocess)"]
     Sandshore --> CF["Cloudflare\n(edge)"]
     SandshoreChild --> E2B2["Sandbox (child)"]
@@ -1311,7 +1592,7 @@ flowchart TD
     CF --> Execution
     E2B2 --> Merge
 
-    Execution["Parallel Execution"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
+    Execution["Parallel Execution\n55 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
 
     Provider --> Gate{"Approval\nGate?"}
 
@@ -1321,8 +1602,9 @@ flowchart TD
     Review --> AutoPilot["AutoPilot\nA/B test variants"]
     AutoPilot --> Policy["Policy Engine\nPII redact / block / alert"]
     Policy --> Optimizer["SLO Optimizer\nRoute to best model"]
+    Optimizer --> Memory["Agent Memory\nsemantic search + decay"]
 
-    Optimizer --> Merge((" "))
+    Memory --> Merge((" "))
 
     Merge --> LocalMode["Local Mode\nSQLite / In-process queue / Filesystem"]
     Merge --> ProdMode["Production Mode\nPostgreSQL / Redis (arq) / S3"]
@@ -1344,6 +1626,8 @@ flowchart TD
 | Storage | Local filesystem | S3 / MinIO |
 | Agent Runtime | Sandshore (E2B / Docker / Local / Cloudflare) | Sandshore (E2B / Docker / Local / Cloudflare) |
 | Model Providers | Claude, OpenAI, MiniMax, Google/Gemini | Claude, OpenAI, MiniMax, Google/Gemini |
+| Integrations | 55 tools, 9 categories | 55 tools, 9 categories |
+| Security | Fernet encryption, HMAC auth, rate limiting | + Redis rate limiting, seccomp, IP allowlists |
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react | @xyflow/react |
 | Charts | Recharts | Recharts |
@@ -1369,6 +1653,11 @@ MAX_CONCURRENT_SANDBOXES=5     # rate limiter for parallel execution
 # Docker backend (only if SANDBOX_BACKEND=docker)
 # DOCKER_IMAGE=sandcastle-runner:latest
 # DOCKER_URL=                  # empty = local Docker socket
+# DOCKER_SECCOMP_PROFILE=      # path to seccomp JSON (built-in default used if empty)
+# DOCKER_PIDS_LIMIT=100
+# DOCKER_CPU_PERIOD=100000
+# DOCKER_CPU_QUOTA=50000
+# DOCKER_MEMORY_LIMIT=536870912  # 512 MiB
 
 # Cloudflare backend (only if SANDBOX_BACKEND=cloudflare)
 # CLOUDFLARE_WORKER_URL=https://sandbox.your-domain.workers.dev
@@ -1398,11 +1687,26 @@ DATA_DIR=./data                # SQLite + local storage base path
 # Security
 WEBHOOK_SECRET=your-webhook-signing-secret
 AUTH_REQUIRED=false
+CREDENTIAL_ENCRYPTION_KEY=     # Fernet key for credential encryption (empty = plaintext)
+API_KEY_PEPPER=                # HMAC pepper for API key hashing
+KEY_ROTATION_GRACE_HOURS=24    # Grace period for rotated keys
+CSP_REPORT_ONLY=false          # Content-Security-Policy in report-only mode
+
+# Budget
 DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
 MAX_WORKFLOW_DEPTH=5      # max recursion depth for hierarchical workflows
-SANDBOX_ROOT=             # restrict browse + CSV export to this directory (empty = no restriction)
+
+# Agent Memory
+MEMORY_BACKEND=local           # "local" (SQLite + embeddings) or "cloud"
+MEMORY_MAX_AGE_DAYS=90         # TTL for memory decay (0 = keep forever)
+MEMORY_ADMIT_THRESHOLD=0.3     # Minimum quality score for admission
+MEMORY_GRAPH_ENABLED=false     # Enable Neo4j graph backend
+
+# License
+LICENSE_KEY=                   # sc_lic_... (community tier if empty)
 
 # Dashboard
+SANDBOX_ROOT=             # restrict browse + CSV export to this directory
 DASHBOARD_ORIGIN=http://localhost:5173
 WORKFLOWS_DIR=./workflows
 LOG_LEVEL=info
@@ -1413,7 +1717,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (400 passing)
+# Run tests (1378 passing)
 uv run pytest
 
 # Type check backend
@@ -1444,7 +1748,7 @@ Created by [**Tomas Pflanzer**](https://github.com/gizmax) ([@gizmax](https://gi
 
 ## License
 
-[MIT](LICENSE)
+[BSL 1.1](LICENSE)
 
 ---
 
