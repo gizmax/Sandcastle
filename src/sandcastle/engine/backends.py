@@ -305,11 +305,19 @@ class DockerBackend:
         docker_url: str | None = None,
         timeout: float = 300.0,
         memory_limit: int = 512 * 1024 * 1024,
+        seccomp_profile: str = "",
+        pids_limit: int = 100,
+        cpu_period: int = 100_000,
+        cpu_quota: int = 50_000,
     ) -> None:
         self._image = docker_image
         self._url = docker_url
         self._timeout = timeout
         self._memory_limit = memory_limit
+        self._seccomp_profile = seccomp_profile
+        self._pids_limit = pids_limit
+        self._cpu_period = cpu_period
+        self._cpu_quota = cpu_quota
         self._client: Any = None  # aiodocker.Docker | None
         # Health cache: (result, timestamp)
         self._health_cache: tuple[bool, float] = (False, 0.0)
@@ -408,6 +416,20 @@ class DockerBackend:
             # Note: AutoRemove requires the container to be started, and
             # prevents manual deletion via delete(force=True). We use it
             # only when we plan to let the container exit naturally.
+            # Resolve seccomp profile
+            seccomp_path = self._seccomp_profile or str(
+                _RUNNER_DIR / "seccomp-default.json"
+            )
+            security_opt = []
+            try:
+                with open(seccomp_path) as f:
+                    import json as _json
+
+                    seccomp_data = _json.dumps(_json.load(f))
+                    security_opt.append(f"seccomp={seccomp_data}")
+            except (FileNotFoundError, ValueError) as exc:
+                logger.warning("Seccomp profile not loaded: %s", exc)
+
             config = {
                 "Image": self._image,
                 "Cmd": ["node", f"/home/user/{runner_file}"],
@@ -418,6 +440,11 @@ class DockerBackend:
                 "HostConfig": {
                     "AutoRemove": True,
                     "Memory": self._memory_limit,
+                    "CapDrop": ["ALL"],
+                    "SecurityOpt": security_opt,
+                    "PidsLimit": self._pids_limit,
+                    "CpuPeriod": self._cpu_period,
+                    "CpuQuota": self._cpu_quota,
                 },
             }
 
@@ -729,6 +756,10 @@ def create_backend(
     docker_image: str = "sandcastle-runner:latest",
     docker_url: str | None = None,
     docker_memory_limit: int = 512 * 1024 * 1024,
+    docker_seccomp_profile: str = "",
+    docker_pids_limit: int = 100,
+    docker_cpu_period: int = 100_000,
+    docker_cpu_quota: int = 50_000,
     cloudflare_worker_url: str = "",
     timeout: float = 300.0,
     e2b_event_queue_size: int = 1000,
@@ -762,6 +793,10 @@ def create_backend(
             docker_url=docker_url,
             timeout=timeout,
             memory_limit=docker_memory_limit,
+            seccomp_profile=docker_seccomp_profile,
+            pids_limit=docker_pids_limit,
+            cpu_period=docker_cpu_period,
+            cpu_quota=docker_cpu_quota,
         )
     if backend_type == "local":
         return LocalBackend(timeout=timeout)

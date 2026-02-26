@@ -17,6 +17,7 @@ from sandcastle.api.a2a import a2a_router
 from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
+from sandcastle.api.security_headers import security_headers_middleware
 from sandcastle.config import settings
 
 # Configure logging
@@ -180,10 +181,13 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# Auth (added first = inner middleware)
+# Auth (added first = innermost middleware)
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
-# CORS (added second = outer middleware, wraps everything including auth)
+# Security headers (added second = wraps auth)
+app.add_middleware(BaseHTTPMiddleware, dispatch=security_headers_middleware)
+
+# CORS (added third = outermost middleware, wraps everything including auth + security headers)
 _cors_origins = [
     settings.dashboard_origin,
     "http://localhost:5173",

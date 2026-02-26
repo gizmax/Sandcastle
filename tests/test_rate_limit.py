@@ -1,4 +1,4 @@
-"""Tests for RateLimiter and sliding window counter."""
+"""Tests for RateLimiter, sliding window counter, and backend selection."""
 
 import time
 from unittest.mock import MagicMock
@@ -6,8 +6,12 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from sandcastle.api.rate_limit import RateLimiter, _Window
-
+from sandcastle.api.rate_limit import (
+    InMemoryBackend,
+    RateLimiter,
+    RedisBackend,
+    _Window,
+)
 
 # ------------------------------------------------------------------
 # _Window
@@ -34,7 +38,38 @@ class TestWindow:
 
 
 # ------------------------------------------------------------------
-# RateLimiter
+# InMemoryBackend
+# ------------------------------------------------------------------
+
+
+class TestInMemoryBackend:
+
+    @pytest.mark.asyncio
+    async def test_allows_under_limit(self):
+        backend = InMemoryBackend()
+        for _ in range(5):
+            count = await backend.check_and_increment("key1", 5, 60.0)
+        assert count <= 5
+
+    @pytest.mark.asyncio
+    async def test_exceeds_limit(self):
+        backend = InMemoryBackend()
+        for _ in range(5):
+            await backend.check_and_increment("key1", 5, 60.0)
+        # 6th request should return count > max_requests
+        count = await backend.check_and_increment("key1", 5, 60.0)
+        assert count > 5  # Returns 6 (attempted request number)
+
+    @pytest.mark.asyncio
+    async def test_active_keys_property(self):
+        backend = InMemoryBackend()
+        await backend.check_and_increment("key1", 10, 60.0)
+        await backend.check_and_increment("key2", 10, 60.0)
+        assert backend.active_keys == 2
+
+
+# ------------------------------------------------------------------
+# RateLimiter (async)
 # ------------------------------------------------------------------
 
 
@@ -49,42 +84,46 @@ def _mock_request(tenant_id=None, ip="127.0.0.1"):
 
 class TestRateLimiter:
 
-    def test_allows_under_limit(self):
+    @pytest.mark.asyncio
+    async def test_allows_under_limit(self):
         rl = RateLimiter(max_requests=5, window_seconds=60.0)
         req = _mock_request()
         for _ in range(5):
-            rl.check(req)
+            await rl.check(req)
 
-    def test_rejects_over_limit(self):
+    @pytest.mark.asyncio
+    async def test_rejects_over_limit(self):
         rl = RateLimiter(max_requests=3, window_seconds=60.0)
         req = _mock_request()
-        rl.check(req)
-        rl.check(req)
-        rl.check(req)
+        await rl.check(req)
+        await rl.check(req)
+        await rl.check(req)
         with pytest.raises(HTTPException) as exc:
-            rl.check(req)
+            await rl.check(req)
         assert exc.value.status_code == 429
         assert "Rate limit exceeded" in exc.value.detail
 
-    def test_different_tenants_independent(self):
+    @pytest.mark.asyncio
+    async def test_different_tenants_independent(self):
         rl = RateLimiter(max_requests=2, window_seconds=60.0)
         req1 = _mock_request(tenant_id="tenant-a")
         req2 = _mock_request(tenant_id="tenant-b")
-        rl.check(req1)
-        rl.check(req1)
+        await rl.check(req1)
+        await rl.check(req1)
         # tenant-a is now at limit, but tenant-b should be fine
-        rl.check(req2)
+        await rl.check(req2)
         with pytest.raises(HTTPException):
-            rl.check(req1)
+            await rl.check(req1)
 
-    def test_different_ips_independent(self):
+    @pytest.mark.asyncio
+    async def test_different_ips_independent(self):
         rl = RateLimiter(max_requests=1, window_seconds=60.0)
         req1 = _mock_request(ip="10.0.0.1")
         req2 = _mock_request(ip="10.0.0.2")
-        rl.check(req1)
-        rl.check(req2)
+        await rl.check(req1)
+        await rl.check(req2)
         with pytest.raises(HTTPException):
-            rl.check(req1)
+            await rl.check(req1)
 
     def test_tenant_key_over_ip(self):
         rl = RateLimiter(max_requests=1, window_seconds=60.0)
@@ -112,22 +151,46 @@ class TestRateLimiter:
         info = rl.info
         assert info["max_requests"] == 10
         assert info["window_seconds"] == 30.0
-        assert info["active_keys"] == 0
+        assert info["backend"] == "InMemoryBackend"
 
-    def test_info_tracks_active_keys(self):
+    @pytest.mark.asyncio
+    async def test_info_tracks_active_keys(self):
         rl = RateLimiter(max_requests=100, window_seconds=60.0)
         req1 = _mock_request(ip="1.1.1.1")
         req2 = _mock_request(ip="2.2.2.2")
-        rl.check(req1)
-        rl.check(req2)
+        await rl.check(req1)
+        await rl.check(req2)
         assert rl.info["active_keys"] == 2
 
-    def test_429_headers(self):
+    @pytest.mark.asyncio
+    async def test_429_headers(self):
         rl = RateLimiter(max_requests=1, window_seconds=30.0)
         req = _mock_request()
-        rl.check(req)
+        await rl.check(req)
         with pytest.raises(HTTPException) as exc:
-            rl.check(req)
+            await rl.check(req)
         assert exc.value.headers["Retry-After"] == "30"
         assert exc.value.headers["X-RateLimit-Limit"] == "1"
         assert exc.value.headers["X-RateLimit-Remaining"] == "0"
+
+
+# ------------------------------------------------------------------
+# Backend selection
+# ------------------------------------------------------------------
+
+
+class TestBackendSelection:
+
+    def test_in_memory_when_no_redis(self, monkeypatch):
+        monkeypatch.setattr("sandcastle.config.settings.redis_url", "")
+        from sandcastle.api.rate_limit import _create_backend
+
+        backend = _create_backend()
+        assert isinstance(backend, InMemoryBackend)
+
+    def test_redis_when_redis_url_set(self, monkeypatch):
+        monkeypatch.setattr("sandcastle.config.settings.redis_url", "redis://localhost:6379")
+        from sandcastle.api.rate_limit import _create_backend
+
+        backend = _create_backend()
+        assert isinstance(backend, RedisBackend)
