@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Inbox } from "lucide-react";
+import { Inbox, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { DeadLetterTable, type DLQItem } from "@/components/dead-letter/DeadLetterTable";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 
 export default function DeadLetterPage() {
   const [items, setItems] = useState<DLQItem[]>([]);
@@ -81,6 +82,12 @@ export default function DeadLetterPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Dead Letter Queue</h1>
+
+      {items.filter((i) => !i.resolved_at).length > 0 && (
+        <ContextBanner variant="error" icon={AlertTriangle}>
+          {items.filter((i) => !i.resolved_at).length} unresolved item{items.filter((i) => !i.resolved_at).length > 1 ? "s" : ""} - retry or resolve to clear the queue.
+        </ContextBanner>
+      )}
 
       {items.length === 0 ? (
         <EmptyState

@@ -310,26 +310,6 @@ body {
   transform: scale(1.02);
 }
 
-/* ──── Lighthouse beacon animations ──── */
-
-@keyframes lighthouse-pulse-critical {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); }
-  50%      { box-shadow: 0 0 12px 4px rgba(239, 68, 68, 0.25); }
-}
-
-@keyframes lighthouse-pulse-warning {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.25); }
-  50%      { box-shadow: 0 0 10px 3px rgba(245, 158, 11, 0.2); }
-}
-
-.lighthouse-pulse-critical {
-  animation: lighthouse-pulse-critical 2s ease-in-out infinite;
-}
-
-.lighthouse-pulse-warning {
-  animation: lighthouse-pulse-warning 2.5s ease-in-out infinite;
-}
-
 /* Accessibility: disable animations for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .wizard-step-enter,
@@ -342,9 +322,7 @@ body {
   .card-selected,
   .terminal-running,
   .terminal-success,
-  .terminal-error,
-  .lighthouse-pulse-critical,
-  .lighthouse-pulse-warning {
+  .terminal-error {
     animation: none !important;
   }
   .btn-shimmer::after {

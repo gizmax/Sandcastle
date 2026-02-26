@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Gauge, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import { Gauge, ChevronDown, ChevronUp, AlertTriangle, Coins } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { formatCost, formatRelativeTime, cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 
@@ -149,6 +150,12 @@ export default function OptimizerPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
+
+      {stats && stats.estimated_savings_30d_usd > 1 && (
+        <ContextBanner variant="info" icon={Coins}>
+          ${stats.estimated_savings_30d_usd.toFixed(2)} in potential savings identified across your workflows this month.
+        </ContextBanner>
+      )}
 
       {/* Stats cards */}
       {stats && (

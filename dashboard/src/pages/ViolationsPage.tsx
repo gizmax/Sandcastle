@@ -3,6 +3,7 @@ import { ShieldAlert, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContextBanner } from "@/components/shared/ContextBanner";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 
@@ -107,6 +108,13 @@ export default function ViolationsPage() {
       <div className="flex items-center gap-3">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
       </div>
+
+      {/* Critical violations banner */}
+      {stats && stats.violations_by_severity.critical > 0 && (
+        <ContextBanner variant="error" icon={ShieldAlert}>
+          {stats.violations_by_severity.critical} critical violation{stats.violations_by_severity.critical > 1 ? "s" : ""} detected - PII leaks or security issues require review.
+        </ContextBanner>
+      )}
 
       {/* Stats cards */}
       {stats && (
