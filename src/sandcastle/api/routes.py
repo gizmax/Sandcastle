@@ -88,7 +88,7 @@ from sandcastle.api.schemas import (
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.sandshore import get_sandshore_runtime
+from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime  # noqa: F401
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
     ApiKey,
@@ -200,7 +200,8 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
                     parsed = json.loads(value)
                     if not isinstance(parsed, list):
                         errors.append(
-                            f"Input field '{field_name}' must be an array, got {type(parsed).__name__}"
+                            f"Input field '{field_name}' must be"
+                            f" an array, got {type(parsed).__name__}"
                         )
                     else:
                         input_data[field_name] = parsed
@@ -1113,7 +1114,11 @@ async def get_stats(request: Request) -> ApiResponse:
                 else_=None,
             )).label("completed"),
             func.count(case(
-                (Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]), Run.id),
+                (Run.status.in_([
+                    RunStatus.COMPLETED,
+                    RunStatus.FAILED,
+                    RunStatus.PARTIAL,
+                ]), Run.id),
                 else_=None,
             )).label("finished"),
             func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
@@ -3484,7 +3489,10 @@ async def deploy_experiment(experiment_id: str, req: Request) -> ApiResponse:
 
 @router.post("/autopilot/experiments/{experiment_id}/reset")
 async def reset_experiment(experiment_id: str, req: Request) -> ApiResponse:
-    """Reset an experiment by deleting all samples and restarting. Admin-only when auth is enabled."""
+    """Reset an experiment by deleting all samples and restarting.
+
+    Admin-only when auth is enabled.
+    """
     _require_admin(req)
     try:
         exp_uuid = uuid.UUID(experiment_id)

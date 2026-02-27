@@ -19,7 +19,10 @@ from sandcastle.models.db import ApiKey, async_session
 logger = logging.getLogger(__name__)
 
 # Public endpoints that don't require authentication
-PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc", "/a2a", "/.well-known/agent.json"}
+PUBLIC_PATHS = {
+    "/api/health", "/api/docs", "/api/openapi.json",
+    "/api/redoc", "/a2a", "/.well-known/agent.json",
+}
 
 # Path prefixes that don't require authentication
 PUBLIC_PREFIXES = ("/api/templates", "/api/agui")

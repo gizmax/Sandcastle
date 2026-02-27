@@ -42,7 +42,12 @@ def _get_fernet():
     try:
         from cryptography.fernet import Fernet
 
-        _fernet_instance = Fernet(current_key.encode() if isinstance(current_key, str) else current_key)
+        key = (
+            current_key.encode()
+            if isinstance(current_key, str)
+            else current_key
+        )
+        _fernet_instance = Fernet(key)
     except Exception as exc:
         logger.error("Invalid CREDENTIAL_ENCRYPTION_KEY: %s", exc)
         _fernet_instance = None

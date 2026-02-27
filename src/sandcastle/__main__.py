@@ -501,7 +501,11 @@ def _cmd_logs(args: argparse.Namespace) -> None:
             event_type = _attr(event, "_event", "message")
             ts = time.strftime("%H:%M:%S")
             # The event dict itself is the data (SDK puts event type in _event key)
-            display = {k: v for k, v in event.items() if k != "_event"} if isinstance(event, dict) else event
+            display = (
+                {k: v for k, v in event.items() if k != "_event"}
+                if isinstance(event, dict)
+                else event
+            )
             print(f"{_color(ts, _C.DIM)} [{_color(str(event_type), _C.CYAN)}] {display}")
 
             if not args.follow:

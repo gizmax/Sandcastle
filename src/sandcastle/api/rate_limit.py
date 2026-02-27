@@ -113,7 +113,10 @@ class RedisBackend:
                 self._redis = from_url(self._redis_url)
                 return self._redis
             except ImportError:
-                logger.warning("redis package not installed, falling back to in-memory rate limiting")
+                logger.warning(
+                    "redis package not installed, falling back"
+                    " to in-memory rate limiting"
+                )
                 return None
 
     # Lua script for atomic check-and-increment (avoids TOCTOU between

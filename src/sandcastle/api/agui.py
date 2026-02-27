@@ -42,7 +42,10 @@ EVENT_RUN_ERROR = "run_error"
 
 # -- Status mapping helpers --
 
-_TERMINAL_STATUSES = {"completed", "failed", "partial", "cancelled", "budget_exceeded", "awaiting_approval"}
+_TERMINAL_STATUSES = {
+    "completed", "failed", "partial", "cancelled",
+    "budget_exceeded", "awaiting_approval",
+}
 
 
 def _run_status_str(run: Run) -> str:
@@ -143,7 +146,13 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail={"data": None, "error": {"code": "INVALID_INPUT", "message": "Invalid run ID format"}},
+            detail={
+                "data": None,
+                "error": {
+                    "code": "INVALID_INPUT",
+                    "message": "Invalid run ID format",
+                },
+            },
         )
 
     # Verify the run exists

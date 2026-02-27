@@ -438,7 +438,12 @@ async def cancel_run_local(run_id: str) -> None:
             evict_count = len(_cancel_flags) // 2
             for _ in range(evict_count):
                 _cancel_flags.popitem(last=False)
-            logger.warning("Cancel flags set exceeded %d entries, evicted %d oldest", _MAX_CANCEL_FLAGS, evict_count)
+            logger.warning(
+                "Cancel flags set exceeded %d entries,"
+                " evicted %d oldest",
+                _MAX_CANCEL_FLAGS,
+                evict_count,
+            )
         _cancel_flags[run_id] = None
 
 
@@ -2032,10 +2037,11 @@ async def _execute_http_step(
 
         # SSRF prevention for HTTP steps - block private/internal networks
         try:
-            from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
-            from urllib.parse import urlparse as _urlparse
             import ipaddress as _ipaddress
             import socket as _socket
+            from urllib.parse import urlparse as _urlparse
+
+            from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
             _parsed = _urlparse(url)
             if _parsed.scheme not in ("https", "http"):
                 return StepResult(
@@ -2598,7 +2604,10 @@ async def _execute_race_step(
             return {"output": last_output, "cost": branch_cost}
 
         # Run all branches in parallel, cancel remaining after first valid result
-        tasks = {asyncio.create_task(run_branch(branch)): i for i, branch in enumerate(cfg.branches)}
+        tasks = {
+            asyncio.create_task(run_branch(branch)): i
+            for i, branch in enumerate(cfg.branches)
+        }
         pending = set(tasks.keys())
         total_cost = 0.0
         winning_output = None
@@ -2697,10 +2706,11 @@ async def _execute_sensor_step(
 
         # SSRF prevention for sensor steps - block private/internal networks
         try:
-            from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
-            from urllib.parse import urlparse as _urlparse
             import ipaddress as _ipaddress
             import socket as _socket
+            from urllib.parse import urlparse as _urlparse
+
+            from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
             _parsed = _urlparse(url)
             if _parsed.scheme not in ("https", "http"):
                 return StepResult(
@@ -3129,7 +3139,8 @@ async def _execute_delegate_step(
             from pathlib import Path
 
             from sandcastle.config import settings
-            from sandcastle.engine.dag import build_plan, parse as parse_workflow
+            from sandcastle.engine.dag import build_plan
+            from sandcastle.engine.dag import parse as parse_workflow
 
             workflows_dir = (
                 Path(settings.workflows_dir)
@@ -3140,11 +3151,14 @@ async def _execute_delegate_step(
             # Path traversal guard
             wf_name = cfg.workflow
             if ".." in wf_name or "/" in wf_name or "\\" in wf_name:
-                raise ValueError(f"Delegate workflow name '{wf_name}' contains path traversal characters")
+                raise ValueError(
+                    f"Delegate workflow name '{wf_name}'"
+                    " contains path traversal characters"
+                )
 
             wf_path = (workflows_dir / f"{wf_name}.yaml").resolve()
             if not str(wf_path).startswith(str(workflows_dir)):
-                raise ValueError(f"Delegate workflow path escapes workflows directory")
+                raise ValueError("Delegate workflow path escapes workflows directory")
 
             if wf_path.exists():
                 sub_wf = parse_workflow(str(wf_path))
@@ -3478,7 +3492,6 @@ async def _browser_dom_mode(
     Faster and cheaper than vision-based modes. Best for structured data
     extraction from known page layouts.
     """
-    import time
 
     logger.info("Browser DOM mode: %s -> %s", step.id, cfg.start_url)
 

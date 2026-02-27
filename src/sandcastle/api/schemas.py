@@ -62,29 +62,51 @@ class ScheduleUpdateRequest(BaseModel):
 class WorkflowGenerateRequest(BaseModel):
     """Request to generate a workflow from natural language."""
 
-    description: str = Field(..., description="Natural language description of the workflow", min_length=1, max_length=10000)
+    description: str = Field(
+        ...,
+        description="Natural language description of the workflow",
+        min_length=1,
+        max_length=10000,
+    )
     refine_from: str | None = Field(None, description="Existing YAML to refine")
-    refine_instruction: str | None = Field(None, description="What to change in the existing YAML", max_length=10000)
+    refine_instruction: str | None = Field(
+        None,
+        description="What to change in the existing YAML",
+        max_length=10000,
+    )
 
 
 class GenerateChatMessage(BaseModel):
     """A single message in a chat-based generation conversation."""
 
-    role: str = Field(..., description="Message role: 'user' or 'assistant'", pattern="^(user|assistant)$")
+    role: str = Field(
+        ...,
+        description="Message role: 'user' or 'assistant'",
+        pattern="^(user|assistant)$",
+    )
     content: str = Field(..., description="Message content", min_length=1)
 
 
 class GenerateChatRequest(BaseModel):
     """Request for chat-based workflow generation."""
 
-    messages: list[GenerateChatMessage] = Field(..., description="Conversation history", min_length=1)
+    messages: list[GenerateChatMessage] = Field(
+        ...,
+        description="Conversation history",
+        min_length=1,
+    )
     existing_yaml: str | None = Field(None, description="Existing workflow YAML for edit mode")
 
 
 class WorkflowSaveRequest(BaseModel):
     """Request to save a workflow YAML file."""
 
-    name: str = Field(..., description="Workflow file name (without .yaml extension)", min_length=1, max_length=200)
+    name: str = Field(
+        ...,
+        description="Workflow file name (without .yaml extension)",
+        min_length=1,
+        max_length=200,
+    )
     content: str = Field(..., description="Workflow YAML content", min_length=1)
     description: str = Field("", description="Version description", max_length=1000)
 
@@ -92,7 +114,11 @@ class WorkflowSaveRequest(BaseModel):
 class ApiKeyCreateRequest(BaseModel):
     """Request to create a new API key."""
 
-    tenant_id: str | None = Field(None, description="Tenant scope. Null for admin keys.", max_length=200)
+    tenant_id: str | None = Field(
+        None,
+        description="Tenant scope. Null for admin keys.",
+        max_length=200,
+    )
     name: str = Field(..., description="Description for the key", min_length=1, max_length=200)
     max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run", ge=0)
 
