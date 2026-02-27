@@ -41,6 +41,9 @@ interface RunDetail {
   parent_run_id: string | null;
   replay_from_step: string | null;
   fork_changes: Record<string, unknown> | null;
+  depth: number;
+  sub_workflow_of_step: string | null;
+  sub_runs: { run_id: string; workflow_name: string; status: string; sub_workflow_of_step: string | null }[] | null;
 }
 
 export default function RunDetailPage() {
@@ -80,12 +83,11 @@ export default function RunDetailPage() {
     void fetchRun();
   }, [fetchRun]);
 
-  // Poll while running
   useEffect(() => {
     if (!run || !["running", "queued"].includes(run.status)) return;
-    const interval = setInterval(fetchRun, 3000);
+    const interval = setInterval(fetchRun, 5000);
     return () => clearInterval(interval);
-  }, [run, fetchRun]);
+  }, [run?.status, fetchRun]);
 
   const handleCancel = useCallback(async () => {
     if (!id || cancelling) return;

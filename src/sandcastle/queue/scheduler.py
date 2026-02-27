@@ -200,6 +200,25 @@ async def _check_approval_timeouts() -> None:
                 ap.status = ApprovalStatus.TIMED_OUT
                 ap.resolved_at = now
 
+                # Verify the parent run still exists and is in a resumable state
+                run = await session.get(Run, approval.run_id)
+                if not run:
+                    logger.warning(
+                        f"Approval {approval.id} references non-existent run "
+                        f"{approval.run_id}, marking as timed out"
+                    )
+                    await session.commit()
+                    continue
+
+                run_status = run.status.value if hasattr(run.status, "value") else run.status
+                if run_status in ("completed", "failed", "cancelled"):
+                    logger.info(
+                        f"Approval {approval.id} for already-finished run "
+                        f"(status={run_status}), marking as timed out only"
+                    )
+                    await session.commit()
+                    continue
+
                 if approval.on_timeout == "skip":
                     # Skip the step and continue
                     await session.commit()
@@ -211,7 +230,6 @@ async def _check_approval_timeouts() -> None:
                         logger.error(f"Failed to resume after timeout skip: {e}")
                 else:
                     # Abort - fail the run
-                    run = await session.get(Run, approval.run_id)
                     if run:
                         run.status = RunStatus.FAILED
                         run.completed_at = now
@@ -232,9 +250,17 @@ def add_schedule(
     input_data: dict | None = None,
 ) -> None:
     """Register a cron job for a workflow schedule."""
+    if not cron_expression or not cron_expression.strip():
+        raise ValueError("cron_expression must not be empty")
+    if not workflow_name or not workflow_name.strip():
+        raise ValueError("workflow_name must not be empty")
+
     scheduler = get_scheduler()
 
-    trigger = CronTrigger.from_crontab(cron_expression)
+    try:
+        trigger = CronTrigger.from_crontab(cron_expression)
+    except ValueError as e:
+        raise ValueError(f"Invalid cron expression '{cron_expression}': {e}")
 
     scheduler.add_job(
         _run_scheduled_workflow,

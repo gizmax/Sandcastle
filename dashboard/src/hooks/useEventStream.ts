@@ -36,6 +36,7 @@ export function useEventStream() {
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
   const mockModeRef = useRef(api.isMockMode);
 
   const addEvent = useCallback((type: string, data: Record<string, unknown>) => {
@@ -81,6 +82,7 @@ export function useEventStream() {
     es.onerror = () => {
       es.close();
       esRef.current = null;
+      if (unmountedRef.current) return;
       setStatus("disconnected");
 
       // If we've failed multiple times and there's no backend, stop retrying
@@ -97,12 +99,12 @@ export function useEventStream() {
 
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
-        connect();
+        if (!unmountedRef.current) connect();
       }, delay);
     };
 
     // Listen for specific event types from the backend
-    const eventTypes = ["run.started", "run.completed", "run.failed", "step.completed", "step.failed", "dlq.new"];
+    const eventTypes = ["run.started", "run.completed", "run.failed", "step.started", "step.completed", "step.failed", "dlq.new"];
 
     for (const eventType of eventTypes) {
       es.addEventListener(eventType, (e: MessageEvent) => {
@@ -147,9 +149,11 @@ export function useEventStream() {
   }, []);
 
   useEffect(() => {
+    unmountedRef.current = false;
     connect();
 
     return () => {
+      unmountedRef.current = true;
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -158,7 +162,6 @@ export function useEventStream() {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      setStatus("disconnected");
     };
   }, [connect]);
 

@@ -88,7 +88,7 @@ from sandcastle.api.schemas import (
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.sandshore import SandshoreRuntime
+from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
     ApiKey,
@@ -147,12 +147,15 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
     """
     if schema is None:
         return []
+    if not isinstance(schema, dict):
+        return [f"input_schema must be a dict, got {type(schema).__name__}"]
 
     errors: list[str] = []
 
     # Check required fields
     for field_name in schema.get("required", []):
-        if field_name not in input_data or input_data[field_name] == "":
+        val = input_data.get(field_name)
+        if val is None or val == "":
             errors.append(f"Required input field '{field_name}' is missing or empty")
 
     # Type coercion based on properties
@@ -212,6 +215,9 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
 def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
     import re
+
+    if not workflow_name or not workflow_name.strip():
+        raise ValueError("Workflow name must not be empty")
 
     # Reject path traversal characters before any filesystem operation
     if ".." in workflow_name or "/" in workflow_name or "\\" in workflow_name:
@@ -418,16 +424,14 @@ def _extract_step_configs(yaml_content: str) -> dict[str, dict]:
 @router.get("/health")
 async def health_check() -> ApiResponse:
     """Check health of Sandcastle and its dependencies."""
-    runtime = SandshoreRuntime(
-        anthropic_api_key=settings.anthropic_api_key,
-        e2b_api_key=settings.e2b_api_key,
-        sandbox_backend=settings.sandbox_backend,
-        docker_image=settings.docker_image,
-        docker_url=settings.docker_url or None,
-        cloudflare_worker_url=settings.cloudflare_worker_url,
-    )
-    runtime_ok = await runtime.health()
-    await runtime.close()
+    try:
+        runtime = get_sandshore_runtime(
+            anthropic_api_key=settings.anthropic_api_key or "",
+            e2b_api_key=settings.e2b_api_key or "",
+        )
+        runtime_ok = await runtime.health()
+    except Exception:
+        runtime_ok = False
 
     # Check database
     db_ok = False
@@ -564,24 +568,49 @@ async def browse_directory(
     if not settings.is_local_mode:
         raise HTTPException(
             status_code=403,
-            detail="Directory browsing is only available in local mode",
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message="Directory browsing is only available in local mode",
+                )
+            ).model_dump(),
         )
 
     try:
         target = Path(path).expanduser().resolve()
     except (ValueError, OSError):
-        raise HTTPException(status_code=400, detail="Invalid path")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_PATH", message="Invalid path")
+            ).model_dump(),
+        )
 
     # Enforce sandbox root when configured
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
         if not target.is_relative_to(sandbox):
-            raise HTTPException(status_code=403, detail="Path outside sandbox root")
+            raise HTTPException(
+                status_code=403,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="FORBIDDEN", message="Path outside sandbox root")
+                ).model_dump(),
+            )
 
     if not target.exists():
-        raise HTTPException(status_code=404, detail="Path does not exist")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Path does not exist")
+            ).model_dump(),
+        )
     if not target.is_dir():
-        raise HTTPException(status_code=400, detail="Path is not a directory")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_PATH", message="Path is not a directory")
+            ).model_dump(),
+        )
 
     entries = []
     try:
@@ -597,7 +626,12 @@ async def browse_directory(
                 }
             )
     except PermissionError:
-        raise HTTPException(status_code=403, detail="Permission denied")
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(code="FORBIDDEN", message="Permission denied")
+            ).model_dump(),
+        )
 
     return ApiResponse(
         data={
@@ -647,7 +681,12 @@ async def get_template(template_name: str) -> ApiResponse:
     try:
         content, info = _get_template(template_name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=str(exc))
+            ).model_dump(),
+        ) from exc
 
     return ApiResponse(
         data={
@@ -966,7 +1005,12 @@ async def export_workflow(name: str, request: Request) -> ApiResponse:
         )
         wv = result.scalar_one_or_none()
         if not wv:
-            raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Workflow '{name}' not found")
+                ).model_dump(),
+            )
 
     # Sanitize the YAML content
     sanitized = _sanitize_workflow_yaml(wv.yaml_content)
@@ -993,40 +1037,25 @@ async def get_stats(request: Request) -> ApiResponse:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     async with async_session() as session:
-        # Base filters
-        base = select(func.count(Run.id)).where(Run.created_at >= today_start)
-        base = _apply_tenant_filter(base, tenant_id, Run.tenant_id)
-
-        total_today = await session.scalar(base)
-
-        completed_q = select(func.count(Run.id)).where(
-            Run.created_at >= today_start,
-            Run.status == RunStatus.COMPLETED,
-        )
-        completed_q = _apply_tenant_filter(completed_q, tenant_id, Run.tenant_id)
-        completed_today = await session.scalar(completed_q)
-
-        finished_q = select(func.count(Run.id)).where(
-            Run.created_at >= today_start,
-            Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]),
-        )
-        finished_q = _apply_tenant_filter(finished_q, tenant_id, Run.tenant_id)
-        finished_today = await session.scalar(finished_q)
+        summary_q = select(
+            func.count(Run.id).label("total"),
+            func.count(func.case(
+                (Run.status == RunStatus.COMPLETED, Run.id),
+            )).label("completed"),
+            func.count(func.case(
+                (Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]), Run.id),
+            )).label("finished"),
+            func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
+            _duration_seconds_expr().label("avg_dur"),
+        ).where(Run.created_at >= today_start)
+        summary_q = _apply_tenant_filter(summary_q, tenant_id, Run.tenant_id)
+        row = (await session.execute(summary_q)).one()
+        total_today = row.total
+        completed_today = row.completed
+        finished_today = row.finished
         success_rate = (completed_today / finished_today) if finished_today else 0.0
-
-        cost_q = select(func.coalesce(func.sum(Run.total_cost_usd), 0.0)).where(
-            Run.created_at >= today_start
-        )
-        cost_q = _apply_tenant_filter(cost_q, tenant_id, Run.tenant_id)
-        total_cost = await session.scalar(cost_q)
-
-        dur_q = select(_duration_seconds_expr()).where(
-            Run.created_at >= today_start,
-            Run.completed_at.isnot(None),
-            Run.started_at.isnot(None),
-        )
-        dur_q = _apply_tenant_filter(dur_q, tenant_id, Run.tenant_id)
-        avg_duration = await session.scalar(dur_q)
+        total_cost = row.cost
+        avg_duration = row.avg_dur
 
         # Runs by day (last 30 days)
         thirty_days_ago = now - timedelta(days=30)
@@ -1193,20 +1222,26 @@ async def list_workflows() -> ApiResponse:
     version_info: dict[str, dict] = {}
     try:
         async with async_session() as session:
-            stmt = select(
-                WorkflowVersion.workflow_name,
-                WorkflowVersion.version,
-                WorkflowVersion.status,
-            ).order_by(WorkflowVersion.workflow_name, WorkflowVersion.version.desc())
-            rows = (await session.execute(stmt)).all()
+            count_stmt = (
+                select(
+                    WorkflowVersion.workflow_name,
+                    func.count(WorkflowVersion.id).label("total"),
+                    func.max(
+                        func.case(
+                            (WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+                             WorkflowVersion.version),
+                            else_=None,
+                        )
+                    ).label("prod_version"),
+                )
+                .group_by(WorkflowVersion.workflow_name)
+            )
+            rows = (await session.execute(count_stmt)).all()
             for row in rows:
-                name = row.workflow_name
-                if name not in version_info:
-                    version_info[name] = {"prod": None, "total": 0}
-                version_info[name]["total"] += 1
-                is_prod = row.status == WorkflowVersionStatus.PRODUCTION
-                if is_prod and version_info[name]["prod"] is None:
-                    version_info[name]["prod"] = row.version
+                version_info[row.workflow_name] = {
+                    "prod": row.prod_version,
+                    "total": row.total,
+                }
     except Exception:
         pass
 
@@ -1271,7 +1306,25 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
     workflows_dir = Path(settings.workflows_dir)
     workflows_dir.mkdir(parents=True, exist_ok=True)
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.name)
+    if not safe_name or safe_name.strip("_") == "":
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_NAME",
+                    message="Workflow name must contain at least one alphanumeric character",
+                )
+            ).model_dump(),
+        )
     file_path = workflows_dir / f"{safe_name}.yaml"
+    resolved_path = file_path.resolve()
+    if not resolved_path.is_relative_to(workflows_dir.resolve()):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
     file_path.write_text(request.content)
 
     # Create a draft version in the registry
@@ -1374,6 +1427,19 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             detail=ApiResponse(error=ErrorResponse(code="PLAN_ERROR", message=str(e))).model_dump(),
         )
 
+    # Validate callback_url if provided (SSRF prevention)
+    if request.callback_url:
+        try:
+            from sandcastle.webhooks.dispatcher import validate_callback_url
+            validate_callback_url(request.callback_url)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_CALLBACK_URL", message=str(e))
+                ).model_dump(),
+            )
+
     # Resolve budget
     budget = await _resolve_budget(request.max_cost_usd, tenant_id)
 
@@ -1444,6 +1510,39 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     except Exception:
         logger.warning("Could not update run in database")
 
+    # Dispatch webhooks (same as async path in worker)
+    try:
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        webhook_urls = []
+        if request.callback_url:
+            webhook_urls.append(request.callback_url)
+
+        if result.status == "completed":
+            if not request.callback_url and workflow.on_complete and workflow.on_complete.webhook:
+                webhook_urls.append(workflow.on_complete.webhook)
+        elif result.status not in ("awaiting_approval",):
+            if workflow.on_failure and workflow.on_failure.webhook:
+                webhook_urls.append(workflow.on_failure.webhook)
+
+        for webhook_url in webhook_urls:
+            duration = 0.0
+            if result.started_at and result.completed_at:
+                duration = (result.completed_at - result.started_at).total_seconds()
+            await dispatch_webhook(
+                url=webhook_url,
+                event="workflow.completed" if result.status == "completed" else "workflow.failed",
+                run_id=run_id,
+                workflow=workflow.name,
+                status=result.status,
+                outputs=result.outputs,
+                costs=result.total_cost_usd,
+                duration_seconds=duration,
+                error=result.error,
+            )
+    except Exception:
+        logger.warning("Could not dispatch webhook for sync run")
+
     return ApiResponse(
         data=RunStatusResponse(
             run_id=result.run_id,
@@ -1505,6 +1604,19 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 )
             ).model_dump(),
         )
+
+    # Validate callback_url if provided (SSRF prevention)
+    if request.callback_url:
+        try:
+            from sandcastle.webhooks.dispatcher import validate_callback_url
+            validate_callback_url(request.callback_url)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_CALLBACK_URL", message=str(e))
+                ).model_dump(),
+            )
 
     # Resolve budget
     budget = await _resolve_budget(request.max_cost_usd, tenant_id)
@@ -1592,7 +1704,12 @@ async def compare_runs(
         uuid_a = uuid.UUID(run_a)
         uuid_b = uuid.UUID(run_b)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid run ID format")
+            ).model_dump(),
+        )
 
     async with async_session() as session:
         stmt_a = select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_a)
@@ -1853,7 +1970,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid run ID format")
+            ).model_dump(),
+        )
 
     async with async_session() as session:
         stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
@@ -1862,7 +1984,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         run = result.scalar_one_or_none()
 
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
 
     # Find the step
     step = next(
@@ -1870,7 +1997,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         None,
     )
     if not step:
-        raise HTTPException(status_code=404, detail=f"Step '{step_id}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Step '{step_id}' not found")
+            ).model_dump(),
+        )
 
     # Extract PDF artifact path from output_data
     pdf_path = None
@@ -1878,7 +2010,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         pdf_path = step.output_data.get("_pdf_artifact")
 
     if not pdf_path:
-        raise HTTPException(status_code=404, detail="No PDF artifact for this step")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="No PDF artifact for this step")
+            ).model_dump(),
+        )
 
     file_path = Path(pdf_path).resolve()
 
@@ -1888,7 +2025,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         raise HTTPException(status_code=403, detail="PDF path outside data directory")
 
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="PDF file not found on disk")
+            ).model_dump(),
+        )
 
     if not file_path.suffix.lower() == ".pdf":
         raise HTTPException(status_code=400, detail="Artifact is not a PDF file")
@@ -1908,14 +2050,24 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid run ID format")
+            ).model_dump(),
+        )
 
     # Verify the run belongs to the tenant before starting the stream
     async with async_session() as session:
         check_stmt = select(Run.id).where(Run.id == run_uuid)
         check_stmt = _apply_tenant_filter(check_stmt, tenant_id, Run.tenant_id)
         if not await session.scalar(check_stmt):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
 
     async def event_generator():
         """Poll the database and emit SSE events as status changes."""
@@ -2019,7 +2171,13 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     from sandcastle.engine.events import event_bus
 
     tenant_id = get_tenant_id(request)
-    queue = await event_bus.subscribe()
+    try:
+        queue = await event_bus.subscribe()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="Too many concurrent event stream connections",
+        )
 
     # LRU cache of run_id -> tenant_id to avoid repeated DB lookups (bounded)
     _TENANT_CACHE_MAX = 1000

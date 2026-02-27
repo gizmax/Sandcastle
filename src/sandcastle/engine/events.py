@@ -29,6 +29,8 @@ class EventBus:
         "dlq.new",
     }
 
+    MAX_SUBSCRIBERS = 500
+
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
@@ -38,9 +40,14 @@ class EventBus:
 
         Returns an asyncio.Queue that will receive all published events.
         The caller must call unsubscribe() when done.
+        Raises RuntimeError if the subscriber limit is reached.
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         async with self._lock:
+            if len(self._subscribers) >= self.MAX_SUBSCRIBERS:
+                raise RuntimeError(
+                    f"EventBus subscriber limit reached ({self.MAX_SUBSCRIBERS})"
+                )
             self._subscribers.add(queue)
         logger.debug(
             "EventBus: new subscriber (total=%d)", len(self._subscribers)

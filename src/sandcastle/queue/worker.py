@@ -56,14 +56,16 @@ async def run_workflow_job(
 
     async with async_session() as session:
         run = await session.get(Run, run_uuid)
-        if run:
-            run.status = RunStatus.RUNNING
-            run.started_at = datetime.now(timezone.utc)
-            callback_url = run.callback_url
-            # Use budget from DB if not passed explicitly
-            if max_cost_usd is None and run.max_cost_usd:
-                max_cost_usd = run.max_cost_usd
-            await session.commit()
+        if not run:
+            logger.error(f"Run {run_id} not found in database, cannot execute")
+            return {"run_id": run_id, "status": "failed", "error": "Run record not found"}
+        run.status = RunStatus.RUNNING
+        run.started_at = datetime.now(timezone.utc)
+        callback_url = run.callback_url
+        # Use budget from DB if not passed explicitly
+        if max_cost_usd is None and run.max_cost_usd:
+            max_cost_usd = run.max_cost_usd
+        await session.commit()
 
     try:
         workflow = parse_yaml_string(workflow_yaml)
@@ -90,7 +92,6 @@ async def run_workflow_job(
         status_map = {
             "completed": RunStatus.COMPLETED,
             "failed": RunStatus.FAILED,
-            "partial": RunStatus.PARTIAL,
             "cancelled": RunStatus.CANCELLED,
             "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
             "awaiting_approval": RunStatus.AWAITING_APPROVAL,

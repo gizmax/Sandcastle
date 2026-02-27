@@ -14,6 +14,8 @@ interface ApprovalItem {
   status: string;
   message: string;
   request_data: Record<string, unknown> | null;
+  response_data: Record<string, unknown> | null;
+  reviewer_id: string | null;
   reviewer_comment: string | null;
   timeout_at: string | null;
   on_timeout: string;

@@ -69,6 +69,13 @@ class Run(Base):
     """A single workflow execution."""
 
     __tablename__ = "runs"
+    __table_args__ = (
+        Index("ix_runs_status", "status"),
+        Index("ix_runs_created_at", "created_at"),
+        Index("ix_runs_tenant_id", "tenant_id"),
+        Index("ix_runs_workflow_name", "workflow_name"),
+        Index("ix_runs_tenant_status_created", "tenant_id", "status", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -114,6 +121,10 @@ class RunStep(Base):
     """A single step execution within a run."""
 
     __tablename__ = "run_steps"
+    __table_args__ = (
+        Index("ix_run_steps_run_id", "run_id"),
+        Index("ix_run_steps_run_step_parallel", "run_id", "step_id", "parallel_index"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -191,6 +202,10 @@ class DeadLetterItem(Base):
     """Failed step stored in the dead letter queue for retry/resolution."""
 
     __tablename__ = "dead_letter_queue"
+    __table_args__ = (
+        Index("ix_dead_letter_run_id", "run_id"),
+        Index("ix_dead_letter_resolved_at", "resolved_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -361,6 +376,9 @@ class RunCheckpoint(Base):
     """Snapshot of run context after each completed stage for replay/fork."""
 
     __tablename__ = "run_checkpoints"
+    __table_args__ = (
+        Index("ix_run_checkpoints_run_id", "run_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -431,6 +449,10 @@ class EvalRun(Base):
     """A single evaluation suite execution."""
 
     __tablename__ = "eval_runs"
+    __table_args__ = (
+        Index("ix_eval_runs_status", "status"),
+        Index("ix_eval_runs_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4

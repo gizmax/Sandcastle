@@ -27,12 +27,13 @@ interface OptimizerDecision {
   run_id: string;
   step_id: string;
   selected_model: string;
+  selected_variant_id: string;
   confidence: number;
-  reason: string;
-  budget_pressure: number | null;
-  alternatives: Alternative[];
+  reason: string | null;
+  budget_pressure: number;
+  alternatives: Alternative[] | null;
   slo: SloConfig | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 interface OptimizerStats {

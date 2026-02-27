@@ -64,7 +64,11 @@ export function useSSE(path: string | null) {
               try {
                 const data = JSON.parse(raw);
                 const eventType = currentEvent;
-                setEvents((prev) => [...prev, { event: eventType, data, timestamp: new Date() }]);
+                setEvents((prev) => {
+                  const updated = [...prev, { event: eventType, data, timestamp: new Date() }];
+                  if (updated.length > 500) return updated.slice(-500);
+                  return updated;
+                });
               } catch {
                 // Ignore parse errors
               }

@@ -56,13 +56,11 @@ export default function Runs() {
 
   const handleBulkDelete = useCallback(async () => {
     setBulkProcessing(true);
-    let ok = 0;
-    let fail = 0;
-    for (const id of selectedIds) {
-      const res = await api.delete(`/runs/${id}`);
-      if (res.error) fail++;
-      else ok++;
-    }
+    const results = await Promise.allSettled(
+      Array.from(selectedIds).map((id) => api.delete(`/runs/${id}`))
+    );
+    const ok = results.filter((r) => r.status === "fulfilled" && !(r.value as { error?: unknown }).error).length;
+    const fail = results.length - ok;
     setBulkProcessing(false);
     setBulkAction(null);
     setSelectedIds(new Set());
@@ -73,13 +71,11 @@ export default function Runs() {
 
   const handleBulkCancel = useCallback(async () => {
     setBulkProcessing(true);
-    let ok = 0;
-    let fail = 0;
-    for (const id of selectedIds) {
-      const res = await api.post(`/runs/${id}/cancel`);
-      if (res.error) fail++;
-      else ok++;
-    }
+    const results = await Promise.allSettled(
+      Array.from(selectedIds).map((id) => api.post(`/runs/${id}/cancel`))
+    );
+    const ok = results.filter((r) => r.status === "fulfilled" && !(r.value as { error?: unknown }).error).length;
+    const fail = results.length - ok;
     setBulkProcessing(false);
     setBulkAction(null);
     setSelectedIds(new Set());
