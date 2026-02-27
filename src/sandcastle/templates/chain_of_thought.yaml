@@ -16,14 +16,17 @@ input_schema:
     problem:
       type: string
       description: "The problem to decompose and solve"
+      example: "example input text"
     constraints:
       type: string
       description: "Known constraints, requirements, or boundary conditions that the solution must satisfy"
       default: ""
+      example: "example input text"
     depth:
       type: string
       description: "Analysis depth - quick (surface-level), standard (balanced), or deep (exhaustive)"
       default: "standard"
+      example: "standard"
 
 steps:
   - id: problem-decomposition

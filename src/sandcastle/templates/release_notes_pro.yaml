@@ -17,20 +17,25 @@ input_schema:
     repo:
       type: string
       description: "GitHub repository in owner/repo format - e.g. 'acme/platform'"
+      example: "github.com/acme/platform"
     version:
       type: string
       description: "Release version tag - e.g. 'v2.4.0'"
+      example: "example input text"
     since_tag:
       type: string
       description: "Previous version tag to compare against - e.g. 'v2.3.0'. If empty, uses the last tag before the current version."
+      example: "v2.3.0"
     slack_channel:
       type: string
       description: "Slack channel for release announcement (e.g. '#releases')"
       default: "#releases"
+      example: "#daily-standup"
     audience:
       type: string
       description: "Target audience for the notes - 'developers', 'end-users', 'internal', or 'all' (default: 'all')"
       default: "all"
+      example: "all"
 
 steps:
   - id: fetch-prs

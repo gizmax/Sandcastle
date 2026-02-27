@@ -16,9 +16,11 @@ input_schema:
     team_member:
       type: string
       description: "Name of the team member giving the standup"
+      example: "example input text"
     update:
       type: string
       description: "What did you do yesterday? What are you doing today? Any blockers?"
+      example: "2026-04-01"
 
 memory:
   scope: agent

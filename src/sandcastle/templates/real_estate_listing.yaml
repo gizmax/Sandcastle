@@ -16,20 +16,25 @@ input_schema:
     property_address:
       type: string
       description: "Full property address including city, state, and ZIP code"
+      example: "742 Evergreen Terrace, Austin, TX 78701"
     property_type:
       type: string
       description: "Type of property: residential, commercial, or land"
       default: "residential"
+      example: "residential"
     listing_price:
       type: number
       description: "Proposed listing price in USD"
+      example: 485000
     key_features:
       type: string
       description: "Key property features (bedrooms, bathrooms, sqft, lot size, renovations, amenities, etc.)"
+      example: "4 bed / 3 bath, 2,400 sqft, renovated kitchen, hardwood floors, 2-car garage"
     target_buyer_profile:
       type: string
       description: "Ideal buyer demographic and psychographic profile"
       default: "General buyer seeking move-in ready property"
+      example: "Young professionals, ages 28-40, dual income, first-time homebuyers"
 
 steps:
   - id: market-analysis

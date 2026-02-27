@@ -16,18 +16,23 @@ input_schema:
     project_type:
       type: string
       description: "Type of construction project: 'commercial', 'residential', 'industrial', or 'infrastructure'"
+      example: "example input text"
     bid_documents:
       type: string
       description: "Description of bid documents to analyze - paste the full bid package text, scope of work narrative, specifications, and any included cost breakdowns"
+      example: "example input text"
     location:
       type: string
       description: "Project location (city, state/province, country) - used for regional cost adjustments and labor rate calibration"
+      example: "Remote (US)"
     project_size:
       type: string
       description: "Square footage, acreage, or scope description (e.g. '45,000 SF office building', '2-mile road extension', '150-unit apartment complex')"
+      example: "45,000 SF office building"
     budget_target:
       type: string
       description: "Owner's budget target or not-to-exceed figure, if known (e.g. '$12M', '$85/SF')"
+      example: "$12M"
 
 steps:
   - id: document-parsing

@@ -17,21 +17,26 @@ input_schema:
     call_source:
       type: string
       description: "Call recording source or batch identifier (e.g. 'five9-queue-support', 'genesys-inbound-jan', 'nice-batch-2024Q1', or a direct transcript paste)"
+      example: "five9-queue-support"
     team_name:
       type: string
       description: "Team or department name for reporting context (e.g. 'Tier 1 Support', 'Retention', 'Sales Development')"
+      example: "Tier 1 Support"
     evaluation_criteria:
       type: string
       description: "Custom evaluation criteria or focus areas beyond defaults (e.g. 'upsell effectiveness, product knowledge depth, de-escalation handling')"
       default: "standard QA evaluation"
+      example: "upsell effectiveness, product knowledge depth, de-escalation handling"
     compliance_requirements:
       type: string
       description: "Regulatory and compliance frameworks to check against (e.g. 'PCI-DSS, TCPA, HIPAA, MiFID II, GDPR consent')"
       default: "general best practices"
+      example: "5+ years Python/Go, distributed systems experience, strong communication skills"
     scoring_rubric:
       type: string
       description: "Custom scoring weights or rubric description (e.g. '40% resolution, 30% compliance, 20% empathy, 10% efficiency')"
       default: "balanced scorecard"
+      example: "40% resolution, 30% compliance, 20% empathy, 10% efficiency"
 
 steps:
   - id: transcription-processing

@@ -17,17 +17,21 @@ input_schema:
     topic:
       type: string
       description: "The content topic or theme to create content around"
+      example: "How to scale your engineering team from 10 to 50"
     brand_voice:
       type: string
       description: "Brand voice and tone guidelines (e.g. professional, casual, authoritative, playful)"
       default: "professional"
+      example: "professional, clear, and approachable"
     target_audience:
       type: string
       description: "Description of the target audience (demographics, interests, pain points)"
+      example: "SaaS founders and engineering leaders"
     platforms:
       type: string
       description: "Comma-separated list of social platforms to create content for"
       default: "linkedin,twitter,instagram"
+      example: "linkedin,twitter,instagram"
 
 steps:
   - id: brief-intake

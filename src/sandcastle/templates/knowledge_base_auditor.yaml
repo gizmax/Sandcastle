@@ -17,18 +17,22 @@ input_schema:
     kb_source:
       type: string
       description: "Knowledge base source identifier (e.g. 'zendesk', 'intercom', 'helpscout', 'confluence') or URL to the knowledge base"
+      example: "zendesk"
     ticket_source:
       type: string
       description: "Support ticket source for contradiction analysis (default: zendesk)"
       default: "zendesk"
+      example: "zendesk"
     audit_period:
       type: string
       description: "Time period to analyze for recent tickets and changes (default: last 90 days)"
       default: "last 90 days"
+      example: "last 90 days"
     content_types:
       type: string
       description: "Comma-separated content types to audit (default: articles, FAQs, guides)"
       default: "articles, FAQs, guides"
+      example: "articles, FAQs, guides"
 
 steps:
   - id: content-inventory

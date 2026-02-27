@@ -17,13 +17,16 @@ input_schema:
     alert_source:
       type: string
       description: "Alert source integration (e.g. 'pagerduty', 'datadog', 'opsgenie')"
+      example: "datadog"
     service_name:
       type: string
       description: "Name of the affected service (e.g. 'payments-api', 'auth-service')"
+      example: "payments-api"
     severity:
       type: string
       description: "Incident severity level (default: P2)"
       default: "P2"
+      example: "P2"
 
 steps:
   - id: alert-ingestion

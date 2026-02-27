@@ -16,19 +16,24 @@ input_schema:
     account_name:
       type: string
       description: "Name of the customer account for the QBR"
+      example: "example input text"
     crm_source:
       type: string
       description: "CRM platform containing account data (e.g., Salesforce, HubSpot, Pipedrive)"
+      example: "example input text"
     reporting_quarter:
       type: string
       description: "Quarter under review (e.g., Q1 2026, Q4 2025)"
+      example: "example input text"
     account_tier:
       type: string
       description: "Account tier classification for service level expectations"
       default: "enterprise"
+      example: "enterprise"
     csm_name:
       type: string
       description: "Customer Success Manager name for personalization"
+      example: "example input text"
 
 steps:
   - id: data-aggregation

@@ -16,12 +16,15 @@ input_schema:
     company_ticker:
       type: string
       description: "Stock ticker symbol of the company (e.g. AAPL, MSFT, TSLA)"
+      example: "example input text"
     sector:
       type: string
       description: "Industry sector (e.g. technology, healthcare, financials, consumer)"
+      example: "example input text"
     benchmark_peers:
       type: string
       description: "Comma-separated ticker symbols of peer companies for comparison"
+      example: "example input text"
 
 steps:
   - id: transcription

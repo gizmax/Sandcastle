@@ -10,10 +10,12 @@ input_schema:
     discord_channel_id:
       type: string
       description: Discord channel ID for incident alerts
+      example: "example input text"
     severity:
       type: string
       description: Minimum severity to alert on (high or low)
       default: high
+      example: "P2"
 
 steps:
   - id: check_incidents

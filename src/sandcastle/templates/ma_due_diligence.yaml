@@ -16,14 +16,17 @@ input_schema:
     target_company:
       type: string
       description: "Name of the target company being evaluated for the transaction"
+      example: "example input text"
     deal_type:
       type: string
       description: "Type of transaction (e.g. acquisition, merger, asset purchase, joint venture)"
       default: "acquisition"
+      example: "acquisition"
     focus_areas:
       type: string
       description: "Comma-separated focus areas for the due diligence review"
       default: "financials,contracts,ip,compliance"
+      example: "financial performance, risk factors, growth strategy"
 
 steps:
   - id: document-ingestion

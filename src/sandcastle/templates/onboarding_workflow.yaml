@@ -17,32 +17,41 @@ input_schema:
     employee_name:
       type: string
       description: "Full name of the new employee"
+      example: "John Doe"
     role:
       type: string
       description: "Job title/role (e.g. 'Senior Frontend Engineer')"
+      example: "Senior Frontend Engineer"
     department:
       type: string
       description: "Department (e.g. 'Engineering', 'Marketing', 'Sales')"
+      example: "Engineering"
     start_date:
       type: string
       description: "Start date in YYYY-MM-DD format"
+      example: "2026-03-15"
     manager_email:
       type: string
       description: "Direct manager's email address"
+      example: "jane.manager@acme.com"
     employee_email:
       type: string
       description: "New employee's email address (if already provisioned)"
+      example: "john.doe@acme.com"
     location:
       type: string
       description: "Office location or 'Remote' (default: 'Remote')"
       default: "Remote"
+      example: "Remote (US)"
     seniority_level:
       type: string
       description: "Seniority level: 'junior', 'mid', 'senior', 'lead', 'director', 'vp' (default: 'mid')"
       default: "mid"
+      example: "senior"
     buddy_email:
       type: string
       description: "Assigned onboarding buddy/mentor email (optional - will suggest if not provided)"
+      example: "john.doe@acme.com"
 
 steps:
   - id: create-checklist

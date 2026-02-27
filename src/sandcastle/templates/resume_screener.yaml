@@ -16,12 +16,15 @@ input_schema:
     resume_text:
       type: string
       description: "The candidate resume text to screen"
+      example: "example input text"
     job_description:
       type: string
       description: "The job description to match the resume against"
+      example: "A detailed description of the subject for analysis"
     hiring_priority:
       type: string
       description: "What matters most for this hire: 'technical-depth', 'leadership', 'culture-add', 'speed-to-productivity', or 'growth-potential'"
+      example: "high"
 
 steps:
   - id: parse-resume

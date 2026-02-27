@@ -16,13 +16,16 @@ input_schema:
     industry_keywords:
       type: string
       description: "Comma-separated industry keywords to scan for trends (e.g. 'developer tools, API management, observability')"
+      example: "developer tools, API management, observability"
     technology_domains:
       type: string
       description: "Specific technology domains to focus on (e.g. 'AI/ML, edge computing, serverless')"
+      example: "AI/ML, edge computing, serverless"
     timeframe:
       type: string
       description: "Lookback period for trend signals (default: 6 months)"
       default: "6 months"
+      example: "6 months"
 
 steps:
   - id: academic-scan

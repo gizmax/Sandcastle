@@ -17,13 +17,16 @@ input_schema:
     document_text:
       type: string
       description: "The document text to review for compliance (policy, contract, or process description)"
+      example: "example input text"
     framework:
       type: string
       description: "Compliance framework to check against: 'GDPR', 'SOC2', 'HIPAA', 'PCI-DSS', or custom requirements text"
+      example: "example input text"
     severity_threshold:
       type: string
       description: "Minimum severity to report: 'low', 'medium', or 'high' (default: 'low')"
       default: "low"
+      example: "low"
 
 steps:
   - id: fetch-framework

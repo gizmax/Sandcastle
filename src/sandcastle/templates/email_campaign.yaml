@@ -16,15 +16,19 @@ input_schema:
     campaign_brief:
       type: string
       description: "The campaign brief describing target audience, goals, and brand guidelines"
+      example: "Provide relevant context and details for analysis"
     email_platform:
       type: string
       description: "Email platform used (e.g. 'Mailchimp', 'HubSpot', 'Klaviyo', 'SendGrid') for platform-specific best practices"
+      example: "Mailchimp"
     list_size:
       type: string
       description: "Approximate email list size for statistical significance calculations"
+      example: "example input text"
     campaign_type:
       type: string
       description: "Type: 'promotional', 'nurture', 'announcement', 'onboarding', 're-engagement', 'event'"
+      example: "example input text"
 
 steps:
   - id: audience-brief

@@ -17,14 +17,17 @@ input_schema:
     pipeline_stage:
       type: string
       description: "Pipeline stage to focus on (e.g. 'Negotiation', 'Proposal Sent', 'Discovery', or 'All')"
+      example: "Negotiation"
     min_deal_size:
       type: number
       description: "Minimum deal size in USD to include in analysis (default: 10000)"
       default: 10000
+      example: "10000"
     crm_source:
       type: string
       description: "CRM system to pull pipeline data from (default: 'salesforce')"
       default: "salesforce"
+      example: "salesforce"
 
 steps:
   - id: pipeline-snapshot

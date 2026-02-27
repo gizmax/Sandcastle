@@ -17,12 +17,15 @@ input_schema:
     project:
       type: string
       description: "Jira project key (e.g. PROJ)"
+      example: "example input text"
     jql_filter:
       type: string
       description: "Additional JQL filter (default: untriaged issues from last 24h)"
+      example: "example input text"
     team_context:
       type: string
       description: "Context about team members and their areas of expertise"
+      example: "Provide relevant context and details for analysis"
 
 steps:
   - id: fetch-issues

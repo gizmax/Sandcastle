@@ -17,21 +17,26 @@ input_schema:
     segment:
       type: string
       description: "Customer segment to analyze - e.g. 'Enterprise', 'Mid-Market', 'SMB', or 'All'"
+      example: "Enterprise, Mid-Market, SMB"
     renewal_window_days:
       type: number
       description: "Flag accounts renewing within this many days (default: 90)"
       default: 90
+      example: "90"
     slack_channel:
       type: string
       description: "Slack channel for churn alerts (e.g. '#customer-success')"
       default: "#customer-success"
+      example: "#daily-standup"
     cohort_window:
       type: string
       description: "Cohort grouping for trend analysis - 'monthly', 'quarterly', or 'by_contract_start' (default: 'quarterly')"
       default: "quarterly"
+      example: "quarterly"
     health_score_weights:
       type: string
       description: "Custom weights for health score categories - e.g. 'usage:30,support:20,engagement:25,contract:25' (default: equal 25 each)"
+      example: "usage:30,support:20,engagement:25,contract:25"
 
 steps:
   - id: fetch-accounts

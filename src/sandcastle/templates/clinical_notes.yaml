@@ -16,17 +16,21 @@ input_schema:
     encounter_data:
       type: string
       description: "Raw clinical encounter data - can be transcribed dictation, free-text notes, or structured intake form data describing the patient visit"
+      example: "45yo male, presenting with chest pain onset 2 hours ago, history of hypertension, currently on lisinopril 10mg"
     patient_context:
       type: string
       description: "Patient context including age, sex, relevant medical history, current medications, allergies, and reason for visit"
+      example: "62yo female, type 2 diabetes (A1C 7.2), on metformin 1000mg BID, allergic to penicillin, presenting for routine follow-up"
     specialty:
       type: string
       description: "Clinical specialty context (e.g. 'general', 'cardiology', 'orthopedics', 'psychiatry', 'pediatrics', 'emergency')"
       default: "general"
+      example: "general"
     documentation_standard:
       type: string
       description: "Documentation format standard to follow: 'SOAP', 'H&P', 'progress_note', 'discharge_summary'"
       default: "SOAP"
+      example: "SOAP"
 
 steps:
   - id: encounter-parsing

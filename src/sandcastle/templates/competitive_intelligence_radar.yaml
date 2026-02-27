@@ -17,13 +17,16 @@ input_schema:
     competitors:
       type: string
       description: "Comma-separated list of competitor names to monitor (e.g. 'Acme Corp, Globex, Initech')"
+      example: "Zapier, Make, n8n"
     product_name:
       type: string
       description: "Your product name for battlecard context"
+      example: "Sandcastle AI"
     focus_areas:
       type: string
       description: "Comma-separated focus areas for monitoring (default: pricing,features,positioning)"
       default: "pricing,features,positioning"
+      example: "financial performance, risk factors, growth strategy"
 
 steps:
   - id: monitor-sources

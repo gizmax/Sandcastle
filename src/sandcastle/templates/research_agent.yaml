@@ -16,18 +16,22 @@ input_schema:
     topic:
       type: string
       description: "The research topic to investigate"
+      example: "How to scale your engineering team from 10 to 50"
     research_questions:
       type: string
       description: "Specific questions the research should answer (comma-separated)"
       default: ""
+      example: "example input text"
     depth:
       type: string
       description: "Research depth - survey (broad overview), standard (balanced), or deep-dive (exhaustive)"
       default: "standard"
+      example: "standard"
     perspective:
       type: string
       description: "Analytical lens - neutral, critical, comparative, or advocate"
       default: "neutral"
+      example: "neutral"
 
 steps:
   - id: scope-definition

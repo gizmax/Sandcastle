@@ -17,17 +17,21 @@ input_schema:
     product_catalog:
       type: string
       description: "Product catalog description or SKU list to optimize pricing for (e.g. 'premium headphones line - 5 SKUs')"
+      example: "premium headphones line - 5 SKUs"
     competitor_urls:
       type: string
       description: "Comma-separated competitor store URLs or names to monitor (e.g. 'bestbuy.com, amazon.com/headphones')"
+      example: "bestbuy.com, amazon.com/headphones"
     pricing_strategy:
       type: string
       description: "Pricing approach: 'value-based', 'competitive', 'premium', or 'penetration' (default: 'value-based')"
       default: "value-based"
+      example: "value-based"
     margin_floor:
       type: number
       description: "Minimum acceptable gross margin percentage (default: 20)"
       default: 20
+      example: "20"
 
 steps:
   - id: competitor-monitoring

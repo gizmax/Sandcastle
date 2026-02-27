@@ -16,18 +16,23 @@ input_schema:
     project_type:
       type: string
       description: "Type of permit required: construction, business, environmental, zoning, event"
+      example: "example input text"
     jurisdiction:
       type: string
       description: "City, county, and state/country where the permit will be filed (e.g. 'Austin, TX', 'London Borough of Camden, UK')"
+      example: "Austin, TX"
     project_description:
       type: string
       description: "Detailed description of the project requiring permits (scope, size, location, intended use)"
+      example: "A detailed description of the subject for analysis"
     applicant_info:
       type: string
       description: "Applicant details: name, organization, address, contact info, professional licenses held"
+      example: "Provide relevant context and details for analysis"
     timeline_requirement:
       type: string
       description: "Desired project timeline and any hard deadlines (e.g. 'construction start by March 2026, occupancy by December 2026')"
+      example: "construction start by March 2026, occupancy by December 2026"
 
 steps:
   - id: code-research

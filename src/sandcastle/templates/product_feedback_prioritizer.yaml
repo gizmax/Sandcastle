@@ -16,13 +16,16 @@ input_schema:
     product_name:
       type: string
       description: "Name of the product to analyze feedback for"
+      example: "Sandcastle AI"
     feedback_sources:
       type: string
       description: "Comma-separated feedback channels (e.g. 'Intercom, Canny, Slack, G2, Zendesk, App Store')"
+      example: "Intercom, Canny, Slack, G2, Zendesk, App Store"
     time_period:
       type: string
       description: "Time period to analyze (default: last 90 days)"
       default: "last 90 days"
+      example: "last 90 days"
 
 steps:
   - id: channel-ingestion

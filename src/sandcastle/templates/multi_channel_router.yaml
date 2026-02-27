@@ -17,20 +17,25 @@ input_schema:
     ticket_content:
       type: string
       description: "The incoming support ticket or message content"
+      example: "example input text"
     channel:
       type: string
       description: "Source channel - 'email', 'chat', 'twitter', 'facebook', 'instagram', or 'phone'"
       default: "email"
+      example: "#general"
     customer_email:
       type: string
       description: "Customer email address for account lookup"
+      example: "user@example.com"
     slack_channel:
       type: string
       description: "Slack channel for routing notifications (e.g. '#support-routing')"
       default: "#support-routing"
+      example: "#daily-standup"
     escalation_rules:
       type: string
       description: "Custom escalation rules - e.g. 'VIP customers -> direct to senior agent; billing issues -> billing team within 1h'"
+      example: "example input text"
 
 steps:
   - id: classify-ticket

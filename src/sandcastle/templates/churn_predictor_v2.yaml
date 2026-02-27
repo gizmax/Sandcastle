@@ -17,21 +17,26 @@ input_schema:
     hubspot_list_id:
       type: string
       description: "HubSpot contact list ID or segment name containing customers to analyze (e.g. 'active-customers', 'enterprise-tier')"
+      example: "active-customers"
     lookback_days:
       type: number
       description: "Number of days of historical activity data to analyze (default: 90)"
       default: 90
+      example: "90"
     risk_threshold:
       type: number
       description: "Minimum churn risk score (0-100) to trigger alerts and campaigns (default: 60)"
       default: 60
+      example: "60"
     slack_channel:
       type: string
       description: "Slack channel for churn risk alerts (e.g. '#cs-alerts')"
       default: "#cs-alerts"
+      example: "#daily-standup"
     hubspot_sequence_id:
       type: string
       description: "HubSpot sequence ID for automated retention outreach (leave blank to skip enrollment)"
+      example: "example input text"
 
 steps:
   - id: fetch-customer-signals

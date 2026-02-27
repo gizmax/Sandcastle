@@ -17,14 +17,17 @@ input_schema:
     pipeline_name:
       type: string
       description: "HubSpot pipeline name to monitor (e.g. 'Sales Pipeline')"
+      example: "Sales Pipeline"
     stale_days:
       type: number
       description: "Days without activity before a deal is considered stalled (default: 7)"
       default: 7
+      example: "7"
     alert_channel:
       type: string
       description: "Slack channel for pipeline alerts (e.g. '#sales-alerts')"
       default: "#sales-alerts"
+      example: "#general"
 
 steps:
   - id: fetch-deals

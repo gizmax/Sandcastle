@@ -17,13 +17,16 @@ input_schema:
     jurisdiction:
       type: string
       description: "Primary jurisdiction to monitor (e.g. US, EU, UK, APAC)"
+      example: "example input text"
     industry:
       type: string
       description: "Industry sector (e.g. financial-services, healthcare, technology, manufacturing)"
+      example: "example input text"
     regulatory_bodies:
       type: string
       description: "Comma-separated list of regulatory bodies to monitor"
       default: "SEC,FINRA,GDPR"
+      example: "SEC,FINRA,GDPR"
 
 steps:
   - id: regulatory-scan

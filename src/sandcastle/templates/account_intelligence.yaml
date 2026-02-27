@@ -17,12 +17,15 @@ input_schema:
     target_accounts:
       type: string
       description: "Comma-separated list of target account names to research (e.g. 'Acme Corp, Globex Inc, Initech')"
+      example: "Acme Corp, Globex Inc, Initech"
     product_description:
       type: string
       description: "Brief description of your product/service and its core value proposition"
+      example: "AI-powered workflow orchestrator that lets teams build, test, and deploy multi-step AI pipelines with pluggable sandbox backends"
     icp_criteria:
       type: string
       description: "Ideal Customer Profile criteria for scoring fit (e.g. 'B2B SaaS, 200-2000 employees, Series B+, using Kubernetes')"
+      example: "B2B SaaS, 200-2000 employees, Series B+, using Kubernetes"
 
 steps:
   - id: target-profiling

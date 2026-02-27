@@ -17,18 +17,23 @@ input_schema:
     rfp_document:
       type: string
       description: "Full text of the RFP/RFQ document, or URL to the bid document"
+      example: "example input text"
     company_name:
       type: string
       description: "Your company name (the bidder/proposer)"
+      example: "Acme Corp"
     knowledge_base_source:
       type: string
       description: "Source of company knowledge base for response matching (e.g. 'confluence', 'notion', 'sharepoint', or paste key capabilities)"
+      example: "confluence"
     win_themes:
       type: string
       description: "Comma-separated strategic win themes to weave into the proposal (e.g. 'innovation leader, proven ROI, local presence')"
+      example: "innovation leader, proven ROI, local presence"
     submission_deadline:
       type: string
       description: "Submission deadline for the RFP (e.g. '2026-03-15')"
+      example: "2026-04-01"
 
 steps:
   - id: requirement-extraction

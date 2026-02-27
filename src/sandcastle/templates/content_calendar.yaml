@@ -16,21 +16,26 @@ input_schema:
     niche:
       type: string
       description: "Your content niche or industry (e.g. 'B2B SaaS marketing', 'personal finance', 'sustainable fashion')"
+      example: "B2B SaaS marketing"
     target_audience:
       type: string
       description: "Primary target audience for the content (e.g. 'startup founders', 'mid-career professionals', 'ecommerce store owners')"
+      example: "SaaS founders and engineering leaders"
     content_types:
       type: string
       description: "Comma-separated content formats to include (default: 'blog post, social post, newsletter, video script')"
       default: "blog post, social post, newsletter, video script"
+      example: "blog post, social post, newsletter, video script"
     posts_per_week:
       type: number
       description: "Number of content pieces to plan per week (default: 4)"
       default: 4
+      example: "4"
     brand_voice:
       type: string
       description: "Brand voice and tone guidelines (e.g. 'professional but approachable', 'bold and opinionated')"
       default: "professional, helpful, and data-driven"
+      example: "professional, clear, and approachable"
 
 steps:
   - id: trend-research

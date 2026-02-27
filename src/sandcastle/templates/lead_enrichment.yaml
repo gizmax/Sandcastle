@@ -16,18 +16,23 @@ input_schema:
     company_name:
       type: string
       description: "Name of the company to research"
+      example: "Acme Corp"
     company_domain:
       type: string
       description: "Company website domain"
+      example: "general"
     target_persona:
       type: string
       description: "Target persona or role to identify among contacts"
+      example: "example input text"
     icp_criteria:
       type: string
       description: "Ideal Customer Profile criteria for lead scoring"
+      example: "example input text"
     value_proposition:
       type: string
       description: "Your value proposition for outreach angle generation"
+      example: "example input text"
 
 steps:
   - id: research-company

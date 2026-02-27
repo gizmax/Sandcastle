@@ -16,23 +16,29 @@ input_schema:
     brand_name:
       type: string
       description: "Name of the brand or business"
+      example: "example input text"
     platforms:
       type: string
       description: "Target platforms, comma-separated (e.g., Instagram, TikTok, LinkedIn, Twitter/X, Facebook, YouTube, Pinterest)"
+      example: "example input text"
     content_pillars:
       type: string
       description: "Core content themes/pillars the brand focuses on (e.g., education, behind-the-scenes, product showcases, user stories)"
+      example: "example input text"
     posting_frequency:
       type: string
       description: "Desired posting frequency per platform (e.g., 'daily on Instagram, 3x/week on LinkedIn')"
+      example: "example input text"
     brand_voice:
       type: string
       description: "Brand voice and tone description"
       default: "Professional yet approachable, informative with personality"
+      example: "professional, clear, and approachable"
     time_period:
       type: string
       description: "Calendar planning period"
       default: "30 days"
+      example: "30 days"
 
 steps:
   - id: audience-analysis

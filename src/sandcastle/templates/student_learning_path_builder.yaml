@@ -16,21 +16,26 @@ input_schema:
     student_profile:
       type: string
       description: "Description of the student - include current level (grade, year, or skill level), academic history, assessment scores, known strengths and weaknesses, learning goals, and any relevant context (e.g. 'Grade 10 student, strong in algebra but struggling with geometry proofs, SAT prep goal, diagnosed ADHD')"
+      example: "Grade 10 student, strong in algebra but struggling with geometry proofs, SAT prep goal, diagnosed ADHD"
     subject_area:
       type: string
       description: "Subject or skill area for the learning path (e.g. 'High School Mathematics', 'AP Biology', 'Python Programming', 'Academic English Writing', 'Data Science Fundamentals')"
+      example: "High School Mathematics"
     curriculum_standard:
       type: string
       description: "Curriculum framework or standard to align to (e.g. 'Common Core State Standards', 'IB Diploma', 'AP Curriculum', 'NGSS', 'Cambridge IGCSE', or 'custom')"
       default: "custom"
+      example: "Common Core State Standards"
     learning_style:
       type: string
       description: "Preferred learning modality: 'visual', 'auditory', 'kinesthetic', 'reading-writing', or 'mixed'"
       default: "mixed"
+      example: "mixed"
     available_resources:
       type: string
       description: "Comma-separated list of resource types available to the student"
       default: "video, text, interactive, labs"
+      example: "video, text, interactive, labs"
 
 steps:
   - id: assessment-analysis

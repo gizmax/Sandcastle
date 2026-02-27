@@ -16,15 +16,19 @@ input_schema:
     transcript:
       type: string
       description: "The meeting transcript text"
+      example: "example input text"
     meeting_title:
       type: string
       description: "Title or subject of the meeting"
+      example: "example input text"
     sender_name:
       type: string
       description: "Name of the person sending the follow-up email"
+      example: "example input text"
     meeting_type:
       type: string
       description: "Type of meeting: standup, sprint-planning, client-call, brainstorm, 1-on-1, all-hands, retrospective"
+      example: "example input text"
 
 steps:
   - id: summarize

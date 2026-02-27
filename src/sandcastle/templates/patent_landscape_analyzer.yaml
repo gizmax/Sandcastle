@@ -16,19 +16,24 @@ input_schema:
     technology_domain:
       type: string
       description: "The technology domain to analyze (e.g. 'natural language processing', 'battery electrode chemistry', 'autonomous vehicle perception')"
+      example: "general"
     company_name:
       type: string
       description: "Your company or organization name for the FTO assessment"
+      example: "Acme Corp"
     target_jurisdictions:
       type: string
       description: "Comma-separated list of patent jurisdictions to cover"
       default: "US, EP, CN"
+      example: "US, EP, CN"
     search_keywords:
       type: string
       description: "Comma-separated specific keywords and phrases to include in prior art searches (e.g. 'transformer attention mechanism, multi-head self-attention, sparse attention')"
+      example: "transformer attention mechanism, multi-head self-attention, sparse attention"
     competitor_names:
       type: string
       description: "Comma-separated list of competitor companies whose patent portfolios should be analyzed"
+      example: "Zapier, Make, n8n"
 
 steps:
   - id: prior-art-search

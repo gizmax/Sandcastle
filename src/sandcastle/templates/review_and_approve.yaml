@@ -16,17 +16,21 @@ input_schema:
     brief:
       type: string
       description: "The content brief describing what to generate"
+      example: "Provide relevant context and details for analysis"
     audience:
       type: string
       description: "The target audience for the content"
+      example: "example input text"
     review_criteria:
       type: string
       description: "Specific criteria the content must meet (e.g. 'must include 3 case studies, cite sources, stay under 2000 words')"
       default: "Accuracy, clarity, engagement, and completeness"
+      example: "must include 3 case studies, cite sources, stay under 2000 words"
     standards:
       type: string
       description: "Quality or compliance standards to check against (e.g. 'AP Style Guide', 'GDPR compliant', 'brand voice guidelines')"
       default: "Professional writing standards with clear sourcing and factual accuracy"
+      example: "AP Style Guide"
 
 steps:
   - id: content-analysis

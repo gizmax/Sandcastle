@@ -17,14 +17,17 @@ input_schema:
     survey_data:
       type: string
       description: "Description of survey data source or raw survey response data (e.g. 'Q4 2025 engagement survey - 450 responses across Engineering, Product, Sales, Marketing')"
+      example: "Q4 2025 engagement survey - 450 responses across Engineering, Product, Sales, Marketing"
     department_filter:
       type: string
       description: "Filter analysis to a specific department, or 'all' for company-wide (default: 'all')"
       default: "all"
+      example: "all"
     comparison_period:
       type: string
       description: "Prior period to compare against for trend analysis (default: 'previous quarter')"
       default: "previous quarter"
+      example: "previous quarter"
 
 steps:
   - id: survey-ingestion

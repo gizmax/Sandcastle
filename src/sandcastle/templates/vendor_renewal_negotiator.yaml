@@ -16,19 +16,24 @@ input_schema:
     vendor_list:
       type: string
       description: "Comma-separated list of vendor/SaaS products up for renewal (e.g. 'Salesforce, Snowflake, Datadog, Slack, Zoom')"
+      example: "Salesforce, Snowflake, Datadog, Slack, Zoom"
     company_name:
       type: string
       description: "Your company name for the negotiation context"
+      example: "Acme Corp"
     contract_data:
       type: string
       description: "Contract details: renewal dates, current annual spend per vendor, contract length, payment terms (e.g. 'Salesforce: $240k/yr, renews June 2026, 3yr term; Datadog: $180k/yr, renews Aug 2026, 1yr term')"
+      example: "Salesforce: $240k/yr, renews June 2026, 3yr term; Datadog: $180k/yr, renews Aug 2026, 1yr term"
     usage_metrics:
       type: string
       description: "Current usage data per vendor: active users, license utilization, feature adoption, storage consumption (e.g. 'Salesforce: 150/200 licenses used, Enterprise tier; Datadog: 80 hosts monitored, 500GB/day ingestion')"
+      example: "Salesforce: 150/200 licenses used, Enterprise tier; Datadog: 80 hosts monitored, 500GB/day ingestion"
     negotiation_priority:
       type: string
       description: "Primary negotiation objective: cost_reduction, flexibility, feature_upgrade, term_optimization, consolidation"
       default: "cost_reduction"
+      example: "high"
 
 steps:
   - id: contract-analysis

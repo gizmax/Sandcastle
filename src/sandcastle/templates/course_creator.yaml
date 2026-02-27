@@ -16,19 +16,24 @@ input_schema:
     course_topic:
       type: string
       description: "The subject of the course (e.g. 'Machine Learning for Product Managers', 'Advanced SQL for Data Engineers', 'Introduction to UX Research')"
+      example: "Machine Learning for Product Managers"
     target_audience:
       type: string
       description: "Who the course is designed for (e.g. 'junior developers with 1-2 years experience', 'marketing professionals transitioning to data analytics', 'complete beginners with no technical background')"
+      example: "SaaS founders and engineering leaders"
     difficulty_level:
       type: string
       description: "Course difficulty: 'beginner', 'intermediate', or 'advanced'"
+      example: "example input text"
     course_length:
       type: string
       description: "Target course duration in hours (e.g. '4', '10', '20')"
+      example: "4"
     platform:
       type: string
       description: "Target learning platform: 'udemy', 'coursera', 'teachable', 'skillshare', 'general' (default: 'general')"
       default: "general"
+      example: "example input text"
 
 steps:
   - id: curriculum-design

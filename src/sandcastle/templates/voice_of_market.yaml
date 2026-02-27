@@ -16,12 +16,15 @@ input_schema:
     product_category:
       type: string
       description: "Product category to research (e.g. 'project management tools', 'email marketing platforms')"
+      example: "project management tools"
     competitor_names:
       type: string
       description: "Comma-separated list of competitor names to mine feedback for"
+      example: "Zapier, Make, n8n"
     keywords:
       type: string
       description: "Additional search keywords to include in research (optional)"
+      example: "automation, productivity, developer tools"
 
 steps:
   - id: forum-mining

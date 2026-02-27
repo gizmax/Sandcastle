@@ -96,6 +96,20 @@ NEW_TEMPLATE_FILES = [
 ]
 
 
+def extract_input_schema(data: dict) -> dict | None:
+    """Extract input_schema from parsed YAML data for hub UI display."""
+    raw = data.get("input_schema", {})
+    if not raw or not raw.get("properties"):
+        return None
+    return {
+        "required": raw.get("required", []),
+        "properties": {
+            name: {k: v for k, v in prop.items() if k in ("type", "description", "default", "example")}
+            for name, prop in raw.get("properties", {}).items()
+        },
+    }
+
+
 def parse_yaml_template(path: Path) -> dict:
     """Parse a YAML template and extract metadata."""
     text = path.read_text()
@@ -157,7 +171,10 @@ def parse_yaml_template(path: Path) -> dict:
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.strip("[]").split(",")]
 
-    return {
+    # Extract input_schema for hub UI
+    input_schema = extract_input_schema(data)
+
+    entry = {
         "slug": f"gizmax/{path.stem.replace('_', '-')}",
         "name": name,
         "description": desc,
@@ -180,6 +197,9 @@ def parse_yaml_template(path: Path) -> dict:
         "forked_from": None,
         "license": "MIT",
     }
+    if input_schema:
+        entry["input_schema"] = input_schema
+    return entry
 
 
 def main():
@@ -209,6 +229,27 @@ def main():
 
     if missing:
         print(f"\n  MISSING files: {missing}")
+
+    # Patch input_schema into ALL existing entries (reads from YAML files)
+    # Build a map from yaml stem (e.g. "ad-copy-generator") to parsed schema
+    patched = 0
+    stem_to_schema: dict[str, dict] = {}
+    for path in sorted(TEMPLATES_DIR.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text())
+            schema = extract_input_schema(data)
+            if schema:
+                stem_to_schema[path.stem.replace("_", "-")] = schema
+        except Exception:
+            pass
+
+    for entry in registry["templates"]:
+        # Match by slug suffix (works for both gizmax/ and community author slugs)
+        slug_stem = entry["slug"].split("/", 1)[-1] if "/" in entry["slug"] else entry["slug"]
+        if slug_stem in stem_to_schema and "input_schema" not in entry:
+            entry["input_schema"] = stem_to_schema[slug_stem]
+            patched += 1
+    print(f"  PATCHED input_schema: {patched} entries")
 
     # Update categories
     cat_counts = {}
