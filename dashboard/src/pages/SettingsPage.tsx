@@ -28,6 +28,9 @@ import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 interface SettingsData {
   anthropic_api_key: string;
   e2b_api_key: string;
+  openai_api_key: string;
+  minimax_api_key: string;
+  openrouter_api_key: string;
   auth_required: boolean;
   dashboard_origin: string;
   default_max_cost_usd: number;

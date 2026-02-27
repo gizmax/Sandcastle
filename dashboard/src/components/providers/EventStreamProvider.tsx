@@ -14,23 +14,38 @@ export function EventStreamProvider({ children }: EventStreamProviderProps) {
   const { events, status, clearEvents } = useEventStream();
   const subscribersRef = useRef<Map<string, Set<EventCallback>>>(new Map());
 
-  // Dispatch events to subscribers via effect (not during render)
-  const lastDispatchedRef = useRef<string | null>(null);
-  const latestEvent = events[0] ?? null;
+  // Dispatch events to subscribers via effect (not during render).
+  // Track the last dispatched event ID so we process all new events,
+  // not just the latest, avoiding missed events when multiple arrive between renders.
+  const lastDispatchedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!latestEvent || latestEvent.id === lastDispatchedRef.current) return;
-    lastDispatchedRef.current = latestEvent.id;
+    if (events.length === 0) return;
 
-    const subs = subscribersRef.current.get(latestEvent.type);
-    if (subs) {
-      for (const cb of subs) cb(latestEvent);
+    // events are newest-first; find index of the last dispatched event
+    const lastIdx = lastDispatchedIdRef.current
+      ? events.findIndex((e) => e.id === lastDispatchedIdRef.current)
+      : -1;
+
+    // All events before that index are new (or all events if last ID not found)
+    const newCount = lastIdx === -1 ? events.length : lastIdx;
+    if (newCount === 0) return;
+
+    lastDispatchedIdRef.current = events[0].id;
+
+    // Dispatch new events in chronological order (oldest first)
+    const newEvents = events.slice(0, newCount).reverse();
+    for (const event of newEvents) {
+      const subs = subscribersRef.current.get(event.type);
+      if (subs) {
+        for (const cb of subs) cb(event);
+      }
+      const wildcardSubs = subscribersRef.current.get("*");
+      if (wildcardSubs) {
+        for (const cb of wildcardSubs) cb(event);
+      }
     }
-    const wildcardSubs = subscribersRef.current.get("*");
-    if (wildcardSubs) {
-      for (const cb of wildcardSubs) cb(latestEvent);
-    }
-  }, [latestEvent]);
+  }, [events]);
 
   const subscribe = useCallback((eventType: string, callback: EventCallback) => {
     if (!subscribersRef.current.has(eventType)) {

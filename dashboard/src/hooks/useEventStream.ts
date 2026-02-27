@@ -13,6 +13,8 @@ export interface StreamEvent {
 // Reconnect with exponential backoff - starts at 1s, maxes at 30s
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30000;
+// In mock mode, stop retrying after this many attempts to avoid log spam
+const MOCK_MAX_ATTEMPTS = 2;
 
 function getBackoffDelay(attempt: number): number {
   const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_DELAY_MS);
@@ -25,6 +27,7 @@ let nextEventId = 1;
 /**
  * Hook that connects to the global SSE endpoint GET /events.
  * Uses the native EventSource API with automatic reconnection and backoff.
+ * In mock/demo mode, skips connection entirely to avoid console spam.
  * Should be used via EventStreamProvider context - not directly in components.
  */
 export function useEventStream() {
@@ -33,6 +36,8 @@ export function useEventStream() {
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
+  const mockModeRef = useRef(api.isMockMode);
 
   const addEvent = useCallback((type: string, data: Record<string, unknown>) => {
     const event: StreamEvent = {
@@ -50,6 +55,12 @@ export function useEventStream() {
   }, []);
 
   const connect = useCallback(() => {
+    // In mock mode, don't attempt SSE connections at all
+    if (mockModeRef.current) {
+      setStatus("disconnected");
+      return;
+    }
+
     // Clean up any existing connection
     if (esRef.current) {
       esRef.current.close();
@@ -71,7 +82,15 @@ export function useEventStream() {
     es.onerror = () => {
       es.close();
       esRef.current = null;
+      if (unmountedRef.current) return;
       setStatus("disconnected");
+
+      // If we've failed multiple times and there's no backend, stop retrying
+      if (attemptRef.current >= MOCK_MAX_ATTEMPTS) {
+        mockModeRef.current = true;
+        console.info("[Sandcastle] Event stream unavailable, stopping reconnection attempts");
+        return;
+      }
 
       // Schedule reconnect with backoff
       const delay = getBackoffDelay(attemptRef.current);
@@ -80,12 +99,12 @@ export function useEventStream() {
 
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
-        connect();
+        if (!unmountedRef.current) connect();
       }, delay);
     };
 
     // Listen for specific event types from the backend
-    const eventTypes = ["run.started", "run.completed", "run.failed", "step.completed", "step.failed", "dlq.new"];
+    const eventTypes = ["run.started", "run.completed", "run.failed", "step.started", "step.completed", "step.failed", "dlq.new"];
 
     for (const eventType of eventTypes) {
       es.addEventListener(eventType, (e: MessageEvent) => {
@@ -109,10 +128,32 @@ export function useEventStream() {
     };
   }, [addEvent]);
 
+  // Track mock mode changes from the API client
   useEffect(() => {
+    const unsub = api.onMockChange((mock) => {
+      mockModeRef.current = mock;
+      if (mock) {
+        // If switching to mock mode, close any active connection
+        if (esRef.current) {
+          esRef.current.close();
+          esRef.current = null;
+        }
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        setStatus("disconnected");
+      }
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    unmountedRef.current = false;
     connect();
 
     return () => {
+      unmountedRef.current = true;
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -121,7 +162,6 @@ export function useEventStream() {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      setStatus("disconnected");
     };
   }, [connect]);
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { X, Play, FileText, FormInput, Braces } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -33,9 +33,12 @@ const MODE_OPTIONS: { value: InputMode; label: string; icon: typeof FileText }[]
 ];
 
 export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onRun }: RunWorkflowModalProps) {
-  const fields = inputSchema?.properties ? Object.entries(inputSchema.properties) : [];
+  const fields = useMemo(
+    () => inputSchema?.properties ? Object.entries(inputSchema.properties) : [],
+    [inputSchema?.properties]
+  );
   const hasSchema = fields.length > 0;
-  const requiredFields = new Set(inputSchema?.required || []);
+  const requiredFields = useMemo(() => new Set(inputSchema?.required || []), [inputSchema?.required]);
 
   const [mode, setMode] = useState<InputMode>(hasSchema ? "form" : "text");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
@@ -58,6 +61,33 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
   const [inputJson, setInputJson] = useState("{}");
   const [inputText, setInputText] = useState("");
   const [callbackUrl, setCallbackUrl] = useState("");
+  const prevOpenRef = useRef(false);
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (open && !prevOpenRef.current) {
+      setMode(hasSchema ? "form" : "text");
+      const init: Record<string, string> = {};
+      for (const [key, prop] of fields) {
+        if (prop.default != null) {
+          if (typeof prop.default === "boolean") {
+            init[key] = prop.default ? "true" : "false";
+          } else {
+            init[key] = String(prop.default);
+          }
+        } else if (prop.type === "boolean") {
+          init[key] = "false";
+        } else {
+          init[key] = "";
+        }
+      }
+      setFieldValues(init);
+      setInputJson("{}");
+      setInputText("");
+      setCallbackUrl("");
+    }
+    prevOpenRef.current = open;
+  }, [open, hasSchema, fields]);
 
   if (!open) return null;
 
@@ -82,7 +112,8 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
       try {
         parsed = JSON.parse(inputJson);
       } catch {
-        // default empty
+        toast.error("Invalid JSON input");
+        return;
       }
     }
     onRun(parsed, callbackUrl || undefined);

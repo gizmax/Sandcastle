@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown } from "lucide-react";
 import { toast } from "sonner";
@@ -41,6 +41,9 @@ interface RunDetail {
   parent_run_id: string | null;
   replay_from_step: string | null;
   fork_changes: Record<string, unknown> | null;
+  depth: number;
+  sub_workflow_of_step: string | null;
+  sub_runs: { run_id: string; workflow_name: string; status: string; sub_workflow_of_step: string | null }[] | null;
 }
 
 export default function RunDetailPage() {
@@ -77,18 +80,22 @@ export default function RunDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    setLoading(true);
+    setRun(null);
+    setError(null);
     void fetchRun();
   }, [fetchRun]);
 
-  // Poll while running
   useEffect(() => {
     if (!run || !["running", "queued"].includes(run.status)) return;
-    const interval = setInterval(fetchRun, 3000);
+    const interval = setInterval(fetchRun, 5000);
     return () => clearInterval(interval);
-  }, [run, fetchRun]);
+  }, [run?.status, fetchRun]);
 
+  const cancellingRef = useRef(false);
   const handleCancel = useCallback(async () => {
-    if (!id || cancelling) return;
+    if (!id || cancellingRef.current) return;
+    cancellingRef.current = true;
     setCancelling(true);
     const res = await api.post(`/runs/${id}/cancel`);
     if (res.error) {
@@ -97,11 +104,14 @@ export default function RunDetailPage() {
       toast.success("Run cancelled");
       void fetchRun();
     }
+    cancellingRef.current = false;
     setCancelling(false);
-  }, [id, cancelling, fetchRun]);
+  }, [id, fetchRun]);
 
+  const deletingRef = useRef(false);
   const handleDelete = useCallback(async () => {
-    if (!id || deleting) return;
+    if (!id || deletingRef.current) return;
+    deletingRef.current = true;
     setDeleting(true);
     const res = await api.delete(`/runs/${id}`);
     if (res.error) {
@@ -110,9 +120,10 @@ export default function RunDetailPage() {
       toast.success("Run deleted");
       navigate("/runs");
     }
+    deletingRef.current = false;
     setDeleting(false);
     setDeleteConfirmOpen(false);
-  }, [id, deleting, navigate]);
+  }, [id, navigate]);
 
   // Filter out internal fields (prefixed with _) from outputs
   const filterOutputs = useCallback(
@@ -446,6 +457,7 @@ export default function RunDetailPage() {
         title="Delete Run"
         description={`Are you sure you want to delete run ${run.run_id.slice(0, 8)}...? This action cannot be undone.`}
         confirmLabel={deleting ? "Deleting..." : "Delete"}
+        confirmDisabled={deleting}
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setDeleteConfirmOpen(false)}

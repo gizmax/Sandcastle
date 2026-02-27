@@ -21,20 +21,20 @@ class WorkflowRunRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict, description="Input data for the workflow")
     callback_url: str | None = Field(None, description="Webhook URL for completion notification")
     idempotency_key: str | None = Field(None, description="Unique key to prevent duplicate runs")
-    max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run")
+    max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run", ge=0)
     version: int | str | None = Field(None, description="Workflow version (int, 'latest', or None)")
 
 
 class ReplayRequest(BaseModel):
     """Request to replay a run from a specific step."""
 
-    from_step: str = Field(..., description="Step ID to replay from")
+    from_step: str = Field(..., description="Step ID to replay from", min_length=1, max_length=100)
 
 
 class ForkRequest(BaseModel):
     """Request to fork a run from a specific step with overrides."""
 
-    from_step: str = Field(..., description="Step ID to fork from")
+    from_step: str = Field(..., description="Step ID to fork from", min_length=1, max_length=100)
     changes: dict[str, Any] = Field(
         default_factory=dict,
         description="Step overrides (e.g. prompt, model, max_turns)",
@@ -44,8 +44,8 @@ class ForkRequest(BaseModel):
 class ScheduleCreateRequest(BaseModel):
     """Request to create a scheduled workflow."""
 
-    workflow_name: str
-    cron_expression: str
+    workflow_name: str = Field(..., min_length=1, max_length=200)
+    cron_expression: str = Field(..., min_length=1, max_length=100)
     input_data: dict[str, Any] = Field(default_factory=dict)
     notify: dict[str, Any] | None = None
     enabled: bool = True
@@ -55,46 +55,46 @@ class ScheduleUpdateRequest(BaseModel):
     """Request to update a schedule."""
 
     enabled: bool | None = None
-    cron_expression: str | None = None
+    cron_expression: str | None = Field(None, max_length=100)
     input_data: dict[str, Any] | None = None
 
 
 class WorkflowGenerateRequest(BaseModel):
     """Request to generate a workflow from natural language."""
 
-    description: str = Field(..., description="Natural language description of the workflow")
+    description: str = Field(..., description="Natural language description of the workflow", min_length=1, max_length=10000)
     refine_from: str | None = Field(None, description="Existing YAML to refine")
-    refine_instruction: str | None = Field(None, description="What to change in the existing YAML")
+    refine_instruction: str | None = Field(None, description="What to change in the existing YAML", max_length=10000)
 
 
 class GenerateChatMessage(BaseModel):
     """A single message in a chat-based generation conversation."""
 
-    role: str = Field(..., description="Message role: 'user' or 'assistant'")
-    content: str = Field(..., description="Message content")
+    role: str = Field(..., description="Message role: 'user' or 'assistant'", pattern="^(user|assistant)$")
+    content: str = Field(..., description="Message content", min_length=1)
 
 
 class GenerateChatRequest(BaseModel):
     """Request for chat-based workflow generation."""
 
-    messages: list[GenerateChatMessage] = Field(..., description="Conversation history")
+    messages: list[GenerateChatMessage] = Field(..., description="Conversation history", min_length=1)
     existing_yaml: str | None = Field(None, description="Existing workflow YAML for edit mode")
 
 
 class WorkflowSaveRequest(BaseModel):
     """Request to save a workflow YAML file."""
 
-    name: str = Field(..., description="Workflow file name (without .yaml extension)")
-    content: str = Field(..., description="Workflow YAML content")
-    description: str = Field("", description="Version description")
+    name: str = Field(..., description="Workflow file name (without .yaml extension)", min_length=1, max_length=200)
+    content: str = Field(..., description="Workflow YAML content", min_length=1)
+    description: str = Field("", description="Version description", max_length=1000)
 
 
 class ApiKeyCreateRequest(BaseModel):
     """Request to create a new API key."""
 
-    tenant_id: str | None = Field(None, description="Tenant scope. Null for admin keys.")
-    name: str = Field(..., description="Description for the key")
-    max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run")
+    tenant_id: str | None = Field(None, description="Tenant scope. Null for admin keys.", max_length=200)
+    name: str = Field(..., description="Description for the key", min_length=1, max_length=200)
+    max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run", ge=0)
 
 
 class ApiKeyRotateRequest(BaseModel):
@@ -445,6 +445,7 @@ class ExperimentResponse(BaseModel):
     created_at: datetime | None = None
     completed_at: datetime | None = None
     samples: list[dict[str, Any]] | None = None
+    rollout_stage: str | None = None
 
 
 class SampleResponse(BaseModel):

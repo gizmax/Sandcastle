@@ -88,7 +88,7 @@ from sandcastle.api.schemas import (
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.sandshore import SandshoreRuntime
+from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
     ApiKey,
@@ -147,12 +147,15 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
     """
     if schema is None:
         return []
+    if not isinstance(schema, dict):
+        return [f"input_schema must be a dict, got {type(schema).__name__}"]
 
     errors: list[str] = []
 
     # Check required fields
     for field_name in schema.get("required", []):
-        if field_name not in input_data or input_data[field_name] == "":
+        val = input_data.get(field_name)
+        if val is None or val == "":
             errors.append(f"Required input field '{field_name}' is missing or empty")
 
     # Type coercion based on properties
@@ -213,7 +216,14 @@ def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
     import re
 
-    workflows_dir = Path(settings.workflows_dir)
+    if not workflow_name or not workflow_name.strip():
+        raise ValueError("Workflow name must not be empty")
+
+    # Reject path traversal characters before any filesystem operation
+    if ".." in workflow_name or "/" in workflow_name or "\\" in workflow_name:
+        raise FileNotFoundError(f"Invalid workflow name: '{workflow_name}'")
+
+    workflows_dir = Path(settings.workflows_dir).resolve()
     # Slugified version: lowercase, non-alnum chars -> hyphens, collapse runs
     slug = re.sub(r"[^a-z0-9]+", "-", workflow_name.lower()).strip("-")
     # Try exact match, slugified match, then without extension
@@ -223,8 +233,12 @@ def _load_workflow_yaml(workflow_name: str) -> str:
         workflows_dir / workflow_name,
         workflows_dir / slug,
     ]:
-        if candidate.exists() and candidate.is_file():
-            return candidate.read_text()
+        resolved = candidate.resolve()
+        # Ensure the resolved path is within the workflows directory
+        if not resolved.is_relative_to(workflows_dir):
+            continue
+        if resolved.exists() and resolved.is_file():
+            return resolved.read_text()
     raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
 
 
@@ -410,16 +424,14 @@ def _extract_step_configs(yaml_content: str) -> dict[str, dict]:
 @router.get("/health")
 async def health_check() -> ApiResponse:
     """Check health of Sandcastle and its dependencies."""
-    runtime = SandshoreRuntime(
-        anthropic_api_key=settings.anthropic_api_key,
-        e2b_api_key=settings.e2b_api_key,
-        sandbox_backend=settings.sandbox_backend,
-        docker_image=settings.docker_image,
-        docker_url=settings.docker_url or None,
-        cloudflare_worker_url=settings.cloudflare_worker_url,
-    )
-    runtime_ok = await runtime.health()
-    await runtime.close()
+    try:
+        runtime = get_sandshore_runtime(
+            anthropic_api_key=settings.anthropic_api_key or "",
+            e2b_api_key=settings.e2b_api_key or "",
+        )
+        runtime_ok = await runtime.health()
+    except Exception:
+        runtime_ok = False
 
     # Check database
     db_ok = False
@@ -556,24 +568,49 @@ async def browse_directory(
     if not settings.is_local_mode:
         raise HTTPException(
             status_code=403,
-            detail="Directory browsing is only available in local mode",
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message="Directory browsing is only available in local mode",
+                )
+            ).model_dump(),
         )
 
     try:
         target = Path(path).expanduser().resolve()
     except (ValueError, OSError):
-        raise HTTPException(status_code=400, detail="Invalid path")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_PATH", message="Invalid path")
+            ).model_dump(),
+        )
 
     # Enforce sandbox root when configured
     if settings.sandbox_root:
         sandbox = Path(settings.sandbox_root).expanduser().resolve()
         if not target.is_relative_to(sandbox):
-            raise HTTPException(status_code=403, detail="Path outside sandbox root")
+            raise HTTPException(
+                status_code=403,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="FORBIDDEN", message="Path outside sandbox root")
+                ).model_dump(),
+            )
 
     if not target.exists():
-        raise HTTPException(status_code=404, detail="Path does not exist")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Path does not exist")
+            ).model_dump(),
+        )
     if not target.is_dir():
-        raise HTTPException(status_code=400, detail="Path is not a directory")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_PATH", message="Path is not a directory")
+            ).model_dump(),
+        )
 
     entries = []
     try:
@@ -589,7 +626,12 @@ async def browse_directory(
                 }
             )
     except PermissionError:
-        raise HTTPException(status_code=403, detail="Permission denied")
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(code="FORBIDDEN", message="Permission denied")
+            ).model_dump(),
+        )
 
     return ApiResponse(
         data={
@@ -639,7 +681,12 @@ async def get_template(template_name: str) -> ApiResponse:
     try:
         content, info = _get_template(template_name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=str(exc))
+            ).model_dump(),
+        ) from exc
 
     return ApiResponse(
         data={
@@ -740,7 +787,10 @@ async def hub_playground(request: Request) -> ApiResponse:
     Returns a mock result - no actual execution happens.
     Public endpoint - no authentication required.
     """
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
     template_slug = body.get("slug", "")
     inputs = body.get("inputs", {})
 
@@ -826,9 +876,25 @@ async def install_hub_template(slug: str) -> ApiResponse:
             ).model_dump(),
         )
 
+    # SSRF prevention: only allow downloads from trusted GitHub domains
+    from urllib.parse import urlparse
+
+    parsed_url = urlparse(download_url)
+    allowed_hosts = {"raw.githubusercontent.com", "github.com", "api.github.com"}
+    if parsed_url.hostname not in allowed_hosts:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UNTRUSTED_URL",
+                    message="Download URL must be from GitHub",
+                )
+            ).model_dump(),
+        )
+
     # Download the YAML content
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
             yaml_resp = await client.get(download_url)
             yaml_resp.raise_for_status()
             yaml_content = yaml_resp.text
@@ -939,7 +1005,12 @@ async def export_workflow(name: str, request: Request) -> ApiResponse:
         )
         wv = result.scalar_one_or_none()
         if not wv:
-            raise HTTPException(status_code=404, detail=f"Workflow '{name}' not found")
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Workflow '{name}' not found")
+                ).model_dump(),
+            )
 
     # Sanitize the YAML content
     sanitized = _sanitize_workflow_yaml(wv.yaml_content)
@@ -966,40 +1037,25 @@ async def get_stats(request: Request) -> ApiResponse:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     async with async_session() as session:
-        # Base filters
-        base = select(func.count(Run.id)).where(Run.created_at >= today_start)
-        base = _apply_tenant_filter(base, tenant_id, Run.tenant_id)
-
-        total_today = await session.scalar(base)
-
-        completed_q = select(func.count(Run.id)).where(
-            Run.created_at >= today_start,
-            Run.status == RunStatus.COMPLETED,
-        )
-        completed_q = _apply_tenant_filter(completed_q, tenant_id, Run.tenant_id)
-        completed_today = await session.scalar(completed_q)
-
-        finished_q = select(func.count(Run.id)).where(
-            Run.created_at >= today_start,
-            Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]),
-        )
-        finished_q = _apply_tenant_filter(finished_q, tenant_id, Run.tenant_id)
-        finished_today = await session.scalar(finished_q)
+        summary_q = select(
+            func.count(Run.id).label("total"),
+            func.count(func.case(
+                (Run.status == RunStatus.COMPLETED, Run.id),
+            )).label("completed"),
+            func.count(func.case(
+                (Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]), Run.id),
+            )).label("finished"),
+            func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
+            _duration_seconds_expr().label("avg_dur"),
+        ).where(Run.created_at >= today_start)
+        summary_q = _apply_tenant_filter(summary_q, tenant_id, Run.tenant_id)
+        row = (await session.execute(summary_q)).one()
+        total_today = row.total
+        completed_today = row.completed
+        finished_today = row.finished
         success_rate = (completed_today / finished_today) if finished_today else 0.0
-
-        cost_q = select(func.coalesce(func.sum(Run.total_cost_usd), 0.0)).where(
-            Run.created_at >= today_start
-        )
-        cost_q = _apply_tenant_filter(cost_q, tenant_id, Run.tenant_id)
-        total_cost = await session.scalar(cost_q)
-
-        dur_q = select(_duration_seconds_expr()).where(
-            Run.created_at >= today_start,
-            Run.completed_at.isnot(None),
-            Run.started_at.isnot(None),
-        )
-        dur_q = _apply_tenant_filter(dur_q, tenant_id, Run.tenant_id)
-        avg_duration = await session.scalar(dur_q)
+        total_cost = row.cost
+        avg_duration = row.avg_dur
 
         # Runs by day (last 30 days)
         thirty_days_ago = now - timedelta(days=30)
@@ -1093,11 +1149,11 @@ async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
             )
         )
     except Exception as exc:
-        logger.error(f"Generation failed: {exc}")
+        logger.error("Generation failed: %s", exc)
         return ApiResponse(
             error=ErrorResponse(
                 code="generation_failed",
-                message=str(exc),
+                message="Workflow generation failed",
             )
         )
 
@@ -1133,7 +1189,7 @@ async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
             existing_yaml=request.existing_yaml,
         )
     except httpx.HTTPStatusError as exc:
-        logger.error(f"Anthropic API error: {exc}")
+        logger.error("Anthropic API error: %s", exc)
         return ApiResponse(
             error=ErrorResponse(
                 code="upstream_error",
@@ -1141,11 +1197,11 @@ async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
             )
         )
     except Exception as exc:
-        logger.error(f"Chat generation failed: {exc}")
+        logger.error("Chat generation failed: %s", exc)
         return ApiResponse(
             error=ErrorResponse(
                 code="generation_failed",
-                message=str(exc),
+                message="Chat generation failed",
             )
         )
 
@@ -1166,20 +1222,26 @@ async def list_workflows() -> ApiResponse:
     version_info: dict[str, dict] = {}
     try:
         async with async_session() as session:
-            stmt = select(
-                WorkflowVersion.workflow_name,
-                WorkflowVersion.version,
-                WorkflowVersion.status,
-            ).order_by(WorkflowVersion.workflow_name, WorkflowVersion.version.desc())
-            rows = (await session.execute(stmt)).all()
+            count_stmt = (
+                select(
+                    WorkflowVersion.workflow_name,
+                    func.count(WorkflowVersion.id).label("total"),
+                    func.max(
+                        func.case(
+                            (WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+                             WorkflowVersion.version),
+                            else_=None,
+                        )
+                    ).label("prod_version"),
+                )
+                .group_by(WorkflowVersion.workflow_name)
+            )
+            rows = (await session.execute(count_stmt)).all()
             for row in rows:
-                name = row.workflow_name
-                if name not in version_info:
-                    version_info[name] = {"prod": None, "total": 0}
-                version_info[name]["total"] += 1
-                is_prod = row.status == WorkflowVersionStatus.PRODUCTION
-                if is_prod and version_info[name]["prod"] is None:
-                    version_info[name]["prod"] = row.version
+                version_info[row.workflow_name] = {
+                    "prod": row.prod_version,
+                    "total": row.total,
+                }
     except Exception:
         pass
 
@@ -1244,7 +1306,25 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
     workflows_dir = Path(settings.workflows_dir)
     workflows_dir.mkdir(parents=True, exist_ok=True)
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.name)
+    if not safe_name or safe_name.strip("_") == "":
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_NAME",
+                    message="Workflow name must contain at least one alphanumeric character",
+                )
+            ).model_dump(),
+        )
     file_path = workflows_dir / f"{safe_name}.yaml"
+    resolved_path = file_path.resolve()
+    if not resolved_path.is_relative_to(workflows_dir.resolve()):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
     file_path.write_text(request.content)
 
     # Create a draft version in the registry
@@ -1347,6 +1427,19 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             detail=ApiResponse(error=ErrorResponse(code="PLAN_ERROR", message=str(e))).model_dump(),
         )
 
+    # Validate callback_url if provided (SSRF prevention)
+    if request.callback_url:
+        try:
+            from sandcastle.webhooks.dispatcher import validate_callback_url
+            validate_callback_url(request.callback_url)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_CALLBACK_URL", message=str(e))
+                ).model_dump(),
+            )
+
     # Resolve budget
     budget = await _resolve_budget(request.max_cost_usd, tenant_id)
 
@@ -1417,6 +1510,39 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     except Exception:
         logger.warning("Could not update run in database")
 
+    # Dispatch webhooks (same as async path in worker)
+    try:
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        webhook_urls = []
+        if request.callback_url:
+            webhook_urls.append(request.callback_url)
+
+        if result.status == "completed":
+            if not request.callback_url and workflow.on_complete and workflow.on_complete.webhook:
+                webhook_urls.append(workflow.on_complete.webhook)
+        elif result.status not in ("awaiting_approval",):
+            if workflow.on_failure and workflow.on_failure.webhook:
+                webhook_urls.append(workflow.on_failure.webhook)
+
+        for webhook_url in webhook_urls:
+            duration = 0.0
+            if result.started_at and result.completed_at:
+                duration = (result.completed_at - result.started_at).total_seconds()
+            await dispatch_webhook(
+                url=webhook_url,
+                event="workflow.completed" if result.status == "completed" else "workflow.failed",
+                run_id=run_id,
+                workflow=workflow.name,
+                status=result.status,
+                outputs=result.outputs,
+                costs=result.total_cost_usd,
+                duration_seconds=duration,
+                error=result.error,
+            )
+    except Exception:
+        logger.warning("Could not dispatch webhook for sync run")
+
     return ApiResponse(
         data=RunStatusResponse(
             run_id=result.run_id,
@@ -1479,6 +1605,19 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
+    # Validate callback_url if provided (SSRF prevention)
+    if request.callback_url:
+        try:
+            from sandcastle.webhooks.dispatcher import validate_callback_url
+            validate_callback_url(request.callback_url)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_CALLBACK_URL", message=str(e))
+                ).model_dump(),
+            )
+
     # Resolve budget
     budget = await _resolve_budget(request.max_cost_usd, tenant_id)
 
@@ -1512,10 +1651,11 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             session.add(db_run)
             await session.commit()
     except Exception as e:
+        logger.error("Could not create run in database: %s", e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="DB_ERROR", message=f"Could not create run: {e}")
+                error=ErrorResponse(code="DB_ERROR", message="Could not create run")
             ).model_dump(),
         )
 
@@ -1533,12 +1673,13 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                     db_run.completed_at = datetime.now(timezone.utc)
                     await session.commit()
         except Exception:
-            logger.error(f"Could not clean up orphan run {run_id}")
+            logger.error("Could not clean up orphan run %s", run_id)
 
+        logger.error("Could not enqueue job for run %s: %s", run_id, e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue job: {e}")
+                error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue job")
             ).model_dump(),
         )
 
@@ -1563,7 +1704,12 @@ async def compare_runs(
         uuid_a = uuid.UUID(run_a)
         uuid_b = uuid.UUID(run_b)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid run ID format")
+            ).model_dump(),
+        )
 
     async with async_session() as session:
         stmt_a = select(Run).options(selectinload(Run.steps)).where(Run.id == uuid_a)
@@ -1824,7 +1970,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid run ID format")
+            ).model_dump(),
+        )
 
     async with async_session() as session:
         stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
@@ -1833,7 +1984,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         run = result.scalar_one_or_none()
 
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
 
     # Find the step
     step = next(
@@ -1841,7 +1997,12 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         None,
     )
     if not step:
-        raise HTTPException(status_code=404, detail=f"Step '{step_id}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Step '{step_id}' not found")
+            ).model_dump(),
+        )
 
     # Extract PDF artifact path from output_data
     pdf_path = None
@@ -1849,11 +2010,30 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         pdf_path = step.output_data.get("_pdf_artifact")
 
     if not pdf_path:
-        raise HTTPException(status_code=404, detail="No PDF artifact for this step")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="No PDF artifact for this step")
+            ).model_dump(),
+        )
 
-    file_path = Path(pdf_path)
+    file_path = Path(pdf_path).resolve()
+
+    # Prevent path traversal: PDF must be within the data directory
+    data_dir = Path(settings.data_dir).resolve()
+    if not file_path.is_relative_to(data_dir):
+        raise HTTPException(status_code=403, detail="PDF path outside data directory")
+
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="PDF file not found on disk")
+            ).model_dump(),
+        )
+
+    if not file_path.suffix.lower() == ".pdf":
+        raise HTTPException(status_code=400, detail="Artifact is not a PDF file")
 
     return FileResponse(
         path=str(file_path),
@@ -1870,19 +2050,29 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid run ID format")
+            ).model_dump(),
+        )
 
     # Verify the run belongs to the tenant before starting the stream
     async with async_session() as session:
         check_stmt = select(Run.id).where(Run.id == run_uuid)
         check_stmt = _apply_tenant_filter(check_stmt, tenant_id, Run.tenant_id)
         if not await session.scalar(check_stmt):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
 
     async def event_generator():
         """Poll the database and emit SSE events as status changes."""
         last_status = None
-        last_step_count = 0
+        seen_step_ids: set[tuple[str, int | None]] = set()
 
         for _ in range(600):  # Max 10 minutes of polling (1s intervals)
             async with async_session() as session:
@@ -1908,9 +2098,11 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 )
                 last_status = current_status
 
-            # Emit step update events
-            if len(run.steps) > last_step_count:
-                for step in run.steps[last_step_count:]:
+            # Emit step update events (keyed by step_id + parallel_index to avoid duplicates)
+            for step in run.steps:
+                key = (step.step_id, step.parallel_index)
+                if key not in seen_step_ids:
+                    seen_step_ids.add(key)
                     step_status = (
                         step.status.value if hasattr(step.status, "value") else step.status
                     )
@@ -1924,7 +2116,6 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                             "duration_seconds": step.duration_seconds,
                         },
                     )
-                last_step_count = len(run.steps)
 
             # Terminal states - emit final result and stop
             if current_status in (
@@ -1981,9 +2172,16 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     from sandcastle.engine.events import event_bus
 
     tenant_id = get_tenant_id(request)
-    queue = await event_bus.subscribe()
+    try:
+        queue = await event_bus.subscribe()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="Too many concurrent event stream connections",
+        )
 
-    # Cache of run_id -> tenant_id to avoid repeated DB lookups
+    # LRU cache of run_id -> tenant_id to avoid repeated DB lookups (bounded)
+    _TENANT_CACHE_MAX = 1000
     tenant_cache: dict[str, str | None] = {}
 
     async def _run_belongs_to_tenant(run_id: str) -> bool:
@@ -1996,6 +2194,10 @@ async def global_event_stream(request: Request) -> StreamingResponse:
             async with async_session() as session:
                 run = await session.get(Run, uuid.UUID(run_id))
                 run_tenant = run.tenant_id if run else None
+                # Evict oldest entries if cache grows too large
+                if len(tenant_cache) >= _TENANT_CACHE_MAX:
+                    oldest_key = next(iter(tenant_cache))
+                    del tenant_cache[oldest_key]
                 tenant_cache[run_id] = run_tenant
                 return run_tenant == tenant_id
         except Exception:
@@ -2148,14 +2350,16 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
 
         cancel_run_local(run_id)
 
-    # Update DB status
+    # Update DB status (re-check to avoid overwriting a just-completed run)
     async with async_session() as session:
         db_run = await session.get(Run, run_uuid)
         if db_run:
-            db_run.status = RunStatus.CANCELLED
-            db_run.completed_at = datetime.now(timezone.utc)
-            db_run.error = "Cancelled by user"
-            await session.commit()
+            current = db_run.status.value if hasattr(db_run.status, "value") else db_run.status
+            if current in ("queued", "running"):
+                db_run.status = RunStatus.CANCELLED
+                db_run.completed_at = datetime.now(timezone.utc)
+                db_run.error = "Cancelled by user"
+                await session.commit()
 
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
@@ -2349,7 +2553,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue replay: {e}")
+                error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue replay")
             ).model_dump(),
         )
 
@@ -2491,7 +2695,7 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue fork: {e}")
+                error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue fork")
             ).model_dump(),
         )
 
@@ -2577,7 +2781,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                         detail=ApiResponse(
                             error=ErrorResponse(
                                 code="SCHEDULER_ERROR",
-                                message=f"Could not register schedule: {exc}",
+                                message="Could not register schedule",
                             )
                         ).model_dump(),
                     ) from exc
@@ -2596,7 +2800,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                     detail=ApiResponse(
                         error=ErrorResponse(
                             code="DB_ERROR",
-                            message=f"Could not create schedule: {e}",
+                            message="Could not create schedule",
                         )
                     ).model_dump(),
                 ) from e
@@ -2608,7 +2812,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="DB_ERROR",
-                    message=f"Could not create schedule: {e}",
+                    message="Could not create schedule",
                 )
             ).model_dump(),
         ) from e
@@ -2744,7 +2948,7 @@ async def update_schedule(
                 detail=ApiResponse(
                     error=ErrorResponse(
                         code="SCHEDULER_ERROR",
-                        message=f"Failed to update scheduler: {exc}",
+                        message="Failed to update scheduler",
                     )
                 ).model_dump(),
             ) from exc
@@ -2770,7 +2974,7 @@ async def update_schedule(
                 detail=ApiResponse(
                     error=ErrorResponse(
                         code="DB_ERROR",
-                        message=f"Failed to commit schedule update: {exc}",
+                        message="Failed to commit schedule update",
                     )
                 ).model_dump(),
             ) from exc
@@ -2818,10 +3022,16 @@ async def delete_schedule(schedule_id: str, request: Request) -> ApiResponse:
                     )
                 ).model_dump(),
             )
+
+        # Remove from scheduler BEFORE deleting DB record to prevent
+        # orphaned scheduler jobs if DB delete fails.
+        try:
+            remove_schedule(schedule_id)
+        except Exception:
+            pass  # scheduler may not have the job if it was disabled
+
         await session.delete(schedule)
         await session.commit()
-
-    remove_schedule(schedule_id)
 
     return ApiResponse(data={"deleted": True, "id": schedule_id})
 
@@ -2960,11 +3170,11 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
         logger.info(f"DLQ retry: created new run {new_run_id} for item {item_id}")
 
     except Exception as e:
-        logger.error(f"DLQ retry failed for item {item_id}: {e}")
+        logger.error("DLQ retry failed for item %s: %s", item_id, e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="RETRY_ERROR", message=f"Could not retry: {e}")
+                error=ErrorResponse(code="RETRY_ERROR", message="Could not retry dead letter item")
             ).model_dump(),
         )
 
@@ -3464,13 +3674,17 @@ async def get_approval(approval_id: str, request: Request) -> ApiResponse:
     )
 
 
-async def _resolve_approval(
+async def _resolve_and_update_approval(
     approval_id: str,
     tenant_id: str | None,
-    action: str,
+    new_status: ApprovalStatus,
     request_body: ApprovalRespondRequest | None = None,
+    response_data: dict | None = None,
 ) -> ApprovalRequest:
-    """Shared logic for approve/reject/skip actions."""
+    """Atomically check pending status and update in a single session/transaction.
+
+    Prevents TOCTOU race where two clients resolve the same approval.
+    """
     try:
         approval_uuid = uuid.UUID(approval_id)
     except ValueError:
@@ -3481,6 +3695,8 @@ async def _resolve_approval(
             ).model_dump(),
         )
 
+    now = datetime.now(timezone.utc)
+
     async with async_session() as session:
         stmt = select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
         if settings.auth_required and tenant_id is not None:
@@ -3490,25 +3706,41 @@ async def _resolve_approval(
         result = await session.execute(stmt)
         approval = result.scalar_one_or_none()
 
-    if not approval:
-        raise HTTPException(
-            status_code=404,
-            detail=ApiResponse(
-                error=ErrorResponse(code="NOT_FOUND", message="Approval request not found")
-            ).model_dump(),
-        )
+        if not approval:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="Approval request not found")
+                ).model_dump(),
+            )
 
-    ap_status = approval.status.value if hasattr(approval.status, "value") else approval.status
-    if ap_status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="ALREADY_RESOLVED",
-                    message=f"Approval already resolved with status '{ap_status}'",
-                )
-            ).model_dump(),
-        )
+        ap_status = approval.status.value if hasattr(approval.status, "value") else approval.status
+        if ap_status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="ALREADY_RESOLVED",
+                        message=f"Approval already resolved with status '{ap_status}'",
+                    )
+                ).model_dump(),
+            )
+
+        approval.status = new_status
+        approval.resolved_at = now
+        if response_data is not None:
+            approval.response_data = response_data
+        if request_body and request_body.comment:
+            approval.reviewer_comment = request_body.comment
+
+        if new_status == ApprovalStatus.REJECTED:
+            run = await session.get(Run, approval.run_id)
+            if run:
+                run.status = RunStatus.FAILED
+                run.completed_at = now
+                run.error = f"Approval rejected at step '{approval.step_id}'"
+
+        await session.commit()
 
     return approval
 
@@ -3521,26 +3753,20 @@ async def approve_approval(
 ) -> ApiResponse:
     """Approve an approval gate and resume the workflow."""
     tenant_id = get_tenant_id(req)
-    approval = await _resolve_approval(approval_id, tenant_id, "approve", request)
 
-    now = datetime.now(timezone.utc)
-    response_data = approval.request_data  # Default: use original data
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.APPROVED, request,
+    )
 
-    # Apply edited data if allowed and provided
+    response_data = approval.request_data
     if request and request.edited_data and approval.allow_edit:
         response_data = request.edited_data
+        async with async_session() as session:
+            ap = await session.get(ApprovalRequest, approval.id)
+            if ap:
+                ap.response_data = response_data
+                await session.commit()
 
-    async with async_session() as session:
-        ap = await session.get(ApprovalRequest, approval.id)
-        if ap:
-            ap.status = ApprovalStatus.APPROVED
-            ap.resolved_at = now
-            ap.response_data = response_data
-            if request and request.comment:
-                ap.reviewer_comment = request.comment
-            await session.commit()
-
-    # Resume the workflow
     await _resume_after_approval(approval, output_data=response_data or {"approved": True})
 
     return ApiResponse(
@@ -3556,26 +3782,10 @@ async def reject_approval(
 ) -> ApiResponse:
     """Reject an approval gate and fail the workflow."""
     tenant_id = get_tenant_id(req)
-    approval = await _resolve_approval(approval_id, tenant_id, "reject", request)
 
-    now = datetime.now(timezone.utc)
-
-    async with async_session() as session:
-        ap = await session.get(ApprovalRequest, approval.id)
-        if ap:
-            ap.status = ApprovalStatus.REJECTED
-            ap.resolved_at = now
-            if request and request.comment:
-                ap.reviewer_comment = request.comment
-            await session.commit()
-
-        # Fail the run
-        run = await session.get(Run, approval.run_id)
-        if run:
-            run.status = RunStatus.FAILED
-            run.completed_at = now
-            run.error = f"Approval rejected at step '{approval.step_id}'"
-            await session.commit()
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.REJECTED, request,
+    )
 
     return ApiResponse(
         data={"rejected": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
@@ -3590,20 +3800,11 @@ async def skip_approval(
 ) -> ApiResponse:
     """Skip an approval gate and continue the workflow."""
     tenant_id = get_tenant_id(req)
-    approval = await _resolve_approval(approval_id, tenant_id, "skip", request)
 
-    now = datetime.now(timezone.utc)
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.SKIPPED, request,
+    )
 
-    async with async_session() as session:
-        ap = await session.get(ApprovalRequest, approval.id)
-        if ap:
-            ap.status = ApprovalStatus.SKIPPED
-            ap.resolved_at = now
-            if request and request.comment:
-                ap.reviewer_comment = request.comment
-            await session.commit()
-
-    # Resume with null output for skipped step
     await _resume_after_approval(approval, output_data=None)
 
     return ApiResponse(
@@ -3734,10 +3935,11 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
                 )
             )
     except Exception as e:
+        logger.error("Could not create API key: %s", e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="DB_ERROR", message=f"Could not create API key: {e}")
+                error=ErrorResponse(code="DB_ERROR", message="Could not create API key")
             ).model_dump(),
         )
 
@@ -4378,6 +4580,9 @@ _SENSITIVE_KEYS = frozenset(
     {
         "anthropic_api_key",
         "e2b_api_key",
+        "openai_api_key",
+        "minimax_api_key",
+        "openrouter_api_key",
         "database_url",
         "redis_url",
         "webhook_secret",
@@ -4389,6 +4594,9 @@ def _mask(value: str) -> str:
     """Mask a sensitive value, showing only the last 4 characters."""
     if not value:
         return ""
+    # Only show suffix for keys long enough that 4 chars don't reveal much
+    if len(value) < 12:
+        return "****"
     return "****" + value[-4:]
 
 

@@ -14,15 +14,16 @@ interface Violation {
   policy_id: string;
   severity: string;
   action_taken: string;
-  trigger_details: string;
+  trigger_details: string | null;
   output_modified: boolean;
-  created_at: string;
+  created_at: string | null;
 }
 
 interface ViolationStats {
   total_violations_30d: number;
   violations_by_severity: Record<string, number>;
   violations_by_policy: Record<string, number>;
+  violations_by_day: { date: string; count: number }[];
 }
 
 const SEVERITY_STYLES: Record<string, { bg: string; text: string; dot: string; label: string }> = {
@@ -232,7 +233,7 @@ export default function ViolationsPage() {
                   </span>
 
                   {/* Time + expand */}
-                  <span className="text-xs text-muted shrink-0">{formatRelativeTime(item.created_at)}</span>
+                  <span className="text-xs text-muted shrink-0">{item.created_at ? formatRelativeTime(item.created_at) : "-"}</span>
                   {isExpanded ? (
                     <ChevronUp className="h-4 w-4 text-muted shrink-0" />
                   ) : (

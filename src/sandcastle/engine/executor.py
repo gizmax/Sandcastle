@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import csv
 import dataclasses
 import json
@@ -70,6 +71,7 @@ class RunContext:
     _memory_config: Any = field(default=None, repr=False)
     _memory_scope_id: str = field(default="", repr=False)
     branch_skip_steps: set[str] = field(default_factory=set)
+    branch_run_steps: set[str] = field(default_factory=set)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item."""
@@ -86,6 +88,7 @@ class RunContext:
             _memory_config=self._memory_config,
             _memory_scope_id=self._memory_scope_id,
             branch_skip_steps=set(self.branch_skip_steps),
+            branch_run_steps=set(self.branch_run_steps),
         )
 
     @property
@@ -116,6 +119,9 @@ class WorkflowResult:
     completed_at: datetime | None = None
 
 
+_UNRESOLVED = object()
+
+
 def resolve_variable(var_path: str, context: RunContext) -> Any:
     """Resolve a dotted variable path against the run context.
 
@@ -125,37 +131,50 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
     - steps.STEP_ID.output.FIELD -> specific field
     - run_id -> current run UUID
     - date -> current ISO date
+
+    Returns _UNRESOLVED sentinel if the variable path cannot be resolved
+    (unknown path, missing step). Returns None if the variable resolved
+    but its value is None (e.g. skipped step output).
     """
+    if not var_path:
+        return _UNRESOLVED
+
     parts = var_path.split(".")
 
-    if parts[0] == "input":
-        obj = context.input
-        for part in parts[1:]:
+    def _traverse(obj: Any, path_parts: list[str]) -> Any:
+        for part in path_parts:
+            if obj is None:
+                return None
             if isinstance(obj, dict):
                 obj = obj.get(part)
             elif isinstance(obj, list):
-                obj = obj[int(part)]
+                try:
+                    idx = int(part)
+                except (ValueError, TypeError):
+                    return _UNRESOLVED
+                if idx < 0 or idx >= len(obj):
+                    return _UNRESOLVED
+                obj = obj[idx]
             else:
-                return None
+                return _UNRESOLVED
         return obj
+
+    if parts[0] == "input":
+        if len(parts) > 1 and parts[1] not in context.input:
+            return _UNRESOLVED
+        return _traverse(context.input, parts[1:])
 
     if parts[0] == "steps" and len(parts) >= 3:
         step_id = parts[1]
-        step_data = context.step_outputs.get(step_id)
-        if step_data is None:
-            return None
+        if step_id not in context.step_outputs:
+            return _UNRESOLVED
+        step_data = context.step_outputs[step_id]
         if parts[2] == "output":
             if len(parts) == 3:
                 return step_data
-            obj = step_data
-            for part in parts[3:]:
-                if isinstance(obj, dict):
-                    obj = obj.get(part)
-                elif isinstance(obj, list):
-                    obj = obj[int(part)]
-                else:
-                    return None
-            return obj
+            if step_data is None:
+                return None
+            return _traverse(step_data, parts[3:])
 
     if parts[0] == "memory":
         from sandcastle.engine.memory import format_memories_for_prompt
@@ -168,7 +187,7 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
     if var_path == "date":
         return datetime.now(timezone.utc).date().isoformat()
 
-    return None
+    return _UNRESOLVED
 
 
 def resolve_templates(
@@ -187,22 +206,23 @@ def resolve_templates(
     def _replace(match: re.Match) -> str:
         var_path = match.group(1)
         value = resolve_variable(var_path, context)
-        if value is None:
+        if value is _UNRESOLVED:
             logger.warning(f"Unresolved variable '{var_path}' in template, leaving placeholder")
             return match.group(0)
+        if value is None:
+            return "None"
         if isinstance(value, (dict, list)):
             return json.dumps(value)
         return str(value)
 
-    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date)\}", _replace, template)
+    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date|memory)\}", _replace, template)
 
     # Auto-inject unreferenced dependency outputs
     if depends_on:
         missing = [
             dep
             for dep in depends_on
-            if f"steps.{dep}." not in template
-            and f"steps.{dep}}}" not in template
+            if not re.search(r"\{steps\." + re.escape(dep) + r"[\.\}]", template)
             and dep in context.step_outputs
         ]
         if missing:
@@ -346,8 +366,8 @@ async def _save_checkpoint(
         logger.warning(f"Could not save checkpoint for step {step_id}: {e}")
 
 
-# Browser action cache for self-healing selectors
-_browser_action_cache: dict[str, list[dict]] = {}
+_browser_action_cache: collections.OrderedDict[str, list[dict]] = collections.OrderedDict()
+_BROWSER_CACHE_MAX = 500
 
 
 def _cache_key(url: str, intent: str) -> str:
@@ -355,26 +375,25 @@ def _cache_key(url: str, intent: str) -> str:
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
-    # Normalize to domain + path pattern
     return f"{parsed.netloc}{parsed.path}:{intent[:100]}"
 
 
 def _get_cached_actions(url: str, intent: str) -> list[dict] | None:
     """Get cached action sequence for a URL+intent pair."""
     key = _cache_key(url, intent)
-    return _browser_action_cache.get(key)
+    actions = _browser_action_cache.get(key)
+    if actions is not None:
+        _browser_action_cache.move_to_end(key)
+    return actions
 
 
 def _save_cached_actions(url: str, intent: str, actions: list[dict]) -> None:
     """Save successful action sequence to cache."""
     key = _cache_key(url, intent)
     _browser_action_cache[key] = actions
-    # Keep cache bounded
-    if len(_browser_action_cache) > 500:
-        # Remove oldest entries (first added)
-        oldest = list(_browser_action_cache.keys())[:100]
-        for k in oldest:
-            del _browser_action_cache[k]
+    _browser_action_cache.move_to_end(key)
+    while len(_browser_action_cache) > _BROWSER_CACHE_MAX:
+        _browser_action_cache.popitem(last=False)
 
 
 def _escape_js_string(text: str) -> str:
@@ -396,10 +415,17 @@ def _escape_js_string(text: str) -> str:
 
 # In-memory cancel flags for local mode (no Redis)
 _cancel_flags: set[str] = set()
+_MAX_CANCEL_FLAGS = 10000
 
 
 def cancel_run_local(run_id: str) -> None:
     """Set cancel flag in-memory (local mode without Redis)."""
+    if len(_cancel_flags) >= _MAX_CANCEL_FLAGS:
+        # Evict oldest half instead of clearing all, to preserve recent cancels
+        to_remove = list(_cancel_flags)[:len(_cancel_flags) // 2]
+        for flag in to_remove:
+            _cancel_flags.discard(flag)
+        logger.warning("Cancel flags set exceeded %d entries, evicted %d oldest", _MAX_CANCEL_FLAGS, len(to_remove))
     _cancel_flags.add(run_id)
 
 
@@ -522,6 +548,22 @@ def _write_csv_output(
     if cfg.mode == "append":
         filepath = directory / f"{base_name}.csv"
         file_exists = filepath.exists() and filepath.stat().st_size > 0
+        if file_exists:
+            # Read existing header and merge with new fieldnames to keep columns aligned
+            with open(filepath, "r", newline="", encoding="utf-8") as rf:
+                reader = csv.reader(rf)
+                existing_header = next(reader, None)
+            if existing_header:
+                for col in existing_header:
+                    if col not in seen:
+                        fieldnames.append(col)
+                        seen.add(col)
+                # Preserve existing column order: existing columns first, then new ones
+                merged = list(existing_header)
+                for col in fieldnames:
+                    if col not in existing_header:
+                        merged.append(col)
+                fieldnames = merged
         with open(filepath, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             if not file_exists:
@@ -757,6 +799,8 @@ async def execute_step_with_retry(
         {
             "run_id": context.run_id,
             "step_name": step.id,
+            "step_id": step.id,
+            "step_type": step.type,
             "workflow": context.workflow_name,
         },
     )
@@ -834,13 +878,18 @@ async def execute_step_with_retry(
                 model=step.model,
             )
 
-            # Broadcast step.completed event
+            # Broadcast step.completed event (truncate large outputs for event bus)
+            _evt_output = result.output
+            if isinstance(_evt_output, str) and len(_evt_output) > 4096:
+                _evt_output = _evt_output[:4096] + "...[truncated]"
             event_bus.publish(
                 "step.completed",
                 {
                     "run_id": context.run_id,
                     "step_name": step.id,
+                    "step_id": step.id,
                     "status": "completed",
+                    "output": _evt_output,
                     "cost_usd": result.cost_usd,
                     "duration_seconds": result.duration_seconds,
                 },
@@ -902,6 +951,7 @@ async def execute_step_with_retry(
                 {
                     "run_id": context.run_id,
                     "step_name": step.id,
+                    "step_id": step.id,
                     "error": result.error,
                 },
             )
@@ -1016,6 +1066,29 @@ def _is_cacheable_output(output: Any) -> bool:
             return False
 
     return True
+
+
+_MAX_STEP_OUTPUT_SIZE = 10 * 1024 * 1024  # 10MB per step output
+
+
+def _truncate_output(output: Any, max_size: int = _MAX_STEP_OUTPUT_SIZE) -> Any:
+    """Truncate step output if it exceeds the size limit."""
+    if output is None:
+        return output
+    try:
+        serialized = json.dumps(output, default=str) if not isinstance(output, str) else output
+    except (TypeError, ValueError):
+        serialized = str(output)
+    if len(serialized) <= max_size:
+        return output
+    logger.warning(
+        "Step output truncated: %d bytes > %d byte limit",
+        len(serialized),
+        max_size,
+    )
+    if isinstance(output, str):
+        return output[:max_size] + "\n...[TRUNCATED]"
+    return {"_truncated": True, "_original_size": len(serialized), "result": serialized[:max_size]}
 
 
 _FAILED_OUTPUT_KEYWORDS = [
@@ -1414,6 +1487,9 @@ async def _execute_step_once(
             except Exception as e:
                 logger.warning(f"Policy evaluation failed for step '{step.id}': {e}")
 
+        # Truncate oversized outputs to prevent memory exhaustion
+        output = _truncate_output(output)
+
         # Save to cache - skip empty, failed, or memory-injected outputs
         if not _step_reads_memory and _is_cacheable_output(output):
             await _save_to_cache(
@@ -1548,7 +1624,7 @@ async def _execute_approval_step(
     request_data = None
     if step.approval_config and step.approval_config.show_data:
         request_data_val = resolve_variable(step.approval_config.show_data, context)
-        if request_data_val is not None:
+        if request_data_val is not _UNRESOLVED and request_data_val is not None:
             if isinstance(request_data_val, dict):
                 request_data = request_data_val
             else:
@@ -1687,13 +1763,16 @@ async def _execute_sub_workflow_step(
     # Resolve input mapping
     sub_input = {}
     for target_key, source_path in step.sub_workflow.input_mapping.items():
-        sub_input[target_key] = resolve_variable(source_path, context)
+        val = resolve_variable(source_path, context)
+        sub_input[target_key] = None if val is _UNRESOLVED else val
 
     # Fan-out if parallel_over is configured
     if step.sub_workflow.parallel_over:
         sub_fan_path = step.sub_workflow.parallel_over.strip("{}")
         items = resolve_variable(sub_fan_path, context)
-        if not isinstance(items, list):
+        if items is _UNRESOLVED:
+            items = []
+        elif not isinstance(items, list):
             items = [items]
 
         semaphore = asyncio.Semaphore(step.sub_workflow.max_concurrent)
@@ -1918,6 +1997,39 @@ async def _execute_http_step(
 
     try:
         url = resolve_templates(cfg.url, context, step.depends_on)
+
+        # SSRF prevention for HTTP steps - block private/internal networks
+        try:
+            from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
+            from urllib.parse import urlparse as _urlparse
+            import ipaddress as _ipaddress
+            import socket as _socket
+            _parsed = _urlparse(url)
+            if _parsed.scheme not in ("https", "http"):
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=f"HTTP step URL must use http(s), got '{_parsed.scheme}'",
+                    duration_seconds=time.monotonic() - started_at,
+                )
+            if _parsed.hostname:
+                try:
+                    _resolved = _socket.getaddrinfo(_parsed.hostname, _parsed.port or 443)
+                    for _, _, _, _, _sockaddr in _resolved:
+                        _ip = _ipaddress.ip_address(_sockaddr[0])
+                        for _network in _BLOCKED_NETWORKS:
+                            if _ip in _network:
+                                return StepResult(
+                                    step_id=step.id,
+                                    status="failed",
+                                    error=f"HTTP step URL resolves to blocked network ({_ip})",
+                                    duration_seconds=time.monotonic() - started_at,
+                                )
+                except _socket.gaierror:
+                    pass  # DNS resolution failure - let httpx handle it naturally
+        except ImportError:
+            pass
+
         headers = {
             k: resolve_templates(v, context, step.depends_on) for k, v in cfg.headers.items()
         }
@@ -2087,11 +2199,18 @@ async def _execute_condition_step(
         }
         result = bool(eval(expression, eval_ns))  # noqa: S307
 
-        # Populate skip_steps based on result
+        # Populate skip/run steps. A step explicitly selected to run by
+        # ANY condition takes precedence over skips from other conditions.
         if result:
-            context.branch_skip_steps.update(cfg.else_steps)
+            skip_candidates = set(cfg.else_steps) - context.branch_run_steps
+            context.branch_skip_steps.update(skip_candidates)
+            context.branch_run_steps.update(cfg.then_steps)
+            context.branch_skip_steps -= set(cfg.then_steps)
         else:
-            context.branch_skip_steps.update(cfg.then_steps)
+            skip_candidates = set(cfg.then_steps) - context.branch_run_steps
+            context.branch_skip_steps.update(skip_candidates)
+            context.branch_run_steps.update(cfg.else_steps)
+            context.branch_skip_steps -= set(cfg.else_steps)
 
         duration = time.monotonic() - started_at
         return StepResult(
@@ -2209,10 +2328,14 @@ async def _execute_classify_step(
             )
             matched = cfg.categories[0]
 
-        # Skip non-matching branch steps
+        # Mark matched branch steps as run, skip non-matching branches
+        matched_steps = set(cfg.branches.get(matched, []))
+        context.branch_run_steps.update(matched_steps)
+        context.branch_skip_steps -= matched_steps
         for cat, branch_steps in cfg.branches.items():
             if cat != matched:
-                context.branch_skip_steps.update(branch_steps)
+                skip_candidates = set(branch_steps) - context.branch_run_steps
+                context.branch_skip_steps.update(skip_candidates)
 
         duration = time.monotonic() - started_at
         return StepResult(
@@ -2252,7 +2375,9 @@ async def _execute_loop_step(
         # Resolve the 'over' variable path
         over_path = cfg.over.strip("{}")
         items = resolve_variable(over_path, context)
-        if not isinstance(items, list):
+        if items is _UNRESOLVED:
+            items = []
+        elif not isinstance(items, list):
             items = [items]
 
         # Limit iterations
@@ -2473,6 +2598,39 @@ async def _execute_sensor_step(
 
     try:
         url = resolve_templates(cfg.url, context, step.depends_on)
+
+        # SSRF prevention for sensor steps - block private/internal networks
+        try:
+            from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
+            from urllib.parse import urlparse as _urlparse
+            import ipaddress as _ipaddress
+            import socket as _socket
+            _parsed = _urlparse(url)
+            if _parsed.scheme not in ("https", "http"):
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=f"Sensor step URL must use http(s), got '{_parsed.scheme}'",
+                    duration_seconds=time.monotonic() - started_at,
+                )
+            if _parsed.hostname:
+                try:
+                    _resolved = _socket.getaddrinfo(_parsed.hostname, _parsed.port or 443)
+                    for _, _, _, _, _sockaddr in _resolved:
+                        _ip = _ipaddress.ip_address(_sockaddr[0])
+                        for _network in _BLOCKED_NETWORKS:
+                            if _ip in _network:
+                                return StepResult(
+                                    step_id=step.id,
+                                    status="failed",
+                                    error=f"Sensor step URL resolves to blocked network ({_ip})",
+                                    duration_seconds=time.monotonic() - started_at,
+                                )
+                except _socket.gaierror:
+                    pass  # DNS resolution failure - let httpx handle it naturally
+        except ImportError:
+            pass
+
         headers = {
             k: resolve_templates(v, context, step.depends_on) for k, v in cfg.headers.items()
         }
@@ -2481,6 +2639,16 @@ async def _execute_sensor_step(
         max_interval = min(cfg.check_interval * 32, cfg.timeout / 4)
 
         while time.monotonic() < deadline:
+            # Check for cancellation between polls
+            if await _check_cancel(context.run_id):
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error="Run cancelled during sensor polling",
+                    duration_seconds=duration,
+                )
+
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.request(
@@ -2757,11 +2925,15 @@ async def _execute_transform_step(
                 var_path = parts[0].strip()
                 filter_name = parts[1].strip()
                 value = resolve_variable(var_path, context)
+                if value is _UNRESOLVED:
+                    return ""
                 if filter_name == "tojson":
                     return json.dumps(value) if value is not None else "null"
                 return str(value) if value is not None else ""
             else:
                 value = resolve_variable(expr, context)
+                if value is _UNRESOLVED:
+                    return ""
                 if isinstance(value, (dict, list)):
                     return json.dumps(value)
                 return str(value) if value is not None else ""
@@ -3211,7 +3383,6 @@ async def _browser_dom_mode(
     """
     import time
 
-    time.monotonic()
     logger.info("Browser DOM mode: %s -> %s", step.id, cfg.start_url)
 
     runtime = get_sandshore_runtime()
@@ -3849,9 +4020,11 @@ async def _prepare_and_run_step(
         await _execute_approval_step(step, context, 0)
         return  # WorkflowPaused raised above
 
-    # --- Hybrid step types ---
-    if step.type == "llm":
-        result = await _execute_llm_step(step, context, storage)
+    async def _handle_step_result(
+        result: StepResult,
+        *,
+        model: str | None = None,
+    ) -> None:
         context.costs.append(result.cost_usd)
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
@@ -3862,257 +4035,113 @@ async def _prepare_and_run_step(
                 output=result.output,
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
-                model=step.model,
+                model=model,
             )
         else:
-            raise StepExecutionError(f"LLM step '{step_id}' failed: {result.error}")
+            await _save_run_step(
+                run_id=context.run_id,
+                step_id=step.id,
+                status="failed",
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                error=result.error,
+                model=model,
+            )
+            on_fail = step.retry.on_failure if step.retry else "abort"
+            if use_dead_letter:
+                await _send_to_dead_letter(
+                    run_id=context.run_id,
+                    step_id=step_id,
+                    error=result.error,
+                    input_data=context.input,
+                    attempts=result.attempt,
+                )
+                context.step_outputs[step_id] = None
+            elif on_fail == "abort":
+                raise StepExecutionError(
+                    f"Step '{step_id}' failed: {result.error}"
+                )
+            else:
+                context.step_outputs[step_id] = None
+
+    # --- Hybrid step types ---
+    if step.type == "llm":
+        result = await _execute_llm_step(step, context, storage)
+        await _handle_step_result(result, model=step.model)
         return
 
     if step.type == "http":
         result = await _execute_http_step(step, context)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=0.0,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"HTTP step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "code":
         result = await _execute_code_step(step, context)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=0.0,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Code step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "condition":
         result = await _execute_condition_step(step, context)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=0.0,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Condition step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "classify":
         result = await _execute_classify_step(step, context, storage)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Classify step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "loop":
         result = await _execute_loop_step(
-            step,
-            context,
-            sandbox,
-            storage,
-            workflow,
-            depth,
+            step, context, sandbox, storage, workflow, depth,
         )
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Loop step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "race":
         result = await _execute_race_step(
-            step,
-            context,
-            sandbox,
-            storage,
-            workflow,
-            depth,
+            step, context, sandbox, storage, workflow, depth,
         )
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Race step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "sensor":
         result = await _execute_sensor_step(step, context)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=0.0,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Sensor step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "gate":
         result = await _execute_gate_step(step, context, storage)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Gate step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "transform":
         result = await _execute_transform_step(step, context)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=0.0,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Transform step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "notify":
         result = await _execute_notify_step(step, context)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=0.0,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Notify step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "delegate":
         result = await _execute_delegate_step(
-            step,
-            context,
-            storage,
-            depth=depth,
+            step, context, storage, depth=depth,
         )
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Delegate step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result)
         return
 
     if step.type == "browser":
         result = await _execute_browser_step(step, context, sandbox, storage)
-        context.costs.append(result.cost_usd)
-        if result.status == "completed":
-            context.step_outputs[step_id] = result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-                model=step.model,
-            )
-        else:
-            raise StepExecutionError(f"Browser step '{step_id}' failed: {result.error}")
+        await _handle_step_result(result, model=step.model)
         return
 
     # Sub-workflow
     if step.type == "sub_workflow":
         sub_result = await _execute_sub_workflow_step(
-            step,
-            context,
-            storage,
-            depth=depth,
+            step, context, storage, depth=depth,
         )
-        context.costs.append(sub_result.cost_usd)
-        if sub_result.status == "completed":
-            context.step_outputs[step_id] = sub_result.output
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                output=sub_result.output,
-                cost_usd=sub_result.cost_usd,
-                duration_seconds=sub_result.duration_seconds,
-            )
-        else:
-            raise StepExecutionError(f"Sub-workflow step '{step_id}' failed: {sub_result.error}")
+        await _handle_step_result(sub_result)
         return
 
     # Fan-out
@@ -4120,7 +4149,9 @@ async def _prepare_and_run_step(
         # Strip {braces} - parallel_over may come from YAML as "{steps.x.output.y}"
         fan_out_path = step.parallel_over.strip("{}")
         items = resolve_variable(fan_out_path, context)
-        if not isinstance(items, list):
+        if items is _UNRESOLVED:
+            items = []
+        elif not isinstance(items, list):
             items = [items]
 
         tasks = [
@@ -4392,6 +4423,24 @@ async def execute_workflow(
     # Dependency-based scheduler: start steps as soon as deps complete
     all_step_ids = [s.id for s in workflow.steps]
     step_deps = {s.id: set(s.depends_on) for s in workflow.steps}
+
+    # Add implicit deps: condition/classify branch steps must wait for
+    # the condition/classify step to complete before starting, even if
+    # the branch steps don't have an explicit depends_on for it.
+    for s in workflow.steps:
+        if s.type == "condition" and s.condition_config:
+            for branch_sid in s.condition_config.then_steps:
+                if branch_sid in step_deps:
+                    step_deps[branch_sid].add(s.id)
+            for branch_sid in s.condition_config.else_steps:
+                if branch_sid in step_deps:
+                    step_deps[branch_sid].add(s.id)
+        elif s.type == "classify" and s.classify_config:
+            for branch_steps in s.classify_config.branches.values():
+                for branch_sid in branch_steps:
+                    if branch_sid in step_deps:
+                        step_deps[branch_sid].add(s.id)
+
     done_steps: set[str] = set(skip_steps or ())
     running: dict[str, asyncio.Task] = {}
     checkpoint_counter = len(done_steps)
@@ -4408,15 +4457,18 @@ async def execute_workflow(
             and step_deps[sid].issubset(done_steps | context.branch_skip_steps)
         )
 
-    def _cancel_running() -> None:
+    async def _cancel_running() -> None:
         for t in running.values():
             t.cancel()
+        if running:
+            await asyncio.gather(*running.values(), return_exceptions=True)
+            running.clear()
 
     try:
         while True:
             # Cancel check
             if await _check_cancel(run_id):
-                _cancel_running()
+                await _cancel_running()
                 logger.info(f"Run {run_id} cancelled")
                 return WorkflowResult(
                     run_id=run_id,
@@ -4430,7 +4482,7 @@ async def execute_workflow(
             # Budget check
             budget_status = _check_budget(context)
             if budget_status == "exceeded":
-                _cancel_running()
+                await _cancel_running()
                 cost = context.total_cost
                 limit = context.max_cost_usd
                 logger.warning(f"Run {run_id} budget exceeded (${cost:.4f} / ${limit:.4f})")
@@ -4480,13 +4532,7 @@ async def execute_workflow(
 
                 exc = task.exception()
                 if exc is not None:
-                    _cancel_running()
-                    if running:
-                        await asyncio.gather(
-                            *running.values(),
-                            return_exceptions=True,
-                        )
-                        running.clear()
+                    await _cancel_running()
                     raise exc
 
                 done_steps.add(sid)

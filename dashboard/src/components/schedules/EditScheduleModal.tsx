@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { CronBuilder } from "@/components/schedules/CronBuilder";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,12 @@ interface EditScheduleModalProps {
 export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditScheduleModalProps) {
   const [cronExpression, setCronExpression] = useState(schedule.cron_expression);
   const [enabled, setEnabled] = useState(schedule.enabled);
+
+  // Re-sync state when a different schedule is loaded
+  useEffect(() => {
+    setCronExpression(schedule.cron_expression);
+    setEnabled(schedule.enabled);
+  }, [schedule.id, schedule.cron_expression, schedule.enabled]);
 
   if (!open) return null;
 

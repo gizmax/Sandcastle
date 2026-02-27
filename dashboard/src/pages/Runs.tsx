@@ -56,13 +56,11 @@ export default function Runs() {
 
   const handleBulkDelete = useCallback(async () => {
     setBulkProcessing(true);
-    let ok = 0;
-    let fail = 0;
-    for (const id of selectedIds) {
-      const res = await api.delete(`/runs/${id}`);
-      if (res.error) fail++;
-      else ok++;
-    }
+    const results = await Promise.allSettled(
+      Array.from(selectedIds).map((id) => api.delete(`/runs/${id}`))
+    );
+    const ok = results.filter((r) => r.status === "fulfilled" && !(r.value as { error?: unknown }).error).length;
+    const fail = results.length - ok;
     setBulkProcessing(false);
     setBulkAction(null);
     setSelectedIds(new Set());
@@ -73,13 +71,11 @@ export default function Runs() {
 
   const handleBulkCancel = useCallback(async () => {
     setBulkProcessing(true);
-    let ok = 0;
-    let fail = 0;
-    for (const id of selectedIds) {
-      const res = await api.post(`/runs/${id}/cancel`);
-      if (res.error) fail++;
-      else ok++;
-    }
+    const results = await Promise.allSettled(
+      Array.from(selectedIds).map((id) => api.post(`/runs/${id}/cancel`))
+    );
+    const ok = results.filter((r) => r.status === "fulfilled" && !(r.value as { error?: unknown }).error).length;
+    const fail = results.length - ok;
     setBulkProcessing(false);
     setBulkAction(null);
     setSelectedIds(new Set());
@@ -108,6 +104,7 @@ export default function Runs() {
               onClick={() => {
                 setStatusFilter(s);
                 setOffset(0);
+                setSelectedIds(new Set());
               }}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all duration-200",
@@ -139,6 +136,7 @@ export default function Runs() {
             onChange={(e) => {
               setWorkflowFilter(e.target.value);
               setOffset(0);
+              setSelectedIds(new Set());
             }}
             className={cn(
               "h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground",
@@ -223,9 +221,9 @@ export default function Runs() {
       ) : (
         <RunsTable
           runs={filteredRuns}
-          total={total}
+          total={searchTerm ? filteredRuns.length : total}
           limit={limit}
-          offset={offset}
+          offset={searchTerm ? 0 : offset}
           onPageChange={setOffset}
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
@@ -238,6 +236,7 @@ export default function Runs() {
         title="Delete Runs"
         description={`Delete ${selectedIds.size} selected run${selectedIds.size > 1 ? "s" : ""}? This cannot be undone.`}
         confirmLabel={bulkProcessing ? "Deleting..." : "Delete All"}
+        confirmDisabled={bulkProcessing}
         variant="danger"
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkAction(null)}
@@ -247,6 +246,7 @@ export default function Runs() {
         title="Cancel Runs"
         description={`Cancel ${selectedIds.size} selected run${selectedIds.size > 1 ? "s" : ""}?`}
         confirmLabel={bulkProcessing ? "Cancelling..." : "Cancel All"}
+        confirmDisabled={bulkProcessing}
         variant="warning"
         onConfirm={handleBulkCancel}
         onCancel={() => setBulkAction(null)}

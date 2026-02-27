@@ -273,8 +273,8 @@ if _dashboard_dir:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="Not found")
-        file = _dashboard_dir / path
-        if file.exists() and file.is_file() and ".." not in path:
+        file = (_dashboard_dir / path).resolve()
+        if file.is_relative_to(_dashboard_dir) and file.exists() and file.is_file():
             return FileResponse(file)
         return FileResponse(_dashboard_dir / "index.html")
 

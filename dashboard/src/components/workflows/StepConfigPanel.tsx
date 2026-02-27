@@ -79,7 +79,7 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
 
 export interface HttpStepConfig {
   url: string;

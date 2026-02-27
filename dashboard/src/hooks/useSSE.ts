@@ -56,19 +56,27 @@ export function useSSE(path: string | null) {
           buffer = lines.pop() || "";
 
           let currentEvent = "message";
+          let currentData = "";
           for (const line of lines) {
             if (line.startsWith("event: ")) {
               currentEvent = line.slice(7).trim();
             } else if (line.startsWith("data: ")) {
-              const raw = line.slice(6);
+              currentData += (currentData ? "\n" : "") + line.slice(6);
+            } else if (line.trim() === "" && currentData) {
+              // Blank line = dispatch accumulated event per SSE spec
               try {
-                const data = JSON.parse(raw);
+                const data = JSON.parse(currentData);
                 const eventType = currentEvent;
-                setEvents((prev) => [...prev, { event: eventType, data, timestamp: new Date() }]);
+                setEvents((prev) => {
+                  const updated = [...prev, { event: eventType, data, timestamp: new Date() }];
+                  if (updated.length > 500) return updated.slice(-500);
+                  return updated;
+                });
               } catch {
                 // Ignore parse errors
               }
               currentEvent = "message";
+              currentData = "";
             }
           }
         }

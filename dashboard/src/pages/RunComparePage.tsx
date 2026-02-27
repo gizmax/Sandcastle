@@ -103,7 +103,10 @@ export default function RunComparePage() {
     }
     try {
       const res = await api.get<CompareData>("/runs/compare", { run_a: runA, run_b: runB });
-      if (res.data) setData(res.data);
+      if (res.data) {
+        setData(res.data);
+        setError(null);
+      }
       if (res.error) setError(res.error.message);
     } finally {
       setLoading(false);
@@ -124,12 +127,21 @@ export default function RunComparePage() {
 
   if (error || !data) {
     return (
-      <div className="py-16">
-        <EmptyState
-          icon={GitCompareArrows}
-          title="Cannot compare runs"
-          description={error || "No comparison data available"}
-        />
+      <div className="space-y-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+        <div className="py-16">
+          <EmptyState
+            icon={GitCompareArrows}
+            title="Cannot compare runs"
+            description={error || "No comparison data available"}
+          />
+        </div>
       </div>
     );
   }

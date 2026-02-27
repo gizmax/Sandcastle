@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { formatRelativeTime, formatDuration, formatCost, parseUTC, cn } from "@/lib/utils";
@@ -27,12 +28,12 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
   const allSelected = selectable && runs.length > 0 && runs.every((r) => selectedIds?.has(r.run_id));
   const totalPages = Math.ceil(total / limit);
   const currentPage = Math.floor(offset / limit) + 1;
-  function getDuration(run: RunItem): string {
+  const getDuration = useCallback((run: RunItem): string => {
     if (!run.started_at) return "-";
     const start = parseUTC(run.started_at).getTime();
     const end = run.completed_at ? parseUTC(run.completed_at).getTime() : Date.now();
     return formatDuration((end - start) / 1000);
-  }
+  }, []);
 
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">

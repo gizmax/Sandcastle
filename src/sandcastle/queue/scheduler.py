@@ -114,8 +114,18 @@ async def _run_scheduled_workflow(
             schedule = await session.get(
                 Schedule, uuid.UUID(schedule_id)
             )
-            if schedule:
-                tenant_id = schedule.tenant_id
+            if not schedule:
+                logger.warning(
+                    f"Schedule '{schedule_id}' no longer exists in database, "
+                    "skipping execution"
+                )
+                return
+            if not schedule.enabled:
+                logger.info(
+                    f"Schedule '{schedule_id}' is disabled, skipping execution"
+                )
+                return
+            tenant_id = schedule.tenant_id
 
             # Resolve tenant budget from API key if available
             if tenant_id:
@@ -177,49 +187,75 @@ async def _check_approval_timeouts() -> None:
     now = datetime.now(timezone.utc)
 
     try:
+        # Fetch only IDs to avoid stale object references across sessions
         async with async_session() as session:
-            stmt = select(ApprovalRequest).where(
+            stmt = select(ApprovalRequest.id).where(
                 ApprovalRequest.status == ApprovalStatus.PENDING,
                 ApprovalRequest.timeout_at.isnot(None),
                 ApprovalRequest.timeout_at <= now,
             )
             result = await session.execute(stmt)
-            timed_out = result.scalars().all()
+            timed_out_ids = [row[0] for row in result.all()]
 
-        for approval in timed_out:
-            logger.info(
-                f"Approval {approval.id} for step '{approval.step_id}' timed out "
-                f"(on_timeout={approval.on_timeout})"
-            )
+        processed = 0
+        for approval_id in timed_out_ids:
+            try:
+                async with async_session() as session:
+                    # Re-fetch with fresh state to avoid TOCTOU race
+                    ap = await session.get(ApprovalRequest, approval_id)
+                    if not ap or ap.status != ApprovalStatus.PENDING:
+                        continue
 
-            async with async_session() as session:
-                ap = await session.get(ApprovalRequest, approval.id)
-                if not ap or ap.status != ApprovalStatus.PENDING:
-                    continue
+                    logger.info(
+                        f"Approval {ap.id} for step '{ap.step_id}' timed out "
+                        f"(on_timeout={ap.on_timeout})"
+                    )
 
-                ap.status = ApprovalStatus.TIMED_OUT
-                ap.resolved_at = now
+                    ap.status = ApprovalStatus.TIMED_OUT
+                    ap.resolved_at = now
 
-                if approval.on_timeout == "skip":
-                    # Skip the step and continue
-                    await session.commit()
-                    try:
-                        from sandcastle.api.routes import _resume_after_approval
+                    run = await session.get(Run, ap.run_id)
+                    if not run:
+                        logger.warning(
+                            f"Approval {ap.id} references non-existent run "
+                            f"{ap.run_id}, marking as timed out"
+                        )
+                        await session.commit()
+                        processed += 1
+                        continue
 
-                        await _resume_after_approval(approval, output_data=None)
-                    except Exception as e:
-                        logger.error(f"Failed to resume after timeout skip: {e}")
-                else:
-                    # Abort - fail the run
-                    run = await session.get(Run, approval.run_id)
-                    if run:
+                    run_status = run.status.value if hasattr(run.status, "value") else run.status
+                    if run_status in ("completed", "failed", "cancelled"):
+                        logger.info(
+                            f"Approval {ap.id} for already-finished run "
+                            f"(status={run_status}), marking as timed out only"
+                        )
+                        await session.commit()
+                        processed += 1
+                        continue
+
+                    on_timeout = ap.on_timeout
+                    if on_timeout == "skip":
+                        await session.commit()
+                        try:
+                            from sandcastle.api.routes import _resume_after_approval
+
+                            await _resume_after_approval(ap, output_data=None)
+                        except Exception as e:
+                            logger.error(f"Failed to resume after timeout skip: {e}")
+                    else:
                         run.status = RunStatus.FAILED
                         run.completed_at = now
-                        run.error = f"Approval timed out at step '{approval.step_id}'"
-                    await session.commit()
+                        run.error = f"Approval timed out at step '{ap.step_id}'"
+                        await session.commit()
 
-        if timed_out:
-            logger.info(f"Processed {len(timed_out)} timed-out approval(s)")
+                    processed += 1
+
+            except Exception as e:
+                logger.error(f"Error processing approval timeout {approval_id}: {e}")
+
+        if processed:
+            logger.info(f"Processed {processed} timed-out approval(s)")
 
     except Exception as e:
         logger.error(f"Error checking approval timeouts: {e}")
@@ -232,9 +268,17 @@ def add_schedule(
     input_data: dict | None = None,
 ) -> None:
     """Register a cron job for a workflow schedule."""
+    if not cron_expression or not cron_expression.strip():
+        raise ValueError("cron_expression must not be empty")
+    if not workflow_name or not workflow_name.strip():
+        raise ValueError("workflow_name must not be empty")
+
     scheduler = get_scheduler()
 
-    trigger = CronTrigger.from_crontab(cron_expression)
+    try:
+        trigger = CronTrigger.from_crontab(cron_expression)
+    except ValueError as e:
+        raise ValueError(f"Invalid cron expression '{cron_expression}': {e}")
 
     scheduler.add_job(
         _run_scheduled_workflow,

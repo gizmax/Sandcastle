@@ -112,21 +112,23 @@ export default function SystemHealthPage() {
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      const [healthRes, runtimeRes, statsRes, workflowsRes, templatesRes, keysRes] =
+      const [healthRes, runtimeRes, statsRes] =
         await Promise.all([
           api.get<HealthData>("/health"),
           api.get<RuntimeData>("/runtime"),
           api.get<StatsData>("/stats"),
-          api.get<{ name: string }[]>("/workflows"),
-          api.get<{ id: string }[]>("/templates"),
-          api.get<{ id: string }[]>("/api-keys"),
         ]);
 
       if (healthRes.data) setHealth(healthRes.data);
       if (runtimeRes.data) setRuntime(runtimeRes.data);
 
-      // Build quick stats from individual endpoints
       const runs = (statsRes.data as StatsData | null)?.total_runs_today ?? 0;
+
+      const [workflowsRes, templatesRes, keysRes] = await Promise.all([
+        api.get<{ name: string }[]>("/workflows"),
+        api.get<{ id: string }[]>("/templates"),
+        api.get<{ id: string }[]>("/api-keys"),
+      ]);
       const workflows = Array.isArray(workflowsRes.data) ? workflowsRes.data.length : 0;
       const templates = Array.isArray(templatesRes.data) ? templatesRes.data.length : 0;
       const apiKeys = Array.isArray(keysRes.data) ? keysRes.data.length : 0;

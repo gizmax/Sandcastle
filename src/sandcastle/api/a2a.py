@@ -25,7 +25,6 @@ from sandcastle import __version__
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.sandshore import SandshoreRuntime
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import Run, RunStatus, async_session
 
@@ -275,23 +274,21 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
             session.add(db_run)
             await session.commit()
     except Exception as e:
+        logger.error("A2A tasks/send DB error: %s", e)
         return _build_task_response(
-            task_id, "failed", error=f"DB error: {e}"
+            task_id, "failed", error="Failed to create task"
         )
 
     # Execute the workflow
     storage = create_storage()
     try:
-        runtime = SandshoreRuntime()
         result = await execute_workflow(
-            plan=plan,
             workflow=workflow,
+            plan=plan,
             input_data=workflow_input,
             run_id=run_id,
-            runtime=runtime,
             storage=storage,
         )
-        await runtime.close()
     except Exception as e:
         # Update run as failed
         async with async_session() as session:
@@ -312,7 +309,7 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
         "run_id": run_id,
         "status": result.status,
         "total_cost_usd": result.total_cost_usd,
-        "outputs": result.step_outputs,
+        "outputs": result.outputs,
     }
     a2a_state = _map_status(result.status)
     return _build_task_response(run_id, a2a_state, output_data=output)
@@ -454,6 +451,6 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
     try:
         result = await handler(params)
         return _jsonrpc_result(req_id, result)
-    except Exception as e:
+    except Exception:
         logger.exception("A2A handler error for method=%s", method)
-        return _jsonrpc_error(req_id, -32603, f"Internal error: {e}")
+        return _jsonrpc_error(req_id, -32603, "Internal error")

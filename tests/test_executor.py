@@ -18,6 +18,7 @@ from sandcastle.engine.dag import (
 )
 from sandcastle.engine.executor import (
     RunContext,
+    _UNRESOLVED,
     _write_csv_output,
     execute_step_with_retry,
     execute_workflow,
@@ -107,15 +108,15 @@ class TestResolveVariable:
 
     def test_missing_input(self):
         ctx = make_context(input={})
-        assert resolve_variable("input.nonexistent", ctx) is None
+        assert resolve_variable("input.nonexistent", ctx) is _UNRESOLVED
 
     def test_missing_step(self):
         ctx = make_context()
-        assert resolve_variable("steps.missing.output", ctx) is None
+        assert resolve_variable("steps.missing.output", ctx) is _UNRESOLVED
 
     def test_unknown_variable(self):
         ctx = make_context()
-        assert resolve_variable("unknown.path", ctx) is None
+        assert resolve_variable("unknown.path", ctx) is _UNRESOLVED
 
 
 # --- Tests: resolve_templates ---

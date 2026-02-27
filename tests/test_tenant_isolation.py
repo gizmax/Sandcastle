@@ -124,7 +124,13 @@ class TestBrowseSandboxRoot:
             settings.sandbox_root = sandbox
             response = client.get("/api/browse", params={"path": "/tmp"})
             assert response.status_code == 403
-            assert "outside sandbox root" in response.json()["detail"]
+            body = response.json()
+            detail = body.get("detail", "")
+            if isinstance(detail, dict):
+                detail = str(detail)
+            err_msg = body.get("error", {}).get("message", "") if isinstance(body.get("error"), dict) else ""
+            combined = f"{detail} {err_msg}".lower()
+            assert "outside sandbox root" in combined or "path outside sandbox" in combined
 
     def test_browse_allows_path_inside_sandbox(self):
         """Browse with sandbox_root set should allow paths inside the root."""

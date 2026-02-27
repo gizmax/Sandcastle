@@ -27,6 +27,8 @@ interface MockStep {
   duration_seconds: number;
   attempt: number;
   error: string | null;
+  started_at?: string | null;
+  pdf_artifact?: boolean;
 }
 
 const now = new Date();
@@ -34,24 +36,24 @@ const h = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * 3600000).toI
 const d = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86400000).toISOString().slice(0, 10);
 
 const MOCK_RUNS = [
-  { run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.84, started_at: h(0.5), completed_at: h(0.45) },
-  { run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", status: "running", total_cost_usd: 0.67, started_at: h(0.1), completed_at: null },
-  { run_id: "a1b2c3d4-3333-4000-8000-000000000003", workflow_name: "seo-audit", status: "completed", total_cost_usd: 1.23, started_at: h(2), completed_at: h(1.9) },
-  { run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", status: "failed", total_cost_usd: 0.41, started_at: h(5), completed_at: h(4.95) },
-  { run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.72, started_at: h(8), completed_at: h(7.9) },
-  { run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", status: "completed", total_cost_usd: 1.35, started_at: h(12), completed_at: h(11.8) },
-  { run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.98, started_at: h(18), completed_at: h(17.9) },
-  { run_id: "a1b2c3d4-8888-4000-8000-000000000008", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 2.16, started_at: h(24), completed_at: h(23.8) },
-  { run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", status: "failed", total_cost_usd: 0.29, started_at: h(30), completed_at: h(29.9) },
-  { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.87, started_at: h(36), completed_at: h(35.8) },
-  { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.54, started_at: h(48), completed_at: h(47.5) },
-  { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.97, started_at: h(60), completed_at: h(59.8) },
+  { run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.84, started_at: h(0.5), completed_at: h(0.45), parent_run_id: null },
+  { run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", status: "running", total_cost_usd: 0.67, started_at: h(0.1), completed_at: null, parent_run_id: null },
+  { run_id: "a1b2c3d4-3333-4000-8000-000000000003", workflow_name: "seo-audit", status: "completed", total_cost_usd: 1.23, started_at: h(2), completed_at: h(1.9), parent_run_id: "a1b2c3d4-1111-4000-8000-000000000001" },
+  { run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", status: "failed", total_cost_usd: 0.41, started_at: h(5), completed_at: h(4.95), parent_run_id: null },
+  { run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.72, started_at: h(8), completed_at: h(7.9), parent_run_id: null },
+  { run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", status: "completed", total_cost_usd: 1.35, started_at: h(12), completed_at: h(11.8), parent_run_id: null },
+  { run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.98, started_at: h(18), completed_at: h(17.9), parent_run_id: null },
+  { run_id: "a1b2c3d4-8888-4000-8000-000000000008", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 2.16, started_at: h(24), completed_at: h(23.8), parent_run_id: null },
+  { run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", status: "failed", total_cost_usd: 0.29, started_at: h(30), completed_at: h(29.9), parent_run_id: null },
+  { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.87, started_at: h(36), completed_at: h(35.8), parent_run_id: null },
+  { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.54, started_at: h(48), completed_at: h(47.5), parent_run_id: null },
+  { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.97, started_at: h(60), completed_at: h(59.8), parent_run_id: null },
 ];
 
 const MOCK_STEPS: MockStep[] = [
-  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null },
-  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null },
-  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null },
+  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null, started_at: h(0.5), pdf_artifact: false },
+  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null, started_at: h(0.49), pdf_artifact: false },
+  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null, started_at: h(0.48), pdf_artifact: false },
 ];
 
 const MOCK_STEPS_RUNNING: MockStep[] = [
@@ -92,6 +94,9 @@ function getRunDetail(runId: string) {
     parent_run_id: parentRunId,
     replay_from_step: replayFromStep,
     fork_changes: null,
+    depth: 0,
+    sub_workflow_of_step: null,
+    sub_runs: null,
   };
 }
 
@@ -171,20 +176,20 @@ const MOCK_WORKFLOWS = [
 ];
 
 const MOCK_SCHEDULES = [
-  { id: "sch-001", workflow_name: "competitor-monitor", cron_expression: "0 */6 * * *", enabled: true, last_run_id: "a1b2c3d4-6666-4000-8000-000000000006", created_at: h(168) },
-  { id: "sch-002", workflow_name: "lead-enrichment", cron_expression: "0 8 * * 1-5", enabled: true, last_run_id: "a1b2c3d4-1111-4000-8000-000000000001", created_at: h(240) },
-  { id: "sch-003", workflow_name: "seo-audit", cron_expression: "0 0 * * 0", enabled: false, last_run_id: null, created_at: h(48) },
+  { id: "sch-001", workflow_name: "competitor-monitor", cron_expression: "0 */6 * * *", input_data: {}, enabled: true, last_run_id: "a1b2c3d4-6666-4000-8000-000000000006", created_at: h(168) },
+  { id: "sch-002", workflow_name: "lead-enrichment", cron_expression: "0 8 * * 1-5", input_data: { company_url: "https://example.com" }, enabled: true, last_run_id: "a1b2c3d4-1111-4000-8000-000000000001", created_at: h(240) },
+  { id: "sch-003", workflow_name: "seo-audit", cron_expression: "0 0 * * 0", input_data: {}, enabled: false, last_run_id: null, created_at: h(48) },
 ];
 
 const MOCK_API_KEYS = [
-  { id: "key-001", key_prefix: "sc_live_abc1", tenant_id: "acme-corp", name: "Production API", created_at: h(720), last_used_at: h(0.3) },
-  { id: "key-002", key_prefix: "sc_live_def2", tenant_id: "acme-corp", name: "Staging API", created_at: h(480), last_used_at: h(12) },
-  { id: "key-003", key_prefix: "sc_test_ghi3", tenant_id: "beta-inc", name: "Development", created_at: h(168), last_used_at: null },
+  { id: "key-001", key_prefix: "sc_live_abc1", tenant_id: "acme-corp", name: "Production API", is_active: true, created_at: h(720), last_used_at: h(0.3) },
+  { id: "key-002", key_prefix: "sc_live_def2", tenant_id: "acme-corp", name: "Staging API", is_active: true, created_at: h(480), last_used_at: h(12) },
+  { id: "key-003", key_prefix: "sc_test_ghi3", tenant_id: "beta-inc", name: "Development", is_active: true, created_at: h(168), last_used_at: null },
 ];
 
 const MOCK_DLQ = [
-  { id: "dlq-001", run_id: "a1b2c3d4-4444-4000-8000-000000000004", step_id: "enrich", error: "Timeout after 300s - external API unreachable", attempts: 3, created_at: h(5), resolved_at: null, resolved_by: null },
-  { id: "dlq-002", run_id: "a1b2c3d4-9999-4000-8000-000000000009", step_id: "analyze", error: "Rate limit exceeded (429) - retry after 60s", attempts: 3, created_at: h(30), resolved_at: null, resolved_by: null },
+  { id: "dlq-001", run_id: "a1b2c3d4-4444-4000-8000-000000000004", step_id: "enrich", parallel_index: null, error: "Timeout after 300s - external API unreachable", input_data: null, attempts: 3, created_at: h(5), resolved_at: null, resolved_by: null },
+  { id: "dlq-002", run_id: "a1b2c3d4-9999-4000-8000-000000000009", step_id: "analyze", parallel_index: null, error: "Rate limit exceeded (429) - retry after 60s", input_data: null, attempts: 3, created_at: h(30), resolved_at: null, resolved_by: null },
 ];
 
 const MOCK_APPROVALS = [
@@ -570,6 +575,7 @@ const MOCK_AUTOPILOT_EXPERIMENTS = [
 const MOCK_AUTOPILOT_STATS = {
   total_experiments: 3,
   active_experiments: 2,
+  deploying_experiments: 0,
   completed_experiments: 1,
   total_samples: 32,
   avg_quality_improvement: 0.18,
@@ -661,6 +667,7 @@ const MOCK_OPTIMIZER_DECISIONS = [
     run_id: "a1b2c3d4-1111-4000-8000-000000000001",
     step_id: "enrich",
     selected_model: "sonnet",
+    selected_variant_id: "sonnet-v1",
     confidence: 0.92,
     reason: "High complexity step with structured output requirements. Sonnet provides best quality-cost ratio for data enrichment tasks.",
     budget_pressure: 0.3,
@@ -677,6 +684,7 @@ const MOCK_OPTIMIZER_DECISIONS = [
     run_id: "a1b2c3d4-2222-4000-8000-000000000002",
     step_id: "fetch-competitors",
     selected_model: "haiku",
+    selected_variant_id: "haiku-v1",
     confidence: 0.88,
     reason: "Simple data retrieval step. Haiku sufficient for structured extraction with minimal reasoning.",
     budget_pressure: 0.1,
@@ -692,6 +700,7 @@ const MOCK_OPTIMIZER_DECISIONS = [
     run_id: "a1b2c3d4-3333-4000-8000-000000000003",
     step_id: "recommendations",
     selected_model: "opus",
+    selected_variant_id: "opus-v1",
     confidence: 0.45,
     reason: "Complex reasoning required for actionable SEO recommendations. Low confidence due to limited historical data for this step type.",
     budget_pressure: 0.92,
@@ -708,9 +717,10 @@ const MOCK_OPTIMIZER_DECISIONS = [
     run_id: "a1b2c3d4-5555-4000-8000-000000000005",
     step_id: "score",
     selected_model: "haiku",
+    selected_variant_id: "haiku-v1",
     confidence: 0.78,
     reason: "Lead scoring uses a fixed rubric. Haiku handles structured scoring well within quality SLO.",
-    budget_pressure: null,
+    budget_pressure: 0.0,
     alternatives: [
       { id: "haiku-v1", model: "haiku", avg_quality: 0.78, avg_cost: 0.02 },
       { id: "sonnet-v1", model: "sonnet", avg_quality: 0.65, avg_cost: 0.08 },
@@ -723,6 +733,7 @@ const MOCK_OPTIMIZER_DECISIONS = [
     run_id: "a1b2c3d4-6666-4000-8000-000000000006",
     step_id: "analyze",
     selected_model: "sonnet",
+    selected_variant_id: "sonnet-v1",
     confidence: 0.85,
     reason: "Competitor analysis requires nuanced comparison. Sonnet selected as best balance under current budget pressure.",
     budget_pressure: 0.75,
@@ -741,6 +752,7 @@ const MOCK_OPTIMIZER_STATS = {
   model_distribution: { haiku: 0.45, sonnet: 0.40, opus: 0.15 },
   avg_confidence: 0.72,
   estimated_savings_30d_usd: 3.45,
+  active_alerts: 1,
 };
 
 const MOCK_TEMPLATES = [
@@ -3311,17 +3323,17 @@ function getTemplateDetail(name: string) {
 
 const MOCK_WORKFLOW_VERSIONS: Record<string, unknown[]> = {
   "lead-enrichment": [
-    { id: "wv-001", workflow_name: "lead-enrichment", version: 3, status: "production", description: "Improved scoring model", steps_count: 3, checksum: "abc123", created_at: h(24), promoted_at: h(12) },
-    { id: "wv-002", workflow_name: "lead-enrichment", version: 2, status: "archived", description: "Added parallel enrichment", steps_count: 3, checksum: "def456", created_at: h(72), promoted_at: h(48) },
-    { id: "wv-003", workflow_name: "lead-enrichment", version: 1, status: "archived", description: "Initial version", steps_count: 3, checksum: "ghi789", created_at: h(168), promoted_at: h(120) },
+    { id: "wv-001", workflow_name: "lead-enrichment", version: 3, status: "production", description: "Improved scoring model", steps_count: 3, steps: [], checksum: "abc123", created_by: null, promoted_by: null, created_at: h(24), promoted_at: h(12) },
+    { id: "wv-002", workflow_name: "lead-enrichment", version: 2, status: "archived", description: "Added parallel enrichment", steps_count: 3, steps: [], checksum: "def456", created_by: null, promoted_by: null, created_at: h(72), promoted_at: h(48) },
+    { id: "wv-003", workflow_name: "lead-enrichment", version: 1, status: "archived", description: "Initial version", steps_count: 3, steps: [], checksum: "ghi789", created_by: null, promoted_by: null, created_at: h(168), promoted_at: h(120) },
   ],
   "competitor-monitor": [
-    { id: "wv-004", workflow_name: "competitor-monitor", version: 2, status: "production", description: "Added format-report step", steps_count: 4, checksum: "jkl012", created_at: h(48), promoted_at: h(24) },
-    { id: "wv-005", workflow_name: "competitor-monitor", version: 1, status: "archived", description: "Initial version", steps_count: 3, checksum: "mno345", created_at: h(120), promoted_at: h(96) },
+    { id: "wv-004", workflow_name: "competitor-monitor", version: 2, status: "production", description: "Added format-report step", steps_count: 4, steps: [], checksum: "jkl012", created_by: null, promoted_by: null, created_at: h(48), promoted_at: h(24) },
+    { id: "wv-005", workflow_name: "competitor-monitor", version: 1, status: "archived", description: "Initial version", steps_count: 3, steps: [], checksum: "mno345", created_by: null, promoted_by: null, created_at: h(120), promoted_at: h(96) },
   ],
   "seo-audit": [
-    { id: "wv-006", workflow_name: "seo-audit", version: 2, status: "staging", description: "Enhanced recommendations", steps_count: 3, checksum: "pqr678", created_at: h(12), promoted_at: h(6) },
-    { id: "wv-007", workflow_name: "seo-audit", version: 1, status: "production", description: "Initial version", steps_count: 3, checksum: "stu901", created_at: h(96), promoted_at: h(72) },
+    { id: "wv-006", workflow_name: "seo-audit", version: 2, status: "staging", description: "Enhanced recommendations", steps_count: 3, steps: [], checksum: "pqr678", created_by: null, promoted_by: null, created_at: h(12), promoted_at: h(6) },
+    { id: "wv-007", workflow_name: "seo-audit", version: 1, status: "production", description: "Initial version", steps_count: 3, steps: [], checksum: "stu901", created_by: null, promoted_by: null, created_at: h(96), promoted_at: h(72) },
   ],
 };
 

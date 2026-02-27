@@ -176,7 +176,10 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
     """Poll until a run reaches a terminal state, showing a simple spinner."""
     frames = ["|", "/", "-", "\\"]
     idx = 0
-    terminal = {"completed", "failed", "cancelled", "error"}
+    terminal = {
+        "completed", "failed", "cancelled", "error",
+        "partial", "budget_exceeded", "awaiting_approval",
+    }
     while True:
         run = client.get_run(run_id)
         status = _attr(run, "status", "unknown")
@@ -203,6 +206,13 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
 def _cmd_init(args: argparse.Namespace) -> None:
     """Interactive setup wizard - create .env and workflows directory."""
     from pathlib import Path
+
+    if not sys.stdin.isatty():
+        print(
+            "Error: 'sandcastle init' requires an interactive terminal.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     env_path = Path(".env")
 
@@ -393,6 +403,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
 def _cmd_run(args: argparse.Namespace) -> None:
     """Run a workflow via the SDK client."""
+    from pathlib import Path
+
     client = _get_client(args)
 
     # Build input data
@@ -402,13 +414,26 @@ def _cmd_run(args: argparse.Namespace) -> None:
     # --input pairs override / merge with file data
     input_data.update(_parse_input_pairs(args.input))
 
+    # Detect if the argument is a file path or a workflow name
+    workflow_path = Path(args.workflow)
+    is_file = workflow_path.suffix in (".yaml", ".yml") and workflow_path.exists()
+
     try:
-        run = client.run(
-            args.workflow,
-            input=input_data,
-            wait=False,
-            max_cost=args.max_cost,
-        )
+        if is_file:
+            yaml_content = workflow_path.read_text()
+            run = client.run_yaml(
+                yaml_content,
+                input=input_data,
+                wait=False,
+                max_cost_usd=args.max_cost,
+            )
+        else:
+            run = client.run(
+                args.workflow,
+                input=input_data,
+                wait=False,
+                max_cost_usd=args.max_cost,
+            )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -417,12 +442,14 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     if args.wait:
         result = _wait_for_run(client, run_id)
-        _print_run_detail(result)
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            _print_run_detail(result)
         status = _attr(result, "status", "unknown")
-        if status == "failed":
+        if status in ("failed", "error", "budget_exceeded"):
             sys.exit(2)
     else:
-        # Quick JSON output for scripting
         print(json.dumps({"run_id": run_id}))
 
 
@@ -452,24 +479,23 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
 def _cmd_logs(args: argparse.Namespace) -> None:
     """Stream SSE events for a run."""
     client = _get_client(args)
+    terminal_statuses = {
+        "completed", "failed", "cancelled", "error",
+        "partial", "budget_exceeded", "awaiting_approval",
+    }
     try:
         for event in client.stream(args.run_id):
-            event_type = _attr(event, "event", "message")
-            data = _attr(event, "data", event)
+            event_type = _attr(event, "_event", "message")
             ts = time.strftime("%H:%M:%S")
-            print(f"{_color(ts, _C.DIM)} [{_color(str(event_type), _C.CYAN)}] {data}")
+            # The event dict itself is the data (SDK puts event type in _event key)
+            display = {k: v for k, v in event.items() if k != "_event"} if isinstance(event, dict) else event
+            print(f"{_color(ts, _C.DIM)} [{_color(str(event_type), _C.CYAN)}] {display}")
 
             if not args.follow:
                 status = None
-                if isinstance(data, dict):
-                    status = data.get("status")
-                elif isinstance(data, str):
-                    try:
-                        parsed = json.loads(data)
-                        status = parsed.get("status") if isinstance(parsed, dict) else None
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-                if status in ("completed", "failed", "cancelled", "error"):
+                if isinstance(event, dict):
+                    status = event.get("status")
+                if status in terminal_statuses:
                     break
     except KeyboardInterrupt:
         print("\nStream interrupted.")
@@ -564,7 +590,7 @@ def _ls_schedules(client: Any) -> None:
                 s.get("workflow_name", ""),
                 s.get("cron_expression", ""),
                 enabled,
-                s.get("last_run_id", "-") or "-",
+                (s.get("last_run_id") or "-")[:12],
             ]
         )
     print(_table(headers, rows))
@@ -1528,7 +1554,11 @@ def _cmd_hub_search(args: argparse.Namespace) -> None:
     """Search community workflows by query."""
     registry = _fetch_hub_registry()
     templates = registry.get("templates", [])
-    query = getattr(args, "query", "").lower()
+    query = getattr(args, "query", "").strip().lower()
+
+    if not query:
+        print("Error: search query cannot be empty", file=sys.stderr)
+        sys.exit(1)
 
     # Filter by query - match name, description, tags
     results = []
@@ -2598,9 +2628,16 @@ def _add_connection_args(parser: argparse.ArgumentParser) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     """Build the full CLI argument parser."""
+    from sandcastle import __version__
+
     parser = argparse.ArgumentParser(
         prog="sandcastle",
         description="Sandcastle - workflow orchestrator CLI",
+    )
+    parser.add_argument(
+        "--version", "-V",
+        action="version",
+        version=f"sandcastle {__version__}",
     )
     parser.add_argument(
         "--json",
@@ -2618,10 +2655,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     p_serve.add_argument("--port", type=int, default=8080, help="Bind port (default: 8080)")
     p_serve.add_argument(
-        "--reload", action="store_true", default=True, help="Enable auto-reload (default: on)"
-    )
-    p_serve.add_argument(
-        "--no-reload", action="store_false", dest="reload", help="Disable auto-reload"
+        "--reload", action="store_true", default=False, help="Enable auto-reload for development"
     )
 
     # --- run ---
@@ -2914,8 +2948,7 @@ def _build_parser() -> argparse.ArgumentParser:
     hub_publish = hub_sub.add_parser("publish", help="Publish a workflow to the community hub")
     hub_publish.add_argument("file", help="Path to workflow YAML file")
 
-    hub_collections = hub_sub.add_parser("collections", help="List curated workflow collections")
-    hub_collections.add_argument("--json", action="store_true")
+    hub_sub.add_parser("collections", help="List curated workflow collections")
 
     hub_install_col = hub_sub.add_parser(
         "install-collection", help="Install all workflows from a collection"

@@ -3,8 +3,7 @@ import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { Bell, Brain, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
-
-type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
+import type { StepType } from "@/components/workflows/StepConfigPanel";
 
 type StepNodeData = {
   label: string;
@@ -34,6 +33,7 @@ const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
   classify: Tag,
   loop: Repeat,
   approval: ShieldCheck,
+  sub_workflow: ExternalLink,
   race: Zap,
   sensor: Radio,
   gate: ShieldCheck,
@@ -52,6 +52,7 @@ const STEP_TYPE_COLORS: Record<string, string> = {
   classify: "text-pink-400",
   loop: "text-cyan-400",
   approval: "text-warning",
+  sub_workflow: "text-indigo-400",
   race: "text-purple-400",
   sensor: "text-teal-400",
   gate: "text-red-400",
@@ -71,6 +72,7 @@ const STEP_TYPE_RAW_COLORS: Record<string, string> = {
   classify: "244 114 182",
   loop: "34 211 238",
   approval: "245 158 11",
+  sub_workflow: "129 140 248",
   race: "192 132 252",
   sensor: "45 212 191",
   gate: "248 113 113",

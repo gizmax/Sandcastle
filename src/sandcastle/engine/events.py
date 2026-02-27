@@ -29,18 +29,27 @@ class EventBus:
         "dlq.new",
     }
 
+    MAX_SUBSCRIBERS = 500
+    MAX_CONSECUTIVE_DROPS = 50
+
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
+        self._drop_counts: dict[int, int] = {}
 
     async def subscribe(self) -> asyncio.Queue:
         """Create a new subscriber queue and register it.
 
         Returns an asyncio.Queue that will receive all published events.
         The caller must call unsubscribe() when done.
+        Raises RuntimeError if the subscriber limit is reached.
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         async with self._lock:
+            if len(self._subscribers) >= self.MAX_SUBSCRIBERS:
+                raise RuntimeError(
+                    f"EventBus subscriber limit reached ({self.MAX_SUBSCRIBERS})"
+                )
             self._subscribers.add(queue)
         logger.debug(
             "EventBus: new subscriber (total=%d)", len(self._subscribers)
@@ -51,6 +60,7 @@ class EventBus:
         """Remove a subscriber queue."""
         async with self._lock:
             self._subscribers.discard(queue)
+            self._drop_counts.pop(id(queue), None)
         logger.debug(
             "EventBus: subscriber removed (total=%d)", len(self._subscribers)
         )
@@ -71,14 +81,28 @@ class EventBus:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+        dead_queues: list[asyncio.Queue] = []
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)
+                self._drop_counts.pop(id(queue), None)
             except asyncio.QueueFull:
-                logger.debug(
-                    "EventBus: dropping event for slow subscriber "
-                    "(type=%s)", event_type
-                )
+                self._drop_counts[id(queue)] = self._drop_counts.get(id(queue), 0) + 1
+                if self._drop_counts[id(queue)] >= self.MAX_CONSECUTIVE_DROPS:
+                    dead_queues.append(queue)
+                    logger.warning(
+                        "EventBus: removing unresponsive subscriber "
+                        "after %d consecutive drops", self.MAX_CONSECUTIVE_DROPS,
+                    )
+                else:
+                    logger.debug(
+                        "EventBus: dropping event for slow subscriber "
+                        "(type=%s)", event_type
+                    )
+
+        for dq in dead_queues:
+            self._subscribers.discard(dq)
+            self._drop_counts.pop(id(dq), None)
 
     @property
     def subscriber_count(self) -> int:

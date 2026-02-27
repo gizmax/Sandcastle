@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     sandbox_root: str = ""
 
     # Webhooks
-    webhook_secret: str = "your-webhook-signing-secret"
+    webhook_secret: str = ""
 
     # Auth
     auth_required: bool = False  # Set to True to enforce API key auth

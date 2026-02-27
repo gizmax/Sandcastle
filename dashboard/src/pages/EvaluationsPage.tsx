@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   ClipboardCheck,
   ChevronDown,
@@ -391,9 +391,8 @@ export default function EvaluationsPage() {
                           const totalCount = c.assertions.length;
 
                           return (
-                            <>
+                            <Fragment key={caseKey}>
                               <tr
-                                key={caseKey}
                                 className="cursor-pointer hover:bg-border/10 transition-colors"
                                 onClick={() =>
                                   toggleCase(run.id, c.case_name)
@@ -438,7 +437,7 @@ export default function EvaluationsPage() {
                                 </td>
                               </tr>
                               {isCaseExpanded && (
-                                <tr key={`${caseKey}-detail`}>
+                                <tr>
                                   <td colSpan={6} className="px-10 py-3 bg-background/30">
                                     <div className="space-y-2">
                                       {c.assertions.map((a, i) => (
@@ -475,7 +474,7 @@ export default function EvaluationsPage() {
                                   </td>
                                 </tr>
                               )}
-                            </>
+                            </Fragment>
                           );
                         })}
                       </tbody>

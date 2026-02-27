@@ -125,19 +125,22 @@ class RedisBackend:
         redis_key = f"rl:{key}"
 
         try:
+            # First: check current count (clean up + count)
             pipe = redis.pipeline()
-            # Remove expired entries
             pipe.zremrangebyscore(redis_key, 0, window_start)
-            # Count current entries
             pipe.zcard(redis_key)
-            # Add new entry
-            member = f"{now}:{uuid.uuid4().hex[:8]}"
-            pipe.zadd(redis_key, {member: now})
-            # Set expiry on the key
-            pipe.expire(redis_key, int(window_seconds) + 1)
             results = await pipe.execute()
 
             current_count = results[1]  # zcard result
+
+            # Only add the new entry if under the limit
+            if current_count < max_requests:
+                member = f"{now}:{uuid.uuid4().hex[:8]}"
+                pipe2 = redis.pipeline()
+                pipe2.zadd(redis_key, {member: now})
+                pipe2.expire(redis_key, int(window_seconds) + 1)
+                await pipe2.execute()
+
             return current_count + 1
         except Exception as exc:
             logger.warning("Redis rate limit error: %s", exc)

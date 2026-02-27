@@ -77,16 +77,28 @@ def _parse_template(path: Path, source: str = "built-in") -> TemplateInfo:
 
     # Count steps from the parsed YAML body
     data = yaml.safe_load(content)
+    if not isinstance(data, dict):
+        data = {}
     step_count = len(data.get("steps", []))
 
+    # Fall back to YAML body keys when comment metadata is missing
+    name_val = str(meta.get("name") or data.get("name") or path.stem)
+    desc_val = str(meta.get("description") or data.get("description") or "")
+    tags_val = list(meta.get("tags") or data.get("tags") or [])
+    category_val = (
+        str(meta["category"]) if "category" in meta
+        else str(data["category"]) if "category" in data
+        else None
+    )
+
     return TemplateInfo(
-        name=str(meta.get("name", path.stem)),
-        description=str(meta.get("description", "")),
-        tags=list(meta.get("tags", [])),
+        name=name_val,
+        description=desc_val,
+        tags=tags_val,
         file_name=path.name,
         step_count=step_count,
         input_schema=data.get("input_schema"),
-        category=str(meta["category"]) if "category" in meta else None,
+        category=category_val,
         source=source,
     )
 
@@ -148,5 +160,5 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
             info = _parse_template(path, source=source)
             return content, info
 
-    available = [p.stem for p in _TEMPLATES_DIR.glob("*.yaml")]
+    available = [p.stem for d, _ in search_dirs for p in d.glob("*.yaml")]
     raise FileNotFoundError(f"Template '{name}' not found. Available: {', '.join(available)}")

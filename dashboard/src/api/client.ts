@@ -166,7 +166,7 @@ class ApiClient {
   async patch<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) {
-      return { data: null, error: { code: "MOCK_MODE", message: "Not available in demo mode" } };
+      return this.mock<T>(path, undefined, "PATCH", body);
     }
 
     try {

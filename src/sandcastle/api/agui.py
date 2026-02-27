@@ -42,7 +42,7 @@ EVENT_RUN_ERROR = "run_error"
 
 # -- Status mapping helpers --
 
-_TERMINAL_STATUSES = {"completed", "failed", "partial", "cancelled", "budget_exceeded"}
+_TERMINAL_STATUSES = {"completed", "failed", "partial", "cancelled", "budget_exceeded", "awaiting_approval"}
 
 
 def _run_status_str(run: Run) -> str:
@@ -80,7 +80,7 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
     if event_type == "run.started":
         return _agui_event(EVENT_RUN_STARTED, {
             "run_id": data.get("run_id", ""),
-            "workflow": data.get("workflow_name", ""),
+            "workflow": data.get("workflow", data.get("workflow_name", "")),
         })
 
     if event_type == "run.completed":
@@ -96,14 +96,14 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
         })
 
     if event_type == "step.started":
+        step_id = data.get("step_name", data.get("step_id", ""))
         return _agui_event(EVENT_STEP_STARTED, {
-            "step_id": data.get("step_id", ""),
+            "step_id": step_id,
             "type": data.get("step_type", "llm"),
         })
 
     if event_type == "step.completed":
-        # Emit text_message with the step output, then a state_delta
-        step_id = data.get("step_id", "")
+        step_id = data.get("step_name", data.get("step_id", ""))
         output = data.get("output", "")
         content = output if isinstance(output, str) else json.dumps(output, default=str)
 
@@ -119,7 +119,7 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
         return text_event + delta_event
 
     if event_type == "step.failed":
-        step_id = data.get("step_id", "")
+        step_id = data.get("step_name", data.get("step_id", ""))
         return _agui_event(EVENT_STATE_DELTA, {
             "op": "replace",
             "path": f"/steps/{step_id}/status",
@@ -141,7 +141,10 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid run ID format")
+        raise HTTPException(
+            status_code=400,
+            detail={"data": None, "error": {"code": "INVALID_INPUT", "message": "Invalid run ID format"}},
+        )
 
     # Verify the run exists
     async with async_session() as session:
@@ -150,7 +153,10 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
         run = result.scalar_one_or_none()
 
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"data": None, "error": {"code": "NOT_FOUND", "message": "Run not found"}},
+        )
 
     async def event_generator():
         """Yield AG-UI events by subscribing to the event bus."""

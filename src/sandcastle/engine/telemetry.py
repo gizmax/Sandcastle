@@ -37,6 +37,7 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "minimax_api_key", "sentry_dsn",
     "admin_api_key", "webhook_secret",
     "aws_access_key_id", "aws_secret_access_key",
+    "credential_encryption_key",
     "tool_slack_bot_token", "tool_jira_api_token",
     "tool_github_token", "tool_notion_api_key",
     "tool_hubspot_api_key",
@@ -45,6 +46,7 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "tool_salesforce_refresh_token",
     "tool_zendesk_api_token",
     "tool_smtp_password", "tool_google_service_account",
+    "tool_teams_webhook_url", "tool_postgresql_url",
     "license_key",
 })
 

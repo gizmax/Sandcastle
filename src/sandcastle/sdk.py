@@ -309,16 +309,21 @@ def _extract_data(response: httpx.Response) -> Any:
 
 
 def _parse_sse_lines(raw: str) -> Iterator[dict[str, Any]]:
-    """Parse raw SSE text into event dicts."""
+    """Parse raw SSE text into event dicts.
+
+    Follows the SSE spec: multiple ``data:`` lines are concatenated with
+    newline characters before JSON parsing.
+    """
     event_type = ""
-    data_buf = ""
+    data_lines: list[str] = []
 
     for line in raw.split("\n"):
         if line.startswith("event:"):
             event_type = line[len("event:"):].strip()
         elif line.startswith("data:"):
-            data_buf = line[len("data:"):].strip()
-        elif line == "" and data_buf:
+            data_lines.append(line[len("data:"):].strip())
+        elif line == "" and data_lines:
+            data_buf = "\n".join(data_lines)
             try:
                 parsed = json.loads(data_buf)
             except json.JSONDecodeError:
@@ -326,7 +331,7 @@ def _parse_sse_lines(raw: str) -> Iterator[dict[str, Any]]:
             parsed["_event"] = event_type
             yield parsed
             event_type = ""
-            data_buf = ""
+            data_lines = []
 
 
 # ---------------------------------------------------------------------------
@@ -460,13 +465,30 @@ class SandcastleClient:
 
         return result
 
-    def _poll_until_done(self, run_id: str, poll_interval: float) -> Run:
-        """Poll get_run until the run reaches a terminal status."""
+    def _poll_until_done(
+        self, run_id: str, poll_interval: float, max_wait: float = 3600.0,
+    ) -> Run:
+        """Poll get_run until the run reaches a terminal status.
+
+        Args:
+            run_id: Run UUID to poll.
+            poll_interval: Seconds between polls.
+            max_wait: Maximum total wait time in seconds (default 1 hour).
+
+        Raises:
+            TimeoutError: If max_wait is exceeded without reaching a terminal status.
+        """
+        deadline = time.monotonic() + max_wait
         while True:
             time.sleep(poll_interval)
             run = self.get_run(run_id)
             if run.status in _TERMINAL_STATUSES:
                 return run
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Run '{run_id}' did not reach terminal status within "
+                    f"{max_wait}s (last status: {run.status})"
+                )
 
     # -- Run operations --
 
@@ -905,15 +927,32 @@ class AsyncSandcastleClient:
 
         return result
 
-    async def _poll_until_done(self, run_id: str, poll_interval: float) -> Run:
-        """Poll get_run until the run reaches a terminal status."""
+    async def _poll_until_done(
+        self, run_id: str, poll_interval: float, max_wait: float = 3600.0,
+    ) -> Run:
+        """Poll get_run until the run reaches a terminal status.
+
+        Args:
+            run_id: Run UUID to poll.
+            poll_interval: Seconds between polls.
+            max_wait: Maximum total wait time in seconds (default 1 hour).
+
+        Raises:
+            TimeoutError: If max_wait is exceeded without reaching a terminal status.
+        """
         import asyncio
 
+        deadline = time.monotonic() + max_wait
         while True:
             await asyncio.sleep(poll_interval)
             run = await self.get_run(run_id)
             if run.status in _TERMINAL_STATUSES:
                 return run
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Run '{run_id}' did not reach terminal status within "
+                    f"{max_wait}s (last status: {run.status})"
+                )
 
     # -- Run operations --
 

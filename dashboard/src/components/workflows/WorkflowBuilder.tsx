@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -570,14 +570,14 @@ function buildInitialState(wf: InitialWorkflow) {
       policies: adv.policies || [],
       slo: adv.slo || { ...DEFAULT_SLO },
       llmSystemPrompt: "",
-      httpConfig: { ...DEFAULT_HTTP_CONFIG },
+      httpConfig: { ...DEFAULT_HTTP_CONFIG, headers: {} },
       codeConfig: { ...DEFAULT_CODE_CONFIG },
-      conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
-      classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
-      loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      conditionConfig: { ...DEFAULT_CONDITION_CONFIG, thenSteps: [], elseSteps: [] },
+      classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG, categories: [], branches: {} },
+      loopConfig: { ...DEFAULT_LOOP_CONFIG, stepIds: [] },
       raceConfig: { ...DEFAULT_RACE_CONFIG },
       sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
-      gateConfig: { ...DEFAULT_GATE_CONFIG },
+      gateConfig: { ...DEFAULT_GATE_CONFIG, strategies: [] },
       transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
@@ -668,31 +668,32 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       policies: [],
       slo: { ...DEFAULT_SLO },
       llmSystemPrompt: "",
-      httpConfig: { ...DEFAULT_HTTP_CONFIG },
+      httpConfig: { ...DEFAULT_HTTP_CONFIG, headers: {} },
       codeConfig: { ...DEFAULT_CODE_CONFIG },
-      conditionConfig: { ...DEFAULT_CONDITION_CONFIG },
-      classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG },
-      loopConfig: { ...DEFAULT_LOOP_CONFIG },
+      conditionConfig: { ...DEFAULT_CONDITION_CONFIG, thenSteps: [], elseSteps: [] },
+      classifyConfig: { ...DEFAULT_CLASSIFY_CONFIG, categories: [], branches: {} },
+      loopConfig: { ...DEFAULT_LOOP_CONFIG, stepIds: [] },
       raceConfig: { ...DEFAULT_RACE_CONFIG },
       sensorConfig: { ...DEFAULT_SENSOR_CONFIG },
-      gateConfig: { ...DEFAULT_GATE_CONFIG },
+      gateConfig: { ...DEFAULT_GATE_CONFIG, strategies: [] },
       transformConfig: { ...DEFAULT_TRANSFORM_CONFIG },
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
       browserConfig: { ...DEFAULT_BROWSER_CONFIG },
     };
 
-    const newNode: Node = {
-      id,
-      type: "step",
-      position: { x: 200 + (nodes.length % 3) * 200, y: 50 + Math.floor(nodes.length / 3) * 150 },
-      data: { label: id, model: stepType === "classify" ? "haiku" : "sonnet", stepType },
-    };
-
     setSteps((prev) => [...prev, newStep]);
-    setNodes((prev) => [...prev, newNode]);
+    setNodes((prev) => {
+      const newNode: Node = {
+        id,
+        type: "step",
+        position: { x: 200 + (prev.length % 3) * 200, y: 50 + Math.floor(prev.length / 3) * 150 },
+        data: { label: id, model: stepType === "classify" ? "haiku" : "sonnet", stepType },
+      };
+      return [...prev, newNode];
+    });
     setSelectedStepId(id);
-  }, [counter, nodes.length, setNodes]);
+  }, [counter, setNodes]);
 
   const updateStep = useCallback(
     (updated: StepConfig) => {
@@ -727,13 +728,19 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         )
       );
       if (updated.id !== selectedStepId) {
-        // Update edges
+        // Update edges: fix source/target AND regenerate edge IDs to prevent key conflicts
         setEdges((prev) =>
-          prev.map((e) => ({
-            ...e,
-            source: e.source === selectedStepId ? updated.id : e.source,
-            target: e.target === selectedStepId ? updated.id : e.target,
-          }))
+          prev.map((e) => {
+            const newSource = e.source === selectedStepId ? updated.id : e.source;
+            const newTarget = e.target === selectedStepId ? updated.id : e.target;
+            if (newSource === e.source && newTarget === e.target) return e;
+            return {
+              ...e,
+              id: `${newSource}-${newTarget}`,
+              source: newSource,
+              target: newTarget,
+            };
+          })
         );
         setSelectedStepId(updated.id);
       }
@@ -866,7 +873,10 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   );
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
-  const yaml = generateYaml(workflowName, steps, edges, defaultTools);
+  const yaml = useMemo(
+    () => generateYaml(workflowName, steps, edges, defaultTools),
+    [workflowName, steps, edges, defaultTools]
+  );
 
   return (
     <div className="relative flex h-[calc(100vh-10rem)] gap-0 rounded-xl border border-border bg-surface shadow-sm overflow-hidden">

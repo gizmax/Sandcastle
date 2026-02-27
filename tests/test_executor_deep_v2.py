@@ -117,6 +117,7 @@ from sandcastle.engine.executor import (
     _compute_cache_key,
     _escape_js_string,
     _is_cacheable_output,
+    _UNRESOLVED,
     _write_csv_output,
     execute_step_with_retry,
     execute_workflow,
@@ -216,7 +217,7 @@ class TestResolveVariable:
 
     def test_input_missing_key_returns_none(self):
         c = ctx(input={})
-        assert resolve_variable("input.missing", c) is None
+        assert resolve_variable("input.missing", c) is _UNRESOLVED
 
     def test_steps_output(self):
         c = ctx(step_outputs={"s1": "result_value"})
@@ -228,7 +229,7 @@ class TestResolveVariable:
 
     def test_steps_missing_step_returns_none(self):
         c = ctx(step_outputs={})
-        assert resolve_variable("steps.missing.output", c) is None
+        assert resolve_variable("steps.missing.output", c) is _UNRESOLVED
 
     def test_steps_output_list_index(self):
         c = ctx(step_outputs={"s1": ["a", "b", "c"]})
@@ -245,7 +246,7 @@ class TestResolveVariable:
         assert re.match(r"^\d{4}-\d{2}-\d{2}$", val), f"Invalid: {val}"
 
     def test_unknown_path_returns_none(self):
-        assert resolve_variable("totally.unknown.path", ctx()) is None
+        assert resolve_variable("totally.unknown.path", ctx()) is _UNRESOLVED
 
     def test_deep_none_chain(self):
         c = ctx(step_outputs={"s1": None})
@@ -956,7 +957,7 @@ class TestPropertyBased:
     @h_settings(max_examples=100)
     def test_missing_input_key_never_crashes(self, key):
         result = resolve_variable(f"input.{key}", ctx())
-        assert result is None
+        assert result is _UNRESOLVED
 
     @given(st.text(min_size=0, max_size=200))
     @h_settings(max_examples=100)

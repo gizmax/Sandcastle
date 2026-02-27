@@ -838,6 +838,10 @@ def _parse_browser_config(data: dict | None) -> BrowserConfig | None:
 
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
+    if "id" not in data or not data["id"]:
+        raise ValueError("Every step must have a non-empty 'id' field")
+    if not isinstance(data["id"], str):
+        raise ValueError(f"Step 'id' must be a string, got {type(data['id']).__name__}")
     step_type = data.get("type", "standard")
     # Approval steps don't require a prompt - use message as fallback
     prompt = data.get("prompt", "")
@@ -900,6 +904,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
 
 def _parse_raw(data: dict) -> WorkflowDefinition:
     """Parse a raw YAML dict into a WorkflowDefinition."""
+    if "name" not in data:
+        raise ValueError("Workflow YAML must have a 'name' field")
     default_model = data.get("default_model", "sonnet")
     default_max_turns = data.get("default_max_turns", 10)
     default_timeout = data.get("default_timeout", 300)
@@ -910,7 +916,10 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
         "timeout": default_timeout,
     }
 
-    steps = [_parse_step(s, defaults) for s in data.get("steps", [])]
+    raw_steps = data.get("steps", [])
+    if not isinstance(raw_steps, list):
+        raise ValueError(f"Workflow 'steps' must be a list, got {type(raw_steps).__name__}")
+    steps = [_parse_step(s, defaults) for s in raw_steps]
 
     on_complete = None
     if "on_complete" in data:
@@ -955,9 +964,22 @@ def parse(yaml_path: str) -> WorkflowDefinition:
     return _parse_raw(data)
 
 
+_MAX_YAML_SIZE = 1024 * 1024  # 1MB limit for workflow YAML
+
+
 def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
     """Parse a workflow from a YAML string (for API submissions)."""
+    if not yaml_content or not yaml_content.strip():
+        raise ValueError("Workflow YAML content is empty")
+    if len(yaml_content) > _MAX_YAML_SIZE:
+        raise ValueError(
+            f"Workflow YAML too large ({len(yaml_content)} bytes, max {_MAX_YAML_SIZE})"
+        )
     data = yaml.safe_load(yaml_content)
+    if data is None:
+        raise ValueError("Workflow YAML parsed to None (empty document)")
+    if not isinstance(data, dict):
+        raise ValueError(f"Workflow YAML must be a mapping, got {type(data).__name__}")
     return _parse_raw(data)
 
 
@@ -967,23 +989,39 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
 
     if not workflow.name:
         errors.append("Workflow name is required")
+    elif len(workflow.name) > 200:
+        errors.append(f"Workflow name too long ({len(workflow.name)} chars, max 200)")
 
     if not workflow.steps:
         errors.append("Workflow must have at least one step")
+    elif len(workflow.steps) > 500:
+        errors.append(
+            f"Workflow has too many steps ({len(workflow.steps)}, max 500)"
+        )
 
     step_ids = {s.id for s in workflow.steps}
+    _STEP_ID_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_\-]{0,99}$")
 
-    # Check for duplicate step IDs
+    # Check for duplicate step IDs and validate format
     seen: set[str] = set()
     for step in workflow.steps:
         if step.id in seen:
             errors.append(f"Duplicate step ID: '{step.id}'")
         seen.add(step.id)
+        if not _STEP_ID_RE.match(step.id):
+            errors.append(
+                f"Step ID '{step.id}' is invalid. Must be 1-100 chars, "
+                "alphanumeric/underscore/hyphen, starting with alphanumeric or underscore"
+            )
 
     # Check depends_on references
     for step in workflow.steps:
         for dep in step.depends_on:
-            if dep not in step_ids:
+            if not isinstance(dep, str):
+                errors.append(
+                    f"Step '{step.id}' depends_on contains non-string value: {dep!r}"
+                )
+            elif dep not in step_ids:
                 errors.append(f"Step '{step.id}' depends on unknown step '{dep}'")
 
     # Reject unknown step types
@@ -1048,6 +1086,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Loop step '{step.id}' max_iterations must be >= 1, "
                     f"got {step.loop_config.max_iterations}"
                 )
+            if step.loop_config and step.loop_config.max_iterations > 10000:
+                errors.append(
+                    f"Loop step '{step.id}' max_iterations must be <= 10000, "
+                    f"got {step.loop_config.max_iterations}"
+                )
         elif step.type == "race":
             if not step.race_config or not step.race_config.branches:
                 errors.append(f"Race step '{step.id}' must have race_config with branches")
@@ -1061,6 +1104,16 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(f"Sensor step '{step.id}' must have sensor_config with a url")
             if step.sensor_config and not step.sensor_config.condition:
                 errors.append(f"Sensor step '{step.id}' must have sensor_config with a condition")
+            if step.sensor_config and step.sensor_config.check_interval <= 0:
+                errors.append(
+                    f"Sensor step '{step.id}' check_interval must be > 0, "
+                    f"got {step.sensor_config.check_interval}"
+                )
+            if step.sensor_config and step.sensor_config.timeout <= 0:
+                errors.append(
+                    f"Sensor step '{step.id}' timeout must be > 0, "
+                    f"got {step.sensor_config.timeout}"
+                )
         elif step.type == "gate":
             if not step.gate_config or not step.gate_config.strategies:
                 errors.append(f"Gate step '{step.id}' must have gate_config with strategies")
@@ -1079,6 +1132,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Delegate step '{step.id}' must have delegate_config with a workflow"
                 )
+            if step.delegate_config and step.delegate_config.timeout <= 0:
+                errors.append(
+                    f"Delegate step '{step.id}' timeout must be > 0, "
+                    f"got {step.delegate_config.timeout}"
+                )
         elif step.type == "browser":
             if not step.browser_config:
                 errors.append(f"Browser step '{step.id}' must have browser_config")
@@ -1086,24 +1144,43 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
                 )
-        elif step.type == "transform":
-            if not step.transform_config or not step.transform_config.template:
+
+    # Validate sub_workflow configuration
+    for step in workflow.steps:
+        if step.type == "sub_workflow" and step.sub_workflow:
+            if step.sub_workflow.max_concurrent < 1:
                 errors.append(
-                    f"Transform step '{step.id}' must have transform_config with a template"
+                    f"Sub-workflow step '{step.id}' max_concurrent must be >= 1, "
+                    f"got {step.sub_workflow.max_concurrent}"
                 )
-        elif step.type == "notify":
-            if not step.notify_config or not step.notify_config.service:
+            if step.sub_workflow.timeout <= 0:
                 errors.append(
-                    f"Notify step '{step.id}' must have notify_config with a service"
+                    f"Sub-workflow step '{step.id}' timeout must be > 0, "
+                    f"got {step.sub_workflow.timeout}"
                 )
-            if not step.notify_config or not step.notify_config.message:
+
+    # Validate retry configuration
+    for step in workflow.steps:
+        if step.retry:
+            if step.retry.max_attempts < 1:
                 errors.append(
-                    f"Notify step '{step.id}' must have notify_config with a message"
+                    f"Step '{step.id}' retry.max_attempts must be >= 1, "
+                    f"got {step.retry.max_attempts}"
                 )
-        elif step.type == "delegate":
-            if not step.delegate_config or not step.delegate_config.workflow:
+            if step.retry.max_attempts > 100:
                 errors.append(
-                    f"Delegate step '{step.id}' must have delegate_config with a workflow"
+                    f"Step '{step.id}' retry.max_attempts must be <= 100, "
+                    f"got {step.retry.max_attempts}"
+                )
+            if step.retry.backoff not in ("exponential", "fixed"):
+                errors.append(
+                    f"Step '{step.id}' retry.backoff must be 'exponential' or 'fixed', "
+                    f"got '{step.retry.backoff}'"
+                )
+            if step.retry.on_failure not in ("abort", "skip", "fallback"):
+                errors.append(
+                    f"Step '{step.id}' retry.on_failure must be 'abort', 'skip', or 'fallback', "
+                    f"got '{step.retry.on_failure}'"
                 )
 
     # Check model names against provider registry
@@ -1127,6 +1204,25 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         if model_name not in KNOWN_MODELS:
             errors.append(
                 f"Unknown model '{model_name}'. Available: {', '.join(sorted(KNOWN_MODELS))}"
+            )
+
+    # Validate step timeout and max_turns boundaries
+    for step in workflow.steps:
+        if step.timeout <= 0:
+            errors.append(
+                f"Step '{step.id}' timeout must be > 0, got {step.timeout}"
+            )
+        if step.timeout > 86400:
+            errors.append(
+                f"Step '{step.id}' timeout must be <= 86400 (24h), got {step.timeout}"
+            )
+        if step.max_turns < 1:
+            errors.append(
+                f"Step '{step.id}' max_turns must be >= 1, got {step.max_turns}"
+            )
+        if step.max_turns > 1000:
+            errors.append(
+                f"Step '{step.id}' max_turns must be <= 1000, got {step.max_turns}"
             )
 
     # Check SLO configuration
@@ -1177,15 +1273,18 @@ def _detect_cycles(steps: list[StepDefinition]) -> list[str]:
     def dfs(node: str) -> bool:
         visited.add(node)
         in_stack.add(node)
+        found_cycle = False
         for neighbor in adj.get(node, []):
             if neighbor in in_stack:
                 errors.append(f"Cycle detected involving step '{node}' -> '{neighbor}'")
-                return True
+                found_cycle = True
+                break
             if neighbor not in visited:
                 if dfs(neighbor):
-                    return True
+                    found_cycle = True
+                    break
         in_stack.discard(node)
-        return False
+        return found_cycle
 
     for step in steps:
         if step.id not in visited:
