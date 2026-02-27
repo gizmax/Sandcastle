@@ -16,21 +16,27 @@ input_schema:
     meeting_notes:
       type: string
       description: "Notes from the client meeting"
+      example: "Provide relevant context and details for analysis"
     client_name:
       type: string
       description: "Name of the client"
+      example: "Jane Smith"
     product_info:
       type: string
       description: "Product catalog or feature descriptions"
+      example: "Provide relevant context and details for analysis"
     pricing_tier:
       type: string
       description: "Pricing tier to use in the proposal"
+      example: "example input text"
     deal_size:
       type: string
       description: "Estimated deal size or budget range discussed (e.g. '$50k-$80k ARR')"
+      example: "$50k-$80k ARR"
     contract_length:
       type: string
       description: "Proposed contract length (e.g. '12 months', '24 months')"
+      example: "12 months"
 
 steps:
   - id: extract-requirements

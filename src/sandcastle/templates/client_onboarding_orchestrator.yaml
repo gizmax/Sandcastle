@@ -16,16 +16,20 @@ input_schema:
     client_name:
       type: string
       description: "Name of the client being onboarded (e.g. 'Acme Corp', 'TechStart GmbH')"
+      example: "Jane Smith"
     client_tier:
       type: string
       description: "Client tier classification: 'enterprise', 'mid-market', or 'smb'"
+      example: "example input text"
     product_modules:
       type: string
       description: "Comma-separated list of product modules the client has purchased (e.g. 'analytics, automation, integrations, api-access')"
+      example: "analytics, automation, integrations, api-access"
     crm_source:
       type: string
       description: "CRM system where client data originates (e.g. 'salesforce', 'hubspot', 'pipedrive', 'custom')"
       default: "salesforce"
+      example: "salesforce"
 
 steps:
   - id: client-profiling

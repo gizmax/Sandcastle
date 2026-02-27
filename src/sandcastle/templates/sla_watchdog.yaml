@@ -17,24 +17,30 @@ input_schema:
     sla_policy:
       type: string
       description: "SLA policy to enforce - e.g. 'Critical: 1h first response, 4h resolution; High: 4h first response, 24h resolution'"
+      example: "example input text"
     hours_lookback:
       type: number
       description: "How many hours back to scan for tickets (default: 24)"
       default: 24
+      example: "24"
     slack_channel:
       type: string
       description: "Slack channel for SLA breach alerts (e.g. '#sla-alerts')"
       default: "#sla-alerts"
+      example: "#daily-standup"
     business_hours:
       type: string
       description: "Business hours for SLA calculation - e.g. 'Mon-Fri 09:00-18:00 UTC' or '24/7' (default: '24/7')"
       default: "24/7"
+      example: 60
     customer_tiers:
       type: string
       description: "Optional tier-based SLA overrides - e.g. 'Platinum: 0.5x targets; Gold: 1x; Silver: 2x'"
+      example: "example input text"
     escalation_chain:
       type: string
       description: "Escalation contacts - e.g. 'L1: @support-lead; L2: @support-director; L3: @vp-cx'"
+      example: "example input text"
 
 steps:
   - id: fetch-tickets

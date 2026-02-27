@@ -16,17 +16,21 @@ input_schema:
     document_sources:
       type: string
       description: "Comma-separated document paths or URLs to ingest into the knowledge base (e.g. 'docs/api-reference.md, https://example.com/faq, docs/guides/')"
+      example: "docs/api-reference.md, https://example.com/faq, docs/guides/"
     domain:
       type: string
       description: "Knowledge domain for tuning chunking and retrieval heuristics (e.g. 'legal contracts', 'medical research', 'software documentation', 'financial reports')"
+      example: "general"
     chunk_strategy:
       type: string
       description: "Chunking strategy to use: 'semantic', 'fixed', 'recursive', 'document', or 'hybrid' (default: 'semantic')"
       default: "semantic"
+      example: "semantic"
     embedding_model:
       type: string
       description: "Embedding model for vectorization (default: 'text-embedding-3-small'). Options include text-embedding-3-small, text-embedding-3-large, voyage-3, cohere-embed-v3"
       default: "text-embedding-3-small"
+      example: "text-embedding-3-small"
 
 steps:
   - id: document-analysis

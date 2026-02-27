@@ -16,20 +16,25 @@ input_schema:
     catalog_source:
       type: string
       description: "Raw product catalog data - can be CSV-formatted, JSON, or plain text with product names, SKUs, basic descriptions, and prices"
+      example: "example input text"
     product_category:
       type: string
       description: "Primary product category (e.g. 'outdoor furniture', 'organic skincare', 'running shoes', 'smart home devices')"
+      example: "project management tools"
     brand_name:
       type: string
       description: "Brand name for consistent voice and messaging (e.g. 'TerraVerde', 'NovaPeak Athletics')"
+      example: "TerraVerde"
     target_marketplace:
       type: string
       description: "Target e-commerce platform: 'shopify', 'amazon', 'woocommerce', 'bigcommerce', 'etsy', 'walmart'"
       default: "shopify"
+      example: "shopify"
     competitor_urls:
       type: string
       description: "Comma-separated competitor product page URLs or brand names for competitive positioning analysis"
       default: "No specific competitors provided"
+      example: "No specific competitors provided"
 
 steps:
   - id: catalog-ingestion

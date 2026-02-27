@@ -16,13 +16,16 @@ input_schema:
     customer_id:
       type: string
       description: "Unique customer identifier"
+      example: "example input text"
     message:
       type: string
       description: "Customer's support message"
+      example: "example input text"
     channel:
       type: string
       description: "Support channel (email, chat, phone)"
       default: "chat"
+      example: "#general"
 
 memory:
   scope: agent

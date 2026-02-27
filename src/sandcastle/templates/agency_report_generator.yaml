@@ -16,19 +16,24 @@ input_schema:
     agency_name:
       type: string
       description: "Name of the agency generating the report (e.g. 'Apex Digital Media')"
+      example: "Apex Digital Media"
     client_list:
       type: string
       description: "Comma-separated list of client names to include (e.g. 'Acme Corp, GlobalTech, FreshFoods Inc')"
+      example: "Acme Corp, GlobalTech, FreshFoods Inc"
     reporting_period:
       type: string
       description: "Reporting period for analysis (e.g. 'Q4 2025', 'January 2026', '2025 Full Year')"
+      example: "Q4 2025"
     channels:
       type: string
       description: "Comma-separated marketing channels to analyze (e.g. 'paid_search, paid_social, seo, email, display')"
+      example: "paid_search, paid_social, seo, email, display"
     kpi_targets:
       type: string
       description: "Key performance indicator targets and benchmarks in natural language (e.g. 'ROAS target 4.0, CPA under $35, CTR above 2.5%, email open rate 25%+')"
       default: "Industry standard benchmarks"
+      example: "ROAS target 4.0, CPA under $35, CTR above 2.5%, email open rate 25%+"
 
 steps:
   - id: data-aggregation

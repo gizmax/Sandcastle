@@ -16,12 +16,15 @@ input_schema:
     subject:
       type: string
       description: "Support ticket subject line"
+      example: "example input text"
     body:
       type: string
       description: "Support ticket body text"
+      example: "example input text"
     customer_tier:
       type: string
       description: "Customer tier level (e.g. free, pro, enterprise)"
+      example: "example input text"
 
 steps:
   - id: classify

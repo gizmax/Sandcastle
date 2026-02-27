@@ -16,18 +16,23 @@ input_schema:
     organization_name:
       type: string
       description: "Name of the applicant organization"
+      example: "example input text"
     grant_program:
       type: string
       description: "Name of the grant program or funding opportunity"
+      example: "example input text"
     rfp_url_or_text:
       type: string
       description: "Full text of the RFP/FOA, or URL to the funding opportunity announcement"
+      example: "example input text"
     project_description:
       type: string
       description: "Brief description of the proposed project (goals, approach, expected outcomes)"
+      example: "A detailed description of the subject for analysis"
     requested_amount:
       type: number
       description: "Total amount of funding requested in USD"
+      example: "5000"
 
 steps:
   - id: rfp-analysis

@@ -16,17 +16,21 @@ input_schema:
     text:
       type: string
       description: "The text to translate"
+      example: "The quick brown fox jumps over the lazy dog. This is a sample text for processing."
     target_language:
       type: string
       description: "The target language to translate into (e.g. 'Spanish', 'Japanese', 'Czech')"
+      example: "Spanish"
     tone:
       type: string
       description: "Desired tone - professional, casual, formal, literary, technical, or marketing"
       default: "professional"
+      example: "professional, clear, and approachable"
     domain:
       type: string
       description: "Subject domain for terminology accuracy - general, legal, medical, technical, financial, academic, or marketing"
       default: "general"
+      example: "general"
 
 steps:
   - id: source-analysis

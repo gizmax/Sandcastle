@@ -16,22 +16,27 @@ input_schema:
     contract_text:
       type: string
       description: "Full text of the contract to review (paste the contract content or key sections)"
+      example: "example input text"
     contract_type:
       type: string
       description: "Type of contract (e.g. 'SaaS subscription', 'employment', 'NDA', 'MSA', 'SOW', 'vendor agreement')"
       default: "general commercial"
+      example: "SaaS subscription"
     jurisdiction:
       type: string
       description: "Governing law jurisdiction (e.g. 'Delaware, US', 'England & Wales', 'California, US', 'EU/GDPR')"
       default: "United States (general)"
+      example: "Delaware, US"
     review_perspective:
       type: string
       description: "Whose interests to prioritize - 'buyer', 'seller', 'employee', or 'neutral'"
       default: "buyer"
+      example: "buyer"
     risk_tolerance:
       type: string
       description: "Risk tolerance level - 'conservative' (flag everything), 'moderate' (standard business), or 'aggressive' (maximum flexibility)"
       default: "moderate"
+      example: "moderate"
 
 steps:
   - id: clause-extraction

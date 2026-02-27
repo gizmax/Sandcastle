@@ -16,13 +16,16 @@ input_schema:
     product_description:
       type: string
       description: "Description of the product or service to evaluate market opportunities for"
+      example: "AI-powered workflow orchestrator that lets teams build, test, and deploy multi-step AI pipelines with pluggable sandbox backends"
     target_industry:
       type: string
       description: "Industry vertical to analyze (e.g. 'HealthTech', 'FinTech', 'EdTech')"
+      example: "FinTech"
     geography:
       type: string
       description: "Geographic scope for the analysis (default: Global)"
       default: "Global"
+      example: "North America"
 
 steps:
   - id: define-market

@@ -16,19 +16,24 @@ input_schema:
     blog_url:
       type: string
       description: "URL of the blog post to repurpose into social media content"
+      example: "https://example.com"
     brand_voice:
       type: string
       description: "Brand voice guidelines - e.g. 'professional but approachable, avoid jargon, use data-driven claims'"
+      example: "professional, clear, and approachable"
     target_platforms:
       type: string
       description: "Comma-separated platforms to generate for - 'twitter, linkedin, instagram, tiktok' (default: all)"
       default: "twitter, linkedin, instagram, tiktok"
+      example: "twitter, linkedin, instagram, tiktok"
     cta_url:
       type: string
       description: "Call-to-action URL to include in posts (e.g., landing page URL). Defaults to the blog URL."
+      example: "https://example.com"
     hashtag_strategy:
       type: string
       description: "Hashtag preferences - e.g. 'industry-specific, max 5 per post, include branded hashtag #AcmeTech'"
+      example: "example input text"
 
 steps:
   - id: extract-content

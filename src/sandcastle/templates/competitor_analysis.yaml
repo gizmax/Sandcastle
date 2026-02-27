@@ -16,12 +16,15 @@ input_schema:
     competitor:
       type: string
       description: "Name of the competitor to analyze"
+      example: "example input text"
     our_company:
       type: string
       description: "Your own company name and brief description for comparative positioning"
+      example: "example input text"
     industry:
       type: string
       description: "Industry or market vertical for context (e.g. 'B2B SaaS', 'e-commerce', 'fintech')"
+      example: "B2B SaaS"
 
 steps:
   - id: gather-info

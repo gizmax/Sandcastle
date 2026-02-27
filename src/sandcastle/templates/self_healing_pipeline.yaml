@@ -17,17 +17,21 @@ input_schema:
     pipeline_name:
       type: string
       description: "Name of the data pipeline to monitor (e.g. 'orders-etl', 'user-events-pipeline')"
+      example: "orders-etl"
     data_source:
       type: string
       description: "Source system description (e.g. 'PostgreSQL orders table -> Snowflake warehouse')"
+      example: "PostgreSQL orders table -> Snowflake warehouse"
     quality_threshold:
       type: number
       description: "Minimum data quality score (0-100) before alerting (default: 95)"
       default: 95
+      example: "95"
     auto_fix:
       type: string
       description: "Enable automatic fix attempts for known issue patterns: 'true' or 'false' (default: 'true')"
       default: "true"
+      example: "true"
 
 steps:
   - id: schema-monitoring

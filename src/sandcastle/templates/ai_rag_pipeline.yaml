@@ -15,6 +15,7 @@ input_schema:
     question:
       type: string
       description: The question to answer using RAG
+      example: "example input text"
 
 steps:
   - id: search

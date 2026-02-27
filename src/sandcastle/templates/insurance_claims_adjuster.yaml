@@ -16,18 +16,23 @@ input_schema:
     claim_id:
       type: string
       description: "Unique claim identifier from the claims management system (e.g. 'CLM-2024-078342')"
+      example: "CLM-2024-078342"
     claim_type:
       type: string
       description: "Type of insurance claim: 'auto', 'property', 'health', or 'liability'"
+      example: "example input text"
     policy_details:
       type: string
       description: "Policy information including policy number, coverage type, limits, deductibles, endorsements, and effective dates"
+      example: "Provide relevant context and details for analysis"
     claimant_info:
       type: string
       description: "Claimant details including name, contact information, relationship to policyholder, and any prior claims history"
+      example: "Provide relevant context and details for analysis"
     incident_description:
       type: string
       description: "Detailed description of the incident including date, time, location, circumstances, parties involved, and injuries or damages claimed"
+      example: "A detailed description of the subject for analysis"
 
 steps:
   - id: document-extraction

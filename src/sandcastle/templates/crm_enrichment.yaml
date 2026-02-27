@@ -17,15 +17,19 @@ input_schema:
     search_query:
       type: string
       description: "Search query for HubSpot contacts (name or email)"
+      example: "example input text"
     enrichment_focus:
       type: string
       description: "What to focus enrichment on (e.g. 'company size and revenue', 'technology stack')"
+      example: "company size and revenue"
     create_deals:
       type: boolean
       description: "Whether to create deals for qualified contacts (default: false)"
+      example: True
     deal_pipeline:
       type: string
       description: "HubSpot pipeline for new deals (default: 'default')"
+      example: "example input text"
 
 steps:
   - id: fetch-contacts

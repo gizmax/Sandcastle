@@ -17,19 +17,24 @@ input_schema:
     crisis_description:
       type: string
       description: "Detailed description of the crisis situation, including known facts, timeline, and scope"
+      example: "A detailed description of the subject for analysis"
     company_name:
       type: string
       description: "Company name facing the crisis"
+      example: "Acme Corp"
     affected_channels:
       type: string
       description: "Comma-separated list of affected channels (e.g. 'twitter, linkedin, press, reddit, internal')"
+      example: "twitter, linkedin, press, reddit, internal"
     severity_level:
       type: string
       description: "Crisis severity: critical, high, medium, low (default: high)"
       default: "high"
+      example: "high"
     spokesperson_name:
       type: string
       description: "Primary spokesperson name for media responses"
+      example: "example input text"
 
 steps:
   - id: situation-assessment

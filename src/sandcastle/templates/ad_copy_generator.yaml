@@ -16,12 +16,15 @@ input_schema:
     product_brief:
       type: string
       description: "Product brief describing features, target audience, and differentiators"
+      example: "Sandcastle AI - workflow orchestrator for dev teams. Target: CTOs at Series A-C startups. Key differentiators: pluggable sandboxes, community hub, 5-min setup."
     brand_voice:
       type: string
       description: "Brand voice guidelines (e.g. professional, playful, authoritative). Optional - will be inferred from brief if not provided."
+      example: "professional, clear, and approachable"
     landing_page_url:
       type: string
       description: "Landing page URL for display path generation and CTA alignment"
+      example: "https://acme.com/product"
 
 steps:
   - id: analyze-product

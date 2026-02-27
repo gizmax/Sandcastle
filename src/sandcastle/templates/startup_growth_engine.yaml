@@ -16,17 +16,21 @@ input_schema:
     startup_name:
       type: string
       description: "Name of the startup"
+      example: "example input text"
     product_url:
       type: string
       description: "URL of the product or landing page to analyze"
+      example: "https://example.com"
     growth_stage:
       type: string
       description: "Current growth stage (early, growth, scale)"
       default: "early"
+      example: "early"
     monthly_budget:
       type: number
       description: "Monthly marketing budget in USD"
       default: 5000
+      example: "5000"
 
 steps:
   - id: growth-audit

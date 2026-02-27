@@ -16,24 +16,30 @@ input_schema:
     brand_name:
       type: string
       description: "Brand or company name running the campaign"
+      example: "example input text"
     campaign_goal:
       type: string
       description: "Primary campaign objective: awareness, engagement, conversion, or launch"
       default: "awareness"
+      example: "awareness"
     target_audience:
       type: string
       description: "Target audience description (demographics, interests, behaviors)"
+      example: "SaaS founders and engineering leaders"
     budget_range:
       type: string
       description: "Campaign budget range (e.g. '$5K-$20K')"
       default: "$5K-$20K"
+      example: "$5K-$20K"
     platform_focus:
       type: string
       description: "Comma-separated platforms to focus on"
       default: "Instagram, TikTok, YouTube"
+      example: "Instagram, TikTok, YouTube"
     content_category:
       type: string
       description: "Content vertical (e.g. 'fitness', 'tech', 'beauty', 'food')"
+      example: "project management tools"
 
 steps:
   - id: brand-brief-analysis

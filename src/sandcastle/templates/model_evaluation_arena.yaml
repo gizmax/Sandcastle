@@ -16,18 +16,22 @@ input_schema:
     models_to_test:
       type: string
       description: "Comma-separated model names to evaluate (e.g. 'sonnet, haiku, opus, openai/gpt-4o, google/gemini-2.5-pro')"
+      example: "sonnet, haiku, opus, openai/gpt-4o, google/gemini-2.5-pro"
     test_category:
       type: string
       description: "Focus area: 'general', 'coding', 'reasoning', 'creative', 'safety', or 'domain-specific' (default: 'general')"
       default: "general"
+      example: "project management tools"
     num_prompts:
       type: number
       description: "Number of test prompts to generate per category (default: 20)"
       default: 20
+      example: "20"
     evaluation_criteria:
       type: string
       description: "Comma-separated evaluation dimensions (default: 'accuracy,safety,cost,latency')"
       default: "accuracy,safety,cost,latency"
+      example: "accuracy,safety,cost,latency"
 
 steps:
   - id: test-suite-generation

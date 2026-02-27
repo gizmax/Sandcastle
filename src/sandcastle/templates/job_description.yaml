@@ -16,15 +16,19 @@ input_schema:
     role_brief:
       type: string
       description: "Brief describing the role, responsibilities, and requirements"
+      example: "Provide relevant context and details for analysis"
     company_name:
       type: string
       description: "Company name for the About Us section"
+      example: "Acme Corp"
     salary_range:
       type: string
       description: "Salary range to include (e.g. '$120k-$160k'). Recommended for transparency and SEO."
+      example: "$150K-$180K + equity"
     location_type:
       type: string
       description: "Work arrangement: remote, hybrid, on-site, or flexible"
+      example: "example input text"
 
 steps:
   - id: analyze-role

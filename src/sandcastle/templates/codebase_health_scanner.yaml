@@ -17,17 +17,21 @@ input_schema:
     repo_url:
       type: string
       description: "Repository URL or local path to the codebase to analyze"
+      example: "https://example.com"
     language:
       type: string
       description: "Primary programming language (e.g. 'python', 'typescript', 'java', 'go', 'rust')"
+      example: "English"
     focus_areas:
       type: string
       description: "Comma-separated areas to focus on (default: all). Options: complexity, dependencies, coverage, dead_code, api_drift, docs"
       default: "all"
+      example: "financial performance, risk factors, growth strategy"
     tech_debt_budget:
       type: string
       description: "Hours available per sprint for tech debt reduction (used for roadmap planning)"
       default: "20"
+      example: "5000"
 
 steps:
   - id: static-analysis

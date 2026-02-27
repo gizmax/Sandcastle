@@ -10,14 +10,17 @@ input_schema:
     project_name:
       type: string
       description: Vercel project name to monitor
+      example: "example input text"
     metric_query:
       type: string
       description: Datadog metric query to check
       default: "avg:system.cpu.user{*}"
+      example: "avg:system.cpu.user{*}"
     threshold:
       type: number
       description: Alert threshold for the metric
       default: 80
+      example: "80"
 
 steps:
   - id: check_deployments

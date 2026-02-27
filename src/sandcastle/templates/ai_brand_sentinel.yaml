@@ -17,16 +17,20 @@ input_schema:
     brand_name:
       type: string
       description: "Your brand or product name to monitor across AI platforms"
+      example: "example input text"
     competitors:
       type: string
       description: "Comma-separated list of competitor brand names to compare against"
+      example: "Zapier, Make, n8n"
     ai_platforms:
       type: string
       description: "Comma-separated list of AI platforms to probe (default: ChatGPT, Perplexity, Claude, Google AI)"
       default: "ChatGPT, Perplexity, Claude, Google AI"
+      example: "ChatGPT, Perplexity, Claude, Google AI"
     monitoring_queries:
       type: string
       description: "Comma-separated seed queries to test across AI platforms (e.g. 'best CRM software, CRM comparison 2026')"
+      example: "best CRM software, CRM comparison 2026"
 
 steps:
   - id: query-generation

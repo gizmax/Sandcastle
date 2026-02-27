@@ -17,14 +17,17 @@ input_schema:
       type: string
       description: "Path to directory containing PDF files"
       default: "~/Desktop"
+      example: "~/Documents/reports"
     focus_areas:
       type: string
       description: "Specific topics, questions, or areas of interest to prioritize in the analysis (e.g. 'financial performance, risk factors, growth strategy')"
       default: ""
+      example: "financial performance, risk factors, growth strategy"
     output_format:
       type: string
       description: "Desired output format - executive-brief, detailed-report, comparison-table, or slide-notes"
       default: "executive-brief"
+      example: "executive-brief"
 
 steps:
   - id: document-analysis

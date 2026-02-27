@@ -16,17 +16,21 @@ input_schema:
     competitor_product:
       type: string
       description: "The competitor product to tear down - URL to product page or product name (e.g. 'https://competitor.com' or 'Notion')"
+      example: "https://competitor.com"
     your_product:
       type: string
       description: "Your product name and brief description for comparison context (e.g. 'Acme Notes - collaborative documentation tool for engineering teams')"
+      example: "Acme Notes - collaborative documentation tool for engineering teams"
     analysis_depth:
       type: string
       description: "Depth of analysis: quick (key findings only), standard (full analysis), comprehensive (exhaustive teardown with scoring)"
       default: "comprehensive"
+      example: "comprehensive"
     focus_areas:
       type: string
       description: "Comma-separated areas to focus on: features, ux, pricing, positioning, technical, marketing, support"
       default: "features, ux, pricing, positioning"
+      example: "financial performance, risk factors, growth strategy"
 
 steps:
   - id: product-discovery

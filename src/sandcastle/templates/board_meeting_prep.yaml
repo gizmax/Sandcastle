@@ -16,18 +16,23 @@ input_schema:
     company_name:
       type: string
       description: "Name of the company preparing the board meeting"
+      example: "Acme Corp"
     reporting_period:
       type: string
       description: "Reporting period for the board meeting (e.g., Q1 2026, FY 2025)"
+      example: "example input text"
     board_members:
       type: string
       description: "Comma-separated list of board member names and roles"
+      example: "example input text"
     key_metrics_sources:
       type: string
       description: "Comma-separated list of data sources for key metrics (e.g., Stripe, QuickBooks, Mixpanel)"
+      example: "example input text"
     strategic_priorities:
       type: string
       description: "Comma-separated list of current strategic priorities being tracked by the board"
+      example: "example input text"
 
 steps:
   - id: data-collection

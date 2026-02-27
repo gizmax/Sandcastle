@@ -17,21 +17,26 @@ input_schema:
     project_description:
       type: string
       description: "Full text of the client's project posting, job description, or RFP (paste the complete listing)"
+      example: "A detailed description of the subject for analysis"
     freelancer_skills:
       type: string
       description: "Comma-separated list of your core skills and expertise areas (e.g. 'React, Node.js, AWS, PostgreSQL, 8 years experience')"
+      example: "React, Node.js, AWS, PostgreSQL, 8 years experience"
     portfolio_highlights:
       type: string
       description: "Description of relevant past projects, case studies, or portfolio pieces to reference in the proposal"
       default: "no specific portfolio provided"
+      example: "no specific portfolio provided"
     hourly_rate:
       type: string
       description: "Your standard hourly rate or rate range (e.g. '$85/hr', '$75-100/hr', '$5000 fixed for this type')"
       default: "market rate"
+      example: "$85/hr"
     platform:
       type: string
       description: "Freelance platform the proposal is for (affects formatting and optimization strategy)"
       default: "upwork"
+      example: "upwork"
 
 steps:
   - id: project-analysis

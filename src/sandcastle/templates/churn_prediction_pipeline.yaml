@@ -17,14 +17,17 @@ input_schema:
     customer_segment:
       type: string
       description: "Customer segment to analyze (e.g. 'Enterprise', 'Mid-Market', 'SMB', 'Starter', or 'All')"
+      example: "Enterprise, Mid-Market, SMB"
     lookback_period:
       type: string
       description: "How far back to analyze usage and behavioral data (default: '90 days')"
       default: "90 days"
+      example: "90 days"
     risk_threshold:
       type: number
       description: "Minimum churn risk score (0-100) to trigger retention actions (default: 70)"
       default: 70
+      example: "70"
 
 steps:
   - id: usage-analytics

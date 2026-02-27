@@ -17,18 +17,23 @@ input_schema:
     standup_channel:
       type: string
       description: "Slack channel to read standups from (e.g. #daily-standup)"
+      example: "#daily-standup"
     summary_channel:
       type: string
       description: "Slack channel to post summary to (defaults to standup_channel)"
+      example: "#daily-standup"
     lookback_hours:
       type: number
       description: "Hours to look back for messages (default: 24)"
+      example: 24
     sprint_goal:
       type: string
       description: "Current sprint goal for alignment tracking (e.g. 'Ship v2.0 checkout flow')"
+      example: "Ship v2.0 checkout flow by end of sprint"
     team_members:
       type: string
       description: "Comma-separated list of expected team members for missing-update detection"
+      example: "Alice Chen, Bob Smith, Carol Davis"
 
 steps:
   - id: collect-updates

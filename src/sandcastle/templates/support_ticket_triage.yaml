@@ -18,10 +18,12 @@ input_schema:
       type: number
       description: "How many hours back to look for new tickets (default: 4)"
       default: 4
+      example: "4"
     slack_channel:
       type: string
       description: "Slack channel for triage notifications (e.g. '#support-triage')"
       default: "#support-triage"
+      example: "#daily-standup"
 
 steps:
   - id: fetch-tickets

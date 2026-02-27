@@ -16,13 +16,16 @@ input_schema:
     topic:
       type: string
       description: "Research domain or topic area"
+      example: "How to scale your engineering team from 10 to 50"
     question:
       type: string
       description: "Specific research question to investigate"
+      example: "example input text"
     depth:
       type: string
       description: "Analysis depth (quick, standard, deep)"
       default: "standard"
+      example: "standard"
 
 memory:
   scope: global

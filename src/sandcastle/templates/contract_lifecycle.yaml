@@ -16,12 +16,15 @@ input_schema:
     contract_type:
       type: string
       description: "Type of contract to draft (e.g. SaaS, NDA, MSA, SOW, License, Employment)"
+      example: "example input text"
     counterparty:
       type: string
       description: "Name of the counterparty or organization"
+      example: "example input text"
     key_terms:
       type: string
       description: "Key terms and requirements to include (comma-separated or free text)"
+      example: "example input text"
 
 steps:
   - id: draft-generation

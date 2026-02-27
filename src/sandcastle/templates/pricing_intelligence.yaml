@@ -16,12 +16,15 @@ input_schema:
     product_name:
       type: string
       description: "Your product name for pricing comparison context"
+      example: "Sandcastle AI"
     competitor_urls:
       type: string
       description: "Comma-separated list of competitor pricing page URLs or company names"
+      example: "example input text"
     target_segments:
       type: string
       description: "Target customer segments to analyze (e.g. 'SMB, Mid-Market, Enterprise')"
+      example: "Enterprise, Mid-Market, SMB"
 
 steps:
   - id: price-scraping

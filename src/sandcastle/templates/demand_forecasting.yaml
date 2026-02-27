@@ -16,14 +16,17 @@ input_schema:
     product_category:
       type: string
       description: "Product category or SKU group to forecast (e.g. 'outdoor furniture', 'GPU accelerators', 'organic snacks')"
+      example: "project management tools"
     historical_period:
       type: string
       description: "Historical data window to consider (default: '12 months')"
       default: "12 months"
+      example: "12 months"
     forecast_horizon:
       type: string
       description: "How far ahead to forecast (default: 'next quarter')"
       default: "next quarter"
+      example: "next quarter"
 
 steps:
   - id: data-ingestion

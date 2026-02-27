@@ -16,15 +16,19 @@ input_schema:
     podcast_title:
       type: string
       description: "Name of the podcast show"
+      example: "example input text"
     episode_topic:
       type: string
       description: "Topic or title of the specific episode to repurpose"
+      example: "example input text"
     target_keywords:
       type: string
       description: "Target SEO keywords for content optimization (comma-separated)"
+      example: "example input text"
     brand_name:
       type: string
       description: "Brand or company name for attribution and CTAs"
+      example: "example input text"
 
 steps:
   - id: transcription

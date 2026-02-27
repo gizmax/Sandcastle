@@ -16,20 +16,25 @@ input_schema:
     incident_id:
       type: string
       description: "Unique incident identifier from your ticketing system (e.g. 'INC-2024-0847', 'PD-12345')"
+      example: "INC-2024-0847"
     incident_description:
       type: string
       description: "Detailed description of what happened, including initial symptoms observed and services impacted"
+      example: "A detailed description of the subject for analysis"
     monitoring_sources:
       type: string
       description: "Comma-separated list of monitoring and alerting tools used (e.g. 'PagerDuty, Datadog, Slack, Grafana, CloudWatch')"
       default: "PagerDuty, Datadog, Slack"
+      example: "PagerDuty, Datadog, Slack, Grafana, CloudWatch"
     affected_services:
       type: string
       description: "Comma-separated list of services, components, or systems affected by the incident (e.g. 'api-gateway, user-auth, payments-service, postgres-primary')"
+      example: "api-gateway, user-auth, payments-service, postgres-primary"
     severity:
       type: string
       description: "Incident severity level following standard classification: SEV-1 (critical), SEV-2 (major), SEV-3 (minor), SEV-4 (low)"
       default: "SEV-1"
+      example: "P2"
 
 steps:
   - id: timeline-reconstruction

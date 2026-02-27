@@ -16,19 +16,24 @@ input_schema:
     hotel_name:
       type: string
       description: "Name of the hotel property to optimize (e.g. 'Grand Marina Resort', 'Downtown Business Hotel')"
+      example: "Grand Marina Resort"
     location:
       type: string
       description: "Hotel location - city, state/province, country (e.g. 'San Diego, CA, USA', 'Barcelona, Spain')"
+      example: "Remote (US)"
     room_types:
       type: string
       description: "Comma-separated list of room types and inventory counts (e.g. 'Standard King:80, Deluxe Double:45, Suite:12, Presidential:2')"
+      example: "Standard King:80, Deluxe Double:45, Suite:12, Presidential:2"
     competitor_hotels:
       type: string
       description: "Comma-separated list of primary competitor hotels to monitor (e.g. 'Hilton Downtown, Marriott Waterfront, Hyatt Regency')"
+      example: "Hilton Downtown, Marriott Waterfront, Hyatt Regency"
     planning_horizon:
       type: string
       description: "Forward-looking planning period for pricing and forecasting"
       default: "30 days"
+      example: "30 days"
 
 steps:
   - id: market-analysis

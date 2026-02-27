@@ -16,13 +16,16 @@ input_schema:
     revenue_data:
       type: string
       description: "Description of revenue data source and format (e.g. 'Monthly ARR by segment from Jan 2023 to present, exported from Stripe')"
+      example: "Monthly ARR by segment from Jan 2024 to present, exported from Stripe"
     forecast_horizon:
       type: string
       description: "Time period to forecast (default: 'next quarter')"
       default: "next quarter"
+      example: "next quarter"
     segments:
       type: string
       description: "Revenue segments to analyze separately (e.g. 'Enterprise, Mid-Market, SMB, Self-Serve')"
+      example: "Enterprise, Mid-Market, SMB"
 
 steps:
   - id: data-ingestion

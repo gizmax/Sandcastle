@@ -17,13 +17,16 @@ input_schema:
     jira_project:
       type: string
       description: "Jira project key (e.g. 'PROJ')"
+      example: "PROJ"
     github_repo:
       type: string
       description: "GitHub repository (e.g. 'org/repo')"
+      example: "github.com/acme/platform"
     slack_channel:
       type: string
       description: "Slack channel for the standup post (e.g. '#engineering')"
       default: "#engineering"
+      example: "#daily-standup"
 
 steps:
   - id: fetch-sprint

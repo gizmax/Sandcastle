@@ -16,16 +16,20 @@ input_schema:
     frameworks:
       type: string
       description: "Comma-separated list of compliance frameworks to audit against (e.g. 'SOC 2, HIPAA, GDPR, ISO 27001, PCI DSS')"
+      example: "SOC 2, HIPAA, GDPR, ISO 27001, PCI DSS"
     organization_name:
       type: string
       description: "Name of the organization being assessed for compliance readiness"
+      example: "example input text"
     system_scope:
       type: string
       description: "Comma-separated list of systems, applications, and infrastructure in scope for the audit (e.g. 'AWS production, customer portal, HR database, email system')"
+      example: "AWS production, customer portal, HR database, email system"
     audit_date:
       type: string
       description: "Target audit date or timeframe for readiness assessment"
       default: "next quarter"
+      example: "2026-04-01"
 
 steps:
   - id: control-mapping

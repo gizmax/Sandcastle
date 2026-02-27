@@ -17,21 +17,26 @@ input_schema:
     product_name:
       type: string
       description: "Name of the product or feature being designed (e.g. 'Acme Dashboard', 'Checkout Flow Redesign')"
+      example: "Sandcastle AI"
     user_stories:
       type: string
       description: "User stories, requirements, or feature descriptions to translate into design specs (paste all stories/requirements)"
+      example: "example input text"
     design_system:
       type: string
       description: "Design system to use or reference (e.g. 'Material Design 3', 'Apple HIG', 'Ant Design', 'custom')"
       default: "custom"
+      example: "Material Design 3"
     target_platforms:
       type: string
       description: "Comma-separated target platforms (e.g. 'web, iOS, Android', 'web-only', 'responsive web, native iOS')"
       default: "responsive web"
+      example: "web, iOS, Android"
     accessibility_level:
       type: string
       description: "Accessibility conformance target (e.g. 'WCAG 2.1 AA', 'WCAG 2.2 AAA', 'Section 508')"
       default: "WCAG 2.1 AA"
+      example: "WCAG 2.1 AA"
 
 steps:
   - id: requirements-analysis

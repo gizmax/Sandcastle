@@ -1213,6 +1213,127 @@
       color: var(--accent);
     }
 
+    /* ---- Input Schema Section ---- */
+    .modal-inputs-section {
+      margin-bottom: 24px;
+    }
+
+    .input-summary {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .input-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .input-card {
+      padding: 12px 16px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s;
+    }
+
+    .input-card:hover {
+      border-color: var(--border-light);
+    }
+
+    .input-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+
+    .input-card-name {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .input-card-badge {
+      display: inline-flex;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-radius: 3px;
+    }
+
+    .input-card-badge.required {
+      color: #F43F5E;
+      background: rgba(244, 63, 94, 0.12);
+    }
+
+    .input-card-badge.optional {
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .input-card-badge.type-badge {
+      color: #3B82F6;
+      background: rgba(59, 130, 246, 0.12);
+    }
+
+    .input-card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 6px;
+    }
+
+    .input-card-example {
+      font-size: 12px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .input-card-example span {
+      color: var(--text-dim);
+      font-family: var(--font-sans);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-right: 4px;
+    }
+
+    .input-card-default {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .input-card-default code {
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+
+    /* Card input badge */
+    .card-inputs-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 6px;
+      font-size: 10px;
+      font-weight: 500;
+      font-family: var(--font-mono);
+      color: #8B5CF6;
+      background: rgba(139, 92, 246, 0.1);
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
     .modal-install-section {
       background: var(--code-bg);
       border: 1px solid var(--border);
@@ -1698,6 +1819,14 @@
         flex-wrap: wrap;
         gap: 8px;
       }
+
+      .input-card-header {
+        gap: 6px;
+      }
+
+      .input-card-example {
+        font-size: 11px;
+      }
     }
 
     /* ---- THEME TRANSITION ---- */
@@ -1757,6 +1886,18 @@
     html.light .hero h1 .accent {
       -webkit-text-fill-color: var(--accent);
       animation: none;
+    }
+
+    html.light .input-card-badge.optional {
+      background: rgba(0, 0, 0, 0.06);
+    }
+
+    html.light .card-inputs-badge {
+      background: rgba(139, 92, 246, 0.08);
+    }
+
+    html.light .input-card-default code {
+      background: rgba(0, 0, 0, 0.06);
     }
 
     /* ---- THEME TOGGLE ---- */
@@ -2244,6 +2385,11 @@
         <p class="modal-desc" id="modal-desc"></p>
         <div class="modal-highlights" id="modal-highlights"></div>
         <div class="modal-remix-info" id="modal-remix-info" style="display:none"></div>
+        <div class="modal-inputs-section" id="modal-inputs-section" style="display:none">
+          <div class="modal-section-label">What You'll Need</div>
+          <div class="input-summary" id="input-summary"></div>
+          <div class="input-cards" id="input-cards"></div>
+        </div>
         <div class="modal-dag-section" id="modal-dag-section">
           <div class="modal-section-label">Workflow Steps</div>
           <div class="modal-dag" id="modal-dag"></div>
@@ -2702,6 +2848,16 @@
             '<span class="review-count">(' + reviewCount + ')</span>' +
           '</span>';
 
+        var inputsBadge = '';
+        if (t.input_schema && t.input_schema.properties) {
+          var inputNames = Object.keys(t.input_schema.properties);
+          var inputReq = (t.input_schema.required || []).length;
+          var inputTotal = inputNames.length;
+          if (inputTotal > 0) {
+            inputsBadge = '<span class="card-inputs-badge">' + inputReq + '/' + inputTotal + ' inputs</span>';
+          }
+        }
+
         html +=
           '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
             badgeHtml +
@@ -2718,6 +2874,7 @@
             '<div class="card-footer">' +
               '<div class="card-meta">' +
                 '<span class="mono">' + steps + ' steps</span>' +
+                inputsBadge +
                 '<span class="card-author-link" onclick="event.stopPropagation();filterByAuthor(\'' + escAttr(t.author) + '\')">' + escHtml(t.author) + '</span>' +
                 (downloads > 0 ? '<span class="card-downloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' + formatNumber(downloads) + '</span>' : '') +
                 (remixCount > 0 ? '<span class="card-remixes">\u21AA ' + remixCount + '</span>' : '') +
@@ -2804,6 +2961,9 @@
       } else {
         remixInfo.style.display = 'none';
       }
+
+      // Input schema section
+      renderInputSchema(t);
 
       // DAG visualization (now with tools + parallel branches)
       renderDag(steps, models, tools, color);
@@ -3143,6 +3303,77 @@
       container.innerHTML = html;
     }
 
+    /* ========== Input Schema ========== */
+    function renderInputSchema(t) {
+      var section = document.getElementById('modal-inputs-section');
+      var summary = document.getElementById('input-summary');
+      var cards = document.getElementById('input-cards');
+
+      var schema = t.input_schema;
+      if (!schema || !schema.properties || Object.keys(schema.properties).length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+
+      var required = schema.required || [];
+      var props = schema.properties;
+      var names = Object.keys(props);
+
+      // Sort: required first, then optional
+      names.sort(function(a, b) {
+        var aReq = required.indexOf(a) !== -1 ? 0 : 1;
+        var bReq = required.indexOf(b) !== -1 ? 0 : 1;
+        return aReq - bReq;
+      });
+
+      var reqCount = required.length;
+      var totalCount = names.length;
+      summary.textContent = reqCount + ' required, ' + (totalCount - reqCount) + ' optional ' +
+        (totalCount === 1 ? 'field' : 'fields');
+
+      var html = '';
+      names.forEach(function(name) {
+        var prop = props[name];
+        var isReq = required.indexOf(name) !== -1;
+        var fieldType = prop.type || 'string';
+        var desc = prop.description || '';
+        var example = prop.example;
+        var defaultVal = prop['default'];
+
+        // Header: name + badges
+        html += '<div class="input-card">';
+        html += '<div class="input-card-header">';
+        html += '<span class="input-card-name">' + escHtml(name) + '</span>';
+        html += isReq
+          ? '<span class="input-card-badge required">required</span>'
+          : '<span class="input-card-badge optional">optional</span>';
+        if (fieldType !== 'string') {
+          html += '<span class="input-card-badge type-badge">' + escHtml(fieldType) + '</span>';
+        }
+        html += '</div>';
+
+        // Description
+        if (desc) {
+          html += '<div class="input-card-desc">' + escHtml(desc) + '</div>';
+        }
+
+        // Example
+        if (example != null && example !== '') {
+          html += '<div class="input-card-example"><span>Example:</span>' + escHtml(String(example)) + '</div>';
+        }
+
+        // Default
+        if (defaultVal != null && defaultVal !== '') {
+          html += '<div class="input-card-default">Default: <code>' + escHtml(String(defaultVal)) + '</code></div>';
+        }
+
+        html += '</div>';
+      });
+
+      cards.innerHTML = html;
+      section.style.display = 'block';
+    }
+
     /* ========== Playground ========== */
     function setupPlayground(template) {
       var form = document.getElementById('playground-form');
@@ -3161,10 +3392,11 @@
               '<textarea placeholder="' + escAttr(f.placeholder) + '">' + escHtml(f.default || '') + '</textarea>' +
             '</div>';
         } else {
+          var inputType = f.type === 'number' ? 'number' : 'text';
           html +=
             '<div class="playground-field">' +
               '<label>' + escHtml(f.label) + '</label>' +
-              '<input type="text" placeholder="' + escAttr(f.placeholder) + '" value="' + escAttr(f.default || '') + '">' +
+              '<input type="' + inputType + '" placeholder="' + escAttr(f.placeholder) + '" value="' + escAttr(f.default || '') + '">' +
             '</div>';
         }
       });
@@ -3176,7 +3408,57 @@
     }
 
     function getPlaygroundFields(template) {
-      var cat = template.category;
+      // Schema-driven fields from actual input_schema
+      var schema = template.input_schema;
+      if (schema && schema.properties && Object.keys(schema.properties).length > 0) {
+        var required = schema.required || [];
+        var names = Object.keys(schema.properties);
+        // Sort: required first
+        names.sort(function(a, b) {
+          var aReq = required.indexOf(a) !== -1 ? 0 : 1;
+          var bReq = required.indexOf(b) !== -1 ? 0 : 1;
+          return aReq - bReq;
+        });
+
+        return names.map(function(name) {
+          var prop = schema.properties[name];
+          var isReq = required.indexOf(name) !== -1;
+          var fieldType = prop.type || 'string';
+          var desc = prop.description || '';
+          var example = prop.example != null ? String(prop.example) : '';
+          var defaultVal = prop['default'] != null ? String(prop['default']) : '';
+
+          // Humanize field name: "product_brief" -> "Product Brief"
+          var label = name.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+          if (isReq) label += ' *';
+
+          // Decide textarea vs text vs number
+          var inputType = 'text';
+          if (fieldType === 'number') {
+            inputType = 'number';
+          } else {
+            // Use textarea for long-text fields
+            var longWords = ['brief', 'content', 'features', 'description', 'details',
+              'notes', 'context', 'data', 'requirements', 'text', 'overview', 'summary'];
+            var nameLower = name.toLowerCase();
+            var isLong = longWords.some(function(w) { return nameLower.indexOf(w) !== -1; });
+            if (isLong) inputType = 'textarea';
+          }
+
+          return {
+            label: label,
+            type: inputType,
+            placeholder: example || desc,
+            default: example || defaultVal
+          };
+        });
+      }
+
+      // Fallback: category-based fields for templates without schema
+      return getCategoryFallbackFields(template.category);
+    }
+
+    function getCategoryFallbackFields(cat) {
       if (cat === 'sales_crm') {
         return [
           { label: 'Company Name', type: 'text', placeholder: 'e.g. Acme Corp', default: 'Acme Corp' },

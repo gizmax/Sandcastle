@@ -17,19 +17,24 @@ input_schema:
     competitors:
       type: string
       description: "Comma-separated list of competitor names and their pricing page URLs - e.g. 'Acme:https://acme.com/pricing, Globex:https://globex.io/plans'"
+      example: "Zapier, Make, n8n"
     our_product:
       type: string
       description: "Your product name for comparison context"
+      example: "example input text"
     our_pricing:
       type: string
       description: "Your current pricing tiers and features summary for side-by-side comparison"
+      example: "example input text"
     slack_channel:
       type: string
       description: "Slack channel for pricing change alerts (e.g. '#competitive-intel')"
       default: "#competitive-intel"
+      example: "#daily-standup"
     focus_areas:
       type: string
       description: "Specific areas to monitor - e.g. 'enterprise tier, API pricing, per-seat costs, usage limits'"
+      example: "financial performance, risk factors, growth strategy"
 
 steps:
   - id: scrape-pricing

@@ -16,16 +16,20 @@ input_schema:
     tax_year:
       type: string
       description: "Tax year being prepared (e.g. '2025', '2024')"
+      example: "2025"
     filing_status:
       type: string
       description: "IRS filing status: 'single', 'married_joint', 'married_separate', 'head_of_household', or 'qualifying_surviving_spouse'"
+      example: "example input text"
     document_sources:
       type: string
       description: "Comma-separated list of document sources provided (e.g. 'W-2, 1099-NEC, 1099-INT, 1099-DIV, 1099-B, bank statements, receipts, K-1')"
+      example: "W-2, 1099-NEC, 1099-INT, 1099-DIV, 1099-B, bank statements, receipts, K-1"
     business_type:
       type: string
       description: "Type of taxpayer: 'individual' (W-2 employee), 'self_employed' (Schedule C), 'partnership' (K-1), 'scorp' (K-1 + W-2), 'rental_property' (Schedule E)"
       default: "individual"
+      example: "individual"
 
 steps:
   - id: document-ingestion

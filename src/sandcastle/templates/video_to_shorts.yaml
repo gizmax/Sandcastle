@@ -16,17 +16,21 @@ input_schema:
     video_url:
       type: string
       description: "URL of the long-form video to analyze (YouTube, Vimeo, or direct link)"
+      example: "https://example.com"
     target_platforms:
       type: string
       description: "Comma-separated target platforms (e.g. 'TikTok, Instagram Reels, YouTube Shorts')"
+      example: "TikTok, Instagram Reels, YouTube Shorts"
     brand_voice:
       type: string
       description: "Brand voice and tone guidelines (e.g. 'professional but approachable', 'bold and provocative', 'educational and calm')"
       default: "engaging and authentic"
+      example: "professional, clear, and approachable"
     content_goals:
       type: string
       description: "Primary goals for the short-form content (e.g. 'drive newsletter signups', 'build thought leadership', 'increase brand awareness', 'drive product sales')"
       default: "maximize engagement and reach"
+      example: "drive newsletter signups"
 
 steps:
   - id: content-analysis

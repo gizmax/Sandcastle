@@ -17,13 +17,16 @@ input_schema:
     repo_url:
       type: string
       description: "GitHub repository URL (e.g. 'https://github.com/org/repo')"
+      example: "https://example.com"
     branch:
       type: string
       description: "Branch to analyze for deployment (default: main)"
       default: "main"
+      example: "main"
     deploy_target:
       type: string
       description: "Deployment target environment (e.g. 'production', 'staging', 'canary')"
+      example: "production"
 
 steps:
   - id: diff-analysis

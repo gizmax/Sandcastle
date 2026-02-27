@@ -16,19 +16,24 @@ input_schema:
     organization_name:
       type: string
       description: "Name of the organization being audited"
+      example: "example input text"
     saas_inventory:
       type: string
       description: "Comma-separated list of known SaaS tools in use"
+      example: "example input text"
     employee_count:
       type: number
       description: "Total number of employees in the organization"
+      example: 100
     annual_saas_budget:
       type: string
       description: "Annual SaaS budget in USD (e.g., 500000)"
+      example: "5000"
     optimization_goal:
       type: string
       description: "Primary optimization goal"
       default: "reduce_waste"
+      example: "reduce_waste"
 
 steps:
   - id: inventory-audit

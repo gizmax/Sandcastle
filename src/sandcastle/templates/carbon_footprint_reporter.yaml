@@ -16,20 +16,25 @@ input_schema:
     organization_name:
       type: string
       description: "Name of the organization for carbon footprint reporting"
+      example: "example input text"
     reporting_year:
       type: string
       description: "Calendar or fiscal year for emissions reporting (e.g. '2025', 'FY2025')"
+      example: "2025"
     industry_sector:
       type: string
       description: "Industry sector for benchmarking and materiality assessment (e.g. 'technology', 'manufacturing', 'retail', 'financial_services', 'healthcare')"
+      example: "technology"
     data_sources:
       type: string
       description: "Comma-separated list of emissions data sources available (e.g. 'energy, travel, fleet, supply_chain, waste, water, refrigerants')"
       default: "energy, travel, fleet, supply_chain"
+      example: "energy, travel, fleet, supply_chain, waste, water, refrigerants"
     reporting_framework:
       type: string
       description: "Primary reporting framework: 'GHG Protocol', 'ISO 14064', 'CDP', 'CSRD', 'SEC Climate'"
       default: "GHG Protocol"
+      example: "GHG Protocol"
 
 steps:
   - id: data-collection

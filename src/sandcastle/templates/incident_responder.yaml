@@ -17,23 +17,29 @@ input_schema:
     alert_id:
       type: string
       description: "PagerDuty alert or incident ID to investigate (e.g. 'P1234ABC')"
+      example: "P1234ABC"
     pagerduty_service:
       type: string
       description: "PagerDuty service name or ID for additional context"
+      example: "payments-api"
     datadog_query:
       type: string
       description: "Custom Datadog log query to narrow log search (default: auto-detect from alert)"
+      example: "example input text"
     github_repo:
       type: string
       description: "GitHub repository to check for recent deployments (e.g. 'org/repo')"
+      example: "github.com/acme/platform"
     slack_channel:
       type: string
       description: "Slack channel for incident updates (e.g. '#incidents')"
       default: "#incidents"
+      example: "#daily-standup"
     severity:
       type: string
       description: "Override severity level - 'SEV1' (critical), 'SEV2' (major), 'SEV3' (minor), or 'auto' to detect from alert"
       default: "auto"
+      example: "P2"
 
 steps:
   - id: fetch-alert-context

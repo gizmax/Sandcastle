@@ -16,20 +16,25 @@ input_schema:
     scan_scope:
       type: string
       description: "Scope of the scan: codebase, database, api, or full_stack"
+      example: "example input text"
     organization_name:
       type: string
       description: "Organization name for the assessment"
+      example: "example input text"
     regulations:
       type: string
       description: "Comma-separated regulations to check against"
       default: "GDPR, CCPA, HIPAA"
+      example: "GDPR, CCPA, HIPAA"
     data_categories:
       type: string
       description: "Comma-separated data categories to focus on (e.g. 'customer, employee, financial')"
+      example: "customer, employee, financial"
     risk_tolerance:
       type: string
       description: "Risk tolerance level: low, medium, or high"
       default: "medium"
+      example: "medium"
 
 steps:
   - id: data-discovery

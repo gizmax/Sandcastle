@@ -17,17 +17,21 @@ input_schema:
     repo:
       type: string
       description: "GitHub repository in 'owner/repo' format (e.g. 'acme/payments-api')"
+      example: "github.com/acme/platform"
     branch:
       type: string
       description: "Branch to generate docs from (default: 'main')"
       default: "main"
+      example: "main"
     path_filter:
       type: string
       description: "Path filter for API source files (e.g. 'src/api/', 'routes/')"
+      example: "src/api/"
     doc_style:
       type: string
       description: "Documentation style: 'reference', 'tutorial', or 'both' (default: 'reference')"
       default: "reference"
+      example: "reference"
 
 steps:
   - id: fetch-specs

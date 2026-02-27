@@ -10,12 +10,15 @@ input_schema:
     spreadsheet_id:
       type: string
       description: Google Sheets spreadsheet ID
+      example: "example input text"
     sheet_name:
       type: string
       description: Sheet/tab name to read from
+      example: "example input text"
     table_name:
       type: string
       description: Supabase table name to sync into
+      example: "example input text"
 
 steps:
   - id: read_sheet

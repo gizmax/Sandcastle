@@ -17,13 +17,16 @@ input_schema:
     business_question:
       type: string
       description: "The business question to answer in plain English (e.g. 'Which products have the highest return rate by region in the last 6 months?')"
+      example: "Which products have the highest return rate by region in the last 6 months?"
     database_schema:
       type: string
       description: "Description of available tables and columns (e.g. 'orders(id, customer_id, product_id, amount, status, region, created_at), products(id, name, category, price), returns(id, order_id, reason, created_at)')"
+      example: "orders(id, customer_id, product_id, amount, status, region, created_at), products(id, name, category, price), returns(id, order_id, reason, created_at)"
     visualization_type:
       type: string
       description: "Preferred chart type: 'auto', 'bar', 'line', 'pie', 'table', 'heatmap' (default: 'auto')"
       default: "auto"
+      example: "auto"
 
 steps:
   - id: question-analysis

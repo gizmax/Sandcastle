@@ -18,13 +18,16 @@ input_schema:
       type: number
       description: "How many days of resolved tickets to analyze (default: 30)"
       default: 30
+      example: "30"
     min_cluster_size:
       type: number
       description: "Minimum number of similar tickets to form a FAQ topic (default: 3)"
       default: 3
+      example: "3"
     notion_page_id:
       type: string
       description: "Notion page ID where FAQ entries will be written"
+      example: "example input text"
 
 steps:
   - id: fetch-resolved

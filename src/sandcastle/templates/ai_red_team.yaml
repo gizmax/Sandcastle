@@ -16,14 +16,17 @@ input_schema:
     target_model:
       type: string
       description: "Model to test (e.g. 'gpt-4o', 'claude-sonnet', 'llama-3.1-70b', 'gemini-2.0-flash')"
+      example: "gpt-4o"
     test_categories:
       type: string
       description: "Comma-separated test categories to run (default: 'injection,jailbreak,bias,toxicity')"
       default: "injection,jailbreak,bias,toxicity"
+      example: "injection,jailbreak,bias,toxicity"
     max_attempts:
       type: number
       description: "Maximum number of adversarial attempts per test category (default: 50)"
       default: 50
+      example: "50"
 
 steps:
   - id: target-profiling

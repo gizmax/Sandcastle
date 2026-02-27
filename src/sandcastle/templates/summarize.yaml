@@ -16,18 +16,22 @@ input_schema:
     text:
       type: string
       description: "The text to summarize"
+      example: "The quick brown fox jumps over the lazy dog. This is a sample text for processing."
     format:
       type: string
       description: "Output format style - executive, bullet-points, narrative, or academic"
       default: "executive"
+      example: "executive"
     max_length:
       type: string
       description: "Target length for the final summary (e.g. '500 words', '1 page', '3 paragraphs')"
       default: "500 words"
+      example: "500 words"
     audience:
       type: string
       description: "Target audience - determines vocabulary complexity and assumed background knowledge"
       default: "general"
+      example: "example input text"
 
 steps:
   - id: initial-analysis

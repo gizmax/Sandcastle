@@ -17,13 +17,16 @@ input_schema:
     siem_source:
       type: string
       description: "SIEM platform source (e.g. 'splunk', 'sentinel', 'elastic', 'crowdstrike')"
+      example: "splunk"
     alert_id:
       type: string
       description: "Alert ID from the SIEM to triage (e.g. 'ALERT-2024-00847')"
+      example: "ALERT-2024-00847"
     auto_contain:
       type: string
       description: "Whether to auto-execute containment actions (default: 'false')"
       default: "false"
+      example: "false"
 
 steps:
   - id: alert-intake

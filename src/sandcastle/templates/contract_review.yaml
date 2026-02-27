@@ -16,6 +16,7 @@ input_schema:
     contract_text:
       type: string
       description: "The contract document text to review"
+      example: "example input text"
 
 steps:
   - id: extract-terms

@@ -16,9 +16,11 @@ input_schema:
     reviews:
       type: string
       description: "Batch of customer reviews to analyze"
+      example: "example input text"
     product_name:
       type: string
       description: "Name of the product being reviewed"
+      example: "Sandcastle AI"
 
 steps:
   - id: parse-reviews

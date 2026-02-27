@@ -17,14 +17,17 @@ input_schema:
     crm_source:
       type: string
       description: "CRM data source identifier (e.g. 'Salesforce', 'HubSpot') or pipeline name"
+      example: "Salesforce"
     time_period:
       type: string
       description: "Time period to analyze (default: last quarter)"
       default: "last quarter"
+      example: "last quarter"
     deal_stages:
       type: string
       description: "Comma-separated deal stages to include (default: Closed Won,Closed Lost)"
       default: "Closed Won,Closed Lost"
+      example: "Closed Won,Closed Lost"
 
 steps:
   - id: data-ingestion

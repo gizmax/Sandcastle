@@ -16,6 +16,7 @@ input_schema:
     changelog:
       type: string
       description: "Git diff or changelog text to generate release notes from"
+      example: "example input text"
 
 steps:
   - id: parse-changes

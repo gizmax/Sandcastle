@@ -16,17 +16,21 @@ input_schema:
     invoice_source:
       type: string
       description: "Invoice data source or batch identifier (e.g. 'email inbox', 'AP folder', 'EDI feed', or raw invoice text/data)"
+      example: "AP email inbox - batch of 15 vendor invoices from last week"
     company_name:
       type: string
       description: "Company name for matching against internal records"
+      example: "Acme Corp"
     approval_threshold:
       type: string
       description: "Dollar amount above which invoices require additional approval (default: 10000)"
       default: "10000"
+      example: "10000"
     accounting_system:
       type: string
       description: "Target accounting system for journal entries (e.g. 'QuickBooks', 'NetSuite', 'Xero', 'SAP')"
       default: "QuickBooks"
+      example: "QuickBooks"
 
 steps:
   - id: document-extraction

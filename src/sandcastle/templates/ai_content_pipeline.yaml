@@ -15,14 +15,17 @@ input_schema:
     topic:
       type: string
       description: Blog post topic
+      example: "How to scale your engineering team from 10 to 50"
     tone:
       type: string
       description: Writing tone (professional, casual, technical)
       default: professional
+      example: "professional, clear, and approachable"
     s3_prefix:
       type: string
       description: S3 key prefix for storing assets
       default: content/blog
+      example: "content/blog"
 
 steps:
   - id: research

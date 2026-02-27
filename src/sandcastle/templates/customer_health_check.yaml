@@ -17,6 +17,7 @@ input_schema:
     account_name:
       type: string
       description: "Customer account name to analyze"
+      example: "example input text"
 
 steps:
   - id: fetch-customer

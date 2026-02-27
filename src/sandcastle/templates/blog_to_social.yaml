@@ -16,12 +16,15 @@ input_schema:
     blog_post:
       type: string
       description: "The full blog post content to transform into social media posts"
+      example: "example input text"
     brand_handle:
       type: string
       description: "Your brand's social media handle (e.g. '@yourbrand') for consistent tagging"
+      example: "@yourbrand"
     industry:
       type: string
       description: "Industry vertical for hashtag and audience context (e.g. 'SaaS', 'fintech', 'health tech')"
+      example: "SaaS"
 
 steps:
   - id: analyze-post

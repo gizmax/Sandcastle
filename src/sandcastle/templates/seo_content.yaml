@@ -16,12 +16,15 @@ input_schema:
     topic:
       type: string
       description: "The topic to research keywords for and write an SEO-optimized article about"
+      example: "How to scale your engineering team from 10 to 50"
     target_audience:
       type: string
       description: "Primary target audience for the content (e.g. 'SaaS founders', 'beginner developers')"
+      example: "SaaS founders and engineering leaders"
     brand_url:
       type: string
       description: "Your website URL for internal linking strategy and brand context"
+      example: "https://acme.com/product"
 
 steps:
   - id: keyword-research

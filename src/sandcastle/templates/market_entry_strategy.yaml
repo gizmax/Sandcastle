@@ -16,12 +16,15 @@ input_schema:
     product_concept:
       type: string
       description: "Description of the product or service entering the market"
+      example: "example input text"
     target_geography:
       type: string
       description: "Geographic market to enter (e.g. 'European Union', 'Japan', 'Southeast Asia')"
+      example: "North America"
     target_industry:
       type: string
       description: "Industry vertical to target (e.g. 'Financial Services', 'Healthcare', 'Retail')"
+      example: "FinTech"
 
 steps:
   - id: market-sizing

@@ -17,19 +17,24 @@ input_schema:
     role_title:
       type: string
       description: "Job title for the open position (e.g. 'Senior Backend Engineer')"
+      example: "Senior Backend Engineer"
     department:
       type: string
       description: "Hiring department (e.g. 'Engineering', 'Product', 'Marketing')"
+      example: "Engineering"
     requirements:
       type: string
       description: "Key requirements, skills, and experience needed for the role"
+      example: "5+ years Python/Go, distributed systems experience, strong communication skills"
     salary_range:
       type: string
       description: "Compensation range for the role (e.g. '$150K-$180K + equity')"
+      example: "$150K-$180K + equity"
     location:
       type: string
       description: "Work location or remote policy (default: 'Remote')"
       default: "Remote"
+      example: "Remote (US)"
 
 steps:
   - id: job-description

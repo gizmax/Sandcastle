@@ -16,13 +16,16 @@ input_schema:
     supplier_list:
       type: string
       description: "Comma-separated list of supplier names to evaluate (e.g. 'Foxconn, TSMC, Samsung SDI')"
+      example: "Foxconn, TSMC, Samsung SDI"
     industry:
       type: string
       description: "Industry vertical for context (e.g. 'automotive', 'electronics', 'pharma')"
+      example: "automotive"
     risk_threshold:
       type: string
       description: "Minimum risk level to flag: 'low', 'medium', or 'high' (default: 'medium')"
       default: "medium"
+      example: "medium"
 
 steps:
   - id: supplier-scan
