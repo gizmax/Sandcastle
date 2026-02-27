@@ -1781,16 +1781,19 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
             print("Installation cancelled.")
             sys.exit(0)
     elif scan.warnings and force:
-        print(f"{_color('Security warnings (--force)', _C.YELLOW)}: {len(scan.warnings)} warning(s) skipped")
+        n = len(scan.warnings)
+        print(f"{_color('Security warnings (--force)', _C.YELLOW)}: {n} warning(s) skipped")
 
     # Verify checksum if registry has one
     registry_sha = template.get("sha256")
     if registry_sha:
         if not verify_checksum(yaml_content, registry_sha):
+            actual = compute_sha256(yaml_content)
             print(
-                f"{_color('Error', _C.RED)}: Checksum mismatch - content may have been tampered with.\n"
+                f"{_color('Error', _C.RED)}: Checksum mismatch"
+                " - content may have been tampered with.\n"
                 f"  Expected: {registry_sha}\n"
-                f"  Got:      {compute_sha256(yaml_content)}",
+                f"  Got:      {actual}",
                 file=sys.stderr,
             )
             sys.exit(1)

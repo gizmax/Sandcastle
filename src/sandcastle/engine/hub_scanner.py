@@ -140,7 +140,10 @@ def scan_template(yaml_content: str) -> ScanResult:
         return ScanResult(safe=False, warnings=warnings, errors=errors)
 
     if not isinstance(data, dict):
-        errors.append(ScanIssue(code="INVALID_STRUCTURE", message="Template YAML must be a mapping"))
+        errors.append(ScanIssue(
+            code="INVALID_STRUCTURE",
+            message="Template YAML must be a mapping",
+        ))
         return ScanResult(safe=False, warnings=warnings, errors=errors)
 
     steps = data.get("steps", [])
