@@ -1900,6 +1900,152 @@
       background: rgba(0, 0, 0, 0.06);
     }
 
+    html.light .search-autocomplete {
+      background: #fff;
+      border-color: var(--border);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    }
+
+    html.light .autocomplete-item:hover {
+      background: rgba(0, 0, 0, 0.04);
+    }
+
+    html.light .card-fav-btn {
+      color: var(--text-dim);
+    }
+
+    /* ---- FAVORITES ---- */
+    .card-fav-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: var(--surface);
+      border: 1px solid transparent;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      color: var(--text-dim);
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3;
+      transition: transform 0.15s, color 0.15s, opacity 0.15s, background 0.15s;
+      opacity: 0;
+    }
+
+    .card:hover .card-fav-btn,
+    .card-fav-btn.active {
+      opacity: 1;
+    }
+
+    .card-fav-btn:hover {
+      transform: scale(1.15);
+      color: var(--accent);
+      background: var(--surface-hover);
+      border-color: var(--border);
+    }
+
+    .card-fav-btn.active {
+      color: var(--accent);
+    }
+
+    .modal-btn--favorite {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .modal-btn--favorite.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .collection-card--virtual {
+      border-style: dashed;
+    }
+
+    /* ---- SEARCH AUTOCOMPLETE ---- */
+    .search-autocomplete {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 4px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      max-height: 300px;
+      overflow-y: auto;
+      z-index: 50;
+      display: none;
+    }
+
+    .search-autocomplete.visible {
+      display: block;
+    }
+
+    .autocomplete-section {
+      border-bottom: 1px solid var(--border);
+      padding: 4px 0;
+    }
+
+    .autocomplete-section:last-child {
+      border-bottom: none;
+    }
+
+    .autocomplete-section-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      padding: 6px 12px 2px;
+    }
+
+    .autocomplete-item {
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.1s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .autocomplete-item:hover {
+      background: var(--surface-hover);
+    }
+
+    .autocomplete-item .ac-icon {
+      color: var(--text-dim);
+      font-size: 12px;
+      flex-shrink: 0;
+      width: 16px;
+      text-align: center;
+    }
+
+    .autocomplete-item .ac-match {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    @media (max-width: 600px) {
+      .card-fav-btn {
+        opacity: 1;
+        font-size: 16px;
+      }
+
+      .search-autocomplete {
+        max-height: 250px;
+      }
+    }
+
     /* ---- THEME TOGGLE ---- */
     .theme-toggle {
       background: none;
@@ -2293,6 +2439,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </div>
         <input type="text" id="search-input" placeholder="Search workflows... (press / to focus)">
+        <div class="search-autocomplete" id="search-autocomplete"></div>
       </div>
     </div>
   </section>
@@ -2462,6 +2609,8 @@
     var searchQuery = '';
     var sortBy = 'name';
     var debounceTimer = null;
+    var favorites = {};
+    var recentlyViewed = [];
 
     /* ========== Constants ========== */
     var CAT_COLORS = {
@@ -2628,13 +2777,41 @@
     /* ========== Collections ========== */
     function renderCollections() {
       var container = document.getElementById('collections-scroll');
-      if (!registry || !registry.collections || registry.collections.length === 0) {
+      var hasVirtual = Object.keys(favorites).length > 0 || recentlyViewed.length > 0;
+      if (!registry || (!hasVirtual && (!registry.collections || registry.collections.length === 0))) {
         document.getElementById('collections-section').style.display = 'none';
         return;
       }
+      document.getElementById('collections-section').style.display = '';
 
       var html = '';
-      registry.collections.forEach(function(col) {
+
+      // Virtual: Favorites
+      var favCount = Object.keys(favorites).length;
+      if (favCount > 0) {
+        html +=
+          '<div class="collection-card collection-card--virtual' + (activeCollection === 'favorites' ? ' active' : '') + '" data-collection="favorites" onclick="toggleCollection(\'favorites\')">' +
+            '<div class="collection-icon">\u2665</div>' +
+            '<div class="collection-name">Favorites</div>' +
+            '<div class="collection-desc">Your saved workflows</div>' +
+            '<div class="collection-stats"><span>' + favCount + ' template' + (favCount !== 1 ? 's' : '') + '</span></div>' +
+          '</div>';
+      }
+
+      // Virtual: Recently Viewed
+      if (recentlyViewed.length > 0) {
+        var lastName = recentlyViewed[0].name || '';
+        if (lastName.length > 20) lastName = lastName.substring(0, 20) + '...';
+        html +=
+          '<div class="collection-card collection-card--virtual' + (activeCollection === 'recent' ? ' active' : '') + '" data-collection="recent" onclick="toggleCollection(\'recent\')">' +
+            '<div class="collection-icon">\uD83D\uDD53</div>' +
+            '<div class="collection-name">Recently Viewed</div>' +
+            '<div class="collection-desc">Last: ' + escHtml(lastName) + '</div>' +
+            '<div class="collection-stats"><span>' + recentlyViewed.length + ' viewed</span></div>' +
+          '</div>';
+      }
+
+      (registry.collections || []).forEach(function(col) {
         var icon = COLLECTION_ICONS[col.icon] || '\uD83D\uDCE6';
         var count = col.template_slugs ? col.template_slugs.length : 0;
         html +=
@@ -2712,8 +2889,20 @@
       if (!registry) return [];
       var items = registry.templates.slice();
 
+      // Virtual collection: Favorites
+      if (activeCollection === 'favorites') {
+        items = items.filter(function(t) { return favorites[t.slug]; });
+      }
+      // Virtual collection: Recently Viewed
+      else if (activeCollection === 'recent') {
+        var recentSlugs = {};
+        var recentOrder = {};
+        recentlyViewed.forEach(function(r, i) { recentSlugs[r.slug] = true; recentOrder[r.slug] = i; });
+        items = items.filter(function(t) { return recentSlugs[t.slug]; });
+        items.sort(function(a, b) { return (recentOrder[a.slug] || 0) - (recentOrder[b.slug] || 0); });
+      }
       // Collection filter
-      if (activeCollection && registry.collections) {
+      else if (activeCollection && registry.collections) {
         var col = registry.collections.find(function(c) { return c.id === activeCollection; });
         if (col && col.template_slugs) {
           var slugSet = {};
@@ -2784,7 +2973,11 @@
       }
 
       var context = [];
-      if (activeCollection && registry.collections) {
+      if (activeCollection === 'favorites') {
+        context.push('in Favorites');
+      } else if (activeCollection === 'recent') {
+        context.push('in Recently Viewed');
+      } else if (activeCollection && registry.collections) {
         var col = registry.collections.find(function(c) { return c.id === activeCollection; });
         if (col) context.push('in ' + col.name);
       }
@@ -2858,9 +3051,13 @@
           }
         }
 
+        var isFav = favorites[t.slug];
+        var favBtnHtml = '<button class="card-fav-btn' + (isFav ? ' active' : '') + '" onclick="event.stopPropagation();toggleFavorite(\'' + escAttr(t.slug) + '\')" title="' + (isFav ? 'Remove from favorites' : 'Add to favorites') + '">' + (isFav ? '\u2665' : '\u2661') + '</button>';
+
         html +=
           '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
             badgeHtml +
+            favBtnHtml +
             '<div class="card-header-row">' +
               '<div class="card-category" style="color:' + color + '">' +
                 '<span class="dot" style="background:' + color + '"></span>' + escHtml(label) +
@@ -2907,6 +3104,9 @@
       if (!registry) return;
       var t = registry.templates.find(function(item) { return item.slug === slug; });
       if (!t) return;
+
+      // Track recently viewed
+      trackRecentlyViewed(t.slug, t.name);
 
       var color = CAT_COLORS[t.category] || '#9CA3AF';
       var label = CAT_LABELS[t.category] || t.category;
@@ -3016,10 +3216,13 @@
       };
 
       // Action buttons
+      var favBtnClass = favorites[t.slug] ? 'modal-btn modal-btn--secondary modal-btn--favorite active' : 'modal-btn modal-btn--secondary modal-btn--favorite';
+      var favBtnText = favorites[t.slug] ? '\u2665 Favorited' : '\u2661 Add to Favorites';
       document.getElementById('modal-actions').innerHTML =
         '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--primary">Download YAML</a>' +
         '<a href="' + escAttr(t.download_url) + '" target="_blank" rel="noopener" class="modal-btn modal-btn--secondary">View Source</a>' +
-        '<button class="modal-btn modal-btn--playground" onclick="togglePlayground()">Try It</button>';
+        '<button class="modal-btn modal-btn--playground" onclick="togglePlayground()">Try It</button>' +
+        '<button id="modal-fav-btn" class="' + favBtnClass + '" data-slug="' + escAttr(t.slug) + '" onclick="toggleFavorite(\'' + escAttr(t.slug) + '\')">' + favBtnText + '</button>';
 
       // Playground setup
       setupPlayground(t);
@@ -3676,6 +3879,160 @@
       });
     }
 
+    /* ========== Favorites ========== */
+    function loadFavorites() {
+      try {
+        var raw = localStorage.getItem('sandcastle-hub-favorites');
+        if (raw) favorites = JSON.parse(raw);
+      } catch (e) { favorites = {}; }
+    }
+
+    function saveFavorites() {
+      localStorage.setItem('sandcastle-hub-favorites', JSON.stringify(favorites));
+    }
+
+    function toggleFavorite(slug) {
+      if (favorites[slug]) {
+        delete favorites[slug];
+      } else {
+        favorites[slug] = true;
+      }
+      saveFavorites();
+      renderCollections();
+      renderTemplates();
+      // Update modal favorite button if open
+      var modalBtn = document.getElementById('modal-fav-btn');
+      if (modalBtn && modalBtn.dataset.slug === slug) {
+        updateModalFavBtn(slug);
+      }
+    }
+
+    function updateModalFavBtn(slug) {
+      var btn = document.getElementById('modal-fav-btn');
+      if (!btn) return;
+      btn.dataset.slug = slug;
+      if (favorites[slug]) {
+        btn.className = 'modal-btn modal-btn--secondary modal-btn--favorite active';
+        btn.innerHTML = '\u2665 Favorited';
+      } else {
+        btn.className = 'modal-btn modal-btn--secondary modal-btn--favorite';
+        btn.innerHTML = '\u2661 Add to Favorites';
+      }
+    }
+
+    /* ========== Recently Viewed ========== */
+    function loadRecentlyViewed() {
+      try {
+        var raw = localStorage.getItem('sandcastle-hub-recently-viewed');
+        if (raw) recentlyViewed = JSON.parse(raw);
+      } catch (e) { recentlyViewed = []; }
+    }
+
+    function saveRecentlyViewed() {
+      localStorage.setItem('sandcastle-hub-recently-viewed', JSON.stringify(recentlyViewed));
+    }
+
+    function trackRecentlyViewed(slug, name) {
+      recentlyViewed = recentlyViewed.filter(function(r) { return r.slug !== slug; });
+      recentlyViewed.unshift({ slug: slug, name: name, timestamp: Date.now() });
+      if (recentlyViewed.length > 10) recentlyViewed = recentlyViewed.slice(0, 10);
+      saveRecentlyViewed();
+      renderCollections();
+    }
+
+    /* ========== Search Autocomplete ========== */
+    function renderAutocomplete(query) {
+      var dropdown = document.getElementById('search-autocomplete');
+      if (!query || !registry) {
+        dropdown.classList.remove('visible');
+        return;
+      }
+
+      var q = query.toLowerCase();
+      var html = '';
+
+      // Collect all tags
+      var allTags = {};
+      registry.templates.forEach(function(t) {
+        (t.tags || []).forEach(function(tag) { allTags[tag] = true; });
+      });
+      var matchedTags = Object.keys(allTags).filter(function(tag) {
+        return tag.toLowerCase().indexOf(q) !== -1;
+      }).slice(0, 5);
+
+      // Categories
+      var matchedCats = Object.keys(CAT_LABELS).filter(function(key) {
+        return CAT_LABELS[key].toLowerCase().indexOf(q) !== -1;
+      }).slice(0, 3);
+
+      // Templates
+      var matchedTemplates = registry.templates.filter(function(t) {
+        return t.name.toLowerCase().indexOf(q) !== -1 ||
+          t.description.toLowerCase().indexOf(q) !== -1;
+      }).slice(0, 5);
+
+      if (matchedTags.length === 0 && matchedCats.length === 0 && matchedTemplates.length === 0) {
+        dropdown.classList.remove('visible');
+        return;
+      }
+
+      if (matchedTags.length > 0) {
+        html += '<div class="autocomplete-section">';
+        html += '<div class="autocomplete-section-label">Tags</div>';
+        matchedTags.forEach(function(tag) {
+          html += '<div class="autocomplete-item" data-type="tag" data-value="' + escAttr(tag) + '">' +
+            '<span class="ac-icon">#</span>' +
+            '<span>' + highlightMatch(escHtml(tag), q) + '</span>' +
+          '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (matchedCats.length > 0) {
+        html += '<div class="autocomplete-section">';
+        html += '<div class="autocomplete-section-label">Categories</div>';
+        matchedCats.forEach(function(key) {
+          var color = CAT_COLORS[key] || '#9CA3AF';
+          html += '<div class="autocomplete-item" data-type="category" data-value="' + escAttr(key) + '">' +
+            '<span class="ac-icon"><span class="dot" style="background:' + color + ';width:8px;height:8px;display:inline-block;border-radius:50%"></span></span>' +
+            '<span>' + highlightMatch(escHtml(CAT_LABELS[key]), q) + '</span>' +
+          '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (matchedTemplates.length > 0) {
+        html += '<div class="autocomplete-section">';
+        html += '<div class="autocomplete-section-label">Workflows</div>';
+        matchedTemplates.forEach(function(t) {
+          html += '<div class="autocomplete-item" data-type="template" data-value="' + escAttr(t.slug) + '">' +
+            '<span class="ac-icon">\u2192</span>' +
+            '<span>' + highlightMatch(escHtml(t.name), q) + '</span>' +
+          '</div>';
+        });
+        html += '</div>';
+      }
+
+      dropdown.innerHTML = html;
+      dropdown.classList.add('visible');
+    }
+
+    function highlightMatch(text, query) {
+      var idx = text.toLowerCase().indexOf(query.toLowerCase());
+      if (idx === -1) return text;
+      return text.substring(0, idx) +
+        '<span class="ac-match">' + text.substring(idx, idx + query.length) + '</span>' +
+        text.substring(idx + query.length);
+    }
+
+    function hideAutocomplete() {
+      document.getElementById('search-autocomplete').classList.remove('visible');
+    }
+
+    // Load persisted data
+    loadFavorites();
+    loadRecentlyViewed();
+
     /* ========== Theme Toggle ========== */
     function initTheme() {
       var saved = localStorage.getItem('sandcastle-hub-theme');
@@ -3715,6 +4072,7 @@
       updateCategoryPills();
       updateCollectionHighlight();
       hideAuthorBar();
+      hideAutocomplete();
       document.querySelectorAll('.badge-filter-btn').forEach(function(btn) {
         btn.classList.remove('active');
       });
@@ -3736,13 +4094,53 @@
 
     /* ========== Event listeners ========== */
 
-    // Search with debounce
-    document.getElementById('search-input').addEventListener('input', function(e) {
+    // Search with debounce + autocomplete
+    var searchInput = document.getElementById('search-input');
+    searchInput.addEventListener('input', function(e) {
       clearTimeout(debounceTimer);
+      var val = e.target.value.trim();
       debounceTimer = setTimeout(function() {
-        searchQuery = e.target.value.trim();
+        searchQuery = val;
         renderTemplates();
-      }, 300);
+        renderAutocomplete(val);
+      }, 200);
+    });
+
+    searchInput.addEventListener('blur', function() {
+      setTimeout(hideAutocomplete, 150);
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        hideAutocomplete();
+        searchInput.blur();
+      }
+    });
+
+    // Autocomplete click handler (delegated)
+    document.getElementById('search-autocomplete').addEventListener('mousedown', function(e) {
+      var item = e.target.closest('.autocomplete-item');
+      if (!item) return;
+      e.preventDefault();
+      var type = item.dataset.type;
+      var value = item.dataset.value;
+
+      if (type === 'tag') {
+        searchInput.value = value;
+        searchQuery = value;
+        renderTemplates();
+      } else if (type === 'category') {
+        activeCategory = value;
+        activeCollection = null;
+        searchInput.value = '';
+        searchQuery = '';
+        updateCategoryPills();
+        updateCollectionHighlight();
+        renderTemplates();
+      } else if (type === 'template') {
+        showDetail(value);
+      }
+      hideAutocomplete();
     });
 
     // Category pills
