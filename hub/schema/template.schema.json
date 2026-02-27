@@ -91,6 +91,11 @@
       "type": "string",
       "enum": ["built-in", "community"],
       "description": "Whether this is a built-in or community-contributed template"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 hash of the workflow YAML content for integrity verification"
     }
   }
 }

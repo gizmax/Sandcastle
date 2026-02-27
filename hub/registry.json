@@ -34,7 +34,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 10
+      "review_count": 10,
+      "sha256": "b1e7091a038553cb08336286340c905c68ca710d63dc4c0d61b3097b42e3810b"
     },
     {
       "slug": "amira-dev/review-and-approve",
@@ -66,7 +67,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 73
+      "review_count": 73,
+      "sha256": "99652d9aed3956ca67152c56d05f80d7c86075249e09c821f5f7149d8665e435"
     },
     {
       "slug": "amira-dev/student-learning-path-builder",
@@ -100,7 +102,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 13
+      "review_count": 13,
+      "sha256": "4649f272187ed9b48de914611f797a180b049de42aabe2abfa3ce10aaa552ace"
     },
     {
       "slug": "amira-dev/supabase-data-sync",
@@ -136,7 +139,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 19
+      "review_count": 19,
+      "sha256": "95f89cebccb508637ff8d3dc57065d1c046ec980338bf81fd0c855b4d7358724"
     },
     {
       "slug": "content-queen/competitive-intelligence-radar",
@@ -171,7 +175,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 21
+      "review_count": 21,
+      "sha256": "6f7b9d6d9792818d238585507253d86e23257c3501d9011a19fca411ccdd0cb6"
     },
     {
       "slug": "content-queen/competitor-analysis",
@@ -202,7 +207,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 71
+      "review_count": 71,
+      "sha256": "42a27d52c94e4122a25e7aae158f994cc8bde8eb073deb148e0cf04c9d4168f8"
     },
     {
       "slug": "content-queen/content-calendar",
@@ -236,7 +242,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 48
+      "review_count": 48,
+      "sha256": "f333c8d156e82b2d1e484e1880dfd46d41a76e658c22afcb8c69cb9ff8e498ed"
     },
     {
       "slug": "content-queen/email-campaign",
@@ -267,7 +274,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 74
+      "review_count": 74,
+      "sha256": "87a5308b7ee001ed364e61beea9f0faeaeafd72b3ccd5143d678192847c2946f"
     },
     {
       "slug": "content-queen/podcast-to-empire",
@@ -300,7 +308,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 21
+      "review_count": 21,
+      "sha256": "f836f7a6614bcf47898d73be0a051314cb4dda1c664a5ac428c94dee2d7e1886"
     },
     {
       "slug": "content-queen/social-media-calendar",
@@ -334,7 +343,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 23
+      "review_count": 23,
+      "sha256": "a8251341b9cbb09cfcc855c7630c4bb515cff9b0e2d4225284a00f5a8196aa63"
     },
     {
       "slug": "datacraft-io/ai-rag-pipeline",
@@ -370,7 +380,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 41
+      "review_count": 41,
+      "sha256": "17f4b10241fff99ed726cb8f97ddb6ad3e02707d795ef99ab371c45f684fd41f"
     },
     {
       "slug": "datacraft-io/board-meeting-prep",
@@ -404,7 +415,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 26
+      "review_count": 26,
+      "sha256": "27bbb1c8c87ae6113b676fdf2a8c0fbe98af2b9c2a3e68cfddd28ca2d05f6d80"
     },
     {
       "slug": "datacraft-io/memory-learning-agent",
@@ -437,7 +449,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.9,
-      "review_count": 34
+      "review_count": 34,
+      "sha256": "2f0c1dfe3b48a49c2befeeaaafab9aaf45bd35f8567cf7da60525587b9fe1805"
     },
     {
       "slug": "datacraft-io/model-evaluation-arena",
@@ -471,7 +484,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 24
+      "review_count": 24,
+      "sha256": "3eb21b206141d2559cbc16802562c77d8b8ff1e7b5cca4d9b4afb417c5aca226"
     },
     {
       "slug": "datacraft-io/pdf-summary",
@@ -504,7 +518,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 75
+      "review_count": 75,
+      "sha256": "a72554727dc59d3e04d5e371ec6c07b84013cf27cb70a6f9bfd9574f67ea6030"
     },
     {
       "slug": "datacraft-io/product-feedback-prioritizer",
@@ -538,7 +553,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 4
+      "review_count": 4,
+      "sha256": "a29b1eaeb0b330cf62d2d6370fdef30fc5374184a37896498821f6221d78f29f"
     },
     {
       "slug": "datacraft-io/rag-knowledge-base",
@@ -572,7 +588,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 27
+      "review_count": 27,
+      "sha256": "f80a3f9ad64975efb9af58b3970c9b35603ae909f5905425904a12bdfd009e9c"
     },
     {
       "slug": "devrel-bot/release-notes-pro",
@@ -609,7 +626,8 @@
       "forked_from": "ops-ninja/release-notes",
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 47
+      "review_count": 47,
+      "sha256": "9e7505315e988c6e14abb3ffb172f169f02ad277a52b391203a13a2a200033d1"
     },
     {
       "slug": "elena-growth/agency-report-generator",
@@ -643,7 +661,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.7,
-      "review_count": 23
+      "review_count": 23,
+      "sha256": "547f48b041b7ed74cb8d476e090bd4c70b394579bbf0717896f43049af3f7d6c"
     },
     {
       "slug": "elena-growth/ai-brand-sentinel",
@@ -679,7 +698,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 5
+      "review_count": 5,
+      "sha256": "a232d2d0ed1b56ef64df90b4b23438af5a07d2591aa12ea0dbb81cd572fdabf6"
     },
     {
       "slug": "elena-growth/blog-to-social",
@@ -711,7 +731,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 33
+      "review_count": 33,
+      "sha256": "981ec7feba742fb49af3670158cdaba63456713cfe1c969a7f3c3c7e5e5974df"
     },
     {
       "slug": "elena-growth/competitive-teardown",
@@ -744,7 +765,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 6
+      "review_count": 6,
+      "sha256": "9be4bfbeea172df656c312fd908bcb8122233daa98e2e61ba9c9192901651db2"
     },
     {
       "slug": "elena-growth/ecommerce-catalog",
@@ -778,7 +800,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.9,
-      "review_count": 16
+      "review_count": 16,
+      "sha256": "cfc7ce74db1b858ff314fc8a076cc795bd2276a0f522b864ef101360828adf59"
     },
     {
       "slug": "gizmax/account-intelligence",
@@ -814,7 +837,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 13
+      "review_count": 13,
+      "sha256": "ed169dbd053d979b838564a67dc9f0d0e3ba742608c8c1020f9a5a45f5add18f"
     },
     {
       "slug": "gizmax/client-onboarding-orchestrator",
@@ -847,7 +871,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 10
+      "review_count": 10,
+      "sha256": "9c04d56b343734c8bc7cc6b32766697c00dbaf107c81b079e2463cdd49a94728"
     },
     {
       "slug": "gizmax/contract-review",
@@ -878,7 +903,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 14
+      "review_count": 14,
+      "sha256": "aa2913fcd4de35ca6eedc701f2607306dbd443dc6614f14304389971cb59e963"
     },
     {
       "slug": "gizmax/customer-churn-predictor",
@@ -915,7 +941,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 37
+      "review_count": 37,
+      "sha256": "0a0b8b8730b2c254f29df00903526f619f84b63ec0bac41235b79d8ff12700e2"
     },
     {
       "slug": "gizmax/lead-enrichment",
@@ -947,7 +974,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 72
+      "review_count": 72,
+      "sha256": "eb6b38ce7d9ac5c4865f02bbaa0843ba7e1e54157dc6e225fe89e41357aa021d"
     },
     {
       "slug": "gizmax/market-opportunity-scout",
@@ -980,7 +1008,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 23
+      "review_count": 23,
+      "sha256": "ea73d339efbf54164b753f557aee2c335f0ba5edcf812c03b0920e2a25e411cb"
     },
     {
       "slug": "gizmax/review-sentiment",
@@ -1012,7 +1041,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 74
+      "review_count": 74,
+      "sha256": "a597e4d7670418184f21c8c0a4533fd9fdba692f9ca61147b46445b7b181492f"
     },
     {
       "slug": "gizmax/support-ticket-triage",
@@ -1048,7 +1078,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 18
+      "review_count": 18,
+      "sha256": "ee90d147852f5d9942f8296dc9dbea74886e44373f3008afdf0154a3ce206757"
     },
     {
       "slug": "gizmax/win-loss-intelligence",
@@ -1083,7 +1114,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 14
+      "review_count": 14,
+      "sha256": "7553ae3fac6b537acea01e173fe7264e568115b3c39ee11b658934cb19e72776"
     },
     {
       "slug": "jmartinez/construction-bid-analyzer",
@@ -1117,7 +1149,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 24
+      "review_count": 24,
+      "sha256": "2937195eae37af4bdcaf1a4796679b7d0f2e6ae17531e1f6702329b548ac835b"
     },
     {
       "slug": "jmartinez/crm-enrichment",
@@ -1152,7 +1185,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 22
+      "review_count": 22,
+      "sha256": "7374c673f3646a78221493ab6346983e0dfbd6624b565fabcd4583c0926b19ac"
     },
     {
       "slug": "jmartinez/grant-proposal",
@@ -1186,7 +1220,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 22
+      "review_count": 22,
+      "sha256": "6b3221b0c6e120137d5a35ba603f1237f4a6be5a104ac965cca9146557b271c2"
     },
     {
       "slug": "jmartinez/lead-scoring",
@@ -1221,7 +1256,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 71
+      "review_count": 71,
+      "sha256": "98b9e342598e786f1899879f6b4229b70298d225addec1939a403be031cdbfba"
     },
     {
       "slug": "jmartinez/permit-application-processor",
@@ -1255,7 +1291,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 12
+      "review_count": 12,
+      "sha256": "d78f25cd64970a00f799928faa475c1ea6b0ec0acabef862f9ee13d29408fe29"
     },
     {
       "slug": "jmartinez/real-estate-listing",
@@ -1289,7 +1326,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.7,
-      "review_count": 23
+      "review_count": 23,
+      "sha256": "edc5d3d41735e565f4fd3d73b01ac9fc0e8036c4b4a65b2d37a0db14f0816fbe"
     },
     {
       "slug": "jmartinez/sales-pipeline-autopilot",
@@ -1325,7 +1363,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 54
+      "review_count": 54,
+      "sha256": "9f2f9cb25502ef1f1faa2b9e6ec5adccde6afe6b00900e20270a3c5d7180413e"
     },
     {
       "slug": "k8s-ops/deployment-monitor",
@@ -1361,7 +1400,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 22
+      "review_count": 22,
+      "sha256": "18f51b4845a960aae4f51d5b49f80dccdaaf6d8cf66f797923f787c552152cc0"
     },
     {
       "slug": "k8s-ops/discord-incident-bot",
@@ -1396,7 +1436,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 15
+      "review_count": 15,
+      "sha256": "3674735285361cf6c801d0c31195f1ec707201421f999dabf689973d838d890f"
     },
     {
       "slug": "k8s-ops/incident-responder",
@@ -1434,7 +1475,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 73
+      "review_count": 73,
+      "sha256": "e770019065af60155b50f7830cbbbaf06d6dfb31a5ee77f0ab9046b812ec63c2"
     },
     {
       "slug": "k8s-ops/nl-to-dashboard",
@@ -1469,7 +1511,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 16
+      "review_count": 16,
+      "sha256": "3de21f0f4ac00bd7a0216a5ee230ee011d5d9d1fef7aa39bb139f1c9ab4f5fa7"
     },
     {
       "slug": "k8s-ops/self-healing-pipeline",
@@ -1505,7 +1548,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 27
+      "review_count": 27,
+      "sha256": "10b938a69831ee997138a971f8706fa706bf6fd6604a86bf9675d644b3ab0fb5"
     },
     {
       "slug": "k8s-ops/slack-standup",
@@ -1539,7 +1583,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 80
+      "review_count": 80,
+      "sha256": "d5135087f0e5145a8adcad04f5f6c7f723da5f0e63727fa36ead7d011597dc57"
     },
     {
       "slug": "k8s-ops/sprint-standup",
@@ -1576,7 +1621,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 59
+      "review_count": 59,
+      "sha256": "8bb41280172674ce9f3d69c775054a68cf501639df36d5ac7d19a6bf15619b7c"
     },
     {
       "slug": "kai-security/ai-red-team",
@@ -1609,7 +1655,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 19
+      "review_count": 19,
+      "sha256": "507339b5c2c9dacb1d77b3867cc7a6c8a6f1d29c42336e63d481ee61a8d7e77b"
     },
     {
       "slug": "kai-security/compliance-audit-readiness",
@@ -1645,7 +1692,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 11
+      "review_count": 11,
+      "sha256": "520914cfcd607c79786eb65063934982b191a36468552ac751167c47cd757ff6"
     },
     {
       "slug": "kai-security/data-privacy-scanner",
@@ -1680,7 +1728,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 27
+      "review_count": 27,
+      "sha256": "64796c159192e808cfb4c27ea36b5410c2f61e3e154c4e94b577f7fd2054010c"
     },
     {
       "slug": "kai-security/deployment-risk-analyzer",
@@ -1715,7 +1764,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 20
+      "review_count": 20,
+      "sha256": "bec897d5843db1934bdef95c2c908fbe070ab7772936c7ac0f4a89f540df21e7"
     },
     {
       "slug": "kai-security/incident-command-center",
@@ -1751,7 +1801,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 9
+      "review_count": 9,
+      "sha256": "09029c7a4d345479e97d589630812fc67106fa81269341bfab2296f9b0a7ac4f"
     },
     {
       "slug": "kai-security/soc-triage-pipeline",
@@ -1788,7 +1839,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 20
+      "review_count": 20,
+      "sha256": "2bcb2728473e582259b1796d8d023d2f473543bcd58ced1876c7cf977dc7a8a0"
     },
     {
       "slug": "lawtech-ai/contract-lifecycle",
@@ -1821,7 +1873,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 15
+      "review_count": 15,
+      "sha256": "e9544cef1e504c4f3e5697c43a3015a61df526d4e2cf4b213911eda746f322ac"
     },
     {
       "slug": "lawtech-ai/contract-reviewer-pro",
@@ -1855,7 +1908,8 @@
       "forked_from": "gizmax/contract-review",
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 29
+      "review_count": 29,
+      "sha256": "2cab47501869daf6a1c74b22e477cd4b997b528a6790dbe7bdfa487cbb1f33d5"
     },
     {
       "slug": "lawtech-ai/onboarding-workflow",
@@ -1893,7 +1947,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 26
+      "review_count": 26,
+      "sha256": "80ee99fbc1d6fe4475755b43ac7036891b2357b5c73122464661c503c1ea040d"
     },
     {
       "slug": "lawtech-ai/patent-landscape-analyzer",
@@ -1926,7 +1981,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 8
+      "review_count": 8,
+      "sha256": "e53e465fbd8c6b6e13249a5cd6c38ae1ac2051d2117c033ef515c888c8fd306b"
     },
     {
       "slug": "lawtech-ai/resume-screener",
@@ -1958,7 +2014,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 62
+      "review_count": 62,
+      "sha256": "f3ac23d9ff73975119a0bd0423efe68da896127219fe442eba8c8bcd55f7acf2"
     },
     {
       "slug": "lena-content/ad-copy-generator",
@@ -1990,7 +2047,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 62
+      "review_count": 62,
+      "sha256": "71d5575a9e8784f4eff6596ad6b5327b1ec1763d3d2f77be7733f3a151c28497"
     },
     {
       "slug": "lena-content/ai-content-pipeline",
@@ -2026,7 +2084,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.7,
-      "review_count": 29
+      "review_count": 29,
+      "sha256": "1f293d5be4c3d9010ea006ddd03f6c9ae338b36a1993dd331a753bfed10a21c2"
     },
     {
       "slug": "lena-content/content-factory",
@@ -2061,7 +2120,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 15
+      "review_count": 15,
+      "sha256": "1dd337c11478971f23cdf1710eb3b2651b5b5c2d843279ac59b24b859cd99a14"
     },
     {
       "slug": "lena-content/course-creator",
@@ -2094,7 +2154,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 16
+      "review_count": 16,
+      "sha256": "ae40048886f8d06982e648aa5b06d17d3588c39a266ff11695ace50896b74c61"
     },
     {
       "slug": "lena-content/crisis-communication-commander",
@@ -2131,7 +2192,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 17
+      "review_count": 17,
+      "sha256": "47f0bc33920bee38346c7fb04ae1de45fddae3e61e7b2b9254290c0fe4b7c593"
     },
     {
       "slug": "lena-content/market-entry-strategy",
@@ -2165,7 +2227,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.9,
-      "review_count": 8
+      "review_count": 8,
+      "sha256": "51dc85682a6b7d492674b2ee7057f35f066579f80925c5c16120fe40d9cedb3e"
     },
     {
       "slug": "lena-content/seo-content",
@@ -2197,7 +2260,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 41
+      "review_count": 41,
+      "sha256": "096167f91aa6f913e4c5ee6a6d13e82a7659cb8ac521ea474424c807a85e97fc"
     },
     {
       "slug": "lena-content/startup-growth-engine",
@@ -2231,7 +2295,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 15
+      "review_count": 15,
+      "sha256": "2c854e95fbdd6c5f33f14d63da1a9edccde12ee470d4f6f501cb90139f36f616"
     },
     {
       "slug": "lena-content/trend-radar",
@@ -2264,7 +2329,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.9,
-      "review_count": 6
+      "review_count": 6,
+      "sha256": "6b5965d9ab8050477482c336b437e2eec24725cd35b80ee49f3470a1b736a319"
     },
     {
       "slug": "lena-content/video-to-shorts",
@@ -2299,7 +2365,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 9
+      "review_count": 9,
+      "sha256": "7605b0cca9003bb76fb67ab764f716e064e32cc05fd82f82a4fd7718eecedb4a"
     },
     {
       "slug": "marcus-hr/compliance-checker",
@@ -2334,7 +2401,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 24
+      "review_count": 24,
+      "sha256": "fa961139dbeb3f7ac2e13dea212f1b0317629921915db2219a01186d7c217487"
     },
     {
       "slug": "marcus-hr/job-description",
@@ -2365,7 +2433,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 74
+      "review_count": 74,
+      "sha256": "13f709c3b486ac188dd76ca3ffb0723d7ba12f4e8885067af9c4dad6853784cd"
     },
     {
       "slug": "marcus-hr/org-health-pulse",
@@ -2400,7 +2469,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 16
+      "review_count": 16,
+      "sha256": "03bc5b1a838a6c526a6b29039bd2943d85ef54f4afdce199a15bd32ae81cb190"
     },
     {
       "slug": "marcus-hr/regulatory-change-analyzer",
@@ -2435,7 +2505,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 18
+      "review_count": 18,
+      "sha256": "f4cd256fc531b462bd71e7be6f12bf41e59ded161c9b3d1769f7cf9f3e3df5e1"
     },
     {
       "slug": "nadia-cx/deal-velocity-optimizer",
@@ -2469,7 +2540,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 26
+      "review_count": 26,
+      "sha256": "91c8a981c21fd8c0af59919ddd0766ab617a4a23cb5c3eb077d9c7c6a4023873"
     },
     {
       "slug": "nadia-cx/faq-generator",
@@ -2505,7 +2577,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.9,
-      "review_count": 47
+      "review_count": 47,
+      "sha256": "0a52219de0b48655b73f64b1cd9b13305ec484f3513d1cd8845288f7a0ef5160"
     },
     {
       "slug": "nadia-cx/knowledge-base-auditor",
@@ -2541,7 +2614,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 9
+      "review_count": 9,
+      "sha256": "8a243ca6410f127b7d02f15f21206048e78b32b485562edd9d32ee6c34b57126"
     },
     {
       "slug": "nadia-cx/ticket-classifier",
@@ -2573,7 +2647,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 75
+      "review_count": 75,
+      "sha256": "f591e482e8418286e26799f8fd799eb0bf5b1e5a05ba380e90e981c65cadd21d"
     },
     {
       "slug": "nadia-cx/voice-agent-pipeline",
@@ -2607,7 +2682,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 25
+      "review_count": 25,
+      "sha256": "2d30e84f36a0e76b7d03e7663c517032bc869d5df6fd206fb1a870790e9c5a6c"
     },
     {
       "slug": "ops-ninja/memory-standup-bot",
@@ -2640,7 +2716,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.7,
-      "review_count": 31
+      "review_count": 31,
+      "sha256": "907403502d522bbed6ee946e61c8eedb9b5d664cd6cc912050ac4c50399795a4"
     },
     {
       "slug": "ops-ninja/outage-postmortem-generator",
@@ -2674,7 +2751,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 12
+      "review_count": 12,
+      "sha256": "a0204400c51f58b360be9cfe3a3859d4de9fd121726cc8cd614d86ac5e0389c1"
     },
     {
       "slug": "ops-ninja/release-notes",
@@ -2706,7 +2784,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 42
+      "review_count": 42,
+      "sha256": "8969d3ba32f017b19feff481f16e12ac7b74b35bb8dff21f17593ca5c26bc55c"
     },
     {
       "slug": "ops-ninja/saas-usage-optimizer",
@@ -2740,7 +2819,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 18
+      "review_count": 18,
+      "sha256": "005b49b8f9dbe58ad30a53240dae7fbe80d73cd8f5ba83b3e0fac525d9bda590"
     },
     {
       "slug": "pricewatch/dynamic-pricing",
@@ -2775,7 +2855,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 17
+      "review_count": 17,
+      "sha256": "beafce17eecec8719481f55821cf03d2d163b7524d0f9cd4e197e4c81678f79f"
     },
     {
       "slug": "pricewatch/hotel-revenue-optimizer",
@@ -2809,7 +2890,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 17
+      "review_count": 17,
+      "sha256": "129f163733a6076b8fdd355a820c7b9fbac916ce53995a7ebae243cd2f91a859"
     },
     {
       "slug": "pricewatch/pricing-intelligence",
@@ -2842,7 +2924,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 15
+      "review_count": 15,
+      "sha256": "036bb4173a465bcdb3c30824db80b33de9a0c76b075cc7e4a2a5c0d6a5a03f53"
     },
     {
       "slug": "pricewatch/pricing-tracker",
@@ -2876,7 +2959,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 26
+      "review_count": 26,
+      "sha256": "279b30aa4f4941060123718fbde05130b06fbda1e6f5412866b18cc8550f5476"
     },
     {
       "slug": "priya-fintech/earnings-call-intelligence",
@@ -2909,7 +2993,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 8
+      "review_count": 8,
+      "sha256": "6092bc12717675f8c77122e0ef865536c3f22449b1bd49de2f7b555570dc0623"
     },
     {
       "slug": "priya-fintech/invoice-processor",
@@ -2943,7 +3028,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 6
+      "review_count": 6,
+      "sha256": "5bd73f727c34a2d3df4dfad7a947f6021158a898a6f4675a26b6cbfc8ab0576e"
     },
     {
       "slug": "priya-fintech/ma-due-diligence",
@@ -2976,7 +3062,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 10
+      "review_count": 10,
+      "sha256": "94448e9d46de53f31aedb12a2a628a4b7ab2a3accc3777f49af4f19e6b61b6c4"
     },
     {
       "slug": "priya-fintech/research-agent",
@@ -3008,7 +3095,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 44
+      "review_count": 44,
+      "sha256": "aecb4a6f36c8146f7e9625348a1a6e24c702d791eaa6a5b54732a37f838e34c1"
     },
     {
       "slug": "priya-fintech/revenue-forecast-ensemble",
@@ -3042,7 +3130,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 12
+      "review_count": 12,
+      "sha256": "70a81f546ebdf6b4ee0fde70d7db22f3b9c9df000143365235c6432435db8da6"
     },
     {
       "slug": "priya-fintech/summarize",
@@ -3073,7 +3162,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 67
+      "review_count": 67,
+      "sha256": "d5d07bebc8ce3ec3cd77c52c56e8894300a1580d7cf90a62b322d70f1f4cc187"
     },
     {
       "slug": "priya-fintech/tax-return-preprocessor",
@@ -3108,7 +3198,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 16
+      "review_count": 16,
+      "sha256": "e34eba532d3b08bc785711ea9f0679a74e4dd4beed42f798e222f844a4db62ba"
     },
     {
       "slug": "priya-fintech/translate",
@@ -3139,7 +3230,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 21
+      "review_count": 21,
+      "sha256": "f7cf62d779e944d3bdde446a2b648272f28a00ce41dc93b73f69e189b6fa76e2"
     },
     {
       "slug": "priya-fintech/vendor-renewal-negotiator",
@@ -3173,7 +3265,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 9
+      "review_count": 9,
+      "sha256": "fced868aa28a96cec38add14e11d9d2ee935f55b8eaa7eb0afbafd6d38d8b46e"
     },
     {
       "slug": "revops-sam/churn-prediction-pipeline",
@@ -3209,7 +3302,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.8,
-      "review_count": 5
+      "review_count": 5,
+      "sha256": "515b3f0dc406dc9731c8ae28abb03f3649ad7cb4cbecc46eee724c92bf60aefc"
     },
     {
       "slug": "revops-sam/meeting-recap",
@@ -3240,7 +3334,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.9,
-      "review_count": 42
+      "review_count": 42,
+      "sha256": "cb6480bd00d2e18a3d86a934ed565ecf9942f4c7374735ffeb06d2888f7cbf06"
     },
     {
       "slug": "revops-sam/proposal-generator",
@@ -3271,7 +3366,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.1,
-      "review_count": 20
+      "review_count": 20,
+      "sha256": "8d0a538452b4a9107b18bfaf983f7c185917c194a7f42752ad198b1afdd1bb7e"
     },
     {
       "slug": "revops-sam/qbr-autopilot",
@@ -3305,7 +3401,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 31
+      "review_count": 31,
+      "sha256": "dba805ad25168570711b4516a065599cb91b5b433b188d131adc6b7160e1fbbd"
     },
     {
       "slug": "revops-sam/rfp-response-engine",
@@ -3341,7 +3438,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 13
+      "review_count": 13,
+      "sha256": "89e25c95b46994a1fd8a933c16a6d3bc65fc678424f2652f17bf1a48357667e0"
     },
     {
       "slug": "sarah-ml/churn-predictor-v2",
@@ -3378,7 +3476,8 @@
       "forked_from": "gizmax/customer-churn-predictor",
       "license": "MIT",
       "rating": 4.7,
-      "review_count": 38
+      "review_count": 38,
+      "sha256": "6c5b90ddaea64a6a9c17060bee568bf665801e0de1669d47bdb0a47459453e19"
     },
     {
       "slug": "social-sage/influencer-campaign-matcher",
@@ -3412,7 +3511,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.9,
-      "review_count": 7
+      "review_count": 7,
+      "sha256": "a71433a36383463df7125fecbcb6885eca918e803c2bdaf9f1bfbacd79ac2862"
     },
     {
       "slug": "social-sage/social-repurposer",
@@ -3445,7 +3545,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 31
+      "review_count": 31,
+      "sha256": "4c7cd55022adeae1a8408185a989ccbf828bf773eff4f1085c604d306effdaaa"
     },
     {
       "slug": "social-sage/voice-of-market",
@@ -3477,7 +3578,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 27
+      "review_count": 27,
+      "sha256": "2be3cbb42f02843fc0cf3d9f106f77f48f668a7f30dc625bee73afe1cac70699"
     },
     {
       "slug": "supportflow/customer-health-check",
@@ -3513,7 +3615,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.8,
-      "review_count": 58
+      "review_count": 58,
+      "sha256": "f2bbadafd07f28393957198fae89486b6061703f0771fd336731412ea76c805c"
     },
     {
       "slug": "supportflow/memory-customer-context",
@@ -3546,7 +3649,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 26
+      "review_count": 26,
+      "sha256": "8bb041b4ac9772e1a0a7b26050ada01dcd62f2dc28d6582eb9b039ee53b52429"
     },
     {
       "slug": "supportflow/multi-channel-router",
@@ -3582,7 +3686,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.7,
-      "review_count": 36
+      "review_count": 36,
+      "sha256": "6b5e8f19d0bcc7a6b836d7565cac7b2648f3a8ab1c719330b57e37ebac4cc488"
     },
     {
       "slug": "supportflow/sla-watchdog",
@@ -3618,7 +3723,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 58
+      "review_count": 58,
+      "sha256": "600ed94d54ebd9f7390d4c046cc513cd2ad5e628fc1bd8b8394f98a5e5aaf1fe"
     },
     {
       "slug": "tomr-eng/api-docs-generator",
@@ -3652,7 +3758,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.4,
-      "review_count": 17
+      "review_count": 17,
+      "sha256": "77f627d96f2d674555f6d5a3056ea51f03c826addbe6ca261dce35f9d7f91867"
     },
     {
       "slug": "tomr-eng/codebase-health-scanner",
@@ -3688,7 +3795,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.9,
-      "review_count": 13
+      "review_count": 13,
+      "sha256": "d91b5dd82a339a8c725027dd21623984757a2b913ececfef312f97d9e65406e5"
     },
     {
       "slug": "tomr-eng/data-extractor",
@@ -3720,7 +3828,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 58
+      "review_count": 58,
+      "sha256": "9f56f4c320e9304006e5b0412a05b9f0f7b54ab1d03361be02b9a4815da54166"
     },
     {
       "slug": "tomr-eng/jira-triage",
@@ -3754,7 +3863,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 5.0,
-      "review_count": 50
+      "review_count": 50,
+      "sha256": "7591611901f5885078ab8328e3c45e7b87f9f0fd6d5134a46db8fbce91d1e572"
     },
     {
       "slug": "tomr-eng/product-design-spec",
@@ -3788,7 +3898,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 18
+      "review_count": 18,
+      "sha256": "99cb65ad453c337d05d687cc885f920d2c39a21e6e7b84f8bc61484c262243b7"
     },
     {
       "slug": "workflow-lab/carbon-footprint-reporter",
@@ -3823,7 +3934,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 3.9,
-      "review_count": 10
+      "review_count": 10,
+      "sha256": "5deb88048d9d2adba4f75e5217cea2b3a9461b3a54231781c367ccfc67cc56cf"
     },
     {
       "slug": "workflow-lab/chain-of-thought",
@@ -3854,7 +3966,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.2,
-      "review_count": 23
+      "review_count": 23,
+      "sha256": "a51e13796a1d371010ab7748e4f01f3c835cf1331d1b95248efd30c6df798650"
     },
     {
       "slug": "workflow-lab/clinical-notes",
@@ -3888,7 +4001,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.6,
-      "review_count": 25
+      "review_count": 25,
+      "sha256": "e59b611ff4af8c7a42c56ff9f10cdca7fcc3ddae1767e376a8a5d1b5f13776ee"
     },
     {
       "slug": "workflow-lab/demand-forecasting",
@@ -3921,7 +4035,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 19
+      "review_count": 19,
+      "sha256": "72714f567bf512b109adc3baf921c802aba2602053fdf286f69242e9d8d213b4"
     },
     {
       "slug": "workflow-lab/insurance-claims-adjuster",
@@ -3955,7 +4070,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.5,
-      "review_count": 24
+      "review_count": 24,
+      "sha256": "b7b9fee65455b2be5ea721f3a47c5098a40490a215695456a0e9fa8d17530748"
     },
     {
       "slug": "workflow-lab/recruiting-pipeline",
@@ -3990,7 +4106,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.3,
-      "review_count": 14
+      "review_count": 14,
+      "sha256": "9482b43719ec76ab193fac23e16a96f65fe911dc1ad8ad07c670e3a9944ad71d"
     },
     {
       "slug": "workflow-lab/supplier-risk-intelligence",
@@ -4023,7 +4140,8 @@
       "forked_from": null,
       "license": "MIT",
       "rating": 4.0,
-      "review_count": 9
+      "review_count": 9,
+      "sha256": "51283cb3961d9551c3428423000964e5012e3387ef1abce6583f7d567c1d51ce"
     }
   ],
   "categories": [
