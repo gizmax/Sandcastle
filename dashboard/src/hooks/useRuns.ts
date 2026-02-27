@@ -42,6 +42,7 @@ export function useRuns(options: UseRunsOptions = {}) {
   }, [status, workflow, limit, offset]);
 
   useEffect(() => {
+    setLoading(true);
     void fetchRuns();
   }, [fetchRuns]);
 

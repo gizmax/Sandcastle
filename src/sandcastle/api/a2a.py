@@ -275,8 +275,9 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
             session.add(db_run)
             await session.commit()
     except Exception as e:
+        logger.error("A2A tasks/send DB error: %s", e)
         return _build_task_response(
-            task_id, "failed", error=f"DB error: {e}"
+            task_id, "failed", error="Failed to create task"
         )
 
     # Execute the workflow
@@ -454,6 +455,6 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
     try:
         result = await handler(params)
         return _jsonrpc_result(req_id, result)
-    except Exception as e:
+    except Exception:
         logger.exception("A2A handler error for method=%s", method)
-        return _jsonrpc_error(req_id, -32603, f"Internal error: {e}")
+        return _jsonrpc_error(req_id, -32603, "Internal error")

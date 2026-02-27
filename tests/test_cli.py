@@ -35,7 +35,7 @@ class TestArgParsing:
         assert args.command == "serve"
         assert args.host == "0.0.0.0"
         assert args.port == 8080
-        assert args.reload is True
+        assert args.reload is False
 
     def test_serve_custom_port(self):
         """'serve --port 9090' should set port to 9090."""
@@ -44,12 +44,12 @@ class TestArgParsing:
 
         assert args.port == 9090
 
-    def test_serve_no_reload(self):
-        """'serve --no-reload' should set reload to False."""
+    def test_serve_with_reload(self):
+        """'serve --reload' should set reload to True."""
         parser = _build_parser()
-        args = parser.parse_args(["serve", "--no-reload"])
+        args = parser.parse_args(["serve", "--reload"])
 
-        assert args.reload is False
+        assert args.reload is True
 
     def test_run_command_parses_workflow(self):
         """'run my-workflow' should set the workflow argument."""
@@ -267,7 +267,7 @@ class TestServeCommand:
     def test_serve_calls_uvicorn_with_correct_args(self):
         """serve command should call uvicorn.run with host, port, and reload."""
         parser = _build_parser()
-        args = parser.parse_args(["serve", "--host", "127.0.0.1", "--port", "9000", "--no-reload"])
+        args = parser.parse_args(["serve", "--host", "127.0.0.1", "--port", "9000"])
 
         with patch("uvicorn.run") as mock_run, \
              patch("sandcastle.__main__._port_in_use", return_value=False):
@@ -281,7 +281,7 @@ class TestServeCommand:
         )
 
     def test_serve_default_args(self):
-        """serve command with defaults should call uvicorn with 0.0.0.0:8080 and reload=True."""
+        """serve command with defaults should call uvicorn with 0.0.0.0:8080 and reload=False."""
         parser = _build_parser()
         args = parser.parse_args(["serve"])
 
@@ -293,7 +293,7 @@ class TestServeCommand:
             "sandcastle.main:app",
             host="0.0.0.0",
             port=8080,
-            reload=True,
+            reload=False,
         )
 
 

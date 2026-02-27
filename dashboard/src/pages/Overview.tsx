@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Castle } from "lucide-react";
 import { api } from "@/api/client";
 import { StatsCards } from "@/components/overview/StatsCards";
@@ -27,6 +28,7 @@ interface RunItem {
 }
 
 export default function Overview() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +93,7 @@ export default function Overview() {
           icon={Castle}
           title="No runs yet"
           description="Create your first workflow to get started."
-          action={{ label: "Create Workflow", onClick: () => window.location.assign("/workflows/builder") }}
+          action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
           className="mt-8"
         />
       </div>

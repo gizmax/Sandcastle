@@ -40,6 +40,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/schedules": "Schedules",
   "/dead-letter": "Dead Letter",
   "/api-keys": "API Keys",
+  "/system-health": "System Health",
   "/settings": "Settings",
 };
 
@@ -65,6 +66,7 @@ export function Header({
   const [open, setOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const mobileWrapperRef = useRef<HTMLDivElement>(null);
 
   const pageTitle = getPageTitle(location.pathname);
 
@@ -143,7 +145,11 @@ export function Header({
   // Close on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        wrapperRef.current && !wrapperRef.current.contains(target) &&
+        (!mobileWrapperRef.current || !mobileWrapperRef.current.contains(target))
+      ) {
         setOpen(false);
       }
     }
@@ -247,7 +253,7 @@ export function Header({
 
       {/* Mobile search bar - full width below header */}
       {mobileSearchOpen && (
-        <div ref={wrapperRef} className="absolute left-0 top-full z-50 w-full border-b border-border bg-surface p-3 shadow-md sm:hidden">
+        <div ref={mobileWrapperRef} className="absolute left-0 top-full z-50 w-full border-b border-border bg-surface p-3 shadow-md sm:hidden">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -276,6 +282,8 @@ export function Header({
                   >
                     {r.type === "run"
                       ? <PlayCircle className="h-4 w-4 shrink-0 text-muted" />
+                      : r.type === "tool"
+                      ? <Plug className="h-4 w-4 shrink-0 text-muted" />
                       : <GitBranch className="h-4 w-4 shrink-0 text-muted" />
                     }
                     <div className="min-w-0 flex-1">

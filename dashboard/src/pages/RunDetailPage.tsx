@@ -446,6 +446,7 @@ export default function RunDetailPage() {
         title="Delete Run"
         description={`Are you sure you want to delete run ${run.run_id.slice(0, 8)}...? This action cannot be undone.`}
         confirmLabel={deleting ? "Deleting..." : "Delete"}
+        confirmDisabled={deleting}
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setDeleteConfirmOpen(false)}

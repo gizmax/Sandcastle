@@ -134,7 +134,10 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
             if isinstance(obj, dict):
                 obj = obj.get(part)
             elif isinstance(obj, list):
-                obj = obj[int(part)]
+                try:
+                    obj = obj[int(part)]
+                except (ValueError, IndexError):
+                    return None
             else:
                 return None
         return obj
@@ -152,7 +155,10 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
                 if isinstance(obj, dict):
                     obj = obj.get(part)
                 elif isinstance(obj, list):
-                    obj = obj[int(part)]
+                    try:
+                        obj = obj[int(part)]
+                    except (ValueError, IndexError):
+                        return None
                 else:
                     return None
             return obj
@@ -194,7 +200,7 @@ def resolve_templates(
             return json.dumps(value)
         return str(value)
 
-    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date)\}", _replace, template)
+    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date|memory)\}", _replace, template)
 
     # Auto-inject unreferenced dependency outputs
     if depends_on:
@@ -3211,7 +3217,6 @@ async def _browser_dom_mode(
     """
     import time
 
-    time.monotonic()
     logger.info("Browser DOM mode: %s -> %s", step.id, cfg.start_url)
 
     runtime = get_sandshore_runtime()

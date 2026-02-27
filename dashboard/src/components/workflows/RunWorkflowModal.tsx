@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Play, FileText, FormInput, Braces } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -58,6 +58,33 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
   const [inputJson, setInputJson] = useState("{}");
   const [inputText, setInputText] = useState("");
   const [callbackUrl, setCallbackUrl] = useState("");
+  const prevOpenRef = useRef(false);
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (open && !prevOpenRef.current) {
+      setMode(hasSchema ? "form" : "text");
+      const init: Record<string, string> = {};
+      for (const [key, prop] of fields) {
+        if (prop.default != null) {
+          if (typeof prop.default === "boolean") {
+            init[key] = prop.default ? "true" : "false";
+          } else {
+            init[key] = String(prop.default);
+          }
+        } else if (prop.type === "boolean") {
+          init[key] = "false";
+        } else {
+          init[key] = "";
+        }
+      }
+      setFieldValues(init);
+      setInputJson("{}");
+      setInputText("");
+      setCallbackUrl("");
+    }
+    prevOpenRef.current = open;
+  }, [open, hasSchema, fields]);
 
   if (!open) return null;
 
@@ -82,7 +109,8 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
       try {
         parsed = JSON.parse(inputJson);
       } catch {
-        // default empty
+        toast.error("Invalid JSON input");
+        return;
       }
     }
     onRun(parsed, callbackUrl || undefined);

@@ -36,7 +36,7 @@ export default function DeadLetterPage() {
         return;
       }
       toast.success("Item queued for retry");
-      fetchItems();
+      void fetchItems();
     },
     [fetchItems]
   );
@@ -49,7 +49,7 @@ export default function DeadLetterPage() {
         return;
       }
       toast.success("Item resolved");
-      fetchItems();
+      void fetchItems();
     },
     [fetchItems]
   );

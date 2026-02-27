@@ -1086,25 +1086,6 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
                 )
-        elif step.type == "transform":
-            if not step.transform_config or not step.transform_config.template:
-                errors.append(
-                    f"Transform step '{step.id}' must have transform_config with a template"
-                )
-        elif step.type == "notify":
-            if not step.notify_config or not step.notify_config.service:
-                errors.append(
-                    f"Notify step '{step.id}' must have notify_config with a service"
-                )
-            if not step.notify_config or not step.notify_config.message:
-                errors.append(
-                    f"Notify step '{step.id}' must have notify_config with a message"
-                )
-        elif step.type == "delegate":
-            if not step.delegate_config or not step.delegate_config.workflow:
-                errors.append(
-                    f"Delegate step '{step.id}' must have delegate_config with a workflow"
-                )
 
     # Check model names against provider registry
     from sandcastle.engine.providers import KNOWN_MODELS
@@ -1174,18 +1155,15 @@ def _detect_cycles(steps: list[StepDefinition]) -> list[str]:
     in_stack: set[str] = set()
     errors: list[str] = []
 
-    def dfs(node: str) -> bool:
+    def dfs(node: str) -> None:
         visited.add(node)
         in_stack.add(node)
         for neighbor in adj.get(node, []):
             if neighbor in in_stack:
                 errors.append(f"Cycle detected involving step '{node}' -> '{neighbor}'")
-                return True
-            if neighbor not in visited:
-                if dfs(neighbor):
-                    return True
+            elif neighbor not in visited:
+                dfs(neighbor)
         in_stack.discard(node)
-        return False
 
     for step in steps:
         if step.id not in visited:

@@ -114,17 +114,19 @@ async def auth_middleware(request: Request, call_next):
         import ipaddress
 
         client_ip = request.client.host if request.client else None
-        if client_ip:
-            try:
-                addr = ipaddress.ip_address(client_ip)
-                allowed = any(
-                    addr in ipaddress.ip_network(cidr, strict=False)
-                    for cidr in db_key.allowed_cidrs
-                )
-                if not allowed:
-                    return _error_response(403, "IP_BLOCKED", "IP address not in allowlist")
-            except ValueError:
-                return _error_response(403, "IP_BLOCKED", "Invalid client IP address")
+        if not client_ip:
+            # Deny access when client IP cannot be determined but allowlist is set
+            return _error_response(403, "IP_BLOCKED", "Cannot determine client IP address")
+        try:
+            addr = ipaddress.ip_address(client_ip)
+            allowed = any(
+                addr in ipaddress.ip_network(cidr, strict=False)
+                for cidr in db_key.allowed_cidrs
+            )
+            if not allowed:
+                return _error_response(403, "IP_BLOCKED", "IP address not in allowlist")
+        except ValueError:
+            return _error_response(403, "IP_BLOCKED", "Invalid client IP address")
 
     # Set tenant context on request
     request.state.tenant_id = db_key.tenant_id

@@ -90,6 +90,7 @@ async def run_workflow_job(
         status_map = {
             "completed": RunStatus.COMPLETED,
             "failed": RunStatus.FAILED,
+            "partial": RunStatus.PARTIAL,
             "cancelled": RunStatus.CANCELLED,
             "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
             "awaiting_approval": RunStatus.AWAITING_APPROVAL,

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Bell, CheckCircle, XCircle, Info } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 export interface Notification {
   id: string;

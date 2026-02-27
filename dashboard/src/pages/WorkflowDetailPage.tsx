@@ -41,6 +41,15 @@ export default function WorkflowDetailPage() {
   const [shareYaml, setShareYaml] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && shareOpen) setShareOpen(false);
+      if (e.key === "Escape" && diffModal) setDiffModal(null);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [shareOpen, diffModal]);
+
   const fetchVersions = useCallback(async () => {
     if (!name) return;
     try {
@@ -122,8 +131,15 @@ export default function WorkflowDetailPage() {
 
   if (!data) {
     return (
-      <div className="py-16 text-center">
+      <div className="py-16 text-center space-y-3">
         <p className="text-muted">Workflow not found</p>
+        <button
+          onClick={() => navigate("/workflows")}
+          className="inline-flex items-center gap-1 text-sm text-accent hover:text-accent/80 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Workflows
+        </button>
       </div>
     );
   }
@@ -281,8 +297,8 @@ export default function WorkflowDetailPage() {
 
       {/* Share modal */}
       {shareOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-2xl mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShareOpen(false)}>
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-2xl mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h2 className="text-base font-semibold text-foreground">Share Workflow</h2>
               <button

@@ -1,3 +1,8 @@
+# name: AI Content Pipeline
+# description: Generate blog content with OpenAI, create audio version with ElevenLabs, and store assets in AWS S3
+# tags: [AI, Content, Text-to-Speech, S3]
+# category: marketing
+
 name: AI Content Pipeline
 description: Generate blog content with OpenAI, create audio version with ElevenLabs, and store assets in AWS S3.
 category: marketing

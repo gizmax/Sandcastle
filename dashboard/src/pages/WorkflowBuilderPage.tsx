@@ -54,12 +54,20 @@ export default function WorkflowBuilderPage() {
   const runWorkflow = useCallback(
     async (yaml: string, name: string, input: Record<string, unknown>) => {
       // Auto-save before running so the workflow persists
-      await api.post("/workflows", { name, content: yaml });
+      const saveRes = await api.post("/workflows", { name, content: yaml });
+      if (saveRes.error) {
+        toast.error(`Save failed: ${saveRes.error.message}`);
+        return;
+      }
 
       const res = await api.post<{ run_id: string }>("/workflows/run", {
         workflow: yaml,
         input,
       });
+      if (res.error) {
+        toast.error(`Run failed: ${res.error.message}`);
+        return;
+      }
       if (res.data?.run_id) {
         navigate(`/runs/${res.data.run_id}`);
       }

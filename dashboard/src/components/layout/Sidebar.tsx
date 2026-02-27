@@ -84,7 +84,7 @@ const navSections: NavSection[] = [
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
   const { info } = useRuntimeInfo();
   const { updateAvailable } = useUpdateCheck();
-  const version = info?.version ?? "0.15.0";
+  const version = info?.version ?? "-";
 
   return (
     <>

@@ -45,6 +45,8 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevOpenRef = useRef(false);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Reset state when modal opens
   useEffect(() => {
@@ -165,7 +167,8 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     // Use a microtask to allow state to update before sending
     setTimeout(() => {
       const userMsg: ChatMessage = { role: "user", content: text };
-      const newMessages = [...messages, userMsg];
+      const currentMessages = messagesRef.current;
+      const newMessages = [...currentMessages, userMsg];
       setMessages(newMessages);
       setInput("");
       setLoading(true);
@@ -216,7 +219,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
         }
       });
     }, 0);
-  }, [loading, messages, currentYaml]);
+  }, [loading, currentYaml]);
 
   if (!open) return null;
 

@@ -400,21 +400,25 @@ def select_winner(variant_stats: list, config: AutoPilotConfig) -> dict | None:
 # --- Statistical significance ---
 
 
-def _beta_inc(a: float, b: float, x: float) -> float:
-    """Approximate regularized incomplete beta function."""
-    if x <= 0:
-        return 0.0
-    if x >= 1:
+def _two_tailed_p_value(t_stat: float, df: float) -> float:
+    """Approximate two-tailed p-value for a t-statistic using normal approximation.
+
+    For df > ~30 this is very accurate; for smaller df it's a reasonable
+    approximation without requiring scipy.
+    """
+    # Use the Cornish-Fisher expansion for t -> z conversion:
+    # z ~ t * (1 - 1/(4*df)) for moderate df
+    # For large df, t ~ z directly
+    if df <= 0:
         return 1.0
-    # Use a normal approximation for the t-distribution.
-    # Recover t^2 from x = df / (df + t^2) where df = 2*a
-    t_stat_sq = (1 - x) / x * (2 * a)
-    t_stat = math.sqrt(max(t_stat_sq, 0))
-    # Normal approximation of t-distribution CDF
-    z = t_stat * (1 - 1 / (4 * max(a * 2, 1)))
-    # Standard normal CDF approximation
-    p = 0.5 * (1 + math.erf(z / math.sqrt(2)))
-    return 2 * (1 - p)
+    abs_t = abs(t_stat)
+    if df > 100:
+        z = abs_t
+    else:
+        z = abs_t * (1.0 - 0.25 / df)
+    # Two-tailed p-value from standard normal CDF
+    p = math.erfc(z / math.sqrt(2))
+    return max(0.0, min(1.0, p))
 
 
 def _check_significance(
@@ -446,12 +450,7 @@ def _check_significance(
     den = (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
     df = num / den if den > 0 else 1
 
-    # Approximate p-value using t-distribution CDF
-    x = df / (df + t_stat ** 2)
-    if t_stat > 0:
-        p_value = 0.5 * _beta_inc(0.5 * df, 0.5, x)
-    else:
-        p_value = 1.0 - 0.5 * _beta_inc(0.5 * df, 0.5, x)
+    p_value = _two_tailed_p_value(t_stat, df)
 
     return p_value < min_p_value, p_value
 

@@ -1,3 +1,8 @@
+# name: AI RAG Pipeline
+# description: Retrieve-augment-generate pipeline using Tavily search, Pinecone vector store, and OpenAI for answer synthesis
+# tags: [AI, RAG, Search, Vectors]
+# category: general_ai
+
 name: AI RAG Pipeline
 description: Retrieve-augment-generate pipeline using Tavily search, Pinecone vector store, and OpenAI for answer synthesis.
 category: general_ai

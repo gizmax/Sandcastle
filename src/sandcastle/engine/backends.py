@@ -597,6 +597,12 @@ class LocalBackend:
                     await proc.wait()
                 except ProcessLookupError:
                     pass
+            if tools_dir is not None:
+                try:
+                    import shutil as _shutil
+                    _shutil.rmtree(tools_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------

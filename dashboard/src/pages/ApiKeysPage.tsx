@@ -87,9 +87,13 @@ export default function ApiKeysPage() {
         data
       );
       setCreateModalOpen(false);
+      if (res.error) {
+        toast.error(`Failed to create key: ${res.error.message}`);
+        return;
+      }
       if (res.data && "key" in res.data) {
         setRevealKey(res.data.key);
-        fetchKeys();
+        void fetchKeys();
       }
     },
     [fetchKeys]
@@ -97,7 +101,12 @@ export default function ApiKeysPage() {
 
   const handleDeactivate = useCallback(
     async (id: string) => {
-      await api.delete(`/api-keys/${id}`);
+      const res = await api.delete(`/api-keys/${id}`);
+      if (res.error) {
+        toast.error(`Failed to deactivate key: ${res.error.message}`);
+        return;
+      }
+      toast.success("API key deactivated");
       setKeys((prev) => prev.filter((k) => k.id !== id));
     },
     []

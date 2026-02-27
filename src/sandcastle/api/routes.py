@@ -213,7 +213,11 @@ def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
     import re
 
-    workflows_dir = Path(settings.workflows_dir)
+    # Reject path traversal characters before any filesystem operation
+    if ".." in workflow_name or "/" in workflow_name or "\\" in workflow_name:
+        raise FileNotFoundError(f"Invalid workflow name: '{workflow_name}'")
+
+    workflows_dir = Path(settings.workflows_dir).resolve()
     # Slugified version: lowercase, non-alnum chars -> hyphens, collapse runs
     slug = re.sub(r"[^a-z0-9]+", "-", workflow_name.lower()).strip("-")
     # Try exact match, slugified match, then without extension
@@ -223,8 +227,12 @@ def _load_workflow_yaml(workflow_name: str) -> str:
         workflows_dir / workflow_name,
         workflows_dir / slug,
     ]:
-        if candidate.exists() and candidate.is_file():
-            return candidate.read_text()
+        resolved = candidate.resolve()
+        # Ensure the resolved path is within the workflows directory
+        if not resolved.is_relative_to(workflows_dir):
+            continue
+        if resolved.exists() and resolved.is_file():
+            return resolved.read_text()
     raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
 
 
@@ -740,7 +748,10 @@ async def hub_playground(request: Request) -> ApiResponse:
     Returns a mock result - no actual execution happens.
     Public endpoint - no authentication required.
     """
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
     template_slug = body.get("slug", "")
     inputs = body.get("inputs", {})
 
@@ -826,9 +837,25 @@ async def install_hub_template(slug: str) -> ApiResponse:
             ).model_dump(),
         )
 
+    # SSRF prevention: only allow downloads from trusted GitHub domains
+    from urllib.parse import urlparse
+
+    parsed_url = urlparse(download_url)
+    allowed_hosts = {"raw.githubusercontent.com", "github.com", "api.github.com"}
+    if parsed_url.hostname not in allowed_hosts:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UNTRUSTED_URL",
+                    message="Download URL must be from GitHub",
+                )
+            ).model_dump(),
+        )
+
     # Download the YAML content
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
             yaml_resp = await client.get(download_url)
             yaml_resp.raise_for_status()
             yaml_content = yaml_resp.text
@@ -1093,11 +1120,11 @@ async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
             )
         )
     except Exception as exc:
-        logger.error(f"Generation failed: {exc}")
+        logger.error("Generation failed: %s", exc)
         return ApiResponse(
             error=ErrorResponse(
                 code="generation_failed",
-                message=str(exc),
+                message="Workflow generation failed",
             )
         )
 
@@ -1133,7 +1160,7 @@ async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
             existing_yaml=request.existing_yaml,
         )
     except httpx.HTTPStatusError as exc:
-        logger.error(f"Anthropic API error: {exc}")
+        logger.error("Anthropic API error: %s", exc)
         return ApiResponse(
             error=ErrorResponse(
                 code="upstream_error",
@@ -1141,11 +1168,11 @@ async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
             )
         )
     except Exception as exc:
-        logger.error(f"Chat generation failed: {exc}")
+        logger.error("Chat generation failed: %s", exc)
         return ApiResponse(
             error=ErrorResponse(
                 code="generation_failed",
-                message=str(exc),
+                message="Chat generation failed",
             )
         )
 
@@ -1512,10 +1539,11 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             session.add(db_run)
             await session.commit()
     except Exception as e:
+        logger.error("Could not create run in database: %s", e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="DB_ERROR", message=f"Could not create run: {e}")
+                error=ErrorResponse(code="DB_ERROR", message="Could not create run")
             ).model_dump(),
         )
 
@@ -1533,12 +1561,13 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                     db_run.completed_at = datetime.now(timezone.utc)
                     await session.commit()
         except Exception:
-            logger.error(f"Could not clean up orphan run {run_id}")
+            logger.error("Could not clean up orphan run %s", run_id)
 
+        logger.error("Could not enqueue job for run %s: %s", run_id, e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue job: {e}")
+                error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue job")
             ).model_dump(),
         )
 
@@ -1851,9 +1880,18 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
     if not pdf_path:
         raise HTTPException(status_code=404, detail="No PDF artifact for this step")
 
-    file_path = Path(pdf_path)
+    file_path = Path(pdf_path).resolve()
+
+    # Prevent path traversal: PDF must be within the data directory
+    data_dir = Path(settings.data_dir).resolve()
+    if not file_path.is_relative_to(data_dir):
+        raise HTTPException(status_code=403, detail="PDF path outside data directory")
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="PDF file not found on disk")
+
+    if not file_path.suffix.lower() == ".pdf":
+        raise HTTPException(status_code=400, detail="Artifact is not a PDF file")
 
     return FileResponse(
         path=str(file_path),
@@ -1983,7 +2021,8 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     tenant_id = get_tenant_id(request)
     queue = await event_bus.subscribe()
 
-    # Cache of run_id -> tenant_id to avoid repeated DB lookups
+    # LRU cache of run_id -> tenant_id to avoid repeated DB lookups (bounded)
+    _TENANT_CACHE_MAX = 1000
     tenant_cache: dict[str, str | None] = {}
 
     async def _run_belongs_to_tenant(run_id: str) -> bool:
@@ -1996,6 +2035,10 @@ async def global_event_stream(request: Request) -> StreamingResponse:
             async with async_session() as session:
                 run = await session.get(Run, uuid.UUID(run_id))
                 run_tenant = run.tenant_id if run else None
+                # Evict oldest entries if cache grows too large
+                if len(tenant_cache) >= _TENANT_CACHE_MAX:
+                    oldest_key = next(iter(tenant_cache))
+                    del tenant_cache[oldest_key]
                 tenant_cache[run_id] = run_tenant
                 return run_tenant == tenant_id
         except Exception:
@@ -2349,7 +2392,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue replay: {e}")
+                error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue replay")
             ).model_dump(),
         )
 
@@ -2491,7 +2534,7 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="QUEUE_ERROR", message=f"Could not enqueue fork: {e}")
+                error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue fork")
             ).model_dump(),
         )
 
@@ -2577,7 +2620,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                         detail=ApiResponse(
                             error=ErrorResponse(
                                 code="SCHEDULER_ERROR",
-                                message=f"Could not register schedule: {exc}",
+                                message="Could not register schedule",
                             )
                         ).model_dump(),
                     ) from exc
@@ -2596,7 +2639,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                     detail=ApiResponse(
                         error=ErrorResponse(
                             code="DB_ERROR",
-                            message=f"Could not create schedule: {e}",
+                            message="Could not create schedule",
                         )
                     ).model_dump(),
                 ) from e
@@ -2608,7 +2651,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="DB_ERROR",
-                    message=f"Could not create schedule: {e}",
+                    message="Could not create schedule",
                 )
             ).model_dump(),
         ) from e
@@ -2744,7 +2787,7 @@ async def update_schedule(
                 detail=ApiResponse(
                     error=ErrorResponse(
                         code="SCHEDULER_ERROR",
-                        message=f"Failed to update scheduler: {exc}",
+                        message="Failed to update scheduler",
                     )
                 ).model_dump(),
             ) from exc
@@ -2770,7 +2813,7 @@ async def update_schedule(
                 detail=ApiResponse(
                     error=ErrorResponse(
                         code="DB_ERROR",
-                        message=f"Failed to commit schedule update: {exc}",
+                        message="Failed to commit schedule update",
                     )
                 ).model_dump(),
             ) from exc
@@ -2960,11 +3003,11 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
         logger.info(f"DLQ retry: created new run {new_run_id} for item {item_id}")
 
     except Exception as e:
-        logger.error(f"DLQ retry failed for item {item_id}: {e}")
+        logger.error("DLQ retry failed for item %s: %s", item_id, e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="RETRY_ERROR", message=f"Could not retry: {e}")
+                error=ErrorResponse(code="RETRY_ERROR", message="Could not retry dead letter item")
             ).model_dump(),
         )
 
@@ -3734,10 +3777,11 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
                 )
             )
     except Exception as e:
+        logger.error("Could not create API key: %s", e)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
-                error=ErrorResponse(code="DB_ERROR", message=f"Could not create API key: {e}")
+                error=ErrorResponse(code="DB_ERROR", message="Could not create API key")
             ).model_dump(),
         )
 
@@ -4378,6 +4422,9 @@ _SENSITIVE_KEYS = frozenset(
     {
         "anthropic_api_key",
         "e2b_api_key",
+        "openai_api_key",
+        "minimax_api_key",
+        "openrouter_api_key",
         "database_url",
         "redis_url",
         "webhook_secret",
@@ -4389,6 +4436,9 @@ def _mask(value: str) -> str:
     """Mask a sensitive value, showing only the last 4 characters."""
     if not value:
         return ""
+    # Only show suffix for keys long enough that 4 chars don't reveal much
+    if len(value) < 12:
+        return "****"
     return "****" + value[-4:]
 
 

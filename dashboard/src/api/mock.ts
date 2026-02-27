@@ -743,6 +743,31 @@ const MOCK_OPTIMIZER_STATS = {
   estimated_savings_30d_usd: 3.45,
 };
 
+const MOCK_OPTIMIZER_ALERTS = [
+  {
+    model: "sonnet",
+    step_id: "enrich",
+    workflow_name: "lead-enrichment",
+    metric: "latency_p95",
+    current_value: 28.4,
+    threshold: 20.0,
+    severity: "warning",
+    recommended_action: "Consider switching to haiku for lower latency, or increase timeout threshold",
+    detected_at: now.getTime() - 2 * 3600000,
+  },
+  {
+    model: "opus",
+    step_id: "recommendations",
+    workflow_name: "seo-audit",
+    metric: "cost_per_call",
+    current_value: 0.19,
+    threshold: 0.15,
+    severity: "info",
+    recommended_action: "Cost trending above budget. Sonnet achieves similar quality at 50% lower cost for this step",
+    detected_at: now.getTime() - 8 * 3600000,
+  },
+];
+
 const MOCK_TEMPLATES = [
   // --- general_ai ---
   {
@@ -5729,7 +5754,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.15.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.17.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -5767,6 +5792,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runs\/([^/]+)$/,
+    method: "GET",
     handler: (params) => getRunDetail(params._1),
   },
   {
@@ -5886,7 +5912,7 @@ const routes: MockRoute[] = [
     method: "GET",
     handler: (params) => ({
       name: params._1,
-      yaml: `name: ${params._1}\ndescription: Exported workflow\nsteps:\n  - id: step_1\n    model: sonnet\n    prompt: "Process the input data"\n  - id: step_2\n    model: haiku\n    depends_on: [step_1]\n    prompt: "Summarize results from {steps.step_1.output}"`,
+      yaml_content: `name: ${params._1}\ndescription: Exported workflow\nsteps:\n  - id: step_1\n    model: sonnet\n    prompt: "Process the input data"\n  - id: step_2\n    model: haiku\n    depends_on: [step_1]\n    prompt: "Summarize results from {steps.step_1.output}"`,
     }),
   },
   {
@@ -6114,6 +6140,192 @@ const routes: MockRoute[] = [
       const tool = MOCK_TOOLS.find((t) => t.name === params._1);
       if (!tool) return null;
       tool.connections = (tool.connections || []).filter((c) => c.name !== params._2);
+      return { deleted: true };
+    },
+  },
+  // --- Update check ---
+  {
+    match: /^\/check-update$/,
+    method: "GET",
+    handler: () => ({
+      current_version: "0.17.0",
+      latest_version: "0.17.0",
+      update_available: false,
+      release_url: "https://github.com/gizmax/Sandcastle/releases/latest",
+      install_command: "pip install --upgrade sandcastle-ai",
+    }),
+  },
+  // --- Optimizer alerts ---
+  {
+    match: /^\/optimizer\/alerts$/,
+    method: "GET",
+    handler: () => MOCK_OPTIMIZER_ALERTS,
+  },
+  {
+    match: /^\/optimizer\/alerts$/,
+    method: "DELETE",
+    handler: () => ({ deleted: true }),
+  },
+  // --- Approval actions ---
+  {
+    match: /^\/approvals\/([^/]+)\/(approve|reject)$/,
+    method: "POST",
+    handler: (params) => {
+      const approval = MOCK_APPROVALS.find((a) => a.id === params._1);
+      if (!approval) return null;
+      const action = params._2 as "approve" | "reject";
+      return {
+        ...approval,
+        status: action === "approve" ? "approved" : "rejected",
+        resolved_at: new Date().toISOString(),
+      };
+    },
+  },
+  // --- AutoPilot experiment actions ---
+  {
+    match: /^\/autopilot\/experiments\/([^/]+)\/deploy$/,
+    method: "POST",
+    handler: (params, body) => {
+      const exp = MOCK_AUTOPILOT_EXPERIMENTS.find((e) => e.id === params._1);
+      if (!exp) return null;
+      const b = body as { variant_id?: string } | undefined;
+      return { ...exp, status: "completed", deployed_variant_id: b?.variant_id || "baseline" };
+    },
+  },
+  {
+    match: /^\/autopilot\/experiments\/([^/]+)\/reset$/,
+    method: "POST",
+    handler: (params) => {
+      const exp = MOCK_AUTOPILOT_EXPERIMENTS.find((e) => e.id === params._1);
+      if (!exp) return null;
+      return { ...exp, status: "active", deployed_variant_id: null, samples: [] };
+    },
+  },
+  {
+    match: /^\/autopilot\/experiments\/([^/]+)\/advance-rollout$/,
+    method: "POST",
+    handler: (params) => {
+      const exp = MOCK_AUTOPILOT_EXPERIMENTS.find((e) => e.id === params._1);
+      if (!exp) return null;
+      return { ...exp, status: "rolling_out" };
+    },
+  },
+  // --- Dead letter actions ---
+  {
+    match: /^\/dead-letter\/([^/]+)\/retry$/,
+    method: "POST",
+    handler: (params) => {
+      const item = MOCK_DLQ.find((d) => d.id === params._1);
+      if (!item) return null;
+      return { ...item, status: "retrying" };
+    },
+  },
+  {
+    match: /^\/dead-letter\/([^/]+)\/resolve$/,
+    method: "POST",
+    handler: (params) => {
+      const item = MOCK_DLQ.find((d) => d.id === params._1);
+      if (!item) return null;
+      return { ...item, resolved_at: new Date().toISOString(), resolved_by: "demo-user" };
+    },
+  },
+  // --- Run actions ---
+  {
+    match: /^\/runs\/([^/]+)\/cancel$/,
+    method: "POST",
+    handler: (params) => {
+      const run = MOCK_RUNS.find((r) => r.run_id === params._1);
+      if (!run) return null;
+      return { ...run, status: "cancelled" };
+    },
+  },
+  {
+    match: /^\/runs\/([^/]+)$/,
+    method: "DELETE",
+    handler: (params) => {
+      const idx = MOCK_RUNS.findIndex((r) => r.run_id === params._1);
+      if (idx === -1) return null;
+      return { deleted: true };
+    },
+  },
+  // --- Workflow version/promote/rollback ---
+  {
+    match: /^\/workflows\/([^/]+)\/versions\/(\d+)$/,
+    method: "GET",
+    handler: (params) => {
+      const name = params._1;
+      const version = Number(params._2);
+      const versions = MOCK_WORKFLOW_VERSIONS[name] || [];
+      const ver = versions.find((v) => (v as Record<string, unknown>).version === version);
+      if (!ver) return null;
+      return ver;
+    },
+  },
+  {
+    match: /^\/workflows\/([^/]+)\/promote$/,
+    method: "POST",
+    handler: (params, body) => {
+      const b = body as { version?: number } | undefined;
+      return {
+        workflow_name: params._1,
+        version: b?.version || 1,
+        status: "production",
+        promoted_at: new Date().toISOString(),
+      };
+    },
+  },
+  {
+    match: /^\/workflows\/([^/]+)\/rollback$/,
+    method: "POST",
+    handler: (params) => ({
+      workflow_name: params._1,
+      rolled_back: true,
+      previous_version: 2,
+      new_production_version: 1,
+    }),
+  },
+  // --- Schedule CRUD ---
+  {
+    match: /^\/schedules$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { workflow_name?: string; cron_expression?: string } | undefined;
+      return {
+        id: `sch-${Date.now().toString(36)}`,
+        workflow_name: b?.workflow_name || "untitled",
+        cron_expression: b?.cron_expression || "0 * * * *",
+        enabled: true,
+        last_run_id: null,
+        created_at: new Date().toISOString(),
+      };
+    },
+  },
+  {
+    match: /^\/schedules\/([^/]+)$/,
+    method: "PATCH",
+    handler: (params, body) => {
+      const schedule = MOCK_SCHEDULES.find((s) => s.id === params._1);
+      if (!schedule) return null;
+      const updates = body as Record<string, unknown> | undefined;
+      return { ...schedule, ...updates };
+    },
+  },
+  {
+    match: /^\/schedules\/([^/]+)$/,
+    method: "DELETE",
+    handler: (params) => {
+      const idx = MOCK_SCHEDULES.findIndex((s) => s.id === params._1);
+      if (idx === -1) return null;
+      return { deleted: true };
+    },
+  },
+  // --- API key delete ---
+  {
+    match: /^\/api-keys\/([^/]+)$/,
+    method: "DELETE",
+    handler: (params) => {
+      const idx = MOCK_API_KEYS.findIndex((k) => k.id === params._1);
+      if (idx === -1) return null;
       return { deleted: true };
     },
   },

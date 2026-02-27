@@ -223,9 +223,9 @@ export default function Runs() {
       ) : (
         <RunsTable
           runs={filteredRuns}
-          total={total}
+          total={searchTerm ? filteredRuns.length : total}
           limit={limit}
-          offset={offset}
+          offset={searchTerm ? 0 : offset}
           onPageChange={setOffset}
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
@@ -238,6 +238,7 @@ export default function Runs() {
         title="Delete Runs"
         description={`Delete ${selectedIds.size} selected run${selectedIds.size > 1 ? "s" : ""}? This cannot be undone.`}
         confirmLabel={bulkProcessing ? "Deleting..." : "Delete All"}
+        confirmDisabled={bulkProcessing}
         variant="danger"
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkAction(null)}
@@ -247,6 +248,7 @@ export default function Runs() {
         title="Cancel Runs"
         description={`Cancel ${selectedIds.size} selected run${selectedIds.size > 1 ? "s" : ""}?`}
         confirmLabel={bulkProcessing ? "Cancelling..." : "Cancel All"}
+        confirmDisabled={bulkProcessing}
         variant="warning"
         onConfirm={handleBulkCancel}
         onCancel={() => setBulkAction(null)}

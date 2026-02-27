@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # --- Requests ---
 
@@ -23,6 +23,28 @@ class WorkflowRunRequest(BaseModel):
     idempotency_key: str | None = Field(None, description="Unique key to prevent duplicate runs")
     max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run")
     version: int | str | None = Field(None, description="Workflow version (int, 'latest', or None)")
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        from urllib.parse import urlparse
+
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("callback_url must use http or https scheme")
+        if not parsed.hostname:
+            raise ValueError("callback_url must have a valid hostname")
+        # Block common internal/private hostnames
+        hostname = parsed.hostname.lower()
+        if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            raise ValueError("callback_url cannot point to localhost")
+        if hostname.startswith("169.254.") or hostname.startswith("10.") or hostname.startswith("192.168."):
+            raise ValueError("callback_url cannot point to private networks")
+        if hostname.endswith(".internal") or hostname.endswith(".local"):
+            raise ValueError("callback_url cannot point to internal hostnames")
+        return v
 
 
 class ReplayRequest(BaseModel):
@@ -44,8 +66,8 @@ class ForkRequest(BaseModel):
 class ScheduleCreateRequest(BaseModel):
     """Request to create a scheduled workflow."""
 
-    workflow_name: str
-    cron_expression: str
+    workflow_name: str = Field(..., min_length=1, max_length=200)
+    cron_expression: str = Field(..., min_length=1, max_length=100)
     input_data: dict[str, Any] = Field(default_factory=dict)
     notify: dict[str, Any] | None = None
     enabled: bool = True
@@ -62,9 +84,9 @@ class ScheduleUpdateRequest(BaseModel):
 class WorkflowGenerateRequest(BaseModel):
     """Request to generate a workflow from natural language."""
 
-    description: str = Field(..., description="Natural language description of the workflow")
-    refine_from: str | None = Field(None, description="Existing YAML to refine")
-    refine_instruction: str | None = Field(None, description="What to change in the existing YAML")
+    description: str = Field(..., description="Natural language description of the workflow", min_length=1, max_length=10000)
+    refine_from: str | None = Field(None, description="Existing YAML to refine", max_length=100000)
+    refine_instruction: str | None = Field(None, description="What to change in the existing YAML", max_length=10000)
 
 
 class GenerateChatMessage(BaseModel):
@@ -84,17 +106,24 @@ class GenerateChatRequest(BaseModel):
 class WorkflowSaveRequest(BaseModel):
     """Request to save a workflow YAML file."""
 
-    name: str = Field(..., description="Workflow file name (without .yaml extension)")
-    content: str = Field(..., description="Workflow YAML content")
-    description: str = Field("", description="Version description")
+    name: str = Field(..., description="Workflow file name (without .yaml extension)", min_length=1, max_length=200)
+    content: str = Field(..., description="Workflow YAML content", min_length=1)
+    description: str = Field("", description="Version description", max_length=1000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if ".." in v or "/" in v or "\\" in v:
+            raise ValueError("Name must not contain path separators or '..'")
+        return v
 
 
 class ApiKeyCreateRequest(BaseModel):
     """Request to create a new API key."""
 
-    tenant_id: str | None = Field(None, description="Tenant scope. Null for admin keys.")
-    name: str = Field(..., description="Description for the key")
-    max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run")
+    tenant_id: str | None = Field(None, description="Tenant scope. Null for admin keys.", max_length=200)
+    name: str = Field(..., description="Description for the key", min_length=1, max_length=200)
+    max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run", ge=0)
 
 
 class ApiKeyRotateRequest(BaseModel):
@@ -734,9 +763,9 @@ class MemoryAddRequest(BaseModel):
 class MemorySearchRequest(BaseModel):
     """Request to search memories by semantic query."""
 
-    scope_id: str
-    query: str
-    limit: int = 10
+    scope_id: str = Field(..., min_length=1)
+    query: str = Field(..., min_length=1)
+    limit: int = Field(10, ge=1, le=200)
 
 
 class MemoryEntry(BaseModel):

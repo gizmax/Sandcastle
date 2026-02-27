@@ -76,7 +76,7 @@ export default function Schedules() {
       }
       toast.success("Schedule created");
       setModalOpen(false);
-      fetchSchedules();
+      void fetchSchedules();
     },
     [fetchSchedules]
   );

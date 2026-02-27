@@ -30,7 +30,7 @@ steps:
       Define the market boundaries and segmentation for this opportunity analysis.
 
       Product: {input.product_description}
-      Target industry: {input.industry}
+      Target industry: {input.target_industry}
       Geography: {input.geography}
 
       Perform the following:
