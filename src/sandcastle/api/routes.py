@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
@@ -1047,11 +1047,13 @@ async def get_stats(request: Request) -> ApiResponse:
     async with async_session() as session:
         summary_q = select(
             func.count(Run.id).label("total"),
-            func.count(func.case(
+            func.count(case(
                 (Run.status == RunStatus.COMPLETED, Run.id),
+                else_=None,
             )).label("completed"),
-            func.count(func.case(
+            func.count(case(
                 (Run.status.in_([RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.PARTIAL]), Run.id),
+                else_=None,
             )).label("finished"),
             func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
             _duration_seconds_expr().label("avg_dur"),
@@ -1235,7 +1237,7 @@ async def list_workflows() -> ApiResponse:
                     WorkflowVersion.workflow_name,
                     func.count(WorkflowVersion.id).label("total"),
                     func.max(
-                        func.case(
+                        case(
                             (WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
                              WorkflowVersion.version),
                             else_=None,

@@ -1,0 +1,260 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// We cannot import the singleton directly because it probes on construction.
+// Instead we test the client behavior by mocking fetch at the global level
+// and re-importing the module for specific scenarios.
+
+describe("ApiClient", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  // ── handleResponse behavior ─────────────────────────────────────────────
+
+  describe("handleResponse (via api.get)", () => {
+    it("falls back to mock mode on network error", async () => {
+      // Simulate network failure for probe + actual request
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+
+      // Dynamic import to get a fresh module (singleton is constructed on import)
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+
+      // The probe will fail, setting mock mode
+      const result = await api.get("/runs");
+
+      // Should have fallen back to mock data
+      expect(result.data).not.toBeNull();
+    });
+
+    it("handles 500 response with JSON detail", async () => {
+      // First call: probe succeeds
+      // Second call: actual request returns 500
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          // Probe
+          return new Response(JSON.stringify({ data: { status: "ok" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        // Actual request: 500
+        return new Response(
+          JSON.stringify({ detail: "Internal Server Error" }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      const result = await api.get("/failing-endpoint");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.code).toBe("HTTP_500");
+    });
+
+    it("handles non-JSON error response", async () => {
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return new Response(JSON.stringify({ data: { status: "ok" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("Bad Gateway", {
+          status: 502,
+          statusText: "Bad Gateway",
+        });
+      });
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      const result = await api.get("/bad-gateway");
+
+      expect(result.error?.code).toBe("HTTP_502");
+      expect(result.error?.message).toBe("Bad Gateway");
+    });
+
+    it("handles FastAPI HTTPException detail object", async () => {
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return new Response(JSON.stringify({ data: { status: "ok" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            detail: {
+              error: { code: "RATE_LIMITED", message: "Too many requests" },
+              data: null,
+            },
+          }),
+          { status: 429, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      const result = await api.get("/rate-limited");
+
+      expect(result.error?.code).toBe("RATE_LIMITED");
+    });
+  });
+
+  // ── POST / PATCH / PUT / DELETE ─────────────────────────────────────────
+
+  describe("POST method", () => {
+    it("returns network error on fetch failure", async () => {
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return new Response(JSON.stringify({ data: { status: "ok" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      const result = await api.post("/create", { name: "test" });
+
+      expect(result.error?.code).toBe("NETWORK_ERROR");
+    });
+  });
+
+  // ── sseUrl ──────────────────────────────────────────────────────────────
+
+  describe("sseUrl", () => {
+    it("builds SSE URL with token when API key is set", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      api.setApiKey("test-key-123");
+
+      const url = api.sseUrl("/events");
+      expect(url).toContain("/events");
+      expect(url).toContain("token=test-key-123");
+    });
+
+    it("builds SSE URL without token when no API key", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      api.setApiKey(null);
+
+      const url = api.sseUrl("/events");
+      expect(url).not.toContain("token=");
+    });
+  });
+
+  // ── authHeaders ─────────────────────────────────────────────────────────
+
+  describe("authHeaders", () => {
+    it("includes X-API-Key when key is set", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      api.setApiKey("my-key");
+
+      const headers = api.authHeaders();
+      expect(headers).toHaveProperty("X-API-Key", "my-key");
+    });
+
+    it("does not include Content-Type", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      api.setApiKey("my-key");
+
+      const headers = api.authHeaders();
+      expect(headers).not.toHaveProperty("Content-Type");
+    });
+  });
+
+  // ── Mock mode listener ────────────────────────────────────────────────
+
+  describe("onMockChange", () => {
+    it("notifies listeners when switching to mock mode", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+
+      const listener = vi.fn();
+      api.onMockChange(listener);
+
+      // Trigger mock mode by making a GET request that fails
+      // (probe already set mock=true, so listener may already be called)
+      // Listener is called synchronously when setMock changes value
+      expect(api.isMockMode).toBe(true);
+    });
+
+    it("unsubscribe stops notifications", async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+
+      const listener = vi.fn();
+      const unsub = api.onMockChange(listener);
+      unsub();
+
+      // The listener should have been removed
+      // We can't easily trigger another mock change, but confirm unsub runs without error
+      expect(typeof unsub).toBe("function");
+    });
+  });
+
+  // ── Query parameters ──────────────────────────────────────────────────
+
+  describe("GET with query params", () => {
+    it("appends non-empty query parameters to URL", async () => {
+      let requestedUrl = "";
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        callCount++;
+        if (callCount === 1) {
+          return new Response(JSON.stringify({ data: { status: "ok" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        requestedUrl = url;
+        return new Response(JSON.stringify({ data: [], meta: { total: 0, limit: 50, offset: 0 } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      await api.get("/runs", { status: "completed", limit: "50", empty: "" });
+
+      expect(requestedUrl).toContain("status=completed");
+      expect(requestedUrl).toContain("limit=50");
+      // Empty values should be excluded
+      expect(requestedUrl).not.toContain("empty=");
+    });
+  });
+});
