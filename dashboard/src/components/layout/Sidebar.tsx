@@ -91,11 +91,13 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
       {open && (
         <div
           className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          aria-hidden="true"
           onClick={onClose}
         />
       )}
 
       <aside
+        aria-label="Main navigation"
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface",
           "lg:static lg:z-auto",
@@ -112,13 +114,14 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
           </span>
           <button
             onClick={onClose}
+            aria-label="Close navigation"
             className="ml-auto rounded-lg p-1 text-muted hover:text-foreground lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-3">
+        <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Sidebar">
           {navSections.map((section, sectionIdx) => (
             <div key={section.label} className={cn(sectionIdx > 0 && "mt-5")}>
               <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">

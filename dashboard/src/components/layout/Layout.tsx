@@ -23,8 +23,9 @@ function eventToNotificationType(eventType: string): Notification["type"] {
       return "success";
     case "run.failed":
     case "step.failed":
-    case "dlq.new":
       return "error";
+    case "dlq.new":
+      return "warning";
     default:
       return "info";
   }

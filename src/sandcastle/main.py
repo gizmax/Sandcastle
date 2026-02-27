@@ -18,7 +18,7 @@ from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
 from sandcastle.api.security_headers import security_headers_middleware
-from sandcastle.config import settings
+from sandcastle.config import Settings, settings
 
 # Configure logging
 logging.basicConfig(
@@ -82,17 +82,41 @@ async def lifespan(app: FastAPI):
         result = await session.execute(sa_select(Setting))
         saved = {s.key: s.value for s in result.scalars().all()}
 
+        # Only restore settings that are safe to change at runtime.
+        # Security-critical settings (auth, encryption, DB, Redis) must come
+        # from environment variables and cannot be overridden from the DB.
+        _RESTORABLE_SETTINGS = {
+            "anthropic_api_key", "e2b_api_key", "openai_api_key",
+            "minimax_api_key", "openrouter_api_key",
+            "default_max_cost_usd", "log_level", "max_workflow_depth",
+        }
         for key, value in saved.items():
+            if key not in _RESTORABLE_SETTINGS:
+                if hasattr(settings, key):
+                    logger.debug(
+                        "Skipping non-restorable saved setting '%s'", key
+                    )
+                continue
             if hasattr(settings, key):
                 field_type = type(getattr(settings, key))
-                if field_type is bool:
-                    setattr(settings, key, value.lower() in ("true", "1", "yes"))
-                elif field_type is int:
-                    setattr(settings, key, int(value))
-                elif field_type is float:
-                    setattr(settings, key, float(value))
-                else:
-                    setattr(settings, key, value)
+                try:
+                    if field_type is bool:
+                        coerced = value.lower() in ("true", "1", "yes")
+                    elif field_type is int:
+                        coerced = int(value)
+                    elif field_type is float:
+                        coerced = float(value)
+                    else:
+                        coerced = value
+                    # Validate through Pydantic to enforce field validators
+                    validated = Settings.model_validate(
+                        {**settings.model_dump(), key: coerced}
+                    )
+                    setattr(settings, key, getattr(validated, key))
+                except Exception as e:
+                    logger.warning(
+                        f"Ignoring invalid saved setting {key}={value!r}: {e}"
+                    )
 
         if saved:
             logger.info(f"Loaded {len(saved)} saved settings from database")

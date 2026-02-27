@@ -422,8 +422,10 @@ def _escape_js_string(text: str) -> str:
     )
 
 
-# In-memory cancel flags for local mode (no Redis)
-_cancel_flags: set[str] = set()
+# In-memory cancel flags for local mode (no Redis).
+# Uses OrderedDict for true FIFO eviction (set iteration order is
+# insertion-order in CPython 3.7+ but dict is the guaranteed contract).
+_cancel_flags: collections.OrderedDict[str, None] = collections.OrderedDict()
 _MAX_CANCEL_FLAGS = 10000
 _cancel_flags_lock = asyncio.Lock()
 
@@ -432,12 +434,12 @@ async def cancel_run_local(run_id: str) -> None:
     """Set cancel flag in-memory (local mode without Redis)."""
     async with _cancel_flags_lock:
         if len(_cancel_flags) >= _MAX_CANCEL_FLAGS:
-            # Evict oldest half instead of clearing all, to preserve recent cancels
-            to_remove = list(_cancel_flags)[:len(_cancel_flags) // 2]
-            for flag in to_remove:
-                _cancel_flags.discard(flag)
-            logger.warning("Cancel flags set exceeded %d entries, evicted %d oldest", _MAX_CANCEL_FLAGS, len(to_remove))
-        _cancel_flags.add(run_id)
+            # Evict oldest half (FIFO) to preserve recent cancels
+            evict_count = len(_cancel_flags) // 2
+            for _ in range(evict_count):
+                _cancel_flags.popitem(last=False)
+            logger.warning("Cancel flags set exceeded %d entries, evicted %d oldest", _MAX_CANCEL_FLAGS, evict_count)
+        _cancel_flags[run_id] = None
 
 
 _redis_pool = None
@@ -465,10 +467,10 @@ async def _check_cancel(run_id: str) -> bool:
     from sandcastle.config import settings
 
     if not settings.redis_url:
-        # Local mode: check in-memory set and clean up after detection
+        # Local mode: check in-memory OrderedDict and clean up after detection
         async with _cancel_flags_lock:
             if run_id in _cancel_flags:
-                _cancel_flags.discard(run_id)
+                del _cancel_flags[run_id]
                 return True
             return False
 
@@ -1743,15 +1745,28 @@ async def _execute_sub_workflow_step(
     try:
         from pathlib import Path
 
-        workflows_dir = Path(settings.workflows_dir)
+        workflows_dir = Path(settings.workflows_dir).resolve()
         wf_name = step.sub_workflow.workflow
+
+        # Path traversal prevention for sub-workflow names
+        if ".." in wf_name or "/" in wf_name or "\\" in wf_name:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Invalid sub-workflow name: '{wf_name}'",
+            )
+
         yaml_path = None
         for candidate in [
             workflows_dir / f"{wf_name}.yaml",
             workflows_dir / wf_name,
         ]:
-            if candidate.exists() and candidate.is_file():
-                yaml_path = candidate
+            resolved = candidate.resolve()
+            # Ensure the resolved path stays within workflows directory
+            if not resolved.is_relative_to(workflows_dir):
+                continue
+            if resolved.exists() and resolved.is_file():
+                yaml_path = resolved
                 break
 
         if yaml_path is None:
@@ -2067,7 +2082,9 @@ async def _execute_http_step(
             if isinstance(cfg.body, str):
                 body = resolve_templates(cfg.body, context, step.depends_on)
             else:
-                body = json.dumps(cfg.body)
+                # Serialize dict body then resolve templates in the JSON string
+                # so that {input.X} / {steps.Y.output} inside dict values work.
+                body = resolve_templates(json.dumps(cfg.body), context, step.depends_on)
 
         async with httpx.AsyncClient(timeout=step.timeout) as client:
             resp = await client.request(
@@ -2116,7 +2133,15 @@ _CODE_STEP_BLOCKED_PATTERNS = re.compile(
     r"__subclasses__|__bases__|__mro__|__class__|__globals__|__builtins__|"
     r"__import__|importlib|__loader__|__spec__|exec\s*\(|eval\s*\(|"
     r"compile\s*\(|getattr\s*\(|setattr\s*\(|delattr\s*\(|"
-    r"breakpoint\s*\(|open\s*\(|vars\s*\(|dir\s*\(",
+    r"breakpoint\s*\(|open\s*\(|vars\s*\(|dir\s*\(|"
+    # Block string construction bypasses (chr(), bytes(), string concatenation to build builtins)
+    r"chr\s*\(|ord\s*\(|"
+    # Block access to code/frame objects that can escape the sandbox
+    r"__code__|__func__|__self__|__dict__|__init__|__new__|__del__|"
+    r"__getattr__|__getattribute__|"
+    # Block os/sys/subprocess imports via any mechanism
+    r"\bos\b\s*\.\s*system|\bos\b\s*\.\s*popen|subprocess|"
+    r"__reduce__|__reduce_ex__|pickle",
     re.IGNORECASE,
 )
 
@@ -2192,7 +2217,27 @@ async def _execute_code_step(
             "result": None,
         }
 
-        exec(code, exec_globals)  # noqa: S102
+        # Run exec() in a thread with a timeout to prevent infinite loops/DoS.
+        # The step-level timeout (default 300s) applies here, but we cap code
+        # steps at 30s since they should be fast data transformations.
+        import concurrent.futures
+
+        _CODE_STEP_TIMEOUT = min(step.timeout, 30)
+
+        def _run_code():
+            exec(code, exec_globals)  # noqa: S102
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_run_code)
+            try:
+                future.result(timeout=_CODE_STEP_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=f"Code step timed out after {_CODE_STEP_TIMEOUT}s",
+                    duration_seconds=time.monotonic() - started_at,
+                )
 
         output = exec_globals.get("result", None)
 
@@ -2214,6 +2259,9 @@ async def _execute_code_step(
         )
 
 
+_EVAL_MAX_EXPRESSION_LENGTH = 2000
+
+
 def _safe_eval_expression(expression: str, names: dict[str, Any]) -> Any:
     """Evaluate a workflow expression safely using simpleeval.
 
@@ -2221,6 +2269,17 @@ def _safe_eval_expression(expression: str, names: dict[str, Any]) -> Any:
     comparison operators, attribute access, ``len()``, and type
     constructors are available.
     """
+    # Guard against excessively long expressions that could cause DoS
+    if len(expression) > _EVAL_MAX_EXPRESSION_LENGTH:
+        raise ValueError(
+            f"Expression too long ({len(expression)} chars, "
+            f"max {_EVAL_MAX_EXPRESSION_LENGTH})"
+        )
+    # Block dunder attribute access patterns that simpleeval might not catch
+    if "__" in expression:
+        raise ValueError(
+            "Expression contains blocked double-underscore pattern"
+        )
     functions = {"len": len, "int": int, "float": float, "str": str, "bool": bool}
     return simple_eval(expression, names=names, functions=functions)
 
@@ -2583,7 +2642,7 @@ async def _execute_race_step(
                         try:
                             r = t.result()
                             total_cost += r["cost"]
-                        except Exception:
+                        except BaseException:
                             pass
                 pending = set()
                 break

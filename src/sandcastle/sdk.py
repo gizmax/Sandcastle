@@ -333,6 +333,16 @@ def _parse_sse_lines(raw: str) -> Iterator[dict[str, Any]]:
             event_type = ""
             data_lines = []
 
+    # Flush any remaining data if stream ended without trailing blank line
+    if data_lines:
+        data_buf = "\n".join(data_lines)
+        try:
+            parsed = json.loads(data_buf)
+        except json.JSONDecodeError:
+            parsed = {"raw": data_buf}
+        parsed["_event"] = event_type
+        yield parsed
+
 
 # ---------------------------------------------------------------------------
 # Synchronous client

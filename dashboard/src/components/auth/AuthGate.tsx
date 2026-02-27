@@ -33,18 +33,23 @@ export function AuthGate({ onLogin }: AuthGateProps) {
           <p className="text-sm text-muted">Enter your API key to connect</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" aria-label="API key login">
           <div>
+            <label htmlFor="api-key-input" className="sr-only">API Key</label>
             <input
+              id="api-key-input"
               type="password"
               value={key}
               onChange={(e) => { setKey(e.target.value); setError(false); }}
               placeholder="sc_..."
               autoFocus
+              autoComplete="current-password"
+              aria-invalid={error}
+              aria-describedby={error ? "api-key-error" : undefined}
               className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 transition-colors"
             />
             {error && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-error">
+              <div id="api-key-error" className="mt-2 flex items-center gap-1.5 text-xs text-error" role="alert">
                 <AlertCircle className="h-3.5 w-3.5" />
                 Invalid API key
               </div>

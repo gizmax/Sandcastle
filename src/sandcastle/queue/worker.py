@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 # Track in-process background tasks to prevent GC and surface exceptions
 _background_tasks: set[asyncio.Task] = set()
 
+# Shared Redis pool for enqueue operations (avoids creating a new pool per call)
+_enqueue_redis_pool = None
+_enqueue_redis_lock = asyncio.Lock()
+
 
 def _task_done_callback(task: asyncio.Task) -> None:
     """Log unhandled exceptions from fire-and-forget background tasks."""
@@ -121,17 +125,23 @@ async def run_workflow_job(
         }
 
         # Update DB with result
-        async with async_session() as session:
-            run = await session.get(Run, run_uuid)
-            if run:
-                run.status = status_map.get(result.status, RunStatus.FAILED)
-                run.output_data = result.outputs
-                run.total_cost_usd = result.total_cost_usd
-                # Don't set completed_at for paused workflows
-                if result.status != "awaiting_approval":
-                    run.completed_at = datetime.now(timezone.utc)
-                run.error = result.error
-                await session.commit()
+        try:
+            async with async_session() as session:
+                run = await session.get(Run, run_uuid)
+                if run:
+                    run.status = status_map.get(result.status, RunStatus.FAILED)
+                    run.output_data = result.outputs
+                    run.total_cost_usd = result.total_cost_usd
+                    # Don't set completed_at for paused workflows
+                    if result.status != "awaiting_approval":
+                        run.completed_at = datetime.now(timezone.utc)
+                    run.error = result.error
+                    await session.commit()
+        except Exception as db_err:
+            logger.error(
+                f"Failed to persist result for run {run_id}: {db_err}. "
+                "Workflow completed but DB update failed."
+            )
 
         # Dispatch webhook - on_complete or on_failure depending on status
         webhook_urls = []
@@ -141,9 +151,21 @@ async def run_workflow_job(
         if result.status == "completed":
             if not callback_url and workflow.on_complete and workflow.on_complete.webhook:
                 webhook_urls.append(workflow.on_complete.webhook)
-        else:
+        elif result.status == "failed":
+            # Only fire on_failure webhook for actual failures, not for
+            # cancelled/budget_exceeded/awaiting_approval statuses
             if workflow.on_failure and workflow.on_failure.webhook:
                 webhook_urls.append(workflow.on_failure.webhook)
+
+        # Determine the webhook event type based on actual status
+        _event_map = {
+            "completed": "workflow.completed",
+            "failed": "workflow.failed",
+            "cancelled": "workflow.cancelled",
+            "budget_exceeded": "workflow.budget_exceeded",
+            "awaiting_approval": "workflow.awaiting_approval",
+        }
+        event_type = _event_map.get(result.status, "workflow.failed")
 
         for webhook_url in webhook_urls:
             duration = 0.0
@@ -152,7 +174,7 @@ async def run_workflow_job(
 
             await dispatch_webhook(
                 url=webhook_url,
-                event="workflow.completed" if result.status == "completed" else "workflow.failed",
+                event=event_type,
                 run_id=run_id,
                 workflow=workflow.name,
                 status=result.status,
@@ -220,14 +242,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     max_jobs = 10
     job_timeout = 600
-
-    @classmethod
-    def get_redis_settings(cls):
-        if settings.redis_url:
-            return _parse_redis_url(settings.redis_url)
-        return None
-
-    redis_settings = property(get_redis_settings)
+    redis_settings = None
 
 
 # Lazy init: only set redis_settings when Redis is configured
@@ -245,24 +260,27 @@ async def enqueue_workflow(
     step_overrides: dict | None = None,
 ) -> None:
     """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task)."""
+    global _enqueue_redis_pool
+
     if settings.redis_url:
-        # Production mode: enqueue via arq/Redis
+        # Production mode: enqueue via arq/Redis using a shared connection pool
         from arq import create_pool
 
-        redis = await create_pool(_parse_redis_url(settings.redis_url))
-        try:
-            await redis.enqueue_job(
-                "run_workflow_job",
-                workflow_yaml,
-                input_data,
-                run_id,
-                max_cost_usd=max_cost_usd,
-                initial_context=initial_context,
-                skip_steps=skip_steps,
-                step_overrides=step_overrides,
-            )
-        finally:
-            await redis.close()
+        if _enqueue_redis_pool is None:
+            async with _enqueue_redis_lock:
+                if _enqueue_redis_pool is None:
+                    _enqueue_redis_pool = await create_pool(_parse_redis_url(settings.redis_url))
+
+        await _enqueue_redis_pool.enqueue_job(
+            "run_workflow_job",
+            workflow_yaml,
+            input_data,
+            run_id,
+            max_cost_usd=max_cost_usd,
+            initial_context=initial_context,
+            skip_steps=skip_steps,
+            step_overrides=step_overrides,
+        )
     else:
         # Local mode: run directly in-process
         logger.info(f"Local mode: executing run {run_id} in-process")

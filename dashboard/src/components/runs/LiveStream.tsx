@@ -37,7 +37,7 @@ export function LiveStream({ runId }: LiveStreamProps) {
           <p className="text-muted">Waiting for events...</p>
         ) : (
           events.map((event, i) => (
-            <div key={i} className="mb-1">
+            <div key={`${event.event}-${event.timestamp.getTime()}-${i}`} className="mb-1">
               <span className="text-accent">[{event.event}]</span>{" "}
               <span className="text-foreground/80">
                 {JSON.stringify(event.data)}

@@ -39,8 +39,9 @@ def validate_callback_url(url: str) -> str:
     if not parsed.hostname:
         raise ValueError("callback_url has no hostname")
 
+    default_port = 443 if parsed.scheme == "https" else 80
     try:
-        resolved = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+        resolved = socket.getaddrinfo(parsed.hostname, parsed.port or default_port)
     except socket.gaierror as e:
         raise ValueError(f"Cannot resolve hostname '{parsed.hostname}': {e}")
 
@@ -90,6 +91,16 @@ async def dispatch_webhook(
     }
 
     body = json.dumps(payload, default=str)
+
+    # Guard against excessively large payloads (max 1MB)
+    max_payload_bytes = 1_048_576
+    if len(body.encode("utf-8")) > max_payload_bytes:
+        logger.warning(
+            f"Webhook payload for run {run_id} exceeds {max_payload_bytes} bytes, "
+            "truncating outputs"
+        )
+        payload["outputs"] = {"_truncated": True, "_reason": "payload_too_large"}
+        body = json.dumps(payload, default=str)
 
     headers: dict[str, str] = {
         "Content-Type": "application/json",

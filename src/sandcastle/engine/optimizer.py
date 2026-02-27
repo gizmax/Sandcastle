@@ -252,6 +252,8 @@ class CostLatencyOptimizer:
 
     def _get_fallback(self, pool: list[ModelOption]) -> ModelOption:
         """When nothing meets SLO, pick middle option."""
+        if not pool:
+            return DEFAULT_MODEL_POOL[1]  # balanced default
         sorted_by_cost = sorted(pool, key=lambda o: o.avg_cost or 0.10)
         return sorted_by_cost[len(sorted_by_cost) // 2]
 

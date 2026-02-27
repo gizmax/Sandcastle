@@ -447,12 +447,11 @@ async def health_check() -> ApiResponse:
     if settings.redis_url:
         redis_ok = False
         try:
-            import redis.asyncio as aioredis
+            from sandcastle.engine.executor import _get_redis
 
-            r = aioredis.from_url(settings.redis_url)
+            r = await _get_redis()
             await r.ping()
             redis_ok = True
-            await r.aclose()
         except Exception:
             pass
 
@@ -825,13 +824,14 @@ async def install_hub_template(slug: str) -> ApiResponse:
     templates directory. Returns the installed template metadata.
     """
     # Validate slug format (author/name)
-    if "/" not in slug or len(slug.split("/")) != 2:
+    parts = slug.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
         raise HTTPException(
             status_code=400,
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_SLUG",
-                    message="Slug must be in format 'author/name'",
+                    message="Slug must be in format 'author/name' with non-empty parts",
                 )
             ).model_dump(),
         )
@@ -945,13 +945,14 @@ async def install_hub_template(slug: str) -> ApiResponse:
 @router.delete("/hub/install/{slug:path}")
 async def uninstall_hub_template(slug: str) -> ApiResponse:
     """Uninstall a community workflow."""
-    if "/" not in slug or len(slug.split("/")) != 2:
+    parts = slug.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
         raise HTTPException(
             status_code=400,
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="INVALID_SLUG",
-                    message="Slug must be in format 'author/name'",
+                    message="Slug must be in format 'author/name' with non-empty parts",
                 )
             ).model_dump(),
         )
@@ -2073,11 +2074,11 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
         check_stmt = _apply_tenant_filter(check_stmt, tenant_id, Run.tenant_id)
         if not await session.scalar(check_stmt):
             raise HTTPException(
-            status_code=404,
-            detail=ApiResponse(
-                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
-            ).model_dump(),
-        )
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+                ).model_dump(),
+            )
 
     async def event_generator():
         """Poll the database and emit SSE events as status changes."""
@@ -2345,14 +2346,14 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Set cancel flag (Redis or in-memory)
+    # Set cancel flag (Redis or in-memory).
+    # Reuse the executor's shared Redis pool to avoid creating a new connection per cancel.
     if settings.redis_url:
         try:
-            import redis.asyncio as aioredis
+            from sandcastle.engine.executor import _get_redis
 
-            r = aioredis.from_url(settings.redis_url)
+            r = await _get_redis()
             await r.set(f"cancel:{run_id}", "1", ex=3600)  # 1h TTL
-            await r.aclose()
         except Exception as e:
             logger.error(f"Could not set cancel flag in Redis: {e}")
     else:
@@ -3268,7 +3269,8 @@ async def list_experiments(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
-    """List AutoPilot experiments."""
+    """List AutoPilot experiments. Admin-only when auth is enabled."""
+    _require_admin(request)
     async with async_session() as session:
         base = select(AutoPilotExperiment)
         count_base = select(func.count(AutoPilotExperiment.id))
@@ -3304,8 +3306,9 @@ async def list_experiments(
 
 
 @router.get("/autopilot/experiments/{experiment_id}")
-async def get_experiment(experiment_id: str) -> ApiResponse:
-    """Get experiment details with samples and stats."""
+async def get_experiment(experiment_id: str, req: Request) -> ApiResponse:
+    """Get experiment details with samples and stats. Admin-only when auth is enabled."""
+    _require_admin(req)
     try:
         exp_uuid = uuid.UUID(experiment_id)
     except ValueError:
@@ -3366,8 +3369,9 @@ async def get_experiment(experiment_id: str) -> ApiResponse:
 
 
 @router.post("/autopilot/experiments/{experiment_id}/deploy")
-async def deploy_experiment(experiment_id: str) -> ApiResponse:
-    """Manually deploy a specific variant from an experiment."""
+async def deploy_experiment(experiment_id: str, req: Request) -> ApiResponse:
+    """Manually deploy a specific variant from an experiment. Admin-only when auth is enabled."""
+    _require_admin(req)
     try:
         exp_uuid = uuid.UUID(experiment_id)
     except ValueError:
@@ -3419,8 +3423,9 @@ async def deploy_experiment(experiment_id: str) -> ApiResponse:
 
 
 @router.post("/autopilot/experiments/{experiment_id}/reset")
-async def reset_experiment(experiment_id: str) -> ApiResponse:
-    """Reset an experiment by deleting all samples and restarting."""
+async def reset_experiment(experiment_id: str, req: Request) -> ApiResponse:
+    """Reset an experiment by deleting all samples and restarting. Admin-only when auth is enabled."""
+    _require_admin(req)
     try:
         exp_uuid = uuid.UUID(experiment_id)
     except ValueError:
@@ -3459,8 +3464,9 @@ async def reset_experiment(experiment_id: str) -> ApiResponse:
 
 
 @router.post("/autopilot/experiments/{experiment_id}/advance-rollout")
-async def advance_experiment_rollout(experiment_id: str) -> ApiResponse:
-    """Advance a deploying experiment to the next rollout stage."""
+async def advance_experiment_rollout(experiment_id: str, req: Request) -> ApiResponse:
+    """Advance a deploying experiment to the next rollout stage. Admin-only when auth is enabled."""
+    _require_admin(req)
     try:
         exp_uuid = uuid.UUID(experiment_id)
     except ValueError:
@@ -3489,8 +3495,9 @@ async def advance_experiment_rollout(experiment_id: str) -> ApiResponse:
 
 
 @router.get("/autopilot/stats")
-async def autopilot_stats() -> ApiResponse:
-    """Get overall AutoPilot savings and experiment statistics."""
+async def autopilot_stats(req: Request) -> ApiResponse:
+    """Get overall AutoPilot savings and experiment statistics. Admin-only when auth is enabled."""
+    _require_admin(req)
     async with async_session() as session:
         total = await session.scalar(select(func.count(AutoPilotExperiment.id)))
         active = await session.scalar(
@@ -4222,6 +4229,16 @@ async def list_routing_decisions(
             base = base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
             count_base = count_base.join(Run, join_cond).where(Run.tenant_id == tenant_id)
 
+        if workflow:
+            # If tenant isolation already joined Run, just add a where clause;
+            # otherwise, join Run now for the workflow filter.
+            if not (settings.auth_required and tenant_id is not None):
+                join_cond = RoutingDecision.run_id == Run.id
+                base = base.join(Run, join_cond).where(Run.workflow_name == workflow)
+                count_base = count_base.join(Run, join_cond).where(Run.workflow_name == workflow)
+            else:
+                base = base.where(Run.workflow_name == workflow)
+                count_base = count_base.where(Run.workflow_name == workflow)
         if step:
             base = base.where(RoutingDecision.step_id == step)
             count_base = count_base.where(RoutingDecision.step_id == step)
@@ -4388,8 +4405,9 @@ async def optimizer_stats(request: Request) -> ApiResponse:
 
 
 @router.get("/optimizer/alerts")
-async def optimizer_alerts() -> ApiResponse:
+async def optimizer_alerts(req: Request) -> ApiResponse:
     """Get recent model degradation alerts."""
+    _require_admin(req)
     from sandcastle.engine.optimizer import get_optimizer
 
     optimizer = get_optimizer()
@@ -4706,14 +4724,20 @@ async def update_settings(
     # Collect non-None updates
     updates = {k: v for k, v in request.model_dump().items() if v is not None}
 
-    # Block mutation of security-critical settings via API
-    immutable = {
-        "auth_required",
-        "webhook_secret",
-        "database_url",
-        "redis_url",
-        "dashboard_origin",  # CORS origins are built at startup; runtime changes have no effect
+    # Block mutation of security-critical settings via API.
+    # This is the ONLY allowlist of settings that can be changed at runtime.
+    # All others must be set via environment variables.
+    _MUTABLE_SETTINGS = {
+        "anthropic_api_key",
+        "e2b_api_key",
+        "openai_api_key",
+        "minimax_api_key",
+        "openrouter_api_key",
+        "default_max_cost_usd",
+        "log_level",
+        "max_workflow_depth",
     }
+    immutable = updates.keys() - _MUTABLE_SETTINGS
     blocked = immutable & updates.keys()
     if blocked:
         raise HTTPException(

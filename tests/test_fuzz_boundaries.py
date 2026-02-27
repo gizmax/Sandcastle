@@ -1162,10 +1162,15 @@ class TestSdkParseSseLines:
         assert len(events) == 1
 
     def test_no_trailing_newline(self):
-        """Without double newline, event is not emitted."""
+        """Without double newline, buffered data is flushed as a final event.
+
+        This handles interrupted streams (server crash, network timeout) where
+        the last event would otherwise be silently dropped.
+        """
         raw = "data: {\"key\": \"value\"}"
         events = list(_parse_sse_lines(raw))
-        assert len(events) == 0
+        assert len(events) == 1
+        assert events[0]["key"] == "value"
 
 
 class TestSdkClientInit:

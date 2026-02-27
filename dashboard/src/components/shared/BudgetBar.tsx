@@ -24,7 +24,14 @@ export function BudgetBar({ spent, limit }: BudgetBarProps) {
           ${spent.toFixed(2)} / ${limit.toFixed(2)}
         </span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-border/50">
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-border/50"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Budget usage: $${spent.toFixed(2)} of $${limit.toFixed(2)}`}
+      >
         <div
           className={cn(
             "h-full rounded-full transition-all duration-500",

@@ -72,6 +72,23 @@ async def restore_schedules() -> None:
                     workflow_name=schedule.workflow_name,
                     input_data=schedule.input_data,
                 )
+            except ValueError as e:
+                # Invalid cron expression - disable the schedule to prevent
+                # repeated failures on every restart
+                logger.warning(
+                    f"Could not restore schedule {schedule.id}: {e}. "
+                    "Disabling invalid schedule."
+                )
+                try:
+                    async with async_session() as dsession:
+                        bad = await dsession.get(Schedule, schedule.id)
+                        if bad:
+                            bad.enabled = False
+                            await dsession.commit()
+                except Exception as de:
+                    logger.error(
+                        f"Failed to disable invalid schedule {schedule.id}: {de}"
+                    )
             except Exception as e:
                 logger.warning(f"Could not restore schedule {schedule.id}: {e}")
 
@@ -244,7 +261,7 @@ async def _check_approval_timeouts() -> None:
                         continue
 
                     run_status = run.status.value if hasattr(run.status, "value") else run.status
-                    if run_status in ("completed", "failed", "cancelled"):
+                    if run_status in ("completed", "failed", "cancelled", "budget_exceeded"):
                         logger.info(
                             f"Approval {ap.id} for already-finished run "
                             f"(status={run_status}), marking as timed out only"

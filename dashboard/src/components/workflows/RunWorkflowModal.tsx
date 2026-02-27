@@ -64,6 +64,16 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
   const [callbackUrl, setCallbackUrl] = useState("");
   const prevOpenRef = useRef(false);
 
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
   // Reset state when modal opens
   useEffect(() => {
     if (open && !prevOpenRef.current) {
@@ -127,7 +137,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-label={`Run ${workflowName}`} className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">Run {workflowName}</h2>
             <button onClick={onClose} className="rounded-lg p-1 text-muted hover:text-foreground">

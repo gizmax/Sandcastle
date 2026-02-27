@@ -65,6 +65,7 @@ export function Header({
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mobileWrapperRef = useRef<HTMLDivElement>(null);
   const searchVersionRef = useRef(0);
@@ -162,6 +163,40 @@ export function Header({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  // Close search on Escape key
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && (open || mobileSearchOpen)) {
+        setOpen(false);
+        setMobileSearchOpen(false);
+        setQuery("");
+        setResults([]);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, mobileSearchOpen]);
+
+  // Reset active index when results change
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [results]);
+
+  // Keyboard navigation for search results
+  function handleSearchKeyDown(e: React.KeyboardEvent) {
+    if (!open || results.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev + 1) % results.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev <= 0 ? results.length - 1 : prev - 1));
+    } else if (e.key === "Enter" && activeIndex >= 0) {
+      e.preventDefault();
+      handleSelect(results[activeIndex]);
+    }
+  }
+
   function handleSelect(result: SearchResult) {
     navigate(result.link);
     setQuery("");
@@ -177,6 +212,7 @@ export function Header({
     >
       <button
         onClick={onMenuToggle}
+        aria-label="Toggle navigation menu"
         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-border/50 hover:text-foreground lg:hidden"
       >
         <Menu className="h-5 w-5" />
@@ -190,6 +226,7 @@ export function Header({
       {/* Mobile search toggle */}
       <button
         onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+        aria-label="Toggle search"
         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-border/50 hover:text-foreground sm:hidden"
       >
         <Search className="h-5 w-5" />
@@ -206,7 +243,13 @@ export function Header({
             setOpen(true);
           }}
           onFocus={() => { if (results.length > 0) setOpen(true); }}
+          onKeyDown={handleSearchKeyDown}
           placeholder="Search..."
+          role="combobox"
+          aria-expanded={open && results.length > 0}
+          aria-haspopup="listbox"
+          aria-autocomplete="list"
+          aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
           className={cn(
             "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-16 text-sm",
             "placeholder:text-muted-foreground/50",
@@ -218,12 +261,18 @@ export function Header({
           {"\u2318"}K
         </kbd>
         {open && results.length > 0 && (
-          <div className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
+          <div role="listbox" className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
             {results.map((r, i) => (
               <button
                 key={`${r.link}-${i}`}
+                id={`search-result-${i}`}
+                role="option"
+                aria-selected={i === activeIndex}
                 onClick={() => handleSelect(r)}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-border/40 transition-colors"
+                className={cn(
+                  "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-border/40 transition-colors",
+                  i === activeIndex && "bg-border/40"
+                )}
               >
                 {r.type === "run"
                   ? <PlayCircle className="h-4 w-4 shrink-0 text-muted" />

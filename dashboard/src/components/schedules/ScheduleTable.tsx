@@ -50,6 +50,9 @@ export function ScheduleTable({ schedules, onToggle, onDelete, onEdit }: Schedul
                 </td>
                 <td className="px-3 sm:px-5 py-3 text-center">
                   <button
+                    role="switch"
+                    aria-checked={schedule.enabled}
+                    aria-label={`Toggle ${schedule.workflow_name} schedule`}
                     onClick={() => onToggle(schedule.id, !schedule.enabled)}
                     className={cn(
                       "relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200",

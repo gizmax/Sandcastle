@@ -255,7 +255,7 @@ class TestCancelFlagsStress:
 
         # Pre-fill close to max
         for i in range(_MAX_CANCEL_FLAGS - 5):
-            _cancel_flags.add(f"prefill-{i}")
+            _cancel_flags[f"prefill-{i}"] = None
 
         # Now add 50 more concurrently to trigger eviction
         await asyncio.gather(

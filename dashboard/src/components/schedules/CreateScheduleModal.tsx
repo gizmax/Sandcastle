@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import { CronBuilder } from "@/components/schedules/CronBuilder";
@@ -44,6 +44,16 @@ export function CreateScheduleModal({ open, onClose, onSubmit }: CreateScheduleM
       })
       .finally(() => setLoadingWf(false));
   }, [open]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -98,7 +108,7 @@ export function CreateScheduleModal({ open, onClose, onSubmit }: CreateScheduleM
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+        <div role="dialog" aria-modal="true" aria-label="New Schedule" className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl max-h-[85vh] overflow-y-auto">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">New Schedule</h2>
             <button

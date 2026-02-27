@@ -266,6 +266,9 @@ class AutoPilotSample(Base):
     """A single sample from an AutoPilot experiment run."""
 
     __tablename__ = "autopilot_samples"
+    __table_args__ = (
+        Index("ix_autopilot_samples_experiment_id", "experiment_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -295,6 +298,11 @@ class ApprovalRequest(Base):
     """Human approval gate for a workflow step."""
 
     __tablename__ = "approval_requests"
+    __table_args__ = (
+        Index("ix_approval_requests_run_id", "run_id"),
+        Index("ix_approval_requests_status", "status"),
+        Index("ix_approval_requests_status_timeout", "status", "timeout_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -326,6 +334,9 @@ class RoutingDecision(Base):
     """Record of an optimizer routing decision."""
 
     __tablename__ = "routing_decisions"
+    __table_args__ = (
+        Index("ix_routing_decisions_run_id", "run_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -352,6 +363,9 @@ class PolicyViolation(Base):
     """Record of a policy violation during workflow execution."""
 
     __tablename__ = "policy_violations"
+    __table_args__ = (
+        Index("ix_policy_violations_run_id", "run_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -485,6 +499,9 @@ class EvalCaseResult(Base):
     """Result of a single eval case within a run."""
 
     __tablename__ = "eval_case_results"
+    __table_args__ = (
+        Index("ix_eval_case_results_eval_run_id", "eval_run_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -573,9 +590,10 @@ def _build_engine_url() -> str:
     return f"sqlite+aiosqlite:///{data_path}/sandcastle.db"
 
 
-def _build_engine_kwargs() -> dict:
+def _build_engine_kwargs(url: str | None = None) -> dict:
     """Build engine kwargs based on database type."""
-    url = _build_engine_url()
+    if url is None:
+        url = _build_engine_url()
     kwargs: dict = {"echo": False}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
@@ -591,10 +609,11 @@ def _sqlite_wal_mode(dbapi_conn, _connection_record):
     cursor.close()
 
 
-engine = create_async_engine(_build_engine_url(), **_build_engine_kwargs())
+_engine_url = _build_engine_url()
+engine = create_async_engine(_engine_url, **_build_engine_kwargs(_engine_url))
 
 # Enable WAL mode for SQLite connections
-if _build_engine_url().startswith("sqlite"):
+if _engine_url.startswith("sqlite"):
     from sqlalchemy import event
 
     event.listen(engine.sync_engine, "connect", _sqlite_wal_mode)
@@ -612,7 +631,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
         # Auto-add missing columns for SQLite (no Alembic in local mode)
-        if _build_engine_url().startswith("sqlite"):
+        if _engine_url.startswith("sqlite"):
             await conn.run_sync(_add_missing_columns)
 
 

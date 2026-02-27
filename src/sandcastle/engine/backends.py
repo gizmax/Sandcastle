@@ -542,12 +542,19 @@ class LocalBackend:
         if not runner_path.exists():
             raise RuntimeError(f"Runner script not found: {runner_path}")
 
-        # Write tool connector files to a temp tools/ directory
+        # Write tool connector files to a temp tools/ directory.
+        # Created AFTER runner validation to avoid leaking a temp dir
+        # when the runner doesn't exist.
         tools_dir = None
         if tool_files:
             tools_dir = Path(tempfile.mkdtemp(prefix="sandcastle-tools-"))
-            for fname, content in tool_files.items():
-                (tools_dir / fname).write_text(content)
+            try:
+                for fname, content in tool_files.items():
+                    (tools_dir / fname).write_text(content)
+            except Exception:
+                import shutil as _shutil
+                _shutil.rmtree(tools_dir, ignore_errors=True)
+                raise
 
         # Merge host env with provided envs
         proc_env = {**os.environ, **envs}
