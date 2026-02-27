@@ -329,7 +329,7 @@ export default function OptimizerPage() {
                   )}
 
                   {/* Time + expand */}
-                  <span className="text-xs text-muted shrink-0">{formatRelativeTime(item.created_at)}</span>
+                  <span className="text-xs text-muted shrink-0">{item.created_at ? formatRelativeTime(item.created_at) : "-"}</span>
                   {isExpanded ? (
                     <ChevronUp className="h-4 w-4 text-muted shrink-0" />
                   ) : (
@@ -341,7 +341,7 @@ export default function OptimizerPage() {
                 {isExpanded && (
                   <div className="border-t border-border">
                     {/* Alternatives table */}
-                    {item.alternatives.length > 0 && (
+                    {item.alternatives && item.alternatives.length > 0 && (
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
@@ -352,7 +352,7 @@ export default function OptimizerPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
-                            {item.alternatives.map((alt) => (
+                            {item.alternatives!.map((alt) => (
                               <tr key={alt.id} className={cn(alt.model === item.selected_model && "bg-accent/5")}>
                                 <td className="px-3 sm:px-5 py-3">
                                   <div className="flex items-center gap-2">

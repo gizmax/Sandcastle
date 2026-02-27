@@ -1,3 +1,4 @@
+import { afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 // Mock localStorage
@@ -29,8 +30,8 @@ Object.defineProperty(globalThis, "matchMedia", {
 
 // Mock import.meta.env
 if (typeof import.meta !== "undefined") {
-  (import.meta as Record<string, unknown>).env = {
-    ...(import.meta as Record<string, Record<string, unknown>>).env,
+  (import.meta as unknown as Record<string, unknown>).env = {
+    ...(import.meta as unknown as Record<string, Record<string, unknown>>).env,
     VITE_API_URL: "/api",
   };
 }

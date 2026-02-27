@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor, act } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 
 // Mock EventSource
 class MockEventSource {
   static instances: MockEventSource[] = [];
   url: string;
-  onopen: ((this: EventSource, ev: Event) => void) | null = null;
-  onerror: ((this: EventSource, ev: Event) => void) | null = null;
-  onmessage: ((this: EventSource, ev: MessageEvent) => void) | null = null;
+  onopen: ((ev: Event) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+  onmessage: ((ev: MessageEvent) => void) | null = null;
   readyState = 0;
+  withCredentials = false;
+  CONNECTING = 0 as const;
+  OPEN = 1 as const;
+  CLOSED = 2 as const;
   private listeners: Record<string, ((e: MessageEvent) => void)[]> = {};
   closed = false;
 
@@ -26,6 +30,10 @@ class MockEventSource {
     if (this.listeners[type]) {
       this.listeners[type] = this.listeners[type].filter((l) => l !== listener);
     }
+  }
+
+  dispatchEvent(_event: Event): boolean {
+    return false;
   }
 
   close() {

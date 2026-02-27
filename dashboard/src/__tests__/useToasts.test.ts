@@ -23,7 +23,7 @@ describe("useToasts", () => {
     act(() => {
       result.current.addToast("success", "First");
       result.current.addToast("error", "Second");
-      result.current.addToast("info", "Third");
+      result.current.addToast("warning", "Third");
     });
     expect(result.current.toasts).toHaveLength(3);
   });
@@ -32,7 +32,7 @@ describe("useToasts", () => {
     const { result } = renderHook(() => useToasts());
     act(() => {
       for (let i = 0; i < 7; i++) {
-        result.current.addToast("info", `Toast ${i}`);
+        result.current.addToast("warning", `Toast ${i}`);
       }
     });
     expect(result.current.toasts).toHaveLength(5);
@@ -44,7 +44,7 @@ describe("useToasts", () => {
   it("dismisses a toast by id", () => {
     const { result } = renderHook(() => useToasts());
     act(() => {
-      result.current.addToast("info", "Dismissable");
+      result.current.addToast("warning", "Dismissable");
     });
     const id = result.current.toasts[0].id;
     act(() => {
@@ -56,7 +56,7 @@ describe("useToasts", () => {
   it("dismissing non-existent id does nothing", () => {
     const { result } = renderHook(() => useToasts());
     act(() => {
-      result.current.addToast("info", "Keep me");
+      result.current.addToast("warning", "Keep me");
     });
     act(() => {
       result.current.dismissToast("nonexistent-id");
@@ -67,8 +67,8 @@ describe("useToasts", () => {
   it("assigns unique IDs to each toast", () => {
     const { result } = renderHook(() => useToasts());
     act(() => {
-      result.current.addToast("info", "A");
-      result.current.addToast("info", "B");
+      result.current.addToast("warning", "A");
+      result.current.addToast("warning", "B");
     });
     const ids = result.current.toasts.map((t) => t.id);
     expect(new Set(ids).size).toBe(2);

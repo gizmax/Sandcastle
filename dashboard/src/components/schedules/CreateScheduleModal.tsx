@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import { CronBuilder } from "@/components/schedules/CronBuilder";

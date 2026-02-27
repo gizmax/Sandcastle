@@ -37,7 +37,7 @@ export function NotificationCenter({
   onClickNotification,
 }: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const _panelRef = useRef<HTMLDivElement>(null);
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   // Close on Escape key
