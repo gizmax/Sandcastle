@@ -63,16 +63,17 @@ steps:
       properties:
         accounts:
           type: array
+          description: "list of customer accounts in the analyzed segment"
           items:
             type: object
             properties:
-              account_id: { type: string }
-              account_name: { type: string }
-              arr: { type: number }
-              renewal_date: { type: string }
-              monthly_active_users: { type: number }
-        total_count: { type: integer }
-        total_arr_at_risk: { type: number }
+              account_id: { type: string, description: "Salesforce account identifier" }
+              account_name: { type: string, description: "company name of the account" }
+              arr: { type: number, description: "annual recurring revenue in dollars" }
+              renewal_date: { type: string, description: "contract renewal date in ISO 8601 format" }
+              monthly_active_users: { type: number, description: "number of active users in the last 30 days" }
+        total_count: { type: integer, description: "total number of accounts matching the segment filter" }
+        total_arr_at_risk: { type: number, description: "combined ARR of all accounts approaching renewal" }
 
   - id: analyze-signals
     depends_on: [fetch-accounts]
@@ -198,17 +199,18 @@ steps:
       properties:
         accounts:
           type: array
+          description: "accounts ranked by churn risk score, highest first"
           items:
             type: object
             properties:
-              account_name: { type: string }
-              churn_risk_score: { type: number }
-              risk_classification: { type: string }
-              primary_risk_factor: { type: string }
-              arr: { type: number }
-        total_arr_at_risk: { type: number }
-        critical_count: { type: integer }
-        high_count: { type: integer }
+              account_name: { type: string, description: "company name of the account" }
+              churn_risk_score: { type: number, description: "composite churn risk score from 0 (healthy) to 100 (critical)" }
+              risk_classification: { type: string, description: "risk tier: Critical, High, Moderate, or Low" }
+              primary_risk_factor: { type: string, description: "highest-scoring signal category driving the risk" }
+              arr: { type: number, description: "annual recurring revenue at risk in dollars" }
+        total_arr_at_risk: { type: number, description: "combined ARR of Critical and High risk accounts" }
+        critical_count: { type: integer, description: "number of accounts classified as Critical risk" }
+        high_count: { type: integer, description: "number of accounts classified as High risk" }
 
   - id: generate-retention
     depends_on: [score-churn-risk, analyze-signals]

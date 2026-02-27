@@ -18,6 +18,7 @@ import {
   ArrowRight,
   ChevronLeft,
   Loader2,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import jsYaml from "js-yaml";
@@ -259,7 +260,7 @@ export default function TemplatesPage() {
           (t.tags || []).some((tag) => tag.toLowerCase().includes(q))
       );
     }
-    if (selectedTag) {
+    if (selectedTag && selectedTag !== "__installed__") {
       result = result.filter((t) => {
         // Filter by pack category
         const pack = TEMPLATE_PACKS.find((p) => p.id === selectedTag);
@@ -703,20 +704,45 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* Search bar - shown in all views except pack detail and community (community has its own) */}
-      {!isPackDetail && viewParam !== "community" && (
+      {/* Global search bar - shown in all views except pack detail */}
+      {!isPackDetail && (
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input
             type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates..."
+            value={viewParam === "community" ? communitySearch : search}
+            onChange={(e) => {
+              if (viewParam === "community") {
+                setCommunitySearch(e.target.value);
+              } else {
+                setSearch(e.target.value);
+              }
+            }}
+            placeholder={
+              viewParam === "community"
+                ? "Search community workflows..."
+                : "Search templates..."
+            }
             className={cn(
               "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
               "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
             )}
           />
+          {(viewParam === "community" ? communitySearch : search) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (viewParam === "community") {
+                  setCommunitySearch("");
+                } else {
+                  setSearch("");
+                }
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       )}
 
@@ -766,6 +792,8 @@ export default function TemplatesPage() {
           }}
           onOpenDetail={openDetail}
           detailName={detailName}
+          installedSlugs={installedSlugs}
+          communityTemplates={communityTemplates}
         />
       )}
 
@@ -776,6 +804,7 @@ export default function TemplatesPage() {
           expandedTools={expandedTools}
           onToggleTool={toggleToolExpand}
           onOpenDetail={openDetail}
+          search={search}
         />
       )}
 
@@ -859,21 +888,6 @@ export default function TemplatesPage() {
               </button>
             </div>
           )}
-
-          {/* Community search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-            <input
-              type="text"
-              value={communitySearch}
-              onChange={(e) => setCommunitySearch(e.target.value)}
-              placeholder="Search community workflows..."
-              className={cn(
-                "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
-                "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-              )}
-            />
-          </div>
 
           {/* Loading / Error / Content */}
           {communityLoading ? (
@@ -1565,6 +1579,8 @@ function AllTemplatesView({
   onReset,
   onOpenDetail,
   detailName,
+  installedSlugs,
+  communityTemplates,
 }: {
   templates: Template[];
   search: string;
@@ -1573,7 +1589,32 @@ function AllTemplatesView({
   onReset: () => void;
   onOpenDetail: (name: string) => void;
   detailName: string | null;
+  installedSlugs: Set<string>;
+  communityTemplates: CommunityTemplate[];
 }) {
+  // Build set of installed community template names (normalized) for filtering
+  const installedNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const ct of communityTemplates) {
+      if (installedSlugs.has(ct.slug)) {
+        names.add(ct.name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+      }
+    }
+    return names;
+  }, [communityTemplates, installedSlugs]);
+
+  const hasInstalled = installedNames.size > 0;
+  const isInstalledFilter = selectedTag === "__installed__";
+
+  // Apply "Recently Installed" filter on top of the passed-in templates
+  const visibleTemplates = useMemo(() => {
+    if (!isInstalledFilter) return templates;
+    return templates.filter((t) => {
+      const norm = t.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return t.source === "community" || installedNames.has(norm);
+    });
+  }, [templates, isInstalledFilter, installedNames]);
+
   return (
     <>
       {/* Category filter pills */}
@@ -1589,6 +1630,30 @@ function AllTemplatesView({
         >
           All
         </button>
+        {hasInstalled && (
+          <button
+            onClick={() =>
+              onTagSelect(isInstalledFilter ? null : "__installed__")
+            }
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              isInstalledFilter
+                ? "bg-emerald-500/15 text-emerald-400"
+                : "bg-border/40 text-muted hover:text-foreground"
+            )}
+          >
+            <Clock className="h-3 w-3" />
+            Recently Installed
+            <span className={cn(
+              "ml-0.5 rounded-full px-1.5 text-[10px] font-data",
+              isInstalledFilter
+                ? "bg-emerald-500/20 text-emerald-400"
+                : "bg-border/60 text-muted"
+            )}>
+              {installedNames.size}
+            </span>
+          </button>
+        )}
         {TEMPLATE_PACKS.map((pack) => {
           const PackIcon = pack.icon;
           return (
@@ -1612,11 +1677,15 @@ function AllTemplatesView({
       </div>
 
       {/* Template grid */}
-      {templates.length === 0 ? (
+      {visibleTemplates.length === 0 ? (
         <EmptyState
           icon={Layers}
           title="No templates found"
-          description="Try adjusting your search or category filter."
+          description={
+            isInstalledFilter
+              ? "No recently installed community templates match your search."
+              : "Try adjusting your search or category filter."
+          }
           action={
             search || selectedTag
               ? { label: "Reset filters", onClick: onReset }
@@ -1625,7 +1694,7 @@ function AllTemplatesView({
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {templates.map((t) => (
+          {visibleTemplates.map((t) => (
             <TemplateCard
               key={t.name}
               template={t}
@@ -1645,25 +1714,43 @@ function IntegrationView({
   expandedTools,
   onToggleTool,
   onOpenDetail,
+  search,
 }: {
   groups: { tool: string; templates: Template[] }[];
   expandedTools: Set<string>;
   onToggleTool: (tool: string) => void;
   onOpenDetail: (name: string) => void;
+  search: string;
 }) {
-  if (groups.length === 0) {
+  const filteredGroups = useMemo(() => {
+    if (!search) return groups;
+    const q = search.toLowerCase();
+    return groups
+      .map((g) => ({
+        ...g,
+        templates: g.templates.filter(
+          (t) =>
+            t.name.toLowerCase().includes(q) ||
+            t.description.toLowerCase().includes(q) ||
+            (t.tags || []).some((tag) => tag.toLowerCase().includes(q))
+        ),
+      }))
+      .filter((g) => g.tool.toLowerCase().includes(q) || g.templates.length > 0);
+  }, [groups, search]);
+
+  if (filteredGroups.length === 0) {
     return (
       <EmptyState
         icon={Plug}
-        title="No integrations found"
-        description="Template packs with tool integrations will appear here."
+        title={search ? "No matching integrations" : "No integrations found"}
+        description={search ? "Try adjusting your search query." : "Template packs with tool integrations will appear here."}
       />
     );
   }
 
   return (
     <div className="space-y-2">
-      {groups.map(({ tool, templates }) => {
+      {filteredGroups.map(({ tool, templates }) => {
         const ToolIcon = TOOL_ICON_MAP[tool];
         const isExpanded = expandedTools.has(tool);
 

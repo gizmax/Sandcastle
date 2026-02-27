@@ -377,7 +377,12 @@ def _save_cached_actions(url: str, intent: str, actions: list[dict]) -> None:
 
 
 def _escape_js_string(text: str) -> str:
-    """Escape a string for safe embedding in JavaScript single-quoted strings inside shell."""
+    """Escape a string for safe embedding inside JavaScript single-quoted string literals.
+
+    NOTE: This does NOT make the string safe for shell interpolation.
+    Callers should avoid wrapping the result in ``bash -c`` commands;
+    prefer passing scripts directly to ``node -e`` instead.
+    """
     return (
         text.replace("\\", "\\\\")
         .replace("'", "\\'")
@@ -1180,6 +1185,7 @@ async def _execute_step_once(
         # Resolve template variables first (cheap string interpolation) so the
         # cache key reflects the actual inputs, not the raw template string.
         prompt = resolve_templates(step.prompt, context, step.depends_on)
+        prompt = await resolve_storage_refs(prompt, storage)
 
         # Step result cache - check before executing (skip for memory steps)
         cache_key = ""
@@ -1200,7 +1206,6 @@ async def _execute_step_once(
                     status="completed",
                     attempt=attempt,
                 )
-        prompt = await resolve_storage_refs(prompt, storage)
 
         # Inject agent memories into the prompt (semantic search with step prompt)
         if _step_reads_memory:
@@ -2817,7 +2822,7 @@ async def _execute_delegate_step(
             from pathlib import Path
 
             from sandcastle.config import settings
-            from sandcastle.engine.dag import parse as parse_workflow
+            from sandcastle.engine.dag import build_plan, parse as parse_workflow
 
             workflows_dir = (
                 Path(settings.workflows_dir)
@@ -2828,6 +2833,7 @@ async def _execute_delegate_step(
 
             if wf_path.exists():
                 sub_wf = parse_workflow(str(wf_path))
+                sub_plan = build_plan(sub_wf)
                 sub_context = RunContext(
                     run_id=context.run_id,
                     input={**context.input, "task_description": task_description},
@@ -2836,9 +2842,10 @@ async def _execute_delegate_step(
                 )
 
                 sub_result = await execute_workflow(
-                    sub_wf,
-                    sub_context.input,
-                    storage,
+                    workflow=sub_wf,
+                    plan=sub_plan,
+                    input_data=sub_context.input,
+                    storage=storage,
                     max_cost_usd=context.max_cost_usd,
                     depth=depth + 1,
                 )
@@ -2852,8 +2859,8 @@ async def _execute_delegate_step(
                     status="completed" if sub_result.status == "completed" else "failed",
                     error=sub_result.error,
                 )
-        except Exception:
-            pass  # Fall back to returning delegation info
+        except Exception as exc:
+            logger.warning("Delegate step '%s' failed to execute sub-workflow: %s", step.id, exc)
 
         # Fallback: return delegation info without actually running the workflow
         output = {
@@ -3222,12 +3229,8 @@ async def _browser_dom_mode(
     try:
         result = await runtime.sandbox_exec(
             sandbox,
-            "bash",
-            [
-                "-c",
-                f"cat > /tmp/dom_extract.js << 'SCRIPT_EOF'\n"
-                f"{nav_script}\nSCRIPT_EOF\nnode /tmp/dom_extract.js",
-            ],
+            "node",
+            ["-e", nav_script],
             timeout=30,
         )
         dom_output = result.get("stdout", "") if isinstance(result, dict) else str(result)
@@ -3546,8 +3549,8 @@ async def _browser_computer_use_mode(
             try:
                 exec_result = await runtime.sandbox_exec(
                     sandbox,
-                    "bash",
-                    ["-c", f"node -e '{action_script}'"],
+                    "node",
+                    ["-e", action_script],
                     timeout=15,
                 )
                 action_output = (
@@ -3663,8 +3666,9 @@ def _build_computer_use_action_script(
     """Build a Node.js script to execute a computer_use action in the
     sandbox browser.
 
-    All text values are escaped via _escape_js_string to prevent shell
-    injection when the script is passed through ``node -e '...'``.
+    All text values are escaped via _escape_js_string for safe embedding
+    in JavaScript string literals. The script is passed directly to
+    ``node -e`` without shell interpolation.
     """
     coordinate = tool_input.get("coordinate", [0, 0])
     x = coordinate[0] if len(coordinate) > 0 else 0
@@ -3741,8 +3745,8 @@ async def _take_sandbox_screenshot(
         )
         result = await runtime.sandbox_exec(
             sandbox,
-            "bash",
-            ["-c", f"node -e '{script}'"],
+            "node",
+            ["-e", script],
             timeout=10,
         )
         output = (

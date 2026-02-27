@@ -41,8 +41,10 @@ steps:
       properties:
         title:
           type: string
+          description: "engaging blog post title"
         content:
           type: string
+          description: "full blog post content in markdown format"
 
   - id: generate_audio
     prompt: |

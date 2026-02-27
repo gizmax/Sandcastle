@@ -57,13 +57,17 @@ steps:
       properties:
         summary:
           type: string
+          description: "brief encouraging summary of the standup update"
         recurring_blockers:
           type: array
           items:
             type: string
+          description: "blockers that have appeared in multiple past standups"
         patterns:
           type: array
           items:
             type: string
+          description: "detected patterns like tasks carried over multiple days"
         sentiment:
           type: string
+          description: "overall sentiment of the update: positive, neutral, or concerned"

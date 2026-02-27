@@ -27,6 +27,7 @@ steps:
       properties:
         incidents:
           type: array
+          description: "list of active PagerDuty incidents with id, title, status, and urgency"
 
   - id: notify_discord
     prompt: |

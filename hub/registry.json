@@ -47,15 +47,14 @@
       "tags": [
         "approval",
         "human-in-the-loop",
-        "content",
+        "Content",
         "review"
       ],
       "models_used": [
-        "sonnet",
-        "haiku"
+        "sonnet"
       ],
       "tools_used": [],
-      "step_count": 3,
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/review_and_approve.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -191,7 +190,7 @@
         "sonnet"
       ],
       "tools_used": [],
-      "step_count": 4,
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitor_analysis.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -256,7 +255,7 @@
         "sonnet"
       ],
       "tools_used": [],
-      "step_count": 5,
+      "step_count": 6,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/email_campaign.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -483,16 +482,17 @@
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
-        "pdf",
+        "PDF",
         "summarization",
         "parallel",
         "documents"
       ],
       "models_used": [
-        "haiku"
+        "haiku",
+        "sonnet"
       ],
       "tools_used": [],
-      "step_count": 3,
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/pdf_summary.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -1346,9 +1346,8 @@
         "haiku"
       ],
       "tools_used": [
-        "vercel",
         "datadog",
-        "pagerduty"
+        "vercel"
       ],
       "step_count": 3,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/deployment_monitor.yaml",
@@ -1415,8 +1414,9 @@
         "PagerDuty"
       ],
       "models_used": [
-        "sonnet",
-        "opus"
+        "haiku",
+        "opus",
+        "sonnet"
       ],
       "tools_used": [
         "github",
@@ -1978,7 +1978,7 @@
         "haiku"
       ],
       "tools_used": [],
-      "step_count": 4,
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ad_copy_generator.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -2987,16 +2987,16 @@
       "version": "1.0.0",
       "category": "general_ai",
       "tags": [
-        "research",
+        "Research",
         "parallel",
-        "analysis",
+        "Analysis",
         "extraction"
       ],
       "models_used": [
         "sonnet"
       ],
       "tools_used": [],
-      "step_count": 4,
+      "step_count": 6,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/research_agent.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -3058,11 +3058,10 @@
         "formatting"
       ],
       "models_used": [
-        "sonnet",
-        "haiku"
+        "sonnet"
       ],
       "tools_used": [],
-      "step_count": 2,
+      "step_count": 4,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/summarize.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -3125,11 +3124,10 @@
         "i18n"
       ],
       "models_used": [
-        "haiku",
         "sonnet"
       ],
       "tools_used": [],
-      "step_count": 2,
+      "step_count": 4,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/translate.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -3227,8 +3225,7 @@
         "Communication"
       ],
       "models_used": [
-        "sonnet",
-        "haiku"
+        "sonnet"
       ],
       "tools_used": [],
       "step_count": 3,
@@ -3262,7 +3259,7 @@
         "sonnet"
       ],
       "tools_used": [],
-      "step_count": 4,
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/proposal_generator.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",
@@ -3845,7 +3842,7 @@
         "sonnet"
       ],
       "tools_used": [],
-      "step_count": 3,
+      "step_count": 5,
       "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/chain_of_thought.yaml",
       "source": "built-in",
       "created_at": "2026-02-25",

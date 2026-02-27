@@ -31,8 +31,10 @@ steps:
       properties:
         latest_deployment:
           type: object
+          description: "details of the most recent Vercel deployment"
         status:
           type: string
+          description: "deployment status (e.g. ready, error, building)"
 
   - id: check_metrics
     prompt: |
@@ -46,8 +48,10 @@ steps:
       properties:
         current_value:
           type: number
+          description: "current metric value from Datadog"
         above_threshold:
           type: boolean
+          description: "whether the metric exceeds the configured alert threshold"
 
   - id: alert
     type: condition

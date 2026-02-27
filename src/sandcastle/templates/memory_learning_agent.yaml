@@ -63,21 +63,27 @@ steps:
       properties:
         analysis:
           type: string
+          description: "full research analysis text with findings and reasoning"
         confidence:
           type: number
+          description: "confidence level from 0.0 to 1.0 in the analysis quality"
         prior_knowledge_used:
           type: array
+          description: "list of relevant past insights referenced in this analysis"
           items:
             type: string
         new_insights:
           type: array
+          description: "newly discovered findings from this research run"
           items:
             type: string
         knowledge_gaps:
           type: array
+          description: "areas that need further investigation in future runs"
           items:
             type: string
         contradictions:
           type: array
+          description: "conflicts found between new findings and prior knowledge"
           items:
             type: string

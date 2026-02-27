@@ -81,25 +81,33 @@ steps:
       properties:
         problem_type:
           type: string
+          description: "classified problem type, e.g. analytical, creative, diagnostic"
         sub_problems:
           type: array
+          description: "list of decomposed sub-problems to solve"
           items:
             type: object
             properties:
               id:
                 type: string
+                description: "unique identifier for this sub-problem"
               description:
                 type: string
+                description: "clear description of what this sub-problem addresses"
               difficulty:
                 type: string
+                description: "estimated difficulty level: LOW, MEDIUM, or HIGH"
               strategy:
                 type: string
+                description: "reasoning approach, e.g. deductive, inductive, first-principles"
         assumptions:
           type: array
+          description: "list of assumptions made during problem decomposition"
           items:
             type: string
         success_criteria:
           type: array
+          description: "criteria that a correct solution must satisfy"
           items:
             type: string
 
