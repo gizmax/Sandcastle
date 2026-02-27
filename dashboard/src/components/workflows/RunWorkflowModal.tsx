@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X, Play, FileText, FormInput, Braces } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { JsonEditor } from "@/components/shared/JsonEditor";
 
@@ -7,6 +8,7 @@ interface InputSchemaProperty {
   type: string;
   description?: string;
   default?: unknown;
+  enum?: string[];
 }
 
 interface InputSchema {
@@ -39,7 +41,17 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const [key, prop] of fields) {
-      init[key] = prop.default != null ? String(prop.default) : "";
+      if (prop.default != null) {
+        if (typeof prop.default === "boolean") {
+          init[key] = prop.default ? "true" : "false";
+        } else {
+          init[key] = String(prop.default);
+        }
+      } else if (prop.type === "boolean") {
+        init[key] = "false";
+      } else {
+        init[key] = "";
+      }
     }
     return init;
   });
@@ -53,8 +65,16 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
     e.preventDefault();
     let parsed: Record<string, unknown> = {};
     if (mode === "form" && hasSchema) {
+      // Validate required fields
+      const missing = (inputSchema?.required || []).filter(
+        (key) => !fieldValues[key] || fieldValues[key].trim() === ""
+      );
+      if (missing.length > 0) {
+        toast.error(`Missing required fields: ${missing.join(", ")}`);
+        return;
+      }
       for (const [key, val] of Object.entries(fieldValues)) {
-        if (val) parsed[key] = val;
+        if (val !== undefined && val !== null) parsed[key] = val;
       }
     } else if (mode === "text") {
       parsed = { text: inputText };
@@ -109,28 +129,113 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Form mode */}
             {mode === "form" && hasSchema && (
-              fields.map(([key, prop]) => (
-                <div key={key}>
-                  <label className="mb-1 block text-xs font-medium text-muted">
-                    {key}
-                    {requiredFields.has(key) && <span className="text-error ml-0.5">*</span>}
-                  </label>
-                  {prop.description && (
-                    <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
-                  )}
-                  <input
-                    type="text"
-                    value={fieldValues[key] || ""}
-                    onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                    placeholder={prop.default != null ? String(prop.default) : key}
-                    required={requiredFields.has(key)}
-                    className={cn(
-                      "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                      "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+              fields.map(([key, prop]) => {
+                const isTextarea =
+                  prop.type === "string" &&
+                  !prop.enum &&
+                  (/(text|description|content|prompt)/i.test(key) ||
+                    (prop.description && prop.description.length > 80));
+                const isNumber = prop.type === "integer" || prop.type === "number";
+                const isBool = prop.type === "boolean";
+                const hasEnum = Array.isArray(prop.enum) && prop.enum.length > 0;
+
+                const inputClass = cn(
+                  "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
+                  "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                );
+
+                return (
+                  <div key={key}>
+                    <label className="mb-1 block text-xs font-medium text-muted">
+                      {key}
+                      {requiredFields.has(key) && <span className="text-error ml-0.5">*</span>}
+                    </label>
+                    {prop.description && (
+                      <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
                     )}
-                  />
-                </div>
-              ))
+
+                    {hasEnum ? (
+                      <select
+                        value={fieldValues[key] || ""}
+                        onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className={inputClass}
+                      >
+                        <option value="">Select {key}...</option>
+                        {prop.enum!.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : isBool ? (
+                      <div className="flex items-center gap-2 py-1">
+                        <div
+                          role="checkbox"
+                          aria-checked={fieldValues[key] === "true"}
+                          tabIndex={0}
+                          onClick={() =>
+                            setFieldValues((prev) => ({
+                              ...prev,
+                              [key]: prev[key] === "true" ? "false" : "true",
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === " " || e.key === "Enter") {
+                              e.preventDefault();
+                              setFieldValues((prev) => ({
+                                ...prev,
+                                [key]: prev[key] === "true" ? "false" : "true",
+                              }));
+                            }
+                          }}
+                          className={cn(
+                            "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                            fieldValues[key] === "true" ? "bg-accent" : "bg-border"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                              fieldValues[key] === "true" ? "translate-x-5" : "translate-x-0"
+                            )}
+                          />
+                        </div>
+                        <span className="text-sm text-foreground">
+                          {fieldValues[key] === "true" ? "Yes" : "No"}
+                        </span>
+                      </div>
+                    ) : isTextarea ? (
+                      <textarea
+                        value={fieldValues[key] || ""}
+                        onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                        placeholder={prop.default != null ? String(prop.default) : key}
+                        required={requiredFields.has(key)}
+                        rows={3}
+                        className={cn(
+                          "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-y",
+                          "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                        )}
+                      />
+                    ) : isNumber ? (
+                      <input
+                        type="number"
+                        value={fieldValues[key] || ""}
+                        onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                        placeholder={prop.default != null ? String(prop.default) : key}
+                        required={requiredFields.has(key)}
+                        className={inputClass}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={fieldValues[key] || ""}
+                        onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                        placeholder={prop.default != null ? String(prop.default) : key}
+                        required={requiredFields.has(key)}
+                        className={inputClass}
+                      />
+                    )}
+                  </div>
+                );
+              })
             )}
 
             {/* Text mode */}

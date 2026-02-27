@@ -1043,6 +1043,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         elif step.type == "loop":
             if not step.loop_config or not step.loop_config.over:
                 errors.append(f"Loop step '{step.id}' must have loop_config with over")
+            if step.loop_config and step.loop_config.max_iterations < 1:
+                errors.append(
+                    f"Loop step '{step.id}' max_iterations must be >= 1, "
+                    f"got {step.loop_config.max_iterations}"
+                )
         elif step.type == "race":
             if not step.race_config or not step.race_config.branches:
                 errors.append(f"Race step '{step.id}' must have race_config with branches")

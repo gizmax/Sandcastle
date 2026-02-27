@@ -139,6 +139,76 @@ def _trunc_day(column):
     return func.date_trunc("day", column)
 
 
+def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]:
+    """Validate and coerce workflow input against its input_schema.
+
+    Mutates input_data in-place for type coercion.
+    Returns list of error messages (empty = valid).
+    """
+    if schema is None:
+        return []
+
+    errors: list[str] = []
+
+    # Check required fields
+    for field_name in schema.get("required", []):
+        if field_name not in input_data or input_data[field_name] == "":
+            errors.append(f"Required input field '{field_name}' is missing or empty")
+
+    # Type coercion based on properties
+    properties = schema.get("properties", {})
+    for field_name, prop in properties.items():
+        if field_name not in input_data:
+            continue
+        value = input_data[field_name]
+        field_type = prop.get("type")
+        if not field_type:
+            continue
+
+        if field_type == "integer":
+            if isinstance(value, str):
+                try:
+                    input_data[field_name] = int(value)
+                except (ValueError, TypeError):
+                    errors.append(
+                        f"Input field '{field_name}' must be an integer, got '{value}'"
+                    )
+        elif field_type == "number":
+            if isinstance(value, str):
+                try:
+                    input_data[field_name] = float(value)
+                except (ValueError, TypeError):
+                    errors.append(
+                        f"Input field '{field_name}' must be a number, got '{value}'"
+                    )
+        elif field_type == "boolean":
+            if isinstance(value, str):
+                if value.lower() == "true":
+                    input_data[field_name] = True
+                elif value.lower() == "false":
+                    input_data[field_name] = False
+                else:
+                    errors.append(
+                        f"Input field '{field_name}' must be a boolean, got '{value}'"
+                    )
+        elif field_type == "array":
+            if isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                    if not isinstance(parsed, list):
+                        errors.append(
+                            f"Input field '{field_name}' must be an array, got {type(parsed).__name__}"
+                        )
+                    else:
+                        input_data[field_name] = parsed
+                except (json.JSONDecodeError, TypeError):
+                    errors.append(
+                        f"Input field '{field_name}' must be a valid JSON array, got '{value}'"
+                    )
+
+    return errors
+
+
 def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
     import re
@@ -1258,6 +1328,17 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             ).model_dump(),
         )
 
+    validation_errors = _validate_workflow_input(request.input, workflow.input_schema)
+    if validation_errors:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_INPUT", message="; ".join(validation_errors)
+                )
+            ).model_dump(),
+        )
+
     try:
         plan = build_plan(workflow)
     except ValueError as e:
@@ -1384,6 +1465,17 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             status_code=400,
             detail=ApiResponse(
                 error=ErrorResponse(code="VALIDATION_ERROR", message="; ".join(errors))
+            ).model_dump(),
+        )
+
+    validation_errors = _validate_workflow_input(request.input, workflow.input_schema)
+    if validation_errors:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_INPUT", message="; ".join(validation_errors)
+                )
             ).model_dump(),
         )
 

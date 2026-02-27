@@ -188,6 +188,7 @@ def resolve_templates(
         var_path = match.group(1)
         value = resolve_variable(var_path, context)
         if value is None:
+            logger.warning(f"Unresolved variable '{var_path}' in template, leaving placeholder")
             return match.group(0)
         if isinstance(value, (dict, list)):
             return json.dumps(value)
@@ -1951,7 +1952,17 @@ async def _execute_http_step(
         try:
             output = resp.json()
         except Exception:
-            output = {"status_code": resp.status_code, "text": resp.text[:5000]}
+            raw_text = resp.text
+            truncated = len(raw_text) > 5000
+            if truncated:
+                logger.warning(
+                    f"HTTP step '{step.id}': Response truncated from {len(raw_text)} to 5000 chars"
+                )
+            output = {
+                "status_code": resp.status_code,
+                "text": raw_text[:5000],
+                "_truncated": truncated,
+            }
 
         duration = time.monotonic() - started_at
         return StepResult(
@@ -2192,6 +2203,10 @@ async def _execute_classify_step(
                     matched = cat
                     break
         if not matched:
+            logger.warning(
+                f"Classify step '{step.id}': LLM response '{raw_category}'"
+                f" didn't match any category, defaulting to '{cfg.categories[0]}'"
+            )
             matched = cfg.categories[0]
 
         # Skip non-matching branch steps
@@ -2354,49 +2369,65 @@ async def _execute_race_step(
                     raise RuntimeError(f"Branch step '{sub_step_id}' failed: {sub_result.error}")
             return {"output": last_output, "cost": branch_cost}
 
-        # Run all branches in parallel
-        tasks = [asyncio.create_task(run_branch(branch)) for branch in cfg.branches]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Collect successful results
+        # Run all branches in parallel, cancel remaining after first valid result
+        tasks = {asyncio.create_task(run_branch(branch)): i for i, branch in enumerate(cfg.branches)}
+        pending = set(tasks.keys())
         total_cost = 0.0
         winning_output = None
-        for result in results:
-            if isinstance(result, Exception):
-                continue
-            total_cost += result["cost"]
-            # Validate if validator expression is set
-            if cfg.validator:
-                eval_ns: dict[str, Any] = {
-                    "__builtins__": {
-                        "len": len,
-                        "int": int,
-                        "float": float,
-                        "str": str,
-                        "bool": bool,
-                        "True": True,
-                        "False": False,
-                        "None": None,
-                    },
-                    "output": result["output"],
-                }
+        fallback_output = None  # best non-validated result as fallback
+
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
                 try:
-                    if bool(eval(cfg.validator, eval_ns)):  # noqa: S307
-                        winning_output = result["output"]
-                        break
+                    result = task.result()
                 except Exception:
                     continue
-            else:
-                # No validator - take first non-error result
-                winning_output = result["output"]
+                total_cost += result["cost"]
+                # Validate if validator expression is set
+                if cfg.validator:
+                    eval_ns: dict[str, Any] = {
+                        "__builtins__": {
+                            "len": len,
+                            "int": int,
+                            "float": float,
+                            "str": str,
+                            "bool": bool,
+                            "True": True,
+                            "False": False,
+                            "None": None,
+                        },
+                        "output": result["output"],
+                    }
+                    try:
+                        if bool(eval(cfg.validator, eval_ns)):  # noqa: S307
+                            winning_output = result["output"]
+                    except Exception:
+                        pass
+                    if fallback_output is None:
+                        fallback_output = result["output"]
+                else:
+                    # No validator - take first non-error result
+                    winning_output = result["output"]
+
+            if winning_output is not None:
+                # Cancel remaining tasks and accumulate any costs
+                for t in pending:
+                    t.cancel()
+                # Wait for cancelled tasks to finish
+                if pending:
+                    cancelled_done, _ = await asyncio.wait(pending)
+                    for t in cancelled_done:
+                        try:
+                            r = t.result()
+                            total_cost += r["cost"]
+                        except Exception:
+                            pass
+                pending = set()
                 break
 
         if winning_output is None:
-            # No branch produced a valid result - use first non-error output anyway
-            for result in results:
-                if not isinstance(result, Exception):
-                    winning_output = result["output"]
-                    break
+            winning_output = fallback_output
 
         duration = time.monotonic() - started_at
         if winning_output is None:
@@ -2430,6 +2461,7 @@ async def _execute_sensor_step(
     context: RunContext,
 ) -> StepResult:
     """Execute a sensor step - poll URL until condition is met or timeout."""
+    import random
     import time
 
     import httpx
@@ -2445,6 +2477,8 @@ async def _execute_sensor_step(
             k: resolve_templates(v, context, step.depends_on) for k, v in cfg.headers.items()
         }
         deadline = time.monotonic() + cfg.timeout
+        current_interval = cfg.check_interval
+        max_interval = min(cfg.check_interval * 32, cfg.timeout / 4)
 
         while time.monotonic() < deadline:
             try:
@@ -2457,7 +2491,18 @@ async def _execute_sensor_step(
                 try:
                     response_data = resp.json()
                 except Exception:
-                    response_data = {"status_code": resp.status_code, "text": resp.text[:5000]}
+                    raw_text = resp.text
+                    truncated = len(raw_text) > 5000
+                    if truncated:
+                        logger.warning(
+                            f"HTTP step '{step.id}': Response truncated from"
+                            f" {len(raw_text)} to 5000 chars"
+                        )
+                    response_data = {
+                        "status_code": resp.status_code,
+                        "text": raw_text[:5000],
+                        "_truncated": truncated,
+                    }
 
                 # Evaluate condition
                 eval_ns: dict[str, Any] = {
@@ -2488,7 +2533,10 @@ async def _execute_sensor_step(
             except Exception as poll_err:
                 logger.debug(f"Sensor poll error for step '{step.id}': {poll_err}")
 
-            await asyncio.sleep(cfg.check_interval)
+            # Exponential backoff with +/- 20% jitter
+            jitter = current_interval * random.uniform(-0.2, 0.2)
+            await asyncio.sleep(current_interval + jitter)
+            current_interval = min(current_interval * 2, max_interval)
 
         # Timeout reached
         duration = time.monotonic() - started_at
@@ -2720,12 +2768,10 @@ async def _execute_transform_step(
 
         rendered = re.sub(r"\{\{(.+?)\}\}", _jinja_replace, rendered)
 
-        # Try to parse as JSON
+        # Try to parse as JSON (preserves all JSON types: dict, list, int, float, bool, null)
         output: Any = rendered
         try:
-            parsed = json.loads(rendered)
-            if isinstance(parsed, (dict, list)):
-                output = parsed
+            output = json.loads(rendered)
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -2862,7 +2908,7 @@ async def _execute_delegate_step(
         except Exception as exc:
             logger.warning("Delegate step '%s' failed to execute sub-workflow: %s", step.id, exc)
 
-        # Fallback: return delegation info without actually running the workflow
+        # Fallback: sub-workflow not found or failed to load
         output = {
             "workflow": cfg.workflow,
             "task_description": task_description,
@@ -2875,7 +2921,8 @@ async def _execute_delegate_step(
             output=output,
             cost_usd=0.0,
             duration_seconds=duration,
-            status="completed",
+            status="failed",
+            error=f"Sub-workflow '{cfg.workflow}' not found or failed to load",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
