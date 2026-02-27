@@ -106,8 +106,13 @@ async def auth_middleware(request: Request, call_next):
         return _error_response(401, "UNAUTHORIZED", "Invalid API key")
 
     # Check key expiry
-    if db_key.expires_at and db_key.expires_at <= datetime.now(timezone.utc):
-        return _error_response(401, "KEY_EXPIRED", "API key has expired")
+    if db_key.expires_at:
+        expires = db_key.expires_at
+        # SQLite may return naive datetimes - treat as UTC for comparison
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires <= datetime.now(timezone.utc):
+            return _error_response(401, "KEY_EXPIRED", "API key has expired")
 
     # Check IP allowlist
     if db_key.allowed_cidrs:
