@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
+import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 
 interface SidebarProps {
   open: boolean;
@@ -82,6 +83,7 @@ const navSections: NavSection[] = [
 
 export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: SidebarProps) {
   const { info } = useRuntimeInfo();
+  const { updateAvailable } = useUpdateCheck();
   const version = info?.version ?? "0.15.0";
 
   return (
@@ -164,8 +166,20 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </nav>
 
         <div className="border-t border-border px-5 py-4">
-          <div className="flex items-center gap-2">
-            <p className="text-xs text-muted-foreground">Sandcastle v{version}</p>
+          <NavLink
+            to="/settings"
+            onClick={onClose}
+            className="flex items-center gap-2 group"
+          >
+            <p className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+              Sandcastle v{version}
+            </p>
+            {updateAvailable && (
+              <span className="relative flex h-2 w-2" title="Update available">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+              </span>
+            )}
             {info?.license && info.license.status === "valid" && (
               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success/15 border border-success/30 text-success">
                 {info.license.tier === "enterprise" ? "Enterprise" : "Pro"}
@@ -176,7 +190,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                 Expired
               </span>
             )}
-          </div>
+          </NavLink>
         </div>
       </aside>
     </>

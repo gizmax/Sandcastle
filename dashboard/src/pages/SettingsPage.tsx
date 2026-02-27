@@ -10,6 +10,10 @@ import {
   AlertCircle,
   LogOut,
   BadgeCheck,
+  ArrowUpCircle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -17,6 +21,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
 import { cn, inputClass } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
+import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 
 // -- Types ------------------------------------------------------------------
 
@@ -112,6 +117,8 @@ export default function SettingsPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [savingSections, setSavingSections] = useState<Set<SectionName>>(new Set());
   const { info: runtimeInfo } = useRuntimeInfo();
+  const update = useUpdateCheck();
+  const [copied, setCopied] = useState(false);
 
   // Keep a snapshot of the original values for dirty checking
   const originalRef = useRef<SettingsData | null>(null);
@@ -245,6 +252,63 @@ export default function SettingsPage() {
           Settings
         </h1>
       </div>
+
+      {/* Software Update */}
+      {!update.loading && update.currentVersion && (
+        <SectionCard
+          icon={update.updateAvailable ? ArrowUpCircle : CheckCircle2}
+          title="Software Update"
+          description="Check for new Sandcastle versions"
+        >
+          {update.updateAvailable ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-warning/15 border border-warning/30 text-warning">
+                  <ArrowUpCircle className="h-3 w-3" />
+                  v{update.latestVersion} available
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Current: v{update.currentVersion}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-lg bg-muted/50 border border-border px-3 py-2 text-sm font-mono text-foreground">
+                  {update.installCommand}
+                </code>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(update.installCommand!);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="rounded-lg border border-border p-2 text-muted hover:text-foreground hover:bg-border/40 transition-colors cursor-pointer"
+                  title="Copy command"
+                >
+                  {copied ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+              {update.releaseUrl && (
+                <a
+                  href={update.releaseUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  View release notes
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-success" />
+              <span className="text-sm text-foreground">
+                v{update.currentVersion} - You're up to date
+              </span>
+            </div>
+          )}
+        </SectionCard>
+      )}
 
       {/* License */}
       <SectionCard

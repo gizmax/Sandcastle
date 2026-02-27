@@ -43,6 +43,7 @@ dependencies = [
     "fpdf2>=2.8",
     "matplotlib>=3.8",
     "mem0ai>=0.1.0",
+    "packaging>=21.0",
 ]
 
 [project.optional-dependencies]
