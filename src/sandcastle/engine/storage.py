@@ -150,7 +150,12 @@ class S3Storage:
 
 
 def create_storage() -> LocalStorage | S3Storage:
-    """Create the storage backend based on config."""
+    """Create the storage backend based on config.
+
+    When ``STORAGE_BACKEND`` is ``"s3"`` an :class:`S3Storage` instance
+    is returned; for any other value (including the validated default
+    ``"local"``) a :class:`LocalStorage` instance is returned.
+    """
     from sandcastle.config import settings
 
     if settings.storage_backend == "s3":

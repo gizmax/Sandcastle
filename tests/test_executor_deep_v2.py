@@ -577,12 +577,15 @@ class TestRunContext:
         child.step_outputs["new"] = "child_only"
         assert "new" not in parent.step_outputs
 
-    def test_with_item_costs_shared(self):
-        """costs list MUSÍ být sdílený (pro cost accumulation)."""
+    def test_with_item_costs_isolated(self):
+        """costs list is isolated per child (thread safety for parallel_over)."""
         parent = ctx(costs=[0.1])
         child = parent.with_item("X", 0)
         child.costs.append(0.5)
-        assert 0.5 in parent.costs  # sdílený
+        # Child gets its own costs list, parent is not affected
+        assert 0.5 not in parent.costs
+        assert len(parent.costs) == 1
+        assert child.costs == [0.5]
 
     def test_with_item_branch_skip_isolated(self):
         """branch_skip_steps nesmí být sdílený set."""

@@ -8,9 +8,34 @@
 import OpenAI from "openai";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve, normalize } from "node:path";
 
-const request = JSON.parse(process.env.SANDCASTLE_REQUEST);
+// --- Emit event (same protocol as runner.mjs) ---
+
+function emit(event) {
+  process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+// --- Parse and validate request ---
+
+if (!process.env.SANDCASTLE_REQUEST) {
+  emit({ type: "error", error: "SANDCASTLE_REQUEST env var is not set" });
+  process.exit(1);
+}
+
+let request;
+try {
+  request = JSON.parse(process.env.SANDCASTLE_REQUEST);
+} catch (err) {
+  emit({ type: "error", error: `Failed to parse SANDCASTLE_REQUEST: ${err.message}` });
+  process.exit(1);
+}
+
+if (!request.prompt || typeof request.prompt !== "string") {
+  emit({ type: "error", error: "SANDCASTLE_REQUEST must contain a non-empty 'prompt' string" });
+  process.exit(1);
+}
+
 const apiKey = process.env.MODEL_API_KEY || "";
 const baseURL = process.env.MODEL_BASE_URL || "https://api.openai.com/v1";
 const modelId = process.env.MODEL_ID || request.model || "gpt-4o";
@@ -18,6 +43,10 @@ const maxTurns = request.max_turns || 10;
 const timeoutMs = (request.timeout || 300) * 1000;
 
 const client = new OpenAI({ apiKey, baseURL });
+
+// --- Sandbox boundary ---
+
+const SANDBOX_ROOT = "/home/user";
 
 // --- Tool definitions ---
 
@@ -67,6 +96,10 @@ const tools = [
   },
 ];
 
+// --- Max size for tool results stored in conversation history ---
+
+const MAX_TOOL_RESULT_SIZE = 50_000;
+
 // --- Tool execution ---
 
 function executeTool(name, args) {
@@ -75,30 +108,29 @@ function executeTool(name, args) {
       case "bash": {
         const result = execSync(args.command, {
           encoding: "utf-8",
-          timeout: 30000,
+          timeout: 30_000,
           maxBuffer: 1024 * 1024,
-          cwd: "/home/user",
+          cwd: SANDBOX_ROOT,
+          stdio: ["pipe", "pipe", "pipe"],
         });
-        return result.slice(0, 50000);
+        return result.slice(0, MAX_TOOL_RESULT_SIZE);
       }
-      case "read_file":
-        return readFileSync(args.path, "utf-8").slice(0, 100000);
-      case "write_file":
-        mkdirSync(dirname(args.path), { recursive: true });
-        writeFileSync(args.path, args.content, "utf-8");
-        return `Written ${args.content.length} bytes to ${args.path}`;
+      case "read_file": {
+        const absPath = resolve(args.path);
+        return readFileSync(absPath, "utf-8").slice(0, 100_000);
+      }
+      case "write_file": {
+        const absPath = resolve(args.path);
+        mkdirSync(dirname(absPath), { recursive: true });
+        writeFileSync(absPath, args.content, "utf-8");
+        return `Written ${args.content.length} bytes to ${absPath}`;
+      }
       default:
         return `Unknown tool: ${name}`;
     }
   } catch (err) {
     return `Error: ${err.message || err}`;
   }
-}
-
-// --- Emit event (same protocol as runner.mjs) ---
-
-function emit(event) {
-  process.stdout.write(JSON.stringify(event) + "\n");
 }
 
 // --- Pricing helpers ---
@@ -131,6 +163,13 @@ function trimHistory(messages) {
   messages.length = 0;
   messages.push(...trimmed);
 }
+
+// --- Unhandled rejection safety net ---
+
+process.on("unhandledRejection", (err) => {
+  emit({ type: "error", error: `Unhandled rejection: ${err?.message || err}` });
+  process.exit(1);
+});
 
 // --- Main agentic loop ---
 
@@ -165,7 +204,12 @@ async function run() {
 
     trackUsage(completion.usage);
 
-    const choice = completion.choices[0];
+    const choice = completion.choices?.[0];
+    if (!choice) {
+      emit({ type: "error", error: "API returned no choices" });
+      break;
+    }
+
     const msg = choice.message;
 
     // Add assistant message to history
@@ -211,10 +255,11 @@ async function run() {
         result: result.slice(0, 2000),
       });
 
+      // Truncate tool results in conversation history to prevent context overflow
       messages.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: result,
+        content: result.slice(0, MAX_TOOL_RESULT_SIZE),
       });
     }
 

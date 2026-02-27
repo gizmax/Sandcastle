@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from simpleeval import simple_eval
+
 from sandcastle.engine.dag import (
     ExecutionPlan,
     StepDefinition,
@@ -74,12 +76,16 @@ class RunContext:
     branch_run_steps: set[str] = field(default_factory=set)
 
     def with_item(self, item: Any, index: int) -> RunContext:
-        """Create a child context for a parallel_over item."""
+        """Create a child context for a parallel_over item.
+
+        Each child gets its own costs list to avoid concurrent appends
+        to a shared list. The parent aggregates child costs after join.
+        """
         return RunContext(
             run_id=self.run_id,
             input={**self.input, "_item": item, "_index": index},
             step_outputs=dict(self.step_outputs),
-            costs=self.costs,
+            costs=[],
             status=self.status,
             max_cost_usd=self.max_cost_usd,
             workflow_name=self.workflow_name,
@@ -368,6 +374,7 @@ async def _save_checkpoint(
 
 _browser_action_cache: collections.OrderedDict[str, list[dict]] = collections.OrderedDict()
 _BROWSER_CACHE_MAX = 500
+_browser_cache_lock = asyncio.Lock()
 
 
 def _cache_key(url: str, intent: str) -> str:
@@ -378,22 +385,24 @@ def _cache_key(url: str, intent: str) -> str:
     return f"{parsed.netloc}{parsed.path}:{intent[:100]}"
 
 
-def _get_cached_actions(url: str, intent: str) -> list[dict] | None:
+async def _get_cached_actions(url: str, intent: str) -> list[dict] | None:
     """Get cached action sequence for a URL+intent pair."""
     key = _cache_key(url, intent)
-    actions = _browser_action_cache.get(key)
-    if actions is not None:
-        _browser_action_cache.move_to_end(key)
-    return actions
+    async with _browser_cache_lock:
+        actions = _browser_action_cache.get(key)
+        if actions is not None:
+            _browser_action_cache.move_to_end(key)
+        return actions
 
 
-def _save_cached_actions(url: str, intent: str, actions: list[dict]) -> None:
+async def _save_cached_actions(url: str, intent: str, actions: list[dict]) -> None:
     """Save successful action sequence to cache."""
     key = _cache_key(url, intent)
-    _browser_action_cache[key] = actions
-    _browser_action_cache.move_to_end(key)
-    while len(_browser_action_cache) > _BROWSER_CACHE_MAX:
-        _browser_action_cache.popitem(last=False)
+    async with _browser_cache_lock:
+        _browser_action_cache[key] = actions
+        _browser_action_cache.move_to_end(key)
+        while len(_browser_action_cache) > _BROWSER_CACHE_MAX:
+            _browser_action_cache.popitem(last=False)
 
 
 def _escape_js_string(text: str) -> str:
@@ -416,32 +425,39 @@ def _escape_js_string(text: str) -> str:
 # In-memory cancel flags for local mode (no Redis)
 _cancel_flags: set[str] = set()
 _MAX_CANCEL_FLAGS = 10000
+_cancel_flags_lock = asyncio.Lock()
 
 
-def cancel_run_local(run_id: str) -> None:
+async def cancel_run_local(run_id: str) -> None:
     """Set cancel flag in-memory (local mode without Redis)."""
-    if len(_cancel_flags) >= _MAX_CANCEL_FLAGS:
-        # Evict oldest half instead of clearing all, to preserve recent cancels
-        to_remove = list(_cancel_flags)[:len(_cancel_flags) // 2]
-        for flag in to_remove:
-            _cancel_flags.discard(flag)
-        logger.warning("Cancel flags set exceeded %d entries, evicted %d oldest", _MAX_CANCEL_FLAGS, len(to_remove))
-    _cancel_flags.add(run_id)
+    async with _cancel_flags_lock:
+        if len(_cancel_flags) >= _MAX_CANCEL_FLAGS:
+            # Evict oldest half instead of clearing all, to preserve recent cancels
+            to_remove = list(_cancel_flags)[:len(_cancel_flags) // 2]
+            for flag in to_remove:
+                _cancel_flags.discard(flag)
+            logger.warning("Cancel flags set exceeded %d entries, evicted %d oldest", _MAX_CANCEL_FLAGS, len(to_remove))
+        _cancel_flags.add(run_id)
 
 
 _redis_pool = None
+_redis_pool_lock = asyncio.Lock()
 
 
 async def _get_redis():
     """Return a shared Redis connection (reused across cancel checks)."""
     global _redis_pool
-    if _redis_pool is None:
+    if _redis_pool is not None:
+        return _redis_pool
+    async with _redis_pool_lock:
+        if _redis_pool is not None:
+            return _redis_pool
         import redis.asyncio as aioredis
 
         from sandcastle.config import settings
 
         _redis_pool = aioredis.from_url(settings.redis_url)
-    return _redis_pool
+        return _redis_pool
 
 
 async def _check_cancel(run_id: str) -> bool:
@@ -450,10 +466,11 @@ async def _check_cancel(run_id: str) -> bool:
 
     if not settings.redis_url:
         # Local mode: check in-memory set and clean up after detection
-        if run_id in _cancel_flags:
-            _cancel_flags.discard(run_id)
-            return True
-        return False
+        async with _cancel_flags_lock:
+            if run_id in _cancel_flags:
+                _cancel_flags.discard(run_id)
+                return True
+            return False
 
     try:
         r = await _get_redis()
@@ -2094,6 +2111,16 @@ async def _execute_http_step(
         )
 
 
+_CODE_STEP_MAX_SIZE = 50_000  # 50KB max code size
+_CODE_STEP_BLOCKED_PATTERNS = re.compile(
+    r"__subclasses__|__bases__|__mro__|__class__|__globals__|__builtins__|"
+    r"__import__|importlib|__loader__|__spec__|exec\s*\(|eval\s*\(|"
+    r"compile\s*\(|getattr\s*\(|setattr\s*\(|delattr\s*\(|"
+    r"breakpoint\s*\(|open\s*\(|vars\s*\(|dir\s*\(",
+    re.IGNORECASE,
+)
+
+
 async def _execute_code_step(
     step: StepDefinition,
     context: RunContext,
@@ -2109,7 +2136,28 @@ async def _execute_code_step(
     try:
         code = cfg.code
 
+        # Guard: reject oversized code
+        if len(code) > _CODE_STEP_MAX_SIZE:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Code too large ({len(code)} bytes, max {_CODE_STEP_MAX_SIZE})",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        # Guard: block dangerous patterns that could escape the restricted sandbox
+        blocked = _CODE_STEP_BLOCKED_PATTERNS.search(code)
+        if blocked:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Code contains blocked pattern: '{blocked.group()}'",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
         # Inject context: _input and _steps
+        # NOTE: 'type' is intentionally excluded - it provides access to
+        # __subclasses__() which can be used for sandbox escape.
         exec_globals: dict[str, Any] = {
             "__builtins__": {
                 "len": len,
@@ -2133,7 +2181,6 @@ async def _execute_code_step(
                 "abs": abs,
                 "round": round,
                 "isinstance": isinstance,
-                "type": type,
                 "print": print,
                 "None": None,
                 "True": True,
@@ -2167,6 +2214,17 @@ async def _execute_code_step(
         )
 
 
+def _safe_eval_expression(expression: str, names: dict[str, Any]) -> Any:
+    """Evaluate a workflow expression safely using simpleeval.
+
+    This replaces raw ``eval()`` to prevent code injection. Only basic
+    comparison operators, attribute access, ``len()``, and type
+    constructors are available.
+    """
+    functions = {"len": len, "int": int, "float": float, "str": str, "bool": bool}
+    return simple_eval(expression, names=names, functions=functions)
+
+
 async def _execute_condition_step(
     step: StepDefinition,
     context: RunContext,
@@ -2182,22 +2240,15 @@ async def _execute_condition_step(
     try:
         expression = resolve_templates(cfg.expression, context, step.depends_on)
 
-        # Restricted eval namespace
-        eval_ns: dict[str, Any] = {
-            "__builtins__": {
-                "len": len,
-                "int": int,
-                "float": float,
-                "str": str,
-                "bool": bool,
-                "True": True,
-                "False": False,
-                "None": None,
-            },
+        # Safe expression evaluation via simpleeval
+        eval_names: dict[str, Any] = {
             "steps": context.step_outputs,
             "input": context.input,
+            "True": True,
+            "False": False,
+            "None": None,
         }
-        result = bool(eval(expression, eval_ns))  # noqa: S307
+        result = bool(_safe_eval_expression(expression, eval_names))
 
         # Populate skip/run steps. A step explicitly selected to run by
         # ANY condition takes precedence over skips from other conditions.
@@ -2411,21 +2462,14 @@ async def _execute_loop_step(
 
             # Check 'until' break condition
             if cfg.until:
-                eval_ns: dict[str, Any] = {
-                    "__builtins__": {
-                        "len": len,
-                        "int": int,
-                        "float": float,
-                        "str": str,
-                        "bool": bool,
-                        "True": True,
-                        "False": False,
-                        "None": None,
-                    },
+                eval_names: dict[str, Any] = {
                     "output": iteration_output,
                     "index": i,
+                    "True": True,
+                    "False": False,
+                    "None": None,
                 }
-                if bool(eval(cfg.until, eval_ns)):  # noqa: S307
+                if bool(_safe_eval_expression(cfg.until, eval_names)):
                     break
 
         duration = time.monotonic() - started_at
@@ -2511,21 +2555,14 @@ async def _execute_race_step(
                 total_cost += result["cost"]
                 # Validate if validator expression is set
                 if cfg.validator:
-                    eval_ns: dict[str, Any] = {
-                        "__builtins__": {
-                            "len": len,
-                            "int": int,
-                            "float": float,
-                            "str": str,
-                            "bool": bool,
-                            "True": True,
-                            "False": False,
-                            "None": None,
-                        },
+                    eval_names: dict[str, Any] = {
                         "output": result["output"],
+                        "True": True,
+                        "False": False,
+                        "None": None,
                     }
                     try:
-                        if bool(eval(cfg.validator, eval_ns)):  # noqa: S307
+                        if bool(_safe_eval_expression(cfg.validator, eval_names)):
                             winning_output = result["output"]
                     except Exception:
                         pass
@@ -2672,22 +2709,15 @@ async def _execute_sensor_step(
                         "_truncated": truncated,
                     }
 
-                # Evaluate condition
-                eval_ns: dict[str, Any] = {
-                    "__builtins__": {
-                        "len": len,
-                        "int": int,
-                        "float": float,
-                        "str": str,
-                        "bool": bool,
-                        "True": True,
-                        "False": False,
-                        "None": None,
-                    },
+                # Evaluate condition safely via simpleeval
+                eval_names: dict[str, Any] = {
                     "response": response_data,
                     "status_code": resp.status_code,
+                    "True": True,
+                    "False": False,
+                    "None": None,
                 }
-                condition_met = bool(eval(cfg.condition, eval_ns))  # noqa: S307
+                condition_met = bool(_safe_eval_expression(cfg.condition, eval_names))
 
                 if condition_met:
                     duration = time.monotonic() - started_at
@@ -3046,8 +3076,16 @@ async def _execute_delegate_step(
                 Path(settings.workflows_dir)
                 if hasattr(settings, "workflows_dir")
                 else Path("workflows")
-            )
-            wf_path = workflows_dir / f"{cfg.workflow}.yaml"
+            ).resolve()
+
+            # Path traversal guard
+            wf_name = cfg.workflow
+            if ".." in wf_name or "/" in wf_name or "\\" in wf_name:
+                raise ValueError(f"Delegate workflow name '{wf_name}' contains path traversal characters")
+
+            wf_path = (workflows_dir / f"{wf_name}.yaml").resolve()
+            if not str(wf_path).startswith(str(workflows_dir)):
+                raise ValueError(f"Delegate workflow path escapes workflows directory")
 
             if wf_path.exists():
                 sub_wf = parse_workflow(str(wf_path))
@@ -3310,7 +3348,7 @@ async def _browser_playwright_mode(
     augmented_prompt = f"{browser_instructions}\n## Task\n{prompt}\n"
 
     # Feature A: inject cached action hints for self-healing selectors
-    cached = _get_cached_actions(cfg.start_url, step.prompt)
+    cached = await _get_cached_actions(cfg.start_url, step.prompt)
     if cached:
         cache_hint = "\n\nPreviously successful actions for similar pages:\n"
         for act in cached[:10]:
