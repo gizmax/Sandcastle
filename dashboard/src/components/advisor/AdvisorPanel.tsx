@@ -105,11 +105,15 @@ export function AdvisorPanel({
       {/* Overlay */}
       <div
         className="fixed inset-0 z-50 bg-black/40 transition-opacity"
+        aria-hidden="true"
         onClick={onClose}
       />
 
       {/* Panel */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Lighthouse health advisor"
         className={cn(
           "fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col",
           "border-l border-border bg-surface shadow-2xl",

@@ -31,7 +31,7 @@ export function ScoreRing({ score, size = "sm", className }: ScoreRingProps) {
 
   return (
     <div className={cn("relative inline-flex items-center justify-center", className)} style={{ width: cfg.px, height: cfg.px }}>
-      <svg width={cfg.px} height={cfg.px} className="-rotate-90">
+      <svg width={cfg.px} height={cfg.px} className="-rotate-90" role="img" aria-label={`Health score: ${score} out of 100`}>
         {/* Track */}
         <circle
           cx={center}

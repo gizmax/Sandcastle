@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { X } from "lucide-react";
 import { api } from "@/api/client";
 
@@ -38,11 +38,24 @@ export function VersionDiffModal({ open, onClose, workflowName, versionA, versio
       .finally(() => setLoading(false));
   }, [open, workflowName, versionA, versionB]);
 
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Diff: v${versionA} vs v${versionB}`}
         className="relative mx-4 max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >

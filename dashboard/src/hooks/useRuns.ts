@@ -24,6 +24,7 @@ export function useRuns(options: UseRunsOptions = {}) {
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchRuns = useCallback(async () => {
     const params: Record<string, string> = {
@@ -33,10 +34,17 @@ export function useRuns(options: UseRunsOptions = {}) {
     if (status) params.status = status;
     if (workflow) params.workflow = workflow;
 
-    const res = await api.get<RunItem[]>("/runs", params);
-    if (res.data) {
-      setRuns(res.data);
-      setTotal(res.meta?.total ?? res.data.length);
+    try {
+      const res = await api.get<RunItem[]>("/runs", params);
+      if (res.data) {
+        setRuns(res.data);
+        setTotal(res.meta?.total ?? res.data.length);
+        setError(null);
+      } else if (res.error) {
+        setError(res.error.message);
+      }
+    } catch {
+      setError("Failed to fetch runs");
     }
     setLoading(false);
   }, [status, workflow, limit, offset]);
@@ -47,7 +55,9 @@ export function useRuns(options: UseRunsOptions = {}) {
   }, [fetchRuns]);
 
   const hasRunningRef = useRef(false);
-  hasRunningRef.current = runs.some((r) => r.status === "running" || r.status === "queued");
+  useEffect(() => {
+    hasRunningRef.current = runs.some((r) => r.status === "running" || r.status === "queued");
+  }, [runs]);
 
   useEffect(() => {
     if (!autoPoll) return;
@@ -58,5 +68,5 @@ export function useRuns(options: UseRunsOptions = {}) {
     return () => clearInterval(interval);
   }, [autoPoll, fetchRuns]);
 
-  return { runs, total, loading, refetch: fetchRuns };
+  return { runs, total, loading, error, refetch: fetchRuns };
 }

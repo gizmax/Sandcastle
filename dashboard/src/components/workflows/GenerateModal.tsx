@@ -106,7 +106,7 @@ export function GenerateModal({ open, onClose, onSelect }: GenerateModalProps) {
 
       {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[85vh]">
+        <div role="dialog" aria-modal="true" aria-label="AI Workflow Generator" className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[85vh]">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-6 py-4">
             <div className="flex items-center gap-2.5">

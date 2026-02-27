@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { Bell, CheckCircle, XCircle, Info } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, CheckCircle, XCircle, AlertTriangle, Info } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 export interface Notification {
   id: string;
-  type: "success" | "error" | "info";
+  type: "success" | "error" | "warning" | "info";
   message: string;
   timestamp: Date;
   read: boolean;
@@ -17,15 +17,17 @@ interface NotificationCenterProps {
   onClickNotification: (notification: Notification) => void;
 }
 
-const typeIcons = {
+const typeIcons: Record<Notification["type"], React.ElementType> = {
   success: CheckCircle,
   error: XCircle,
+  warning: AlertTriangle,
   info: Info,
 };
 
-const typeColors = {
+const typeColors: Record<Notification["type"], string> = {
   success: "text-success",
   error: "text-error",
+  warning: "text-warning",
   info: "text-running",
 };
 
@@ -35,12 +37,26 @@ export function NotificationCenter({
   onClickNotification,
 }: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
 
   return (
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
+        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+        aria-expanded={open}
+        aria-haspopup="true"
         className={cn(
           "relative flex h-9 w-9 items-center justify-center rounded-lg",
           "hover:bg-border/50 transition-all duration-200",

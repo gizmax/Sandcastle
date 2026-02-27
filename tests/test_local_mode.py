@@ -157,7 +157,7 @@ class TestInMemoryCancel:
         assert await _check_cancel(run_id) is True
 
         # Cleanup
-        _cancel_flags.discard(run_id)
+        _cancel_flags.pop(run_id, None)
 
 
 # --- API Endpoints ---

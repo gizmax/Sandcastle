@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Loader2, Play, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -40,13 +41,23 @@ export function RunModal({
   runInput,
   onRunInputChange,
 }: RunModalProps) {
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
     <>
       <div className="fixed inset-0 z-[60] bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-label={`Run ${template.name.replace(/_/g, " ")}`} className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
               Run {template.name.replace(/_/g, " ")}

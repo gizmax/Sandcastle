@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Copy, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,15 @@ interface KeyRevealModalProps {
 export function KeyRevealModal({ apiKey, onClose }: KeyRevealModalProps) {
   const [copied, setCopied] = useState(false);
 
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   function handleCopy() {
     navigator.clipboard.writeText(apiKey);
     setCopied(true);
@@ -20,7 +29,7 @@ export function KeyRevealModal({ apiKey, onClose }: KeyRevealModalProps) {
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-label="API Key Created" className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">API Key Created</h2>
             <button

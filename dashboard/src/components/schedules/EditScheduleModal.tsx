@@ -27,6 +27,16 @@ export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditSch
     setEnabled(schedule.enabled);
   }, [schedule.id, schedule.cron_expression, schedule.enabled]);
 
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   function handleSubmit(e: React.FormEvent) {
@@ -38,7 +48,7 @@ export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditSch
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+        <div role="dialog" aria-modal="true" aria-label="Edit Schedule" className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl max-h-[85vh] overflow-y-auto">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">Edit Schedule</h2>
             <button
@@ -61,6 +71,9 @@ export function EditScheduleModal({ open, schedule, onClose, onSubmit }: EditSch
               <label className="text-xs font-medium text-muted">Enabled</label>
               <button
                 type="button"
+                role="switch"
+                aria-checked={enabled}
+                aria-label="Schedule enabled"
                 onClick={() => setEnabled(!enabled)}
                 className={cn(
                   "relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200",

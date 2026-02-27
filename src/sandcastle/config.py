@@ -293,6 +293,19 @@ class Settings(BaseSettings):
             return 50_000
         return v
 
+    @field_validator("key_rotation_grace_hours", mode="after")
+    @classmethod
+    def _validate_key_rotation_grace(cls, v: int) -> int:
+        """Ensure key_rotation_grace_hours is non-negative."""
+        if v < 0:
+            _logger.warning(
+                "KEY_ROTATION_GRACE_HOURS=%d is invalid (must be >= 0), "
+                "using 24",
+                v,
+            )
+            return 24
+        return v
+
     @field_validator("max_workflow_depth", mode="after")
     @classmethod
     def _validate_max_workflow_depth(cls, v: int) -> int:

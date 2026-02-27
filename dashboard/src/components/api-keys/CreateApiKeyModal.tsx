@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,16 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
   const [name, setName] = useState("");
   const [tenantId, setTenantId] = useState("");
   const [maxCost, setMaxCost] = useState("");
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -37,7 +47,7 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-label="Create API Key" className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">Create API Key</h2>
             <button

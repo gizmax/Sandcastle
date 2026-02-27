@@ -19,7 +19,7 @@ from sandcastle.models.db import ApiKey, async_session
 logger = logging.getLogger(__name__)
 
 # Public endpoints that don't require authentication
-PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc"}
+PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json", "/api/redoc", "/a2a", "/.well-known/agent.json"}
 
 # Path prefixes that don't require authentication
 PUBLIC_PREFIXES = ("/api/templates", "/api/agui")
@@ -81,10 +81,13 @@ async def auth_middleware(request: Request, call_next):
         if auth_header.startswith("Bearer "):
             api_key = auth_header[7:]
 
-    # Fallback: accept token as query parameter for SSE/EventSource which
-    # does not support custom headers.
+    # Fallback: accept token as query parameter ONLY for SSE/EventSource
+    # endpoints which do not support custom headers. Restricted to stream
+    # paths to avoid leaking keys in URL logs/history/referrer.
     if not api_key:
-        api_key = request.query_params.get("token")
+        path = request.url.path
+        if "/stream" in path or path.startswith("/api/agui/"):
+            api_key = request.query_params.get("token")
 
     if not api_key:
         return _error_response(401, "UNAUTHORIZED", "API key required")

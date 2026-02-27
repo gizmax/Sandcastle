@@ -15,24 +15,34 @@ logger = logging.getLogger(__name__)
 
 _fernet_instance = None
 _fernet_checked = False
+_fernet_key_snapshot: str = ""
 
 
 def _get_fernet():
-    """Lazy-init Fernet from CREDENTIAL_ENCRYPTION_KEY. Returns None if unset."""
-    global _fernet_instance, _fernet_checked
-    if _fernet_checked:
-        return _fernet_instance
-    _fernet_checked = True
+    """Lazy-init Fernet from CREDENTIAL_ENCRYPTION_KEY. Returns None if unset.
+
+    Re-initializes if the key has changed since last check (e.g. via settings API).
+    """
+    global _fernet_instance, _fernet_checked, _fernet_key_snapshot
 
     from sandcastle.config import settings
 
-    key = settings.credential_encryption_key
-    if not key:
+    current_key = settings.credential_encryption_key or ""
+
+    # Re-check if key changed (handles runtime key rotation via settings API)
+    if _fernet_checked and current_key == _fernet_key_snapshot:
+        return _fernet_instance
+
+    _fernet_checked = True
+    _fernet_key_snapshot = current_key
+
+    if not current_key:
+        _fernet_instance = None
         return None
     try:
         from cryptography.fernet import Fernet
 
-        _fernet_instance = Fernet(key.encode() if isinstance(key, str) else key)
+        _fernet_instance = Fernet(current_key.encode() if isinstance(current_key, str) else current_key)
     except Exception as exc:
         logger.error("Invalid CREDENTIAL_ENCRYPTION_KEY: %s", exc)
         _fernet_instance = None

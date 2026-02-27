@@ -34,6 +34,16 @@ async def security_headers_middleware(request: Request, call_next) -> Response:
     response.headers["Permissions-Policy"] = (
         "camera=(), microphone=(), geolocation=(), payment=()"
     )
+    # HSTS: instruct browsers to only use HTTPS for future requests.
+    # Only set when not running in local mode (production with TLS termination).
+    if not settings.is_local_mode:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    # Prevent caching of API responses that may contain sensitive data
+    if request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
 
     # CSP only on dashboard paths (not /api)
     if not request.url.path.startswith("/api"):

@@ -46,7 +46,9 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevOpenRef = useRef(false);
   const messagesRef = useRef(messages);
-  messagesRef.current = messages;
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -232,7 +234,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
 
       {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[85vh]">
+        <div role="dialog" aria-modal="true" aria-label={isEditing ? "Edit Workflow with AI" : "AI Workflow Assistant"} className="w-full max-w-2xl rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[85vh]">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-6 py-4">
             <div className="flex items-center gap-2.5">
@@ -282,7 +284,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
             {/* Chat messages */}
             {messages.map((msg, i) => (
               <div
-                key={i}
+                key={`${msg.role}-${i}`}
                 className={cn(
                   "flex items-start gap-3",
                   msg.role === "user" && "flex-row-reverse"

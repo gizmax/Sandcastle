@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { ArrowRight, Loader2, Play, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -55,10 +56,19 @@ export function TemplateDetail({
   onUseInBuilder,
   onRunNow,
 }: TemplateDetailProps) {
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
+      <div className="fixed inset-0 z-40 bg-black/40" aria-hidden="true" onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-label={`Template detail: ${detailName}`} className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-lg font-semibold text-foreground">
             {detailName.replace(/_/g, " ")}

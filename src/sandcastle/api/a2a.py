@@ -224,18 +224,27 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
 
     workflow_input = _extract_input(message)
 
+    # Reject path traversal in workflow name
+    if ".." in workflow_name or "/" in workflow_name or "\\" in workflow_name:
+        return _build_task_response(
+            task_id, "failed", error=f"Invalid workflow name: '{workflow_name}'"
+        )
+
     # Load workflow YAML
     import re
 
-    workflows_dir = Path(settings.workflows_dir)
+    workflows_dir = Path(settings.workflows_dir).resolve()
     slug = re.sub(r"[^a-z0-9]+", "-", workflow_name.lower()).strip("-")
     yaml_content: str | None = None
     for candidate in [
         workflows_dir / f"{workflow_name}.yaml",
         workflows_dir / f"{slug}.yaml",
     ]:
-        if candidate.exists() and candidate.is_file():
-            yaml_content = candidate.read_text()
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(workflows_dir):
+            continue
+        if resolved.exists() and resolved.is_file():
+            yaml_content = resolved.read_text()
             break
 
     if yaml_content is None:
@@ -389,7 +398,7 @@ async def _handle_tasks_cancel(params: dict[str, Any]) -> dict[str, Any]:
     # Set cancel flag (in-memory for local mode)
     from sandcastle.engine.executor import _cancel_flags
 
-    _cancel_flags.add(task_id)
+    _cancel_flags[task_id] = None
 
     # Update DB status
     async with async_session() as session:

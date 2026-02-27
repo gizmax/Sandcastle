@@ -13,10 +13,12 @@ export const inputClass = cn(
 );
 
 export function formatCost(cost: number): string {
+  if (!Number.isFinite(cost)) return "$0.00";
   return `$${cost.toFixed(2)}`;
 }
 
 export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0s";
   if (seconds < 60) return `${Math.round(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
   const secs = Math.round(seconds % 60);
@@ -41,6 +43,10 @@ export function formatRelativeTime(date: string | Date): string {
   const now = new Date();
   const then = parseUTC(date);
   const diffMs = now.getTime() - then.getTime();
+
+  // Handle future dates gracefully
+  if (diffMs < 0) return "just now";
+
   const diffSec = Math.floor(diffMs / 1000);
 
   if (diffSec < 60) return "just now";
