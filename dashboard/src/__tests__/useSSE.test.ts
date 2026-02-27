@@ -52,7 +52,7 @@ describe("useSSE", () => {
   it("sets connected on successful response", async () => {
     // Create a mock readable stream that never ends
     const stream = new ReadableStream({
-      start(controller) {
+      start(_controller) {
         // Don't enqueue anything, just keep the stream open
         // We'll close it on cleanup
       },
@@ -75,11 +75,9 @@ describe("useSSE", () => {
 
   it("parses SSE events from the stream", async () => {
     const encoder = new TextEncoder();
-    let controllerRef: ReadableStreamDefaultController;
 
     const stream = new ReadableStream({
       start(controller) {
-        controllerRef = controller;
         // Send an SSE event
         const data = `event: step.completed\ndata: {"step":"extract","status":"done"}\n\n`;
         controller.enqueue(encoder.encode(data));

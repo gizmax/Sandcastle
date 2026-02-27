@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Bell, CheckCircle, XCircle, AlertTriangle, Info } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
@@ -37,7 +37,6 @@ export function NotificationCenter({
   onClickNotification,
 }: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
-  const _panelRef = useRef<HTMLDivElement>(null);
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   // Close on Escape key

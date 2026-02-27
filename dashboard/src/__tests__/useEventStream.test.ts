@@ -71,7 +71,7 @@ vi.mock("@/api/client", () => ({
     isMockMode: false,
     onMockChange: vi.fn((cb: (mock: boolean) => void) => {
       // Store callback for testing
-      (vi.mocked as Record<string, unknown>)._mockChangeCallback = cb;
+      (vi.mocked as unknown as Record<string, unknown>)._mockChangeCallback = cb;
       return () => {};
     }),
     authHeaders: vi.fn(() => ({})),
@@ -207,7 +207,7 @@ describe("useEventStream", () => {
   });
 
   it("stops reconnecting after MOCK_MAX_ATTEMPTS (2) failures", () => {
-    const { result } = renderHook(() => useEventStream());
+    renderHook(() => useEventStream());
 
     const es1 = MockEventSource.instances[MockEventSource.instances.length - 1];
 
