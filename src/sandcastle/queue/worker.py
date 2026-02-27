@@ -76,9 +76,9 @@ async def run_workflow_job(
             logger.error(f"Run {run_id} not found in database, cannot execute")
             return {"run_id": run_id, "status": "failed", "error": "Run record not found"}
         # Guard against duplicate delivery: only transition from QUEUED
-        if run.status not in (RunStatus.QUEUED, RunStatus.RUNNING):
+        if run.status != RunStatus.QUEUED:
             logger.warning(
-                f"Run {run_id} already in terminal state {run.status.value}, "
+                f"Run {run_id} in state {run.status.value} (expected QUEUED), "
                 "skipping duplicate execution"
             )
             return {"run_id": run_id, "status": run.status.value}

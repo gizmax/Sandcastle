@@ -35,7 +35,8 @@ const MODE_OPTIONS: { value: InputMode; label: string; icon: typeof FileText }[]
 export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onRun }: RunWorkflowModalProps) {
   const fields = useMemo(
     () => inputSchema?.properties ? Object.entries(inputSchema.properties) : [],
-    [inputSchema?.properties]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(inputSchema?.properties)]
   );
   const hasSchema = fields.length > 0;
   const requiredFields = useMemo(() => new Set(inputSchema?.required || []), [inputSchema?.required]);

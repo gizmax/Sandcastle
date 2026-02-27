@@ -47,7 +47,9 @@ export function useRuns(options: UseRunsOptions = {}) {
   }, [fetchRuns]);
 
   const hasRunningRef = useRef(false);
-  hasRunningRef.current = runs.some((r) => r.status === "running" || r.status === "queued");
+  useEffect(() => {
+    hasRunningRef.current = runs.some((r) => r.status === "running" || r.status === "queued");
+  }, [runs]);
 
   useEffect(() => {
     if (!autoPoll) return;

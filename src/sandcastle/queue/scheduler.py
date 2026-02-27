@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -82,13 +82,18 @@ async def restore_schedules() -> None:
 
 def _load_workflow_yaml(workflow_name: str) -> str:
     """Load workflow YAML content from the workflows directory by name."""
-    workflows_dir = Path(settings.workflows_dir)
+    workflows_dir = Path(settings.workflows_dir).resolve()
     for candidate in [
         workflows_dir / f"{workflow_name}.yaml",
         workflows_dir / workflow_name,
     ]:
-        if candidate.exists() and candidate.is_file():
-            return candidate.read_text()
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(workflows_dir):
+            raise ValueError(
+                f"Path traversal detected in workflow_name: {workflow_name!r}"
+            )
+        if resolved.exists() and resolved.is_file():
+            return resolved.read_text()
     raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
 
 
@@ -166,8 +171,22 @@ async def _run_scheduled_workflow(
 
     except Exception as e:
         logger.error(
-            f"Schedule '{schedule_id}' failed to create run: {e}"
+            f"Schedule '{schedule_id}' failed to create/enqueue run: {e}"
         )
+        # Mark the run as FAILED so it doesn't stay stuck in QUEUED
+        try:
+            from sandcastle.models.db import Run, RunStatus, async_session
+
+            async with async_session() as session:
+                stuck_run = await session.get(Run, uuid.UUID(run_id))
+                if stuck_run and stuck_run.status == RunStatus.QUEUED:
+                    stuck_run.status = RunStatus.FAILED
+                    stuck_run.error = f"Schedule enqueue failed: {e}"
+                    stuck_run.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+                    logger.info(f"Marked stuck run {run_id} as FAILED")
+        except Exception as cleanup_err:
+            logger.error(f"Failed to mark run {run_id} as FAILED: {cleanup_err}")
 
 
 async def _check_approval_timeouts() -> None:

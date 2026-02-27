@@ -46,7 +46,9 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevOpenRef = useRef(false);
   const messagesRef = useRef(messages);
-  messagesRef.current = messages;
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Reset state when modal opens
   useEffect(() => {
