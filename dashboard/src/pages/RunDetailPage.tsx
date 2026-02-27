@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy } from "lucide-react";
+import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -114,9 +114,21 @@ export default function RunDetailPage() {
     setDeleteConfirmOpen(false);
   }, [id, deleting, navigate]);
 
+  // Filter out internal fields (prefixed with _) from outputs
+  const filterOutputs = useCallback(
+    (outputs: Record<string, unknown> | null): Record<string, unknown> => {
+      if (!outputs) return {};
+      return Object.fromEntries(
+        Object.entries(outputs).filter(([k]) => !k.startsWith("_"))
+      );
+    },
+    []
+  );
+
   const handleDownloadOutput = useCallback(() => {
     if (!run) return;
-    const blob = new Blob([JSON.stringify(run.outputs ?? {}, null, 2)], {
+    const clean = filterOutputs(run.outputs);
+    const blob = new Blob([JSON.stringify(clean, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -125,13 +137,36 @@ export default function RunDetailPage() {
     a.download = `${run.workflow_name}-${run.run_id.slice(0, 8)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [run]);
+  }, [run, filterOutputs]);
+
+  const handleDownloadTxt = useCallback(() => {
+    if (!run) return;
+    const clean = filterOutputs(run.outputs);
+    const lines: string[] = [];
+    for (const [key, value] of Object.entries(clean)) {
+      lines.push(`=== ${key} ===`);
+      if (typeof value === "string") {
+        lines.push(value);
+      } else {
+        lines.push(JSON.stringify(value, null, 2));
+      }
+      lines.push("");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${run.workflow_name}-${run.run_id.slice(0, 8)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [run, filterOutputs]);
 
   const handleCopyOutput = useCallback(async () => {
     if (!run?.outputs) return;
-    await navigator.clipboard.writeText(JSON.stringify(run.outputs, null, 2));
+    const clean = filterOutputs(run.outputs);
+    await navigator.clipboard.writeText(JSON.stringify(clean, null, 2));
     toast.success("Output copied to clipboard");
-  }, [run]);
+  }, [run, filterOutputs]);
 
   const handleReplay = useCallback((stepId: string) => {
     setModalStepId(stepId);
@@ -386,10 +421,21 @@ export default function RunDetailPage() {
                 <Download className="h-3.5 w-3.5" />
                 Download JSON
               </button>
+              <button
+                onClick={handleDownloadTxt}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5",
+                  "text-xs font-medium text-muted",
+                  "hover:bg-border/40 hover:text-foreground transition-colors"
+                )}
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                Download TXT
+              </button>
             </div>
           </div>
           <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap">
-            {JSON.stringify(run.outputs, null, 2)}
+            {JSON.stringify(filterOutputs(run.outputs), null, 2)}
           </pre>
         </div>
       )}

@@ -18,6 +18,17 @@ function ElapsedTimer({ since }: { since: string }) {
   return <span className="font-mono text-xs text-muted">{formatDuration(elapsed)}</span>;
 }
 
+function filterInternalKeys(value: unknown): unknown {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).filter(
+        ([k]) => !k.startsWith("_")
+      )
+    );
+  }
+  return value;
+}
+
 function extractText(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -31,17 +42,33 @@ function extractText(value: unknown): string | null {
   return null;
 }
 
+function looksLikeMarkdown(text: string): boolean {
+  return /(?:^|\n)#\s|(\*\*|__).+?\1|- |\* |```|`[^`]+`/.test(text);
+}
+
 function OutputBlock({ value }: { value: unknown }) {
   const text = extractText(value);
   if (text) {
+    // Short single-line output - render inline
+    if (text.length < 100 && !text.includes("\n")) {
+      return (
+        <p className="text-sm text-foreground">{text}</p>
+      );
+    }
+    const isMd = looksLikeMarkdown(text);
     return (
-      <div className="max-h-96 overflow-auto rounded-md bg-background p-3 text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
-        {text}
+      <div>
+        {isMd && (
+          <p className="mb-1 text-[11px] font-medium text-muted/60">Markdown output</p>
+        )}
+        <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-md bg-background p-3 text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+          {text}
+        </div>
       </div>
     );
   }
   return (
-    <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap break-words">
+    <pre className="max-h-64 overflow-x-auto overflow-y-auto rounded-md bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap break-words">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -82,13 +109,18 @@ export function StepCard({
   const [copied, setCopied] = useState(false);
   const isCompleted = status === "completed" || status === "failed";
 
+  const displayOutput = filterInternalKeys(output);
+
   const handleCopyOutput = useCallback(async () => {
-    if (output == null) return;
-    const text = typeof output === "string" ? output : JSON.stringify(output, null, 2);
+    if (displayOutput == null) return;
+    const text =
+      typeof displayOutput === "string"
+        ? displayOutput
+        : JSON.stringify(displayOutput, null, 2);
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [output]);
+  }, [displayOutput]);
 
   return (
     <div className="rounded-lg border border-border bg-surface shadow-sm">
@@ -155,7 +187,7 @@ export function StepCard({
                   {copied ? (
                     <>
                       <Check className="h-3 w-3 text-success" />
-                      Copied
+                      Copied!
                     </>
                   ) : (
                     <>
@@ -165,7 +197,7 @@ export function StepCard({
                   )}
                 </button>
               </div>
-              <OutputBlock value={output} />
+              <OutputBlock value={displayOutput} />
             </div>
           )}
 
