@@ -245,6 +245,16 @@ class RuntimeInfoResponse(BaseModel):
     license: LicenseInfoResponse | None = None
 
 
+class UpdateCheckResponse(BaseModel):
+    """Software update check result."""
+
+    current_version: str
+    latest_version: str
+    update_available: bool
+    release_url: str
+    install_command: str
+
+
 class RunListItem(BaseModel):
     """Summary item for run list."""
 

@@ -58,6 +58,7 @@ from sandcastle.api.schemas import (
     RunListItem,
     RunStatusResponse,
     RuntimeInfoResponse,
+    UpdateCheckResponse,
     ScheduleCreateRequest,
     ScheduleResponse,
     ScheduleUpdateRequest,
@@ -422,6 +423,51 @@ async def runtime_info() -> ApiResponse:
             license=license_info,
         )
     )
+
+
+# --- Update check ---
+
+_update_cache: dict[str, object] = {}
+
+
+@router.get("/check-update")
+async def check_update() -> ApiResponse:
+    """Check if a newer version of sandcastle-ai is available on PyPI."""
+    import time
+
+    from packaging.version import Version
+
+    from sandcastle import __version__
+
+    now = time.monotonic()
+    cached = _update_cache.get("result")
+    cached_at: float = _update_cache.get("ts", 0)  # type: ignore[assignment]
+    if cached and (now - cached_at) < 1800:
+        return ApiResponse(data=cached)
+
+    current = __version__
+    latest = current
+    update_available = False
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get("https://pypi.org/pypi/sandcastle-ai/json")
+            resp.raise_for_status()
+            latest = resp.json()["info"]["version"]
+            update_available = Version(latest) > Version(current)
+    except Exception:
+        pass  # graceful degradation
+
+    result = UpdateCheckResponse(
+        current_version=current,
+        latest_version=latest,
+        update_available=update_available,
+        release_url="https://github.com/gizmax/Sandcastle/releases",
+        install_command="pip install --upgrade sandcastle-ai",
+    )
+    _update_cache["result"] = result
+    _update_cache["ts"] = now
+    return ApiResponse(data=result)
 
 
 # --- Browse (file system) ---
