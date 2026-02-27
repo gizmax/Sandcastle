@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bell, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink } from "lucide-react";
+import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -886,7 +886,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             "text-xs font-medium text-muted hover:border-accent hover:text-accent transition-colors"
           )}
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Brain className="h-3.5 w-3.5" />
           Agent Step
         </button>
 

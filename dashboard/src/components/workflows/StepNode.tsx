@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Bell, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
+import { Bell, Brain, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
 
@@ -26,7 +26,7 @@ type StepNodeData = {
 type StepNodeType = Node<StepNodeData, "step">;
 
 const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
-  standard: Cpu,
+  standard: Brain,
   llm: MessageSquare,
   http: Globe,
   code: Code,
@@ -44,7 +44,7 @@ const STEP_TYPE_ICONS: Record<string, typeof Cpu> = {
 };
 
 const STEP_TYPE_COLORS: Record<string, string> = {
-  standard: "text-muted",
+  standard: "text-violet-400",
   llm: "text-accent",
   http: "text-emerald-400",
   code: "text-amber-400",
@@ -63,7 +63,7 @@ const STEP_TYPE_COLORS: Record<string, string> = {
 
 // Raw color values for left border and background tint
 const STEP_TYPE_RAW_COLORS: Record<string, string> = {
-  standard: "115 115 115",
+  standard: "167 139 250",
   llm: "245 158 11",
   http: "52 211 153",
   code: "251 191 36",
