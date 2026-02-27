@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -40,10 +42,24 @@ class LocalStorage:
         return file_path.read_text(encoding="utf-8")
 
     async def write(self, path: str, content: str) -> None:
-        """Write content to a file."""
+        """Write content to a file atomically (write-to-temp-then-rename)."""
         file_path = self._safe_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(file_path.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(file_path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     async def list(self, prefix: str) -> list[str]:
         """List files matching a prefix."""
@@ -102,7 +118,7 @@ class S3Storage:
                 return None
             except Exception as e:
                 logger.error(f"S3 read error for '{path}': {e}")
-                return None
+                raise
 
     async def write(self, path: str, content: str) -> None:
         """Write content to S3."""

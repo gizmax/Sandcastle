@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { X, Play, FileText, FormInput, Braces } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -33,9 +33,12 @@ const MODE_OPTIONS: { value: InputMode; label: string; icon: typeof FileText }[]
 ];
 
 export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onRun }: RunWorkflowModalProps) {
-  const fields = inputSchema?.properties ? Object.entries(inputSchema.properties) : [];
+  const fields = useMemo(
+    () => inputSchema?.properties ? Object.entries(inputSchema.properties) : [],
+    [inputSchema?.properties]
+  );
   const hasSchema = fields.length > 0;
-  const requiredFields = new Set(inputSchema?.required || []);
+  const requiredFields = useMemo(() => new Set(inputSchema?.required || []), [inputSchema?.required]);
 
   const [mode, setMode] = useState<InputMode>(hasSchema ? "form" : "text");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {

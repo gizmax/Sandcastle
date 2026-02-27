@@ -80,7 +80,7 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
     if event_type == "run.started":
         return _agui_event(EVENT_RUN_STARTED, {
             "run_id": data.get("run_id", ""),
-            "workflow": data.get("workflow_name", ""),
+            "workflow": data.get("workflow", data.get("workflow_name", "")),
         })
 
     if event_type == "run.completed":
@@ -96,14 +96,14 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
         })
 
     if event_type == "step.started":
+        step_id = data.get("step_name", data.get("step_id", ""))
         return _agui_event(EVENT_STEP_STARTED, {
-            "step_id": data.get("step_id", ""),
+            "step_id": step_id,
             "type": data.get("step_type", "llm"),
         })
 
     if event_type == "step.completed":
-        # Emit text_message with the step output, then a state_delta
-        step_id = data.get("step_id", "")
+        step_id = data.get("step_name", data.get("step_id", ""))
         output = data.get("output", "")
         content = output if isinstance(output, str) else json.dumps(output, default=str)
 
@@ -119,7 +119,7 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
         return text_event + delta_event
 
     if event_type == "step.failed":
-        step_id = data.get("step_id", "")
+        step_id = data.get("step_name", data.get("step_id", ""))
         return _agui_event(EVENT_STATE_DELTA, {
             "op": "replace",
             "path": f"/steps/{step_id}/status",

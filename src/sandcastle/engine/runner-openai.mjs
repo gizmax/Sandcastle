@@ -119,6 +119,19 @@ function totalCost() {
   return totalInputTokens * inputPrice + totalOutputTokens * outputPrice;
 }
 
+// --- Conversation history management ---
+
+const MAX_HISTORY_MESSAGES = 80;
+
+function trimHistory(messages) {
+  if (messages.length <= MAX_HISTORY_MESSAGES) return;
+  // Keep the first message (user prompt) and the most recent messages
+  const keep = MAX_HISTORY_MESSAGES - 1;
+  const trimmed = [messages[0], ...messages.slice(-keep)];
+  messages.length = 0;
+  messages.push(...trimmed);
+}
+
 // --- Main agentic loop ---
 
 async function run() {
@@ -135,6 +148,7 @@ async function run() {
     }
 
     turn++;
+    trimHistory(messages);
 
     let completion;
     try {
@@ -180,7 +194,12 @@ async function run() {
       try {
         args = JSON.parse(tc.function.arguments);
       } catch {
-        args = {};
+        // Malformed JSON from model - report the parse error back to the model
+        // instead of executing with empty args which could cause unexpected behavior
+        const parseError = `Error: Could not parse tool arguments as JSON: ${tc.function.arguments}`;
+        emit({ type: "tool_use", tool: tc.function.name, args: {}, result: parseError.slice(0, 2000) });
+        messages.push({ role: "tool", tool_call_id: tc.id, content: parseError });
+        continue;
       }
 
       const result = executeTool(tc.function.name, args);

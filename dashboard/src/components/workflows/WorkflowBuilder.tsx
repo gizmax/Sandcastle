@@ -728,13 +728,19 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         )
       );
       if (updated.id !== selectedStepId) {
-        // Update edges
+        // Update edges: fix source/target AND regenerate edge IDs to prevent key conflicts
         setEdges((prev) =>
-          prev.map((e) => ({
-            ...e,
-            source: e.source === selectedStepId ? updated.id : e.source,
-            target: e.target === selectedStepId ? updated.id : e.target,
-          }))
+          prev.map((e) => {
+            const newSource = e.source === selectedStepId ? updated.id : e.source;
+            const newTarget = e.target === selectedStepId ? updated.id : e.target;
+            if (newSource === e.source && newTarget === e.target) return e;
+            return {
+              ...e,
+              id: `${newSource}-${newTarget}`,
+              source: newSource,
+              target: newTarget,
+            };
+          })
         );
         setSelectedStepId(updated.id);
       }

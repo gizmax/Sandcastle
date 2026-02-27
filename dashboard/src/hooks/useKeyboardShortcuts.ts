@@ -32,6 +32,15 @@ export function useKeyboardShortcuts() {
             e.preventDefault();
             navigate("/schedules");
             break;
+          case "k":
+          case "K": {
+            e.preventDefault();
+            const searchInput = document.querySelector<HTMLInputElement>(
+              'header input[type="text"][placeholder*="Search"]'
+            );
+            searchInput?.focus();
+            break;
+          }
         }
       }
     }

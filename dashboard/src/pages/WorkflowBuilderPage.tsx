@@ -37,18 +37,25 @@ export default function WorkflowBuilderPage() {
     name: string;
     inputSchema?: InputSchema;
   } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const handleSave = useCallback(
     async (yaml: string, name: string) => {
-      const res = await api.post("/workflows", { name, content: yaml });
-      if (res.error) {
-        toast.error(`Save failed: ${res.error.message}`);
-        return;
+      if (saving) return;
+      setSaving(true);
+      try {
+        const res = await api.post("/workflows", { name, content: yaml });
+        if (res.error) {
+          toast.error(`Save failed: ${res.error.message}`);
+          return;
+        }
+        toast.success("Workflow saved");
+        navigate("/workflows");
+      } finally {
+        setSaving(false);
       }
-      toast.success("Workflow saved");
-      navigate("/workflows");
     },
-    [navigate]
+    [navigate, saving]
   );
 
   const runWorkflow = useCallback(
@@ -111,9 +118,9 @@ export default function WorkflowBuilderPage() {
           inputSchema={runModal.inputSchema}
           onClose={() => setRunModal(null)}
           onRun={(input) => {
-            const name = runModal.name;
+            const { yaml, name } = runModal;
             setRunModal(null);
-            void runWorkflow(runModal.yaml, name, input);
+            void runWorkflow(yaml, name, input);
           }}
         />
       )}

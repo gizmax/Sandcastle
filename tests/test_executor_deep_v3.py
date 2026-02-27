@@ -98,6 +98,7 @@ from sandcastle.engine.executor import (
     execute_step_with_retry,
     execute_workflow,
     resolve_templates,
+    _UNRESOLVED,
     resolve_variable,
 )
 from sandcastle.engine.sandshore import SandshoreResult, SandshoreRuntime
@@ -1182,7 +1183,7 @@ class TestResolveVariableAndTemplates:
 
     def test_input_missing_returns_none(self):
         c = ctx(input={})
-        assert resolve_variable("input.nonexistent", c) is None
+        assert resolve_variable("input.nonexistent", c) is _UNRESOLVED
 
     def test_steps_output_simple(self):
         c = ctx(step_outputs={"step1": "output_value"})
@@ -1195,7 +1196,7 @@ class TestResolveVariableAndTemplates:
 
     def test_steps_missing_step_returns_none(self):
         c = ctx(step_outputs={})
-        assert resolve_variable("steps.nonexistent.output", c) is None
+        assert resolve_variable("steps.nonexistent.output", c) is _UNRESOLVED
 
     def test_run_id(self):
         run_id = str(uuid.uuid4())
@@ -1245,7 +1246,7 @@ class TestResolveVariableAndTemplates:
     def test_missing_key_never_crashes(self, key):
         c = ctx(input={})
         result = resolve_variable(f"input.{key}", c)
-        assert result is None
+        assert result is _UNRESOLVED
 
     @given(st.text(min_size=0, max_size=100))
     @h_settings(max_examples=100)

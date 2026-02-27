@@ -103,7 +103,10 @@ export default function RunComparePage() {
     }
     try {
       const res = await api.get<CompareData>("/runs/compare", { run_a: runA, run_b: runB });
-      if (res.data) setData(res.data);
+      if (res.data) {
+        setData(res.data);
+        setError(null);
+      }
       if (res.error) setError(res.error.message);
     } finally {
       setLoading(false);

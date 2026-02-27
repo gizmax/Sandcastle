@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown } from "lucide-react";
 import { toast } from "sonner";
@@ -80,6 +80,9 @@ export default function RunDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    setLoading(true);
+    setRun(null);
+    setError(null);
     void fetchRun();
   }, [fetchRun]);
 
@@ -89,8 +92,10 @@ export default function RunDetailPage() {
     return () => clearInterval(interval);
   }, [run?.status, fetchRun]);
 
+  const cancellingRef = useRef(false);
   const handleCancel = useCallback(async () => {
-    if (!id || cancelling) return;
+    if (!id || cancellingRef.current) return;
+    cancellingRef.current = true;
     setCancelling(true);
     const res = await api.post(`/runs/${id}/cancel`);
     if (res.error) {
@@ -99,11 +104,14 @@ export default function RunDetailPage() {
       toast.success("Run cancelled");
       void fetchRun();
     }
+    cancellingRef.current = false;
     setCancelling(false);
-  }, [id, cancelling, fetchRun]);
+  }, [id, fetchRun]);
 
+  const deletingRef = useRef(false);
   const handleDelete = useCallback(async () => {
-    if (!id || deleting) return;
+    if (!id || deletingRef.current) return;
+    deletingRef.current = true;
     setDeleting(true);
     const res = await api.delete(`/runs/${id}`);
     if (res.error) {
@@ -112,9 +120,10 @@ export default function RunDetailPage() {
       toast.success("Run deleted");
       navigate("/runs");
     }
+    deletingRef.current = false;
     setDeleting(false);
     setDeleteConfirmOpen(false);
-  }, [id, deleting, navigate]);
+  }, [id, navigate]);
 
   // Filter out internal fields (prefixed with _) from outputs
   const filterOutputs = useCallback(

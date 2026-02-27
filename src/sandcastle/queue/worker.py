@@ -10,6 +10,22 @@ from sandcastle.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Track in-process background tasks to prevent GC and surface exceptions
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _task_done_callback(task: asyncio.Task) -> None:
+    """Log unhandled exceptions from fire-and-forget background tasks."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "Background workflow task failed with unhandled exception: %s", exc,
+            exc_info=exc,
+        )
+
 
 def _parse_redis_url(url: str):
     """Parse a Redis URL into arq RedisSettings."""
@@ -59,6 +75,13 @@ async def run_workflow_job(
         if not run:
             logger.error(f"Run {run_id} not found in database, cannot execute")
             return {"run_id": run_id, "status": "failed", "error": "Run record not found"}
+        # Guard against duplicate delivery: only transition from QUEUED
+        if run.status not in (RunStatus.QUEUED, RunStatus.RUNNING):
+            logger.warning(
+                f"Run {run_id} already in terminal state {run.status.value}, "
+                "skipping duplicate execution"
+            )
+            return {"run_id": run_id, "status": run.status.value}
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
         callback_url = run.callback_url
@@ -164,14 +187,17 @@ async def run_workflow_job(
             pass
 
         for url in failure_urls:
-            await dispatch_webhook(
-                url=url,
-                event="workflow.failed",
-                run_id=run_id,
-                workflow="unknown",
-                status="failed",
-                error=str(e),
-            )
+            try:
+                await dispatch_webhook(
+                    url=url,
+                    event="workflow.failed",
+                    run_id=run_id,
+                    workflow="unknown",
+                    status="failed",
+                    error=str(e),
+                )
+            except Exception as wh_err:
+                logger.error(f"Failed to dispatch failure webhook to {url}: {wh_err}")
 
         return {"run_id": run_id, "status": "failed", "error": str(e)}
 
@@ -224,21 +250,23 @@ async def enqueue_workflow(
         from arq import create_pool
 
         redis = await create_pool(_parse_redis_url(settings.redis_url))
-        await redis.enqueue_job(
-            "run_workflow_job",
-            workflow_yaml,
-            input_data,
-            run_id,
-            max_cost_usd=max_cost_usd,
-            initial_context=initial_context,
-            skip_steps=skip_steps,
-            step_overrides=step_overrides,
-        )
-        await redis.close()
+        try:
+            await redis.enqueue_job(
+                "run_workflow_job",
+                workflow_yaml,
+                input_data,
+                run_id,
+                max_cost_usd=max_cost_usd,
+                initial_context=initial_context,
+                skip_steps=skip_steps,
+                step_overrides=step_overrides,
+            )
+        finally:
+            await redis.close()
     else:
         # Local mode: run directly in-process
         logger.info(f"Local mode: executing run {run_id} in-process")
-        asyncio.create_task(
+        task = asyncio.create_task(
             run_workflow_job(
                 {},  # empty ctx for in-process
                 workflow_yaml,
@@ -248,5 +276,8 @@ async def enqueue_workflow(
                 initial_context=initial_context,
                 skip_steps=skip_steps,
                 step_overrides=step_overrides,
-            )
+            ),
+            name=f"workflow-{run_id}",
         )
+        _background_tasks.add(task)
+        task.add_done_callback(_task_done_callback)

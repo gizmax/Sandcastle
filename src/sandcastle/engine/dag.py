@@ -1273,15 +1273,18 @@ def _detect_cycles(steps: list[StepDefinition]) -> list[str]:
     def dfs(node: str) -> bool:
         visited.add(node)
         in_stack.add(node)
+        found_cycle = False
         for neighbor in adj.get(node, []):
             if neighbor in in_stack:
                 errors.append(f"Cycle detected involving step '{node}' -> '{neighbor}'")
-                return True
+                found_cycle = True
+                break
             if neighbor not in visited:
                 if dfs(neighbor):
-                    return True
+                    found_cycle = True
+                    break
         in_stack.discard(node)
-        return False
+        return found_cycle
 
     for step in steps:
         if step.id not in visited:

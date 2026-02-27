@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { POLL_INTERVAL } from "@/lib/constants";
 
@@ -46,14 +46,17 @@ export function useRuns(options: UseRunsOptions = {}) {
     void fetchRuns();
   }, [fetchRuns]);
 
+  const hasRunningRef = useRef(false);
+  hasRunningRef.current = runs.some((r) => r.status === "running" || r.status === "queued");
+
   useEffect(() => {
     if (!autoPoll) return;
-    const hasRunning = runs.some((r) => r.status === "running" || r.status === "queued");
-    if (!hasRunning) return;
 
-    const interval = setInterval(fetchRuns, POLL_INTERVAL);
+    const interval = setInterval(() => {
+      if (hasRunningRef.current) void fetchRuns();
+    }, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [runs, autoPoll, fetchRuns]);
+  }, [autoPoll, fetchRuns]);
 
   return { runs, total, loading, refetch: fetchRuns };
 }

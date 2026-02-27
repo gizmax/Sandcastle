@@ -67,6 +67,7 @@ export function Header({
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mobileWrapperRef = useRef<HTMLDivElement>(null);
+  const searchVersionRef = useRef(0);
 
   const pageTitle = getPageTitle(location.pathname);
 
@@ -75,6 +76,7 @@ export function Header({
       setResults([]);
       return;
     }
+    const version = ++searchVersionRef.current;
     const lower = q.toLowerCase();
     const items: SearchResult[] = [];
 
@@ -83,6 +85,9 @@ export function Header({
       api.get<Array<{ name: string; file_name: string; steps_count: number }>>("/workflows"),
       api.get<{ tools: Array<{ name: string; description: string; category: string; configured: boolean }> }>("/tools"),
     ]);
+
+    // Discard results from stale searches
+    if (version !== searchVersionRef.current) return;
 
     if (runsRes.data) {
       for (const r of runsRes.data) {

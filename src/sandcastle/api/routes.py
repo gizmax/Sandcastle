@@ -2072,7 +2072,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     async def event_generator():
         """Poll the database and emit SSE events as status changes."""
         last_status = None
-        last_step_count = 0
+        seen_step_ids: set[tuple[str, int | None]] = set()
 
         for _ in range(600):  # Max 10 minutes of polling (1s intervals)
             async with async_session() as session:
@@ -2098,9 +2098,11 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 )
                 last_status = current_status
 
-            # Emit step update events
-            if len(run.steps) > last_step_count:
-                for step in run.steps[last_step_count:]:
+            # Emit step update events (keyed by step_id + parallel_index to avoid duplicates)
+            for step in run.steps:
+                key = (step.step_id, step.parallel_index)
+                if key not in seen_step_ids:
+                    seen_step_ids.add(key)
                     step_status = (
                         step.status.value if hasattr(step.status, "value") else step.status
                     )
@@ -2114,7 +2116,6 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                             "duration_seconds": step.duration_seconds,
                         },
                     )
-                last_step_count = len(run.steps)
 
             # Terminal states - emit final result and stop
             if current_status in (
@@ -2349,14 +2350,16 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
 
         cancel_run_local(run_id)
 
-    # Update DB status
+    # Update DB status (re-check to avoid overwriting a just-completed run)
     async with async_session() as session:
         db_run = await session.get(Run, run_uuid)
         if db_run:
-            db_run.status = RunStatus.CANCELLED
-            db_run.completed_at = datetime.now(timezone.utc)
-            db_run.error = "Cancelled by user"
-            await session.commit()
+            current = db_run.status.value if hasattr(db_run.status, "value") else db_run.status
+            if current in ("queued", "running"):
+                db_run.status = RunStatus.CANCELLED
+                db_run.completed_at = datetime.now(timezone.utc)
+                db_run.error = "Cancelled by user"
+                await session.commit()
 
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
@@ -3019,10 +3022,16 @@ async def delete_schedule(schedule_id: str, request: Request) -> ApiResponse:
                     )
                 ).model_dump(),
             )
+
+        # Remove from scheduler BEFORE deleting DB record to prevent
+        # orphaned scheduler jobs if DB delete fails.
+        try:
+            remove_schedule(schedule_id)
+        except Exception:
+            pass  # scheduler may not have the job if it was disabled
+
         await session.delete(schedule)
         await session.commit()
-
-    remove_schedule(schedule_id)
 
     return ApiResponse(data={"deleted": True, "id": schedule_id})
 
@@ -3665,13 +3674,17 @@ async def get_approval(approval_id: str, request: Request) -> ApiResponse:
     )
 
 
-async def _resolve_approval(
+async def _resolve_and_update_approval(
     approval_id: str,
     tenant_id: str | None,
-    action: str,
+    new_status: ApprovalStatus,
     request_body: ApprovalRespondRequest | None = None,
+    response_data: dict | None = None,
 ) -> ApprovalRequest:
-    """Shared logic for approve/reject/skip actions."""
+    """Atomically check pending status and update in a single session/transaction.
+
+    Prevents TOCTOU race where two clients resolve the same approval.
+    """
     try:
         approval_uuid = uuid.UUID(approval_id)
     except ValueError:
@@ -3682,6 +3695,8 @@ async def _resolve_approval(
             ).model_dump(),
         )
 
+    now = datetime.now(timezone.utc)
+
     async with async_session() as session:
         stmt = select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
         if settings.auth_required and tenant_id is not None:
@@ -3691,25 +3706,41 @@ async def _resolve_approval(
         result = await session.execute(stmt)
         approval = result.scalar_one_or_none()
 
-    if not approval:
-        raise HTTPException(
-            status_code=404,
-            detail=ApiResponse(
-                error=ErrorResponse(code="NOT_FOUND", message="Approval request not found")
-            ).model_dump(),
-        )
+        if not approval:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message="Approval request not found")
+                ).model_dump(),
+            )
 
-    ap_status = approval.status.value if hasattr(approval.status, "value") else approval.status
-    if ap_status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="ALREADY_RESOLVED",
-                    message=f"Approval already resolved with status '{ap_status}'",
-                )
-            ).model_dump(),
-        )
+        ap_status = approval.status.value if hasattr(approval.status, "value") else approval.status
+        if ap_status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="ALREADY_RESOLVED",
+                        message=f"Approval already resolved with status '{ap_status}'",
+                    )
+                ).model_dump(),
+            )
+
+        approval.status = new_status
+        approval.resolved_at = now
+        if response_data is not None:
+            approval.response_data = response_data
+        if request_body and request_body.comment:
+            approval.reviewer_comment = request_body.comment
+
+        if new_status == ApprovalStatus.REJECTED:
+            run = await session.get(Run, approval.run_id)
+            if run:
+                run.status = RunStatus.FAILED
+                run.completed_at = now
+                run.error = f"Approval rejected at step '{approval.step_id}'"
+
+        await session.commit()
 
     return approval
 
@@ -3722,26 +3753,20 @@ async def approve_approval(
 ) -> ApiResponse:
     """Approve an approval gate and resume the workflow."""
     tenant_id = get_tenant_id(req)
-    approval = await _resolve_approval(approval_id, tenant_id, "approve", request)
 
-    now = datetime.now(timezone.utc)
-    response_data = approval.request_data  # Default: use original data
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.APPROVED, request,
+    )
 
-    # Apply edited data if allowed and provided
+    response_data = approval.request_data
     if request and request.edited_data and approval.allow_edit:
         response_data = request.edited_data
+        async with async_session() as session:
+            ap = await session.get(ApprovalRequest, approval.id)
+            if ap:
+                ap.response_data = response_data
+                await session.commit()
 
-    async with async_session() as session:
-        ap = await session.get(ApprovalRequest, approval.id)
-        if ap:
-            ap.status = ApprovalStatus.APPROVED
-            ap.resolved_at = now
-            ap.response_data = response_data
-            if request and request.comment:
-                ap.reviewer_comment = request.comment
-            await session.commit()
-
-    # Resume the workflow
     await _resume_after_approval(approval, output_data=response_data or {"approved": True})
 
     return ApiResponse(
@@ -3757,26 +3782,10 @@ async def reject_approval(
 ) -> ApiResponse:
     """Reject an approval gate and fail the workflow."""
     tenant_id = get_tenant_id(req)
-    approval = await _resolve_approval(approval_id, tenant_id, "reject", request)
 
-    now = datetime.now(timezone.utc)
-
-    async with async_session() as session:
-        ap = await session.get(ApprovalRequest, approval.id)
-        if ap:
-            ap.status = ApprovalStatus.REJECTED
-            ap.resolved_at = now
-            if request and request.comment:
-                ap.reviewer_comment = request.comment
-            await session.commit()
-
-        # Fail the run
-        run = await session.get(Run, approval.run_id)
-        if run:
-            run.status = RunStatus.FAILED
-            run.completed_at = now
-            run.error = f"Approval rejected at step '{approval.step_id}'"
-            await session.commit()
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.REJECTED, request,
+    )
 
     return ApiResponse(
         data={"rejected": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
@@ -3791,20 +3800,11 @@ async def skip_approval(
 ) -> ApiResponse:
     """Skip an approval gate and continue the workflow."""
     tenant_id = get_tenant_id(req)
-    approval = await _resolve_approval(approval_id, tenant_id, "skip", request)
 
-    now = datetime.now(timezone.utc)
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.SKIPPED, request,
+    )
 
-    async with async_session() as session:
-        ap = await session.get(ApprovalRequest, approval.id)
-        if ap:
-            ap.status = ApprovalStatus.SKIPPED
-            ap.resolved_at = now
-            if request and request.comment:
-                ap.reviewer_comment = request.comment
-            await session.commit()
-
-    # Resume with null output for skipped step
     await _resume_after_approval(approval, output_data=None)
 
     return ApiResponse(

@@ -25,7 +25,6 @@ from sandcastle import __version__
 from sandcastle.config import settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.sandshore import SandshoreRuntime
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import Run, RunStatus, async_session
 
@@ -283,16 +282,13 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
     # Execute the workflow
     storage = create_storage()
     try:
-        runtime = SandshoreRuntime()
         result = await execute_workflow(
-            plan=plan,
             workflow=workflow,
+            plan=plan,
             input_data=workflow_input,
             run_id=run_id,
-            runtime=runtime,
             storage=storage,
         )
-        await runtime.close()
     except Exception as e:
         # Update run as failed
         async with async_session() as session:
@@ -313,7 +309,7 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
         "run_id": run_id,
         "status": result.status,
         "total_cost_usd": result.total_cost_usd,
-        "outputs": result.step_outputs,
+        "outputs": result.outputs,
     }
     a2a_state = _map_status(result.status)
     return _build_task_response(run_id, a2a_state, output_data=output)

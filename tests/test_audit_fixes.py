@@ -37,6 +37,7 @@ from sandcastle.engine import executor as _executor_mod
 from sandcastle.engine.executor import (
     RunContext,
     StepResult,
+    _UNRESOLVED,
     _backoff_delay,
     _check_budget,
     execute_step_with_retry,
@@ -1172,15 +1173,15 @@ class TestUnresolvedVariables:
 
     def test_resolve_variable_missing_input_returns_none(self):
         ctx = _ctx(input={})
-        assert resolve_variable("input.nonexistent", ctx) is None
+        assert resolve_variable("input.nonexistent", ctx) is _UNRESOLVED
 
     def test_resolve_variable_missing_step_returns_none(self):
         ctx = _ctx()
-        assert resolve_variable("steps.missing.output", ctx) is None
+        assert resolve_variable("steps.missing.output", ctx) is _UNRESOLVED
 
     def test_resolve_variable_unknown_root_returns_none(self):
         ctx = _ctx()
-        assert resolve_variable("something.else", ctx) is None
+        assert resolve_variable("something.else", ctx) is _UNRESOLVED
 
 
 # ============================================================================

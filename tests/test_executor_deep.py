@@ -39,6 +39,7 @@ from sandcastle.engine.executor import (
     _escape_js_string,
     _is_cacheable_output,
     execute_step_with_retry,
+    _UNRESOLVED,
     execute_workflow,
     resolve_templates,
     resolve_variable,
@@ -121,7 +122,7 @@ class TestResolveVariable:
 
     def test_input_missing_key_returns_none(self):
         c = ctx(input={})
-        assert resolve_variable("input.nonexistent", c) is None
+        assert resolve_variable("input.nonexistent", c) is _UNRESOLVED
 
     def test_steps_output(self):
         c = ctx(step_outputs={"fetch": "raw_data"})
@@ -133,7 +134,7 @@ class TestResolveVariable:
 
     def test_steps_output_missing_step(self):
         c = ctx()
-        assert resolve_variable("steps.missing.output", c) is None
+        assert resolve_variable("steps.missing.output", c) is _UNRESOLVED
 
     def test_run_id(self):
         c = ctx(run_id="abc-123")

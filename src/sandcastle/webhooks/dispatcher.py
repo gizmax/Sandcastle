@@ -82,44 +82,66 @@ async def dispatch_webhook(
         "workflow": workflow,
         "status": status,
         "outputs": outputs,
-        "costs": costs,
+        "total_cost_usd": costs,
+        "costs": costs,  # Kept for backward compat
         "duration_seconds": duration_seconds,
         "error": error,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     body = json.dumps(payload, default=str)
-    signature = _sign_payload(body, settings.webhook_secret)
 
-    headers = {
+    headers: dict[str, str] = {
         "Content-Type": "application/json",
-        "X-Sandcastle-Signature": signature,
         "X-Sandcastle-Event": event,
     }
+    if settings.webhook_secret:
+        signature = _sign_payload(body, settings.webhook_secret)
+        headers["X-Sandcastle-Signature"] = signature
+    else:
+        logger.warning("Webhook dispatched without HMAC signature (no webhook_secret configured)")
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0),
+        follow_redirects=False,
+        max_redirects=0,
+    ) as client:
+        for attempt in range(1, max_retries + 1):
+            try:
                 response = await client.post(url, content=body, headers=headers)
 
-            if response.status_code < 400:
-                logger.info(
-                    f"Webhook delivered: {event} for run {run_id} "
-                    f"(status={response.status_code})"
+                if response.status_code < 300:
+                    logger.info(
+                        f"Webhook delivered: {event} for run {run_id} "
+                        f"(status={response.status_code})"
+                    )
+                    return True
+
+                if 300 <= response.status_code < 400:
+                    logger.warning(
+                        f"Webhook got redirect {response.status_code} for {url}, "
+                        "not following (SSRF prevention)"
+                    )
+                    return False
+
+                if 400 <= response.status_code < 500:
+                    logger.warning(
+                        f"Webhook got client error {response.status_code} for {url}, "
+                        "not retrying"
+                    )
+                    return False
+
+                logger.warning(
+                    f"Webhook attempt {attempt} got status {response.status_code} "
+                    f"for {url}"
                 )
-                return True
 
-            logger.warning(
-                f"Webhook attempt {attempt} got status {response.status_code} "
-                f"for {url}"
-            )
+            except httpx.HTTPError as e:
+                logger.warning(f"Webhook attempt {attempt} failed: {e}")
 
-        except httpx.HTTPError as e:
-            logger.warning(f"Webhook attempt {attempt} failed: {e}")
-
-        if attempt < max_retries:
-            delay = min(2**attempt, 30)
-            await asyncio.sleep(delay)
+            if attempt < max_retries:
+                delay = min(2**attempt, 30)
+                await asyncio.sleep(delay)
 
     logger.error(
         f"Webhook delivery failed after {max_retries} attempts: "

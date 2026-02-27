@@ -104,6 +104,7 @@ export default function Runs() {
               onClick={() => {
                 setStatusFilter(s);
                 setOffset(0);
+                setSelectedIds(new Set());
               }}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all duration-200",
@@ -135,6 +136,7 @@ export default function Runs() {
             onChange={(e) => {
               setWorkflowFilter(e.target.value);
               setOffset(0);
+              setSelectedIds(new Set());
             }}
             className={cn(
               "h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground",
