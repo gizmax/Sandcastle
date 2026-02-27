@@ -158,6 +158,7 @@ class ErrorResponse(BaseModel):
 
     code: str
     message: str
+    details: Any | None = None
 
 
 class ApiResponse(BaseModel):

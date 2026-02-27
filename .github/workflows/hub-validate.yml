@@ -1,0 +1,97 @@
+name: Hub Template Validation
+
+on:
+  pull_request:
+    paths:
+      - "hub/**"
+      - "src/sandcastle/templates/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml jsonschema
+
+      - name: Validate registry and scan templates
+        run: |
+          python - <<'SCRIPT'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          import jsonschema
+          import yaml
+
+          # --- Add src to path so we can import hub_scanner ---
+          sys.path.insert(0, "src")
+          from sandcastle.engine.hub_scanner import compute_sha256, scan_template
+
+          errors = []
+
+          # 1. Load and validate schema
+          schema_path = Path("hub/schema/template.schema.json")
+          schema = json.loads(schema_path.read_text())
+
+          # 2. Load registry
+          registry_path = Path("hub/registry.json")
+          registry = json.loads(registry_path.read_text())
+
+          # 3. Validate each template entry against schema
+          for i, tmpl in enumerate(registry.get("templates", [])):
+              slug = tmpl.get("slug", f"index-{i}")
+              try:
+                  jsonschema.validate(tmpl, schema)
+              except jsonschema.ValidationError as e:
+                  errors.append(f"[{slug}] Schema validation: {e.message}")
+
+          # 4. Verify SHA-256 checksums match local files
+          for tmpl in registry.get("templates", []):
+              slug = tmpl.get("slug", "?")
+              sha = tmpl.get("sha256")
+              dl_url = tmpl.get("download_url", "")
+
+              # Extract local path from download URL
+              prefix = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/"
+              if dl_url.startswith(prefix):
+                  local_path = Path(dl_url[len(prefix):])
+                  if local_path.exists():
+                      actual = compute_sha256(local_path.read_text(encoding="utf-8"))
+                      if sha and sha != actual:
+                          errors.append(
+                              f"[{slug}] Checksum mismatch: registry={sha[:16]}... actual={actual[:16]}..."
+                          )
+                      elif not sha:
+                          errors.append(f"[{slug}] Missing sha256 in registry")
+
+          # 5. Scan all template YAML files for security issues
+          template_dirs = [
+              Path("src/sandcastle/templates"),
+              Path("hub/community"),
+          ]
+          for tdir in template_dirs:
+              if not tdir.exists():
+                  continue
+              for yaml_file in sorted(tdir.rglob("*.yaml")):
+                  content = yaml_file.read_text(encoding="utf-8")
+                  result = scan_template(content)
+                  for err in result.errors:
+                      step_info = f" (step: {err.step})" if err.step else ""
+                      errors.append(f"[{yaml_file}] {err.code}: {err.message}{step_info}")
+
+          # Report
+          if errors:
+              print(f"::error::Found {len(errors)} validation error(s):")
+              for e in errors:
+                  print(f"  - {e}")
+              sys.exit(1)
+          else:
+              print(f"All {len(registry.get('templates', []))} templates validated successfully.")
+          SCRIPT

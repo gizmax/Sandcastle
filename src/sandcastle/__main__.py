@@ -1755,6 +1755,50 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
+    # Security scan
+    from sandcastle.engine.hub_scanner import (
+        compute_sha256,
+        scan_template,
+        verify_checksum,
+    )
+
+    scan = scan_template(yaml_content)
+    if scan.errors:
+        print(f"{_color('Security scan BLOCKED', _C.RED)}:")
+        for err in scan.errors:
+            step_info = f" (step: {err.step})" if err.step else ""
+            print(f"  {_color('X', _C.RED)} [{err.code}] {err.message}{step_info}")
+        sys.exit(1)
+
+    force = getattr(args, "force", False)
+    if scan.warnings and not force:
+        print(f"{_color('Security warnings', _C.YELLOW)}:")
+        for w in scan.warnings:
+            step_info = f" (step: {w.step})" if w.step else ""
+            print(f"  {_color('!', _C.YELLOW)} [{w.code}] {w.message}{step_info}")
+        answer = input("Continue anyway? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Installation cancelled.")
+            sys.exit(0)
+    elif scan.warnings and force:
+        print(f"{_color('Security warnings (--force)', _C.YELLOW)}: {len(scan.warnings)} warning(s) skipped")
+
+    # Verify checksum if registry has one
+    registry_sha = template.get("sha256")
+    if registry_sha:
+        if not verify_checksum(yaml_content, registry_sha):
+            print(
+                f"{_color('Error', _C.RED)}: Checksum mismatch - content may have been tampered with.\n"
+                f"  Expected: {registry_sha}\n"
+                f"  Got:      {compute_sha256(yaml_content)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        print(f"  {_color('Note', _C.DIM)}: No checksum in registry (not verified)")
+
+    print(f"{_color('Security scan passed', _C.GREEN)}")
+
     # Save to target directory with sanitized filename
     target_dir = Path(getattr(args, "dir", None) or "./workflows/")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1895,6 +1939,9 @@ def _cmd_hub_install_collection(args: argparse.Namespace) -> None:
     target_dir = Path(getattr(args, "dir", None) or "./workflows/")
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    from sandcastle.engine.hub_scanner import scan_template, verify_checksum
+
+    force = getattr(args, "force", False)
     installed = 0
     for slug in col.get("template_slugs", []):
         t = templates_by_slug.get(slug)
@@ -1914,6 +1961,24 @@ def _cmd_hub_install_collection(args: argparse.Namespace) -> None:
             if not valid:
                 print(f"  {_color('Skip', _C.YELLOW)}: {slug} (invalid YAML: {err_msg})")
                 continue
+
+            # Security scan
+            scan = scan_template(yaml_content)
+            if scan.errors:
+                msgs = "; ".join(e.message for e in scan.errors[:3])
+                print(f"  {_color('BLOCKED', _C.RED)}: {slug} ({msgs})")
+                continue
+            if scan.warnings and not force:
+                msgs = "; ".join(w.message for w in scan.warnings[:3])
+                print(f"  {_color('Skip', _C.YELLOW)}: {slug} (warnings: {msgs}; use --force)")
+                continue
+
+            # Checksum verification
+            registry_sha = t.get("sha256")
+            if registry_sha and not verify_checksum(yaml_content, registry_sha):
+                print(f"  {_color('BLOCKED', _C.RED)}: {slug} (checksum mismatch)")
+                continue
+
             filename = _sanitize_hub_filename(slug)
             file_path = target_dir / filename
             # Path traversal guard
@@ -1972,8 +2037,28 @@ def _cmd_hub_publish(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
 
+    # Security scan before publish guidance
+    from sandcastle.engine.hub_scanner import compute_sha256, scan_template
+
+    scan = scan_template(content)
+    if scan.errors:
+        print(f"\n{_color('Security scan found issues', _C.RED)}:")
+        for err in scan.errors:
+            step_info = f" (step: {err.step})" if err.step else ""
+            print(f"  {_color('X', _C.RED)} [{err.code}] {err.message}{step_info}")
+        print("\nPlease fix these issues before publishing.")
+    if scan.warnings:
+        print(f"\n{_color('Security warnings', _C.YELLOW)}:")
+        for w in scan.warnings:
+            step_info = f" (step: {w.step})" if w.step else ""
+            print(f"  {_color('!', _C.YELLOW)} [{w.code}] {w.message}{step_info}")
+    if not scan.errors and not scan.warnings:
+        print(f"\n{_color('Security scan passed', _C.GREEN)}")
+
+    print(f"\n{_color('SHA-256', _C.DIM)}: {compute_sha256(content)}")
+
     slug = file_path.stem.replace("_", "-")
-    print(f"{_color('Workflow details', _C.BOLD)}:")
+    print(f"\n{_color('Workflow details', _C.BOLD)}:")
     print(f"  Name: {name}")
     print(f"  Slug: {slug}")
     print(f"  Steps: {len(steps)}")
@@ -3096,6 +3181,9 @@ def _build_parser() -> argparse.ArgumentParser:
     hub_install.add_argument(
         "--dir", "-d", default=None, help="Target directory (default: ./workflows/)"
     )
+    hub_install.add_argument(
+        "--force", action="store_true", help="Skip security warnings (errors still block)"
+    )
 
     hub_list = hub_sub.add_parser("list", help="List community workflows")
     hub_list.add_argument("--category", "-c", help="Filter by category")
@@ -3112,6 +3200,9 @@ def _build_parser() -> argparse.ArgumentParser:
     hub_install_col.add_argument("collection_id", help="Collection ID")
     hub_install_col.add_argument(
         "--dir", "-d", default=None, help="Target directory (default: ./workflows/)"
+    )
+    hub_install_col.add_argument(
+        "--force", action="store_true", help="Skip security warnings (errors still block)"
     )
 
     return parser

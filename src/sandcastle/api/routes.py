@@ -917,6 +917,65 @@ async def install_hub_template(slug: str) -> ApiResponse:
             ).model_dump(),
         )
 
+    # Size limit (512 KB)
+    if len(yaml_content) > 512 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="TEMPLATE_TOO_LARGE",
+                    message=f"Template exceeds 512 KB size limit ({len(yaml_content)} bytes)",
+                )
+            ).model_dump(),
+        )
+
+    # Security scan
+    from sandcastle.engine.hub_scanner import (
+        compute_sha256,
+        scan_template,
+        verify_checksum,
+    )
+
+    scan = scan_template(yaml_content)
+    if scan.errors:
+        error_details = [
+            {"code": e.code, "message": e.message, "step": e.step}
+            for e in scan.errors
+        ]
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UNSAFE_TEMPLATE",
+                    message="Template failed security scan",
+                    details=error_details,
+                )
+            ).model_dump(),
+        )
+
+    # Checksum verification
+    registry_sha = template_meta.get("sha256")
+    if registry_sha and not verify_checksum(yaml_content, registry_sha):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="CHECKSUM_MISMATCH",
+                    message="Downloaded content does not match registry checksum",
+                    details={
+                        "expected": registry_sha,
+                        "actual": compute_sha256(yaml_content),
+                    },
+                )
+            ).model_dump(),
+        )
+
+    # Collect warnings (non-blocking for API)
+    scan_warnings = [
+        {"code": w.code, "message": w.message, "step": w.step}
+        for w in scan.warnings
+    ] if scan.warnings else []
+
     # Save to community templates directory
     community_dir = Path(__file__).parent.parent / "templates" / "community"
     community_dir.mkdir(parents=True, exist_ok=True)
@@ -938,6 +997,7 @@ async def install_hub_template(slug: str) -> ApiResponse:
             "filename": filename,
             "path": str(target_path),
             "updated": already_existed,
+            "security_warnings": scan_warnings,
         }
     )
 
