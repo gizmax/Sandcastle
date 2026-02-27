@@ -153,7 +153,7 @@ class TestInMemoryCancel:
         assert await _check_cancel(run_id) is False
 
         # Set cancel flag
-        cancel_run_local(run_id)
+        await cancel_run_local(run_id)
         assert await _check_cancel(run_id) is True
 
         # Cleanup

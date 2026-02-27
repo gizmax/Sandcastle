@@ -38,6 +38,7 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "admin_api_key", "webhook_secret",
     "aws_access_key_id", "aws_secret_access_key",
     "credential_encryption_key",
+    "database_url", "redis_url",
     "tool_slack_bot_token", "tool_jira_api_token",
     "tool_github_token", "tool_notion_api_key",
     "tool_hubspot_api_key",

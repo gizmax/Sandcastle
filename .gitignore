@@ -12,8 +12,13 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+.hypothesis/
 *.db
 *.sqlite3
 .DS_Store
 .claude/
 scripts/license_keys/
+node_modules/
+test-results/
+output/
+data/

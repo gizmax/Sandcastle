@@ -10,6 +10,7 @@ Backends:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -98,18 +99,40 @@ class RedisBackend:
     def __init__(self, redis_url: str) -> None:
         self._redis_url = redis_url
         self._redis = None
+        self._redis_lock = asyncio.Lock()
 
     async def _get_redis(self):
         if self._redis is not None:
             return self._redis
-        try:
-            from redis.asyncio import from_url
+        async with self._redis_lock:
+            if self._redis is not None:
+                return self._redis
+            try:
+                from redis.asyncio import from_url
 
-            self._redis = from_url(self._redis_url)
-            return self._redis
-        except ImportError:
-            logger.warning("redis package not installed, falling back to in-memory rate limiting")
-            return None
+                self._redis = from_url(self._redis_url)
+                return self._redis
+            except ImportError:
+                logger.warning("redis package not installed, falling back to in-memory rate limiting")
+                return None
+
+    # Lua script for atomic check-and-increment (avoids TOCTOU between
+    # count check and zadd when two requests arrive concurrently).
+    _LUA_CHECK_AND_INCREMENT = """
+    local key = KEYS[1]
+    local window_start = tonumber(ARGV[1])
+    local max_requests = tonumber(ARGV[2])
+    local now = tonumber(ARGV[3])
+    local member = ARGV[4]
+    local ttl = tonumber(ARGV[5])
+    redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+    local current = redis.call('ZCARD', key)
+    if current < max_requests then
+        redis.call('ZADD', key, now, member)
+        redis.call('EXPIRE', key, ttl)
+    end
+    return current + 1
+    """
 
     async def check_and_increment(
         self, key: str, max_requests: int, window_seconds: float
@@ -123,25 +146,21 @@ class RedisBackend:
         now = time.time()
         window_start = now - window_seconds
         redis_key = f"rl:{key}"
+        member = f"{now}:{uuid.uuid4().hex[:8]}"
+        ttl = int(window_seconds) + 1
 
         try:
-            # First: check current count (clean up + count)
-            pipe = redis.pipeline()
-            pipe.zremrangebyscore(redis_key, 0, window_start)
-            pipe.zcard(redis_key)
-            results = await pipe.execute()
-
-            current_count = results[1]  # zcard result
-
-            # Only add the new entry if under the limit
-            if current_count < max_requests:
-                member = f"{now}:{uuid.uuid4().hex[:8]}"
-                pipe2 = redis.pipeline()
-                pipe2.zadd(redis_key, {member: now})
-                pipe2.expire(redis_key, int(window_seconds) + 1)
-                await pipe2.execute()
-
-            return current_count + 1
+            result = await redis.eval(
+                self._LUA_CHECK_AND_INCREMENT,
+                1,
+                redis_key,
+                str(window_start),
+                str(max_requests),
+                str(now),
+                member,
+                str(ttl),
+            )
+            return int(result)
         except Exception as exc:
             logger.warning("Redis rate limit error: %s", exc)
             return 0  # Fail open on Redis errors

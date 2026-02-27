@@ -7,7 +7,33 @@
  */
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
-const request = JSON.parse(process.env.SANDCASTLE_REQUEST);
+// --- Emit helper ---
+
+function emit(event) {
+    process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+// --- Parse and validate request ---
+
+if (!process.env.SANDCASTLE_REQUEST) {
+    emit({ type: "error", error: "SANDCASTLE_REQUEST env var is not set" });
+    process.exit(1);
+}
+
+let request;
+try {
+    request = JSON.parse(process.env.SANDCASTLE_REQUEST);
+} catch (err) {
+    emit({ type: "error", error: `Failed to parse SANDCASTLE_REQUEST: ${err.message}` });
+    process.exit(1);
+}
+
+if (!request.prompt || typeof request.prompt !== "string") {
+    emit({ type: "error", error: "SANDCASTLE_REQUEST must contain a non-empty 'prompt' string" });
+    process.exit(1);
+}
+
+// --- Setup ---
 
 const options = {
     allowedTools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
@@ -39,27 +65,39 @@ function totalCost() {
     return totalInputTokens * inputPrice + totalOutputTokens * outputPrice;
 }
 
+// --- Unhandled rejection safety net ---
+
+process.on("unhandledRejection", (err) => {
+    emit({ type: "error", error: `Unhandled rejection: ${err?.message || err}` });
+    process.exit(1);
+});
+
 // --- Main loop ---
 
-for await (const message of query({
-    prompt: request.prompt,
-    options,
-})) {
-    if (message.type === "assistant") {
-        trackUsage(message);
-    }
+try {
+    for await (const message of query({
+        prompt: request.prompt,
+        options,
+    })) {
+        if (message.type === "assistant") {
+            trackUsage(message);
+        }
 
-    if (message.type === "result") {
-        // Override cost with our own calculation based on registry pricing
-        const cost = totalCost();
-        const patched = {
-            ...message,
-            total_cost_usd: cost > 0 ? cost : (message.total_cost_usd || 0),
-            input_tokens: totalInputTokens,
-            output_tokens: totalOutputTokens,
-        };
-        process.stdout.write(JSON.stringify(patched) + "\n");
-    } else {
-        process.stdout.write(JSON.stringify(message) + "\n");
+        if (message.type === "result") {
+            // Override cost with our own calculation based on registry pricing
+            const cost = totalCost();
+            const patched = {
+                ...message,
+                total_cost_usd: cost > 0 ? cost : (message.total_cost_usd || 0),
+                input_tokens: totalInputTokens,
+                output_tokens: totalOutputTokens,
+            };
+            emit(patched);
+        } else {
+            emit(message);
+        }
     }
+} catch (err) {
+    emit({ type: "error", error: `Runner error: ${err.message}` });
+    process.exit(1);
 }

@@ -510,6 +510,7 @@ async def runtime_info() -> ApiResponse:
 # --- Update check ---
 
 _update_cache: dict[str, object] = {}
+_update_cache_lock = asyncio.Lock()
 
 
 @router.get("/check-update")
@@ -527,29 +528,36 @@ async def check_update() -> ApiResponse:
     if cached and (now - cached_at) < 1800:
         return ApiResponse(data=cached)
 
-    current = __version__
-    latest = current
-    update_available = False
+    async with _update_cache_lock:
+        # Double-check after acquiring lock (another request may have filled cache)
+        cached = _update_cache.get("result")
+        cached_at = _update_cache.get("ts", 0)  # type: ignore[assignment]
+        if cached and (time.monotonic() - cached_at) < 1800:
+            return ApiResponse(data=cached)
 
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get("https://pypi.org/pypi/sandcastle-ai/json")
-            resp.raise_for_status()
-            latest = resp.json()["info"]["version"]
-            update_available = Version(latest) > Version(current)
-    except Exception:
-        pass  # graceful degradation
+        current = __version__
+        latest = current
+        update_available = False
 
-    result = UpdateCheckResponse(
-        current_version=current,
-        latest_version=latest,
-        update_available=update_available,
-        release_url="https://github.com/gizmax/Sandcastle/releases",
-        install_command="pip install --upgrade sandcastle-ai",
-    )
-    _update_cache["result"] = result
-    _update_cache["ts"] = now
-    return ApiResponse(data=result)
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get("https://pypi.org/pypi/sandcastle-ai/json")
+                resp.raise_for_status()
+                latest = resp.json()["info"]["version"]
+                update_available = Version(latest) > Version(current)
+        except Exception:
+            pass  # graceful degradation
+
+        result = UpdateCheckResponse(
+            current_version=current,
+            latest_version=latest,
+            update_available=update_available,
+            release_url="https://github.com/gizmax/Sandcastle/releases",
+            install_command="pip install --upgrade sandcastle-ai",
+        )
+        _update_cache["result"] = result
+        _update_cache["ts"] = time.monotonic()
+        return ApiResponse(data=result)
 
 
 # --- Browse (file system) ---
@@ -2348,7 +2356,7 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
     else:
         from sandcastle.engine.executor import cancel_run_local
 
-        cancel_run_local(run_id)
+        await cancel_run_local(run_id)
 
     # Update DB status (re-check to avoid overwriting a just-completed run)
     async with async_session() as session:

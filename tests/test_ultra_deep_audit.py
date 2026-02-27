@@ -480,13 +480,15 @@ class TestBrowserActionCache:
     def setup_method(self):
         _browser_action_cache.clear()
 
-    def test_cache_miss_returns_none(self):
-        assert _get_cached_actions("https://example.com", "click button") is None
+    @pytest.mark.asyncio
+    async def test_cache_miss_returns_none(self):
+        assert await _get_cached_actions("https://example.com", "click button") is None
 
-    def test_cache_hit_returns_actions(self):
+    @pytest.mark.asyncio
+    async def test_cache_hit_returns_actions(self):
         actions = [{"type": "click", "selector": "#btn"}]
-        _save_cached_actions("https://example.com", "click button", actions)
-        result = _get_cached_actions("https://example.com", "click button")
+        await _save_cached_actions("https://example.com", "click button", actions)
+        result = await _get_cached_actions("https://example.com", "click button")
         assert result == actions
 
     def test_cache_key_uses_host_and_path(self):
@@ -499,9 +501,10 @@ class TestBrowserActionCache:
         key = _cache_key("https://example.com", long_intent)
         assert len(key.split(":")[1]) == 100
 
-    def test_cache_eviction_at_max(self):
+    @pytest.mark.asyncio
+    async def test_cache_eviction_at_max(self):
         for i in range(_BROWSER_CACHE_MAX + 10):
-            _save_cached_actions(f"https://example.com/{i}", "task", [{"i": i}])
+            await _save_cached_actions(f"https://example.com/{i}", "task", [{"i": i}])
         assert len(_browser_action_cache) == _BROWSER_CACHE_MAX
 
     def teardown_method(self):
@@ -517,21 +520,23 @@ class TestCancelFlags:
     def setup_method(self):
         _cancel_flags.clear()
 
-    def test_cancel_run_local_adds_flag(self):
-        cancel_run_local("run-1")
+    @pytest.mark.asyncio
+    async def test_cancel_run_local_adds_flag(self):
+        await cancel_run_local("run-1")
         assert "run-1" in _cancel_flags
 
-    def test_cancel_flags_overflow_evicts_half(self):
+    @pytest.mark.asyncio
+    async def test_cancel_flags_overflow_evicts_half(self):
         """When cancel flags reach 10000, adding one more evicts oldest half (5000),
         then adds the new entry, resulting in 5001 entries."""
         for i in range(10001):
-            cancel_run_local(f"run-{i}")
+            await cancel_run_local(f"run-{i}")
         # 10000 entries -> evict 5000 oldest -> 5000 remain -> add 1 = 5001
         assert len(_cancel_flags) == 5001
 
     @pytest.mark.asyncio
     async def test_check_cancel_local_mode(self):
-        cancel_run_local("run-cancel-test")
+        await cancel_run_local("run-cancel-test")
         with patch("sandcastle.config.settings") as mock_settings:
             mock_settings.redis_url = ""
             result = await _executor_mod._check_cancel("run-cancel-test")
@@ -653,11 +658,15 @@ class TestRunContext:
         child.step_outputs["new_step"] = "child_data"
         assert "new_step" not in ctx.step_outputs
 
-    def test_with_item_shares_costs_list(self):
+    def test_with_item_isolates_costs_list(self):
+        """Child contexts get their own costs list to avoid concurrent
+        appends. The parent aggregates child costs after join."""
         ctx = _ctx(costs=[0.01])
         child = ctx.with_item("item", 0)
         child.costs.append(0.02)
-        assert ctx.total_cost == pytest.approx(0.03)
+        # Parent costs should NOT be affected by child appends
+        assert ctx.total_cost == pytest.approx(0.01)
+        assert child.total_cost == pytest.approx(0.02)
 
     def test_with_item_independent_branch_skip(self):
         ctx = _ctx()

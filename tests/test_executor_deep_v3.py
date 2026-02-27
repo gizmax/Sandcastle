@@ -383,39 +383,39 @@ steps:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PASS 3 – SHARED COSTS LIST: with_item kopíruje referenci (záměr vs bug)
-# executor.py:68 → costs=self.costs (SDÍLENÁ REFERENCE!)
-# Child context sdílí seznam costs s parentem – toto je záměrné pro
-# agregaci costs, ale může způsobit problémy pokud child context
-# je zamýšlen jako izolovaný
+# PASS 3 – ISOLATED COSTS LIST: with_item creates separate costs list
+# executor.py:88 → costs=[] (each child gets isolated list for thread safety)
+# The parent aggregates child costs after asyncio.gather returns.
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestCostsSharedReference:
-    """executor.py:68 – with_item sdílí costs list s parentem."""
+    """executor.py:88 - with_item isolates costs list from parent."""
 
     def test_child_cost_appears_in_parent(self):
-        """Záměrné chování: child costs jdou do parent lists."""
+        """Child costs do NOT appear in parent (isolated for thread safety)."""
         parent = ctx(costs=[0.10])
         child = parent.with_item("item_a", 0)
 
-        child.costs.append(0.05)  # Child přidá cost
+        child.costs.append(0.05)  # Child adds cost to its own list
 
-        # Parent by měl vidět child cost (sdílená reference)
-        assert len(parent.costs) == 2
-        assert parent.total_cost == pytest.approx(0.15)
+        # Parent should NOT see child cost (isolated)
+        assert len(parent.costs) == 1
+        assert parent.total_cost == pytest.approx(0.10)
+        assert child.total_cost == pytest.approx(0.05)
 
     def test_multiple_children_costs_accumulate_in_parent(self):
-        """Více child contextů → costs se kumulují v parentovi."""
+        """Multiple children have isolated costs, parent aggregates after gather."""
         parent = ctx(costs=[])
         children = [parent.with_item(f"item_{i}", i) for i in range(5)]
 
         for i, child in enumerate(children):
             child.costs.append(0.01 * (i + 1))
 
-        # All child costs should be in parent
-        assert len(parent.costs) == 5
-        expected = sum(0.01 * (i + 1) for i in range(5))
-        assert parent.total_cost == pytest.approx(expected, rel=1e-6)
+        # Parent costs are empty (children are isolated)
+        assert len(parent.costs) == 0
+        # Each child has its own cost
+        for i, child in enumerate(children):
+            assert child.total_cost == pytest.approx(0.01 * (i + 1))
 
     def test_step_outputs_NOT_shared(self):
         """step_outputs jsou izolované mezi parent a child."""
@@ -944,13 +944,12 @@ class TestCodeStepSandbox:
         assert r.status == "failed", "eval() by měl být zakázán"
 
     @pytest.mark.asyncio
-    async def test_dunder_subclasses_reachable(self):
-        """MRO chain __class__.__mro__[-1].__subclasses__() is reachable.
+    async def test_dunder_subclasses_blocked(self):
+        """MRO chain __class__.__mro__[-1].__subclasses__() is blocked.
 
-        The code sandbox restricts __builtins__ but cannot block attribute
-        access chains. This is a known limitation - code steps run inside
-        an isolated E2B/Docker sandbox, so the MRO escape cannot harm the host.
-        See BUGS.md BUG-011 for details.
+        The code step input validation rejects dangerous dunder patterns
+        (__class__, __mro__, __subclasses__, etc.) before exec() runs.
+        This is enforced by _CODE_STEP_BLOCKED_PATTERNS.
         """
         from sandcastle.engine.executor import _execute_code_step
         s = StepDefinition(id="code", prompt="", type="code",
@@ -958,9 +957,8 @@ class TestCodeStepSandbox:
                                code="result = ().__class__.__mro__[-1].__subclasses__()"
                            ))
         r = await _execute_code_step(s, ctx())
-        # MRO chain works (known limitation) but code runs in sandbox
-        assert r.status == "completed"
-        assert isinstance(r.output, list)
+        assert r.status == "failed"
+        assert "blocked pattern" in r.error.lower()
 
     @pytest.mark.asyncio
     async def test_globals_function_blocked(self):

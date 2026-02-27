@@ -11,14 +11,20 @@ import pytest
 from sandcastle.__main__ import (
     _build_parser,
     _cmd_approve,
+    _cmd_cancel,
     _cmd_fork,
     _cmd_health,
+    _cmd_keys_delete,
+    _cmd_ls,
     _cmd_reject,
     _cmd_replay,
     _cmd_runs,
+    _cmd_runs_compare,
     _cmd_serve,
+    _cmd_status,
     _cmd_templates,
     _parse_input_pairs,
+    main,
 )
 
 # ---------------------------------------------------------------------------
@@ -705,3 +711,430 @@ class TestRunsCommand:
 
         output = captured.getvalue()
         assert "No runs found" in output
+
+
+# ---------------------------------------------------------------------------
+# BUG FIX TESTS: runs compare routing
+# ---------------------------------------------------------------------------
+
+
+class TestRunsCompareRouting:
+    """Verify that 'sandcastle runs compare' is correctly dispatched."""
+
+    def test_runs_compare_parses_args(self):
+        """'runs compare <a> <b>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["runs", "compare", "run-aaa", "run-bbb"])
+
+        assert args.command == "runs"
+        assert args.runs_action == "compare"
+        assert args.run_a == "run-aaa"
+        assert args.run_b == "run-bbb"
+
+    def test_runs_compare_dispatched_via_main(self):
+        """main() should route 'runs compare' to _cmd_runs_compare, not _cmd_runs."""
+        compare_data = {
+            "data": {
+                "run_a": {"run_id": "aaa", "workflow_name": "wf", "status": "completed"},
+                "run_b": {"run_id": "bbb", "workflow_name": "wf", "status": "completed"},
+                "same_workflow": True,
+                "total_cost_a": 0.01,
+                "total_cost_b": 0.02,
+                "total_cost_delta": 0.01,
+                "steps": [],
+            }
+        }
+        captured = StringIO()
+        with (
+            patch("sys.argv", ["sandcastle", "--json", "runs", "compare", "aaa", "bbb"]),
+            patch("httpx.get", return_value=_FakeResponse(compare_data)),
+            patch("sys.stdout", captured),
+        ):
+            main()
+
+        output = json.loads(captured.getvalue())
+        # The compare --json output wraps data in {"data": {...}}
+        assert "run_a" in output or "run_a" in output.get("data", {})
+
+    def test_runs_list_still_works(self):
+        """'sandcastle runs' without sub-action should still list runs."""
+        mock_data = {
+            "data": [
+                {
+                    "run_id": "xyz-123",
+                    "workflow_name": "test-wf",
+                    "status": "completed",
+                    "total_cost_usd": 0.01,
+                    "started_at": "2026-02-27T10:00:00",
+                },
+            ]
+        }
+        captured = StringIO()
+        with (
+            patch("sys.argv", ["sandcastle", "runs"]),
+            patch("httpx.get", return_value=_FakeResponse(mock_data)),
+            patch("sys.stdout", captured),
+        ):
+            main()
+
+        output = captured.getvalue()
+        assert "test-wf" in output
+
+
+# ---------------------------------------------------------------------------
+# BUG FIX TESTS: keys delete confirmation
+# ---------------------------------------------------------------------------
+
+
+class TestKeysDeleteConfirmation:
+    """Verify that keys delete asks for confirmation."""
+
+    def test_keys_delete_with_force_skips_confirmation(self):
+        """'keys delete <id> --force' should skip confirmation prompt."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "delete", "key-123", "--force"])
+
+        assert args.force is True
+
+    def test_keys_delete_force_flag_parses(self):
+        """'keys delete <id> -f' should accept the short flag."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "delete", "key-123", "-f"])
+
+        assert args.force is True
+
+
+# ---------------------------------------------------------------------------
+# BUG FIX TESTS: status command --json support
+# ---------------------------------------------------------------------------
+
+
+class TestStatusJsonSupport:
+    """Verify that 'status' command supports --json output."""
+
+    def test_status_json_output(self):
+        """status --json should print raw JSON."""
+        mock_run = {
+            "run_id": "abc-123",
+            "workflow_name": "test-wf",
+            "status": "completed",
+            "total_cost_usd": 0.01,
+            "started_at": "2026-02-27T10:00:00",
+            "completed_at": "2026-02-27T10:01:00",
+            "steps": [],
+        }
+        mock_client = MagicMock()
+        mock_client.get_run.return_value = mock_run
+
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "status", "abc-123"])
+
+        captured = StringIO()
+        with (
+            patch("sandcastle.__main__._get_client", return_value=mock_client),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_status(args)
+
+        output = json.loads(captured.getvalue())
+        assert output["run_id"] == "abc-123"
+        assert output["status"] == "completed"
+
+    def test_status_table_output(self):
+        """status without --json should print formatted details."""
+        mock_run = {
+            "run_id": "abc-123",
+            "workflow_name": "test-wf",
+            "status": "completed",
+            "total_cost_usd": 0.01,
+            "started_at": "2026-02-27T10:00:00",
+            "completed_at": "2026-02-27T10:01:00",
+        }
+        mock_client = MagicMock()
+        mock_client.get_run.return_value = mock_run
+
+        parser = _build_parser()
+        args = parser.parse_args(["status", "abc-123"])
+
+        captured = StringIO()
+        with (
+            patch("sandcastle.__main__._get_client", return_value=mock_client),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_status(args)
+
+        output = captured.getvalue()
+        assert "abc-123" in output
+        assert "test-wf" in output
+
+
+# ---------------------------------------------------------------------------
+# BUG FIX TESTS: cancel command --json support
+# ---------------------------------------------------------------------------
+
+
+class TestCancelJsonSupport:
+    """Verify that 'cancel' command supports --json output."""
+
+    def test_cancel_json_output(self):
+        """cancel --json should print raw JSON."""
+        mock_client = MagicMock()
+        mock_client.cancel_run.return_value = {"cancelled": True, "run_id": "abc-123"}
+
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "cancel", "abc-123"])
+
+        captured = StringIO()
+        with (
+            patch("sandcastle.__main__._get_client", return_value=mock_client),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_cancel(args)
+
+        output = json.loads(captured.getvalue())
+        assert output["cancelled"] is True
+
+    def test_cancel_text_output(self):
+        """cancel without --json should print human-readable confirmation."""
+        mock_client = MagicMock()
+        mock_client.cancel_run.return_value = {"cancelled": True, "run_id": "abc-123"}
+
+        parser = _build_parser()
+        args = parser.parse_args(["cancel", "abc-123"])
+
+        captured = StringIO()
+        with (
+            patch("sandcastle.__main__._get_client", return_value=mock_client),
+            patch("sys.stdout", captured),
+        ):
+            _cmd_cancel(args)
+
+        output = captured.getvalue()
+        assert "Cancelled" in output
+        assert "abc-123" in output
+
+
+# ---------------------------------------------------------------------------
+# BUG FIX TESTS: ls without resource
+# ---------------------------------------------------------------------------
+
+
+class TestLsNoResource:
+    """Verify that 'ls' without a resource prints usage."""
+
+    def test_ls_no_resource_exits_with_usage(self):
+        """'sandcastle ls' without a resource should exit with usage message."""
+        parser = _build_parser()
+        args = parser.parse_args(["ls"])
+
+        captured = StringIO()
+        with (
+            patch("sys.stderr", captured),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _cmd_ls(args)
+
+        assert exc_info.value.code == 1
+        assert "Usage" in captured.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Additional argument parsing tests for new sub-commands
+# ---------------------------------------------------------------------------
+
+
+class TestSubCommandParsing:
+    """Test argument parsing for sub-command groups (keys, dlq, etc.)."""
+
+    def test_keys_list_command(self):
+        """'keys list' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "list"])
+        assert args.command == "keys"
+        assert args.keys_action == "list"
+
+    def test_keys_create_command(self):
+        """'keys create --name test' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "create", "--name", "my-key"])
+        assert args.keys_action == "create"
+        assert args.name == "my-key"
+
+    def test_keys_create_with_tenant(self):
+        """'keys create --name test --tenant t1' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "create", "--name", "k", "--tenant", "t1"])
+        assert args.tenant == "t1"
+
+    def test_keys_create_with_cost_limit(self):
+        """'keys create --name k --cost-limit 10.5' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "create", "--name", "k", "--cost-limit", "10.5"])
+        assert args.cost_limit == 10.5
+
+    def test_keys_rotate_command(self):
+        """'keys rotate <id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["keys", "rotate", "key-abc"])
+        assert args.keys_action == "rotate"
+        assert args.key_id == "key-abc"
+
+    def test_dlq_list_command(self):
+        """'dlq list' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["dlq", "list"])
+        assert args.command == "dlq"
+        assert args.dlq_action == "list"
+
+    def test_dlq_list_resolved(self):
+        """'dlq list --resolved' should set resolved flag."""
+        parser = _build_parser()
+        args = parser.parse_args(["dlq", "list", "--resolved"])
+        assert args.resolved is True
+
+    def test_dlq_retry_command(self):
+        """'dlq retry <id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["dlq", "retry", "item-123"])
+        assert args.dlq_action == "retry"
+        assert args.item_id == "item-123"
+
+    def test_dlq_resolve_command(self):
+        """'dlq resolve <id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["dlq", "resolve", "item-456"])
+        assert args.dlq_action == "resolve"
+        assert args.item_id == "item-456"
+
+    def test_violations_list_command(self):
+        """'violations list' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["violations", "list"])
+        assert args.command == "violations"
+        assert args.violations_action == "list"
+
+    def test_violations_list_severity(self):
+        """'violations list --severity critical' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["violations", "list", "--severity", "critical"])
+        assert args.severity == "critical"
+
+    def test_tools_list_command(self):
+        """'tools list' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["tools", "list"])
+        assert args.command == "tools"
+        assert args.tools_action == "list"
+
+    def test_tools_configure_command(self):
+        """'tools configure <name> --env K=V' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args([
+            "tools", "configure", "slack", "--env", "SLACK_TOKEN=xoxb-123",
+        ])
+        assert args.tools_action == "configure"
+        assert args.tool_name == "slack"
+        assert args.env == ["SLACK_TOKEN=xoxb-123"]
+
+    def test_autopilot_list_command(self):
+        """'autopilot list' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["autopilot", "list"])
+        assert args.command == "autopilot"
+        assert args.autopilot_action == "list"
+
+    def test_autopilot_deploy_command(self):
+        """'autopilot deploy <id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["autopilot", "deploy", "exp-abc"])
+        assert args.autopilot_action == "deploy"
+        assert args.experiment_id == "exp-abc"
+
+    def test_hub_search_command(self):
+        """'hub search <query>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["hub", "search", "lead scoring"])
+        assert args.command == "hub"
+        assert args.hub_action == "search"
+        assert args.query == "lead scoring"
+
+    def test_hub_install_command(self):
+        """'hub install <slug>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["hub", "install", "gizmax/lead-scoring"])
+        assert args.hub_action == "install"
+        assert args.slug == "gizmax/lead-scoring"
+
+    def test_hub_list_command(self):
+        """'hub list' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["hub", "list"])
+        assert args.hub_action == "list"
+
+    def test_hub_collections_command(self):
+        """'hub collections' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["hub", "collections"])
+        assert args.hub_action == "collections"
+
+    def test_hub_install_collection_command(self):
+        """'hub install-collection <id>' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["hub", "install-collection", "marketing-starter"])
+        assert args.hub_action == "install-collection"
+        assert args.collection_id == "marketing-starter"
+
+    def test_eval_command(self):
+        """'eval suite.yaml' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["eval", "test_suite.yaml"])
+        assert args.command == "eval"
+        assert args.suite == "test_suite.yaml"
+
+    def test_eval_with_options(self):
+        """'eval suite.yaml -c 4 -t tag1 -v' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["eval", "s.yaml", "-c", "4", "-t", "smoke", "-v"])
+        assert args.concurrency == 4
+        assert args.tag == ["smoke"]
+        assert args.verbose is True
+
+    def test_generate_command(self):
+        """'generate -d "build something" -o out.yaml' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["generate", "-d", "build a data pipeline", "-o", "out.yaml"])
+        assert args.command == "generate"
+        assert args.description == "build a data pipeline"
+        assert args.output == "out.yaml"
+
+    def test_generate_refine_flag(self):
+        """'generate --refine' should set refine to True."""
+        parser = _build_parser()
+        args = parser.parse_args(["generate", "--refine"])
+        assert args.refine is True
+
+    def test_mcp_command(self):
+        """'mcp' should parse correctly with connection args."""
+        parser = _build_parser()
+        args = parser.parse_args(["mcp", "--url", "http://remote:9090"])
+        assert args.command == "mcp"
+        assert args.url == "http://remote:9090"
+
+    def test_version_flag(self):
+        """'--version' should print version info."""
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--version"])
+        assert exc_info.value.code == 0
+
+    def test_run_with_input_file(self):
+        """'run wf -f input.json' should parse correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["run", "wf", "-f", "input.json"])
+        assert args.input_file == "input.json"
+
+    def test_logs_with_follow(self):
+        """'logs <id> -f' should set follow flag."""
+        parser = _build_parser()
+        args = parser.parse_args(["logs", "run-123", "-f"])
+        assert args.follow is True

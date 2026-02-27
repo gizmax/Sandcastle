@@ -462,6 +462,10 @@ def _cmd_status(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    if getattr(args, "json", False):
+        print(json.dumps(_to_dict(run), indent=2, default=str))
+        return
+
     _print_run_detail(run)
 
 
@@ -469,11 +473,20 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
     """Cancel a running workflow."""
     client = _get_client(args)
     try:
-        client.cancel_run(args.run_id)
-        print(f"Cancelled run {args.run_id}")
+        result = client.cancel_run(args.run_id)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    if getattr(args, "json", False):
+        print(json.dumps(
+            result if isinstance(result, dict)
+            else {"cancelled": True, "run_id": args.run_id},
+            indent=2, default=str,
+        ))
+        return
+
+    print(f"Cancelled run {args.run_id}")
 
 
 def _cmd_logs(args: argparse.Namespace) -> None:
@@ -506,7 +519,11 @@ def _cmd_logs(args: argparse.Namespace) -> None:
 
 def _cmd_ls(args: argparse.Namespace) -> None:
     """List runs, workflows, or schedules."""
-    resource = args.resource
+    resource = getattr(args, "resource", None)
+    if not resource:
+        print("Usage: sandcastle ls {runs,workflows,schedules}", file=sys.stderr)
+        sys.exit(1)
+
     client = _get_client(args)
 
     try:
@@ -860,6 +877,31 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
             _fail(f"License expired: {lic.detail}")
         else:
             _fail(f"License invalid: {lic.detail}")
+
+    # --- Section 8: Directories ---
+    print()
+    print(_color("  Directories", _C.BOLD))
+    print(_color("  -----------", _C.BOLD))
+
+    if cfg:
+        wf_dir = Path(cfg.workflows_dir)
+        if wf_dir.exists():
+            yamls = list(wf_dir.glob("*.yaml")) + list(wf_dir.glob("*.yml"))
+            _pass(f"Workflows dir: {wf_dir} ({len(yamls)} workflow(s))")
+        else:
+            _warn(
+                f"Workflows dir does not exist: {wf_dir}\n"
+                "           Run 'sandcastle init' to create it"
+            )
+
+        data_path = Path(cfg.data_dir)
+        if data_path.exists():
+            _pass(f"Data dir: {data_path}")
+        else:
+            _warn(
+                f"Data dir does not exist: {data_path}\n"
+                "           Run 'sandcastle init' to create it"
+            )
 
     # --- Summary ---
     print()
@@ -1598,6 +1640,62 @@ def _cmd_hub_search(args: argparse.Namespace) -> None:
     print(f"\n{_color(str(len(results)), _C.CYAN)} result(s) found.")
 
 
+def _sanitize_hub_filename(slug: str) -> str:
+    """Sanitize a hub slug to a safe filename (no path traversal)."""
+    import re as _re
+
+    # Take only the last component and strip any path separators
+    base = slug.split("/")[-1]
+    # Remove any character that is not alphanumeric, hyphen, or underscore
+    safe = _re.sub(r"[^a-zA-Z0-9_\-]", "_", base)
+    # Ensure it does not start with a dot (hidden file) or be empty
+    safe = safe.lstrip(".")
+    if not safe:
+        safe = "workflow"
+    return safe + ".yaml"
+
+
+def _validate_hub_download_url(url: str) -> bool:
+    """Validate that a hub download URL points to a trusted source."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    # Only allow downloads from GitHub raw content
+    trusted_hosts = (
+        "raw.githubusercontent.com",
+        "github.com",
+        "objects.githubusercontent.com",
+    )
+    return parsed.hostname in trusted_hosts
+
+
+def _validate_hub_yaml(yaml_content: str) -> tuple[bool, str]:
+    """Validate that downloaded hub YAML is safe and well-formed."""
+    import yaml as _yaml
+
+    # Size limit
+    if len(yaml_content) > 512 * 1024:  # 512KB
+        return False, "YAML content too large (max 512KB)"
+
+    try:
+        data = _yaml.safe_load(yaml_content)
+    except _yaml.YAMLError as exc:
+        return False, f"Invalid YAML: {exc}"
+
+    if not isinstance(data, dict):
+        return False, "YAML must be a mapping"
+
+    if "name" not in data:
+        return False, "YAML must contain a 'name' field"
+
+    if "steps" not in data or not isinstance(data.get("steps"), list):
+        return False, "YAML must contain a 'steps' list"
+
+    return True, ""
+
+
 def _cmd_hub_install(args: argparse.Namespace) -> None:
     """Install a community workflow by slug."""
     import urllib.request
@@ -1629,6 +1727,14 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
+    # Validate download URL points to a trusted source
+    if not _validate_hub_download_url(download_url):
+        print(
+            f"{_color('Error', _C.RED)}: Download URL is not from a trusted source: {download_url}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Fetch the YAML content
     try:
         with urllib.request.urlopen(download_url, timeout=10) as resp:
@@ -1640,11 +1746,30 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    # Save to target directory
+    # Validate downloaded YAML
+    valid, err_msg = _validate_hub_yaml(yaml_content)
+    if not valid:
+        print(
+            f"{_color('Error', _C.RED)}: Invalid workflow YAML: {err_msg}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Save to target directory with sanitized filename
     target_dir = Path(getattr(args, "dir", None) or "./workflows/")
     target_dir.mkdir(parents=True, exist_ok=True)
-    filename = slug.split("/")[-1] + ".yaml"
+    filename = _sanitize_hub_filename(slug)
     target_path = target_dir / filename
+
+    # Final path traversal guard
+    resolved_target = target_path.resolve()
+    resolved_dir = target_dir.resolve()
+    if not str(resolved_target).startswith(str(resolved_dir)):
+        print(
+            f"{_color('Error', _C.RED)}: Path traversal detected in slug: {slug}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     try:
         target_path.write_text(yaml_content)
@@ -1777,12 +1902,26 @@ def _cmd_hub_install_collection(args: argparse.Namespace) -> None:
             print(f"  {_color('Skip', _C.YELLOW)}: {slug} (not found)")
             continue
 
+        dl_url = t["download_url"]
+        if not _validate_hub_download_url(dl_url):
+            print(f"  {_color('Skip', _C.YELLOW)}: {slug} (untrusted download URL)")
+            continue
+
         try:
-            with urllib.request.urlopen(t["download_url"], timeout=10) as resp:
+            with urllib.request.urlopen(dl_url, timeout=10) as resp:
                 yaml_content = resp.read().decode("utf-8")
-            filename = slug.split("/")[-1] + ".yaml"
-            (target_dir / filename).write_text(yaml_content)
-            print(f"  {_color('OK', _C.GREEN)}: {slug} -> {target_dir / filename}")
+            valid, err_msg = _validate_hub_yaml(yaml_content)
+            if not valid:
+                print(f"  {_color('Skip', _C.YELLOW)}: {slug} (invalid YAML: {err_msg})")
+                continue
+            filename = _sanitize_hub_filename(slug)
+            file_path = target_dir / filename
+            # Path traversal guard
+            if not str(file_path.resolve()).startswith(str(target_dir.resolve())):
+                print(f"  {_color('Skip', _C.YELLOW)}: {slug} (path traversal)")
+                continue
+            file_path.write_text(yaml_content)
+            print(f"  {_color('OK', _C.GREEN)}: {slug} -> {file_path}")
             installed += 1
         except Exception as exc:
             print(f"  {_color('Error', _C.RED)}: {slug} - {exc}")
@@ -2055,6 +2194,20 @@ def _cmd_keys_create(args: argparse.Namespace) -> None:
 
 def _cmd_keys_delete(args: argparse.Namespace) -> None:
     """Delete (deactivate) an API key."""
+    # Safety confirmation for destructive operation
+    force = getattr(args, "force", False)
+    if not force and sys.stdin.isatty():
+        try:
+            answer = input(
+                f"  Deactivate API key {args.key_id}? This cannot be undone. [y/N] "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+        if answer not in ("y", "yes"):
+            print("  Aborted.")
+            return
+
     body = _api_delete(args, f"/api/api-keys/{args.key_id}")
     data = body.get("data", {})
 
@@ -2860,6 +3013,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_keys_delete = keys_sub.add_parser("delete", help="Delete (deactivate) an API key")
     p_keys_delete.add_argument("key_id", help="API key ID to delete")
+    p_keys_delete.add_argument(
+        "--force", "-f", action="store_true", help="Skip confirmation prompt"
+    )
     _add_connection_args(p_keys_delete)
 
     p_keys_rotate = keys_sub.add_parser(
@@ -2976,6 +3132,41 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
+    # Commands with sub-commands must be routed BEFORE the simple dispatch
+    # so that sub-actions like 'runs compare' are not shadowed.
+
+    # --- runs (with sub-commands + backward compat) ---
+    if args.command == "runs":
+        action = getattr(args, "runs_action", None)
+        if action == "compare":
+            _cmd_runs_compare(args)
+        else:
+            # Default: list runs (backward compat for 'sandcastle runs')
+            _cmd_runs(args)
+        return
+
+    # --- db ---
+    if args.command == "db":
+        if getattr(args, "db_action", None) == "migrate":
+            _cmd_db_migrate(args)
+        else:
+            print("Usage: sandcastle db migrate", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # --- schedule ---
+    if args.command == "schedule":
+        action = getattr(args, "schedule_action", None)
+        if action == "create":
+            _cmd_schedule_create(args)
+        elif action == "delete":
+            _cmd_schedule_delete(args)
+        else:
+            print("Usage: sandcastle schedule {create,delete}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Simple dispatch for commands without sub-routing conflicts
     dispatch: dict[str, Any] = {
         "init": _cmd_init,
         "serve": _cmd_serve,
@@ -3006,36 +3197,6 @@ def main() -> None:
     handler = dispatch.get(args.command)
     if handler:
         handler(args)
-        return
-
-    # --- runs (with sub-commands + backward compat) ---
-    if args.command == "runs":
-        action = getattr(args, "runs_action", None)
-        if action == "compare":
-            _cmd_runs_compare(args)
-        else:
-            # Default: list runs (backward compat for 'sandcastle runs')
-            _cmd_runs(args)
-        return
-
-    # Sub-commands that need further routing
-    if args.command == "db":
-        if getattr(args, "db_action", None) == "migrate":
-            _cmd_db_migrate(args)
-        else:
-            print("Usage: sandcastle db migrate", file=sys.stderr)
-            sys.exit(1)
-        return
-
-    if args.command == "schedule":
-        action = getattr(args, "schedule_action", None)
-        if action == "create":
-            _cmd_schedule_create(args)
-        elif action == "delete":
-            _cmd_schedule_delete(args)
-        else:
-            print("Usage: sandcastle schedule {create,delete}", file=sys.stderr)
-            sys.exit(1)
         return
 
     parser.print_help()
