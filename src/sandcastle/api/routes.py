@@ -823,12 +823,13 @@ async def hub_playground(request: Request) -> ApiResponse:
 
 
 @router.post("/hub/install/{slug:path}")
-async def install_hub_template(slug: str) -> ApiResponse:
+async def install_hub_template(req: Request, slug: str) -> ApiResponse:
     """Install a community workflow from the hub registry.
 
     Downloads the YAML from GitHub and saves it to the community
     templates directory. Returns the installed template metadata.
     """
+    _require_admin(req)
     # Validate slug format (author/name)
     parts = slug.split("/")
     if len(parts) != 2 or not parts[0] or not parts[1]:
@@ -1009,8 +1010,9 @@ async def install_hub_template(slug: str) -> ApiResponse:
 
 
 @router.delete("/hub/install/{slug:path}")
-async def uninstall_hub_template(slug: str) -> ApiResponse:
+async def uninstall_hub_template(req: Request, slug: str) -> ApiResponse:
     """Uninstall a community workflow."""
+    _require_admin(req)
     parts = slug.split("/")
     if len(parts) != 2 or not parts[0] or not parts[1]:
         raise HTTPException(
@@ -1203,16 +1205,15 @@ async def get_stats(request: Request) -> ApiResponse:
 
 
 @router.post("/generate")
-async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
+async def generate_workflow(req: Request, request: WorkflowGenerateRequest) -> ApiResponse:
     """Generate a workflow YAML from a natural language description."""
+    await execution_limiter.check(req)
     from sandcastle.engine.generator import generate_workflow as _generate
 
     if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
-        return ApiResponse(
-            error=ErrorResponse(
-                code="service_unavailable",
-                message="ANTHROPIC_API_KEY is required for workflow generation",
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="ANTHROPIC_API_KEY is required for workflow generation",
         )
 
     try:
@@ -1223,19 +1224,15 @@ async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
         )
     except httpx.HTTPStatusError as exc:
         logger.error(f"Anthropic API error: {exc}")
-        return ApiResponse(
-            error=ErrorResponse(
-                code="upstream_error",
-                message=f"Anthropic API returned {exc.response.status_code}",
-            )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Anthropic API returned {exc.response.status_code}",
         )
     except Exception as exc:
         logger.error("Generation failed: %s", exc)
-        return ApiResponse(
-            error=ErrorResponse(
-                code="generation_failed",
-                message="Workflow generation failed",
-            )
+        raise HTTPException(
+            status_code=503,
+            detail="Workflow generation failed",
         )
 
     return ApiResponse(
@@ -1251,16 +1248,15 @@ async def generate_workflow(request: WorkflowGenerateRequest) -> ApiResponse:
 
 
 @router.post("/generate/chat")
-async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
+async def generate_chat(req: Request, request: GenerateChatRequest) -> ApiResponse:
     """Chat-based workflow generation with multi-turn conversation."""
+    await execution_limiter.check(req)
     from sandcastle.engine.generator import generate_chat as _generate_chat
 
     if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
-        return ApiResponse(
-            error=ErrorResponse(
-                code="service_unavailable",
-                message="ANTHROPIC_API_KEY is required for workflow generation",
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="ANTHROPIC_API_KEY is required for workflow generation",
         )
 
     try:
@@ -1271,19 +1267,15 @@ async def generate_chat(request: GenerateChatRequest) -> ApiResponse:
         )
     except httpx.HTTPStatusError as exc:
         logger.error("Anthropic API error: %s", exc)
-        return ApiResponse(
-            error=ErrorResponse(
-                code="upstream_error",
-                message=f"Anthropic API returned {exc.response.status_code}",
-            )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Anthropic API returned {exc.response.status_code}",
         )
     except Exception as exc:
         logger.error("Chat generation failed: %s", exc)
-        return ApiResponse(
-            error=ErrorResponse(
-                code="generation_failed",
-                message="Chat generation failed",
-            )
+        raise HTTPException(
+            status_code=503,
+            detail="Chat generation failed",
         )
 
     return ApiResponse(data=result)
@@ -2343,6 +2335,10 @@ async def list_runs(
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List workflow runs with filters and pagination."""
+    if status:
+        valid = {s.value for s in RunStatus}
+        if status not in valid:
+            raise HTTPException(status_code=400, detail=f"Invalid status '{status}'. Valid: {', '.join(sorted(valid))}")
     tenant_id = get_tenant_id(request)
 
     async with async_session() as session:
@@ -4980,8 +4976,9 @@ async def get_workflow_version(name: str, version: int) -> ApiResponse:
 
 
 @router.post("/workflows/{name}/promote")
-async def promote_workflow(name: str, request: WorkflowPromoteRequest) -> ApiResponse:
+async def promote_workflow(req: Request, name: str, request: WorkflowPromoteRequest) -> ApiResponse:
     """Promote a workflow version: draft -> staging -> production."""
+    _require_admin(req)
     async with async_session() as session:
         # Find the version to promote
         if request.version:
@@ -5083,8 +5080,9 @@ async def promote_workflow(name: str, request: WorkflowPromoteRequest) -> ApiRes
 
 
 @router.post("/workflows/{name}/rollback")
-async def rollback_workflow(name: str, request: WorkflowRollbackRequest) -> ApiResponse:
+async def rollback_workflow(req: Request, name: str, request: WorkflowRollbackRequest) -> ApiResponse:
     """Rollback a workflow to a previous production version."""
+    _require_admin(req)
     async with async_session() as session:
         if request.target_version:
             # Rollback to specific version
@@ -5633,8 +5631,9 @@ async def delete_tool_connection(
 
 
 @router.post("/eval/run")
-async def run_eval_suite_endpoint(body: EvalSuiteRunRequest) -> ApiResponse:
+async def run_eval_suite_endpoint(req: Request, body: EvalSuiteRunRequest) -> ApiResponse:
     """Run an eval suite from YAML and return results."""
+    _require_admin(req)
     from sandcastle.engine.eval import (
         parse_eval_suite_string,
         run_eval_suite,
@@ -5777,6 +5776,7 @@ async def list_eval_runs(
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List eval run history."""
+    _require_admin(request)
     async with async_session() as session:
         count_stmt = select(func.count(EvalRun.id))
         total = await session.scalar(count_stmt)
@@ -5811,8 +5811,9 @@ async def list_eval_runs(
 
 
 @router.get("/eval/runs/{eval_run_id}")
-async def get_eval_run(eval_run_id: str) -> ApiResponse:
+async def get_eval_run(req: Request, eval_run_id: str) -> ApiResponse:
     """Get eval run details with case results."""
+    _require_admin(req)
     try:
         run_uuid = uuid.UUID(eval_run_id)
     except ValueError:
@@ -5875,8 +5876,9 @@ async def get_eval_run(eval_run_id: str) -> ApiResponse:
 
 
 @router.get("/eval/stats")
-async def eval_stats() -> ApiResponse:
+async def eval_stats(req: Request) -> ApiResponse:
     """Get aggregated eval statistics with 30-day trend."""
+    _require_admin(req)
     async with async_session() as session:
         total_runs = await session.scalar(select(func.count(EvalRun.id)))
         avg_pass_rate = await session.scalar(select(func.avg(EvalRun.pass_rate)))
@@ -5931,12 +5933,14 @@ async def eval_stats() -> ApiResponse:
 
 @router.get("/memories")
 async def list_memories(
+    req: Request,
     scope_id: str = Query(
         ..., description="Scope ID (e.g. 'workflow:my-wf', 'agent:bot', 'global')"
     ),
     limit: int = Query(50, ge=1, le=200),
 ):
     """List all memories for a given scope."""
+    _require_admin(req)
     from sandcastle.engine.memory import load_memories
 
     memories = await load_memories(scope_id, limit=limit)
@@ -5945,8 +5949,9 @@ async def list_memories(
 
 
 @router.post("/memories")
-async def add_memory(body: MemoryAddRequest):
+async def add_memory(req: Request, body: MemoryAddRequest):
     """Add a new memory. Mem0 auto-extracts facts and deduplicates."""
+    _require_admin(req)
     from sandcastle.engine.memory import save_memory
 
     result = await save_memory(
@@ -5958,8 +5963,9 @@ async def add_memory(body: MemoryAddRequest):
 
 
 @router.post("/memories/search")
-async def search_memories(body: MemorySearchRequest):
+async def search_memories(req: Request, body: MemorySearchRequest):
     """Semantic search over memories."""
+    _require_admin(req)
     from sandcastle.engine.memory import load_memories
 
     memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
@@ -5968,8 +5974,9 @@ async def search_memories(body: MemorySearchRequest):
 
 
 @router.delete("/memories/{memory_id}")
-async def remove_memory(memory_id: str):
+async def remove_memory(req: Request, memory_id: str):
     """Delete a specific memory by ID."""
+    _require_admin(req)
     from sandcastle.engine.memory import delete_memory
 
     ok = await delete_memory(memory_id)
@@ -5987,9 +5994,11 @@ async def remove_memory(memory_id: str):
 
 @router.delete("/memories")
 async def remove_all_memories(
+    req: Request,
     scope_id: str = Query(..., description="Scope ID to clear"),
 ):
     """Delete all memories for a given scope."""
+    _require_admin(req)
     from sandcastle.engine.memory import delete_all_memories
 
     ok = await delete_all_memories(scope_id)

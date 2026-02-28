@@ -23,7 +23,7 @@ export function ContextBanner({ variant, icon: Icon, children, link, className }
 
   return (
     <div
-      role={variant === "error" || variant === "warning" ? "alert" : undefined}
+      role={variant === "error" ? "alert" : variant === "warning" ? "status" : undefined}
       className={cn(
         "flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5",
         "border-l-[3px]", s.border, s.bg,

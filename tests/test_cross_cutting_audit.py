@@ -759,8 +759,8 @@ class TestCancelFlagLifecycle:
             # First check: should detect cancel
             assert await _check_cancel(run_id) is True
 
-            # Second check: should NOT detect cancel (consumed)
-            assert await _check_cancel(run_id) is False
+            # Second check: flag persists (cleaned up in finally block, not on check)
+            assert await _check_cancel(run_id) is True
         finally:
             real_settings.redis_url = original_redis_url
 

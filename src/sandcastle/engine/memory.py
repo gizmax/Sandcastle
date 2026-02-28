@@ -741,6 +741,7 @@ async def memory_health_check(
 
 def _reset_client() -> None:
     """Reset all client singletons (for testing)."""
-    global _clients, _graph_client
+    global _clients, _graph_client, _graph_client_initialized
     _clients = {}
     _graph_client = None
+    _graph_client_initialized = False

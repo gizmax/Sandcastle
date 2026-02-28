@@ -391,6 +391,7 @@ export default function IntegrationsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search tools..."
+                aria-label="Search available tools"
                 className={cn(
                   "w-full sm:w-56 rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground",
                   "placeholder:text-muted-foreground/50",
@@ -404,6 +405,7 @@ export default function IntegrationsPage() {
                 <button
                   key={cat}
                   onClick={() => setCategory(cat)}
+                  aria-pressed={category === cat}
                   className={cn(
                     "whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
                     category === cat

@@ -24,6 +24,14 @@ export function ReplayForkModal({
   const [maxTurns, setMaxTurns] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (open) {
+      setPrompt("");
+      setModel("");
+      setMaxTurns("");
+    }
+  }, [open, stepId]);
+
   // Close on Escape key
   useEffect(() => {
     if (!open) return;

@@ -312,7 +312,7 @@ def add_schedule(
     scheduler = get_scheduler()
 
     try:
-        trigger = CronTrigger.from_crontab(cron_expression)
+        trigger = CronTrigger.from_crontab(cron_expression, timezone=timezone.utc)
     except ValueError as e:
         raise ValueError(f"Invalid cron expression '{cron_expression}': {e}")
 

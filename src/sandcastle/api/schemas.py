@@ -127,7 +127,7 @@ class ApiKeyRotateRequest(BaseModel):
     """Request to rotate an API key."""
 
     grace_period_hours: int | None = Field(
-        None, description="Hours to keep old key active (default: server setting)"
+        None, description="Hours to keep old key active (default: server setting)", ge=0
     )
 
 

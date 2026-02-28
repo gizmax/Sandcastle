@@ -70,6 +70,8 @@ def _table(headers: list[str], rows: list[list[str]], *, max_col: int = 40) -> s
     if not rows:
         return "(no data)"
 
+    rows = [r + [""] * (len(headers) - len(r)) for r in rows]
+
     def _trunc(val: str) -> str:
         if len(val) > max_col:
             return val[: max_col - 1] + "\u2026"
@@ -180,22 +182,31 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
         "completed", "failed", "cancelled", "error",
         "partial", "budget_exceeded", "awaiting_approval",
     }
-    while True:
-        run = client.get_run(run_id)
-        status = _attr(run, "status", "unknown")
-        if status in terminal:
-            # Clear spinner line
-            sys.stdout.write("\r" + " " * 60 + "\r")
+    start = time.monotonic()
+    max_wait = 3600
+    try:
+        while True:
+            if time.monotonic() - start > max_wait:
+                print(f"\r\033[KTimeout: run did not complete within {max_wait}s")
+                return {"id": run_id, "status": "timeout"}
+            run = client.get_run(run_id)
+            status = _attr(run, "status", "unknown")
+            if status in terminal:
+                # Clear spinner line
+                sys.stdout.write("\r" + " " * 60 + "\r")
+                sys.stdout.flush()
+                return _to_dict(run)
+            # Show spinner
+            frame = frames[idx % len(frames)]
+            label = _status_color(status)
+            msg = f"\r  {_color(frame, _C.CYAN)} Waiting for {run_id[:12]}... [{label}]"
+            sys.stdout.write(msg)
             sys.stdout.flush()
-            return _to_dict(run)
-        # Show spinner
-        frame = frames[idx % len(frames)]
-        label = _status_color(status)
-        msg = f"\r  {_color(frame, _C.CYAN)} Waiting for {run_id[:12]}... [{label}]"
-        sys.stdout.write(msg)
-        sys.stdout.flush()
-        idx += 1
-        time.sleep(1.5)
+            idx += 1
+            time.sleep(1.5)
+    except KeyboardInterrupt:
+        print("\r\033[KCancelled.")
+        return {"id": run_id, "status": "cancelled"}
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +352,16 @@ def _cmd_init(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    try:
+        _cmd_init_inner(args)
+    except (KeyboardInterrupt, EOFError):
+        print("\nSetup cancelled.")
+        return
+
+
+def _cmd_init_inner(args: argparse.Namespace) -> None:
+    from pathlib import Path
 
     env_path = Path(".env")
 
@@ -1068,6 +1089,7 @@ def _cmd_health(args: argparse.Namespace) -> None:
             print(f"Redis:     {'ok' if data.get('redis') else 'unreachable'}")
         print(f"Database:  {'ok' if data.get('database') else 'unreachable'}")
         if status not in ("ok", "healthy"):
+            print(f"Health check failed: {status}")
             sys.exit(1)
     except Exception as exc:
         print(f"Error: cannot reach API - {exc}", file=sys.stderr)
@@ -1917,7 +1939,11 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
         for w in scan.warnings:
             step_info = f" (step: {w.step})" if w.step else ""
             print(f"  {_color('!', _C.YELLOW)} [{w.code}] {w.message}{step_info}")
-        answer = input("Continue anyway? [y/N] ").strip().lower()
+        try:
+            answer = input("Continue anyway? [y/N] ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted.")
+            return
         if answer not in ("y", "yes"):
             print("Installation cancelled.")
             sys.exit(0)

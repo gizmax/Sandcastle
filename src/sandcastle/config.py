@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     tool_google_service_account: str = ""
     tool_postgresql_url: str = ""
     tool_smtp_host: str = ""
-    tool_smtp_port: str = "587"
+    tool_smtp_port: int = 587
     tool_smtp_user: str = ""
     tool_smtp_password: str = ""
 
