@@ -98,6 +98,134 @@ def _table(headers: list[str], rows: list[list[str]], *, max_col: int = 40) -> s
 
 
 # ---------------------------------------------------------------------------
+# .env loader
+# ---------------------------------------------------------------------------
+
+_dot_env_loaded = False
+
+
+def _load_dot_env() -> None:
+    """Load .env file into os.environ if it exists (idempotent).
+
+    This ensures CLI commands that read os.getenv() directly (e.g. for
+    SANDCASTLE_URL, SANDCASTLE_API_KEY) pick up values from .env without
+    requiring pydantic-settings or the full config module.
+    """
+    global _dot_env_loaded
+    if _dot_env_loaded:
+        return
+    _dot_env_loaded = True
+
+    from pathlib import Path
+
+    env_path = Path(".env")
+    if not env_path.is_file():
+        return
+
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            # Strip surrounding quotes
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            # Only set if not already in environment (env vars take precedence)
+            if key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# UUID validation helper
+# ---------------------------------------------------------------------------
+
+
+def _validate_run_id(run_id: str) -> None:
+    """Validate that run_id looks like a valid UUID and exit with a clear
+    message if it is obviously invalid (empty or contains spaces/slashes).
+    For borderline cases, print a warning but let the request proceed
+    (the server will return 404 for unknown IDs).
+    """
+    import re
+
+    # Hard-reject obviously invalid inputs
+    if not run_id or not run_id.strip():
+        print("Error: run ID cannot be empty.", file=sys.stderr)
+        sys.exit(1)
+
+    # Block path traversal and whitespace
+    if "/" in run_id or "\\" in run_id or " " in run_id:
+        print(
+            f"Error: '{run_id}' is not a valid run ID (contains invalid characters).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Warn (but don't block) if it doesn't look like a UUID
+    uuid_pattern = re.compile(
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+    if not uuid_pattern.match(run_id):
+        print(
+            f"Warning: '{run_id}' does not look like a valid UUID "
+            f"(expected format: 550e8400-e29b-41d4-a716-446655440000)",
+            file=sys.stderr,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Improved error formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_cli_error(exc: Exception) -> str:
+    """Format an exception into a user-friendly CLI error message."""
+    exc_type = type(exc).__name__
+
+    # httpx connection errors
+    if "ConnectError" in exc_type or "ConnectionError" in exc_type:
+        return (
+            f"Connection failed: {exc}\n"
+            "  Is the Sandcastle server running? Start it with: sandcastle serve"
+        )
+    if "ConnectTimeout" in exc_type or "TimeoutException" in exc_type:
+        return f"Connection timed out: {exc}\n  Check that the server URL is correct."
+    if "ConnectionRefusedError" in exc_type or "ConnectionRefused" in str(exc):
+        return (
+            f"Connection refused: {exc}\n"
+            "  Is the Sandcastle server running? Start it with: sandcastle serve"
+        )
+
+    # HTTP status errors
+    msg = str(exc)
+    if "401" in msg or "Unauthorized" in msg:
+        return "Authentication failed (HTTP 401). Check your API key."
+    if "403" in msg or "Forbidden" in msg:
+        return "Access denied (HTTP 403). Your API key may lack the required permissions."
+    if "404" in msg or "Not Found" in msg:
+        return f"Resource not found (HTTP 404): {exc}"
+    if "422" in msg:
+        return f"Validation error (HTTP 422): {exc}"
+    if "500" in msg or "Internal Server Error" in msg:
+        return f"Server error (HTTP 500): {exc}"
+
+    # File errors
+    if isinstance(exc, FileNotFoundError):
+        return f"File not found: {exc}"
+    if isinstance(exc, PermissionError):
+        return f"Permission denied: {exc}"
+
+    return f"Error: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Client helper
 # ---------------------------------------------------------------------------
 
@@ -539,6 +667,16 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         print(
             f"\n  {_color('Port ' + str(port) + ' is already in use.', _C.YELLOW)}"
         )
+
+        if not sys.stdin.isatty():
+            # Non-interactive mode - cannot prompt, exit with clear message
+            print(
+                f"  {_color('Cannot prompt in non-interactive mode. '
+                'Free port ' + str(port) + ' or use --port to pick another.', _C.RED)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         try:
             answer = input("  Kill the existing process and restart? [Y/n] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -598,7 +736,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
                 max_cost_usd=args.max_cost,
             )
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     run_id = _attr(run, "run_id", str(run))
@@ -618,11 +756,12 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 def _cmd_status(args: argparse.Namespace) -> None:
     """Show status of a specific run."""
+    _validate_run_id(args.run_id)
     client = _get_client(args)
     try:
         run = client.get_run(args.run_id)
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     if getattr(args, "json", False):
@@ -634,11 +773,12 @@ def _cmd_status(args: argparse.Namespace) -> None:
 
 def _cmd_cancel(args: argparse.Namespace) -> None:
     """Cancel a running workflow."""
+    _validate_run_id(args.run_id)
     client = _get_client(args)
     try:
         result = client.cancel_run(args.run_id)
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     if getattr(args, "json", False):
@@ -654,6 +794,7 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
 
 def _cmd_logs(args: argparse.Namespace) -> None:
     """Stream SSE events for a run."""
+    _validate_run_id(args.run_id)
     client = _get_client(args)
     terminal_statuses = {
         "completed", "failed", "cancelled", "error",
@@ -680,7 +821,7 @@ def _cmd_logs(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         print("\nStream interrupted.")
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
 
@@ -1097,7 +1238,7 @@ def _cmd_health(args: argparse.Namespace) -> None:
             print(f"Health check failed: {status}")
             sys.exit(1)
     except Exception as exc:
-        print(f"Error: cannot reach API - {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
 
@@ -1310,7 +1451,7 @@ def _cmd_templates(args: argparse.Namespace) -> None:
         resp = httpx.get(f"{base}/api/templates", timeout=10)
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     body = resp.json()
@@ -1347,6 +1488,8 @@ def _cmd_replay(args: argparse.Namespace) -> None:
     """Replay a workflow run from a specific step."""
     import httpx
 
+    _validate_run_id(args.run_id)
+
     base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
     api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
     headers_dict: dict[str, str] = {}
@@ -1369,7 +1512,7 @@ def _cmd_replay(args: argparse.Namespace) -> None:
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     body = resp.json()
@@ -1389,6 +1532,8 @@ def _cmd_replay(args: argparse.Namespace) -> None:
 def _cmd_fork(args: argparse.Namespace) -> None:
     """Fork a run with optional overrides."""
     import httpx
+
+    _validate_run_id(args.run_id)
 
     base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
     api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
@@ -1430,7 +1575,7 @@ def _cmd_fork(args: argparse.Namespace) -> None:
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     body = resp.json()
@@ -1452,6 +1597,8 @@ def _cmd_fork(args: argparse.Namespace) -> None:
 def _cmd_approve(args: argparse.Namespace) -> None:
     """Approve a paused approval step."""
     import httpx
+
+    _validate_run_id(args.run_id)
 
     base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
     api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
@@ -1484,7 +1631,7 @@ def _cmd_approve(args: argparse.Namespace) -> None:
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     body = resp.json()
@@ -1500,6 +1647,8 @@ def _cmd_approve(args: argparse.Namespace) -> None:
 def _cmd_reject(args: argparse.Namespace) -> None:
     """Reject a paused approval step."""
     import httpx
+
+    _validate_run_id(args.run_id)
 
     base = getattr(args, "url", None) or os.getenv("SANDCASTLE_URL", "http://localhost:8080")
     api_key = getattr(args, "api_key", None) or os.getenv("SANDCASTLE_API_KEY", "")
@@ -1527,7 +1676,7 @@ def _cmd_reject(args: argparse.Namespace) -> None:
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     body = resp.json()
@@ -1566,7 +1715,7 @@ def _cmd_runs(args: argparse.Namespace) -> None:
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
 
     body = resp.json()
@@ -2308,7 +2457,7 @@ def _api_get(
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
     return resp.json()
 
@@ -2331,7 +2480,7 @@ def _api_post(
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
     return resp.json()
 
@@ -2354,7 +2503,7 @@ def _api_put(
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
     return resp.json()
 
@@ -2375,7 +2524,7 @@ def _api_delete(
         )
         resp.raise_for_status()
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(_format_cli_error(exc), file=sys.stderr)
         sys.exit(1)
     return resp.json()
 
@@ -3370,6 +3519,10 @@ def main() -> None:
         # No command given - default to serve (backwards compatible)
         parser.print_help()
         sys.exit(0)
+
+    # Load .env file for commands that read os.getenv() directly.
+    # Commands like 'init' and 'doctor' don't need this but it's harmless.
+    _load_dot_env()
 
     # Commands with sub-commands must be routed BEFORE the simple dispatch
     # so that sub-actions like 'runs compare' are not shadowed.

@@ -19,15 +19,15 @@ export function ApiKeyTable({ keys, onDeactivate }: ApiKeyTableProps) {
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" aria-label="API keys">
           <thead>
             <tr className="border-b border-border bg-background/50">
-              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Key</th>
-              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Name</th>
-              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Tenant</th>
-              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
-              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Last Used</th>
-              <th className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Key</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Name</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Tenant</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Last Used</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">

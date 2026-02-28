@@ -351,7 +351,7 @@ export default function OptimizerPage() {
                     {/* Alternatives table */}
                     {item.alternatives && item.alternatives.length > 0 && (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="w-full text-sm" aria-label="Model alternatives comparison">
                           <thead>
                             <tr className="border-b border-border bg-background/50">
                               <th className="px-3 sm:px-5 py-2.5 text-left font-medium text-muted">Model</th>

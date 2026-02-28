@@ -42,18 +42,9 @@ import { CommunityCard } from "@/components/templates/CommunityCard";
 import type { CommunityTemplate } from "@/components/templates/CommunityCard";
 import { TOOL_ICON_MAP } from "@/components/integrations/toolIcons";
 
+import type { InputSchema } from "@/types/inputSchema";
+
 // ---- Types ----
-
-interface InputSchemaProperty {
-  type: string;
-  description?: string;
-  default?: unknown;
-}
-
-interface InputSchema {
-  properties: Record<string, InputSchemaProperty>;
-  required?: string[];
-}
 
 interface Template {
   name: string;

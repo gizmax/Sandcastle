@@ -29,7 +29,7 @@ export function YamlPreview({ open, yaml, onClose }: YamlPreviewProps) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
+    <div role="dialog" aria-modal="true" aria-label="YAML Preview" className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
         <h3 className="text-sm font-semibold text-foreground">YAML Preview</h3>
         <div className="flex items-center gap-1">

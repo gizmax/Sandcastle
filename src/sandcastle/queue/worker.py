@@ -250,9 +250,65 @@ async def run_workflow_job(
         return {"run_id": run_id, "status": "failed", "error": str(e)}
 
 
+async def _recover_stuck_runs() -> None:
+    """Recover runs stuck in RUNNING/QUEUED after a worker crash.
+
+    Finds runs that have been in RUNNING or QUEUED status for longer than
+    twice the job timeout and marks them as FAILED.  Called during worker
+    startup to clean up after unexpected shutdowns.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from sandcastle.models.db import Run, RunStatus, async_session
+
+    timeout_seconds = int(os.environ.get("SANDCASTLE_WORKER_JOB_TIMEOUT", "600"))
+    threshold = timedelta(seconds=2 * timeout_seconds)
+    cutoff = datetime.now(timezone.utc) - threshold
+
+    try:
+        async with async_session() as session:
+            # Find runs stuck in RUNNING that started before the cutoff
+            stmt_running = select(Run).where(
+                Run.status == RunStatus.RUNNING,
+                Run.started_at.isnot(None),
+                Run.started_at <= cutoff,
+            )
+            result = await session.execute(stmt_running)
+            stuck_running = result.scalars().all()
+
+            # Find runs stuck in QUEUED that were created before the cutoff
+            stmt_queued = select(Run).where(
+                Run.status == RunStatus.QUEUED,
+                Run.created_at <= cutoff,
+            )
+            result = await session.execute(stmt_queued)
+            stuck_queued = result.scalars().all()
+
+            recovered = 0
+            now = datetime.now(timezone.utc)
+            for run in [*stuck_running, *stuck_queued]:
+                run.status = RunStatus.FAILED
+                run.completed_at = now
+                run.error = "Worker crashed or timed out - recovered on startup"
+                recovered += 1
+
+            if recovered:
+                await session.commit()
+                logger.warning(
+                    "Recovered %d stuck run(s) (threshold=%ds)",
+                    recovered,
+                    2 * timeout_seconds,
+                )
+    except Exception as e:
+        logger.error("Failed to recover stuck runs on startup: %s", e)
+
+
 async def startup(ctx: dict) -> None:
     """Worker startup hook."""
     logger.info("Sandcastle worker starting up")
+    await _recover_stuck_runs()
 
 
 async def shutdown(ctx: dict) -> None:

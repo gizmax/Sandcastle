@@ -176,7 +176,12 @@ def verify_checksum(content: str, expected: str) -> bool:
 
 
 def _check_dangerous_code(steps: list[dict[str, Any]]) -> list[ScanIssue]:
-    """Scan ``code`` steps for dangerous patterns."""
+    """Scan ``code`` steps for dangerous patterns.
+
+    Checks both flat fields (``step.code``, ``step.prompt``) and nested
+    config fields (``step.code_config.code``, ``step.llm_config.prompt``,
+    ``step.classify_config.prompt``) to prevent bypass via nested configs.
+    """
     issues: list[ScanIssue] = []
     for step in steps:
         if not isinstance(step, dict):
@@ -185,8 +190,22 @@ def _check_dangerous_code(steps: list[dict[str, Any]]) -> list[ScanIssue]:
             continue
         step_id = step.get("id") or step.get("name") or "unknown"
         code_content = step.get("code", "") or ""
-        # Also check prompt which may contain inline code
+
+        # Also check code_config.code (nested format used by DAG parser)
+        code_cfg = step.get("code_config")
+        if isinstance(code_cfg, dict):
+            code_content += "\n" + (code_cfg.get("code", "") or "")
+
+        # Check prompt fields (flat and nested llm_config / classify_config)
         prompt = step.get("prompt", "") or ""
+        llm_cfg = step.get("llm_config")
+        if isinstance(llm_cfg, dict):
+            prompt += "\n" + (llm_cfg.get("prompt", "") or "")
+            prompt += "\n" + (llm_cfg.get("system_prompt", "") or "")
+        classify_cfg = step.get("classify_config")
+        if isinstance(classify_cfg, dict):
+            prompt += "\n" + (classify_cfg.get("prompt", "") or "")
+
         combined = f"{code_content}\n{prompt}"
 
         for pattern, msg in _DANGEROUS_CODE_PATTERNS:
@@ -213,26 +232,62 @@ def _check_secret_patterns(yaml_content: str) -> list[ScanIssue]:
 
 
 def _check_ssrf_urls(steps: list[dict[str, Any]]) -> list[ScanIssue]:
-    """Scan ``http`` steps for SSRF-prone URLs."""
+    """Scan ``http``, ``sensor``, and ``notify`` steps for SSRF-prone URLs.
+
+    Checks both flat fields (``step.url``) and nested config fields
+    (``step.http_config.url``, ``step.sensor_config.url``,
+    ``step.notify_config.webhook_url``) to prevent bypass via nested configs.
+    """
     issues: list[ScanIssue] = []
     for step in steps:
         if not isinstance(step, dict):
             continue
-        if step.get("type") != "http":
-            continue
+        step_type = step.get("type", "")
         step_id = step.get("id") or step.get("name") or "unknown"
-        url = step.get("url", "") or ""
-        if not url:
-            continue
 
-        if _is_ssrf_url(url):
-            issues.append(
-                ScanIssue(
-                    code="SSRF_URL",
-                    message=f"URL points to internal/private network: {url}",
-                    step=str(step_id),
+        # Collect all URLs to check based on step type
+        urls_to_check: list[str] = []
+
+        if step_type == "http":
+            # Flat field (backward compat)
+            url = step.get("url", "") or ""
+            if url:
+                urls_to_check.append(url)
+            # Nested http_config.url
+            http_cfg = step.get("http_config")
+            if isinstance(http_cfg, dict):
+                cfg_url = http_cfg.get("url", "") or ""
+                if cfg_url:
+                    urls_to_check.append(cfg_url)
+        elif step_type == "sensor":
+            # Flat field
+            url = step.get("url", "") or ""
+            if url:
+                urls_to_check.append(url)
+            # Nested sensor_config.url
+            sensor_cfg = step.get("sensor_config")
+            if isinstance(sensor_cfg, dict):
+                cfg_url = sensor_cfg.get("url", "") or ""
+                if cfg_url:
+                    urls_to_check.append(cfg_url)
+        elif step_type == "notify":
+            # Nested notify_config.webhook_url (not an official field
+            # but may be used in raw YAML templates)
+            notify_cfg = step.get("notify_config")
+            if isinstance(notify_cfg, dict):
+                wh_url = notify_cfg.get("webhook_url", "") or ""
+                if wh_url:
+                    urls_to_check.append(wh_url)
+
+        for url in urls_to_check:
+            if _is_ssrf_url(url):
+                issues.append(
+                    ScanIssue(
+                        code="SSRF_URL",
+                        message=f"URL points to internal/private network: {url}",
+                        step=str(step_id),
+                    )
                 )
-            )
     return issues
 
 

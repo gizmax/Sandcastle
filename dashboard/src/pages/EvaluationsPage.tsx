@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { formatCost, formatRelativeTime, cn } from "@/lib/utils";
 
@@ -128,18 +129,11 @@ export default function EvaluationsPage() {
 
   if (error) {
     return (
-      <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Evaluations</h1>
-        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
-          <p className="text-sm text-error">{error}</p>
-          <button
-            onClick={() => { setLoading(true); void fetchData(); }}
-            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        title="Evaluations"
+        message={error}
+        onRetry={() => { setLoading(true); void fetchData(); }}
+      />
     );
   }
 
@@ -370,7 +364,7 @@ export default function EvaluationsPage() {
                 {/* Expanded case details */}
                 {isExpanded && run.cases && (
                   <div className="border-t border-border">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm" aria-label={`Evaluation cases for ${run.suite_name}`}>
                       <thead>
                         <tr className="border-b border-border bg-background/50">
                           <th className="px-5 py-2.5 text-left font-medium text-muted w-8" />
