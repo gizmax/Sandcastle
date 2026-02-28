@@ -199,6 +199,134 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Retro banner & boot sequence
+# ---------------------------------------------------------------------------
+
+
+def _print_banner() -> None:
+    """Print 80s retro startup banner with Knight Rider boot sequence."""
+    if not _C.supports_color() or not sys.stdout.isatty():
+        return
+
+    from sandcastle import __version__
+
+    RST = "\033[0m"
+    DIM = "\033[2m"
+    AMB = "\033[33m"
+    BAMB = "\033[1;33m"
+    CYN = "\033[36m"
+    BCYN = "\033[1;36m"
+    WHT = "\033[1;97m"
+    GRN = "\033[1;32m"
+    MAG = "\033[35m"
+
+    # --- Sand castle ---
+    print()
+    # Castle towers with window glow
+    tw = f"{BAMB}█{DIM}░{RST}{BAMB}█{RST}"  # tower window
+    waves = "~\u2248" * 10 + "~"
+    art = [
+        f"              {AMB}▄█▄{RST}     {AMB}▄█▄{RST}",
+        f"              {AMB}███ ▄█▄ ███{RST}",
+        f"              {tw} {tw} {tw}",
+        f"            {AMB}▄▄███▄███▄███▄▄{RST}",
+        f"            {BAMB}█{DIM}░░░░░{BAMB}▫▫{DIM}░░░░░{BAMB}█{RST}",
+        f"            {AMB}▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀{RST}",
+        f"         {CYN}{waves}{RST}",
+    ]
+    for line in art:
+        print(line)
+        time.sleep(0.025)
+
+    # --- SAND in block text (amber gradient) ---
+    print()
+    sand = [
+        " ███████╗ █████╗ ███╗   ██╗██████╗ ",
+        " ██╔════╝██╔══██╗████╗  ██║██╔══██╗",
+        " ███████╗███████║██╔██╗ ██║██║  ██║",
+        " ╚════██║██╔══██║██║╚██╗██║██║  ██║",
+        " ███████║██║  ██║██║ ╚████║██████╔╝",
+        " ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝",
+    ]
+    # --- CASTLE in block text (bright white) ---
+    castle = [
+        "  ██████╗ █████╗ ███████╗████████╗██╗     ███████╗",
+        " ██╔════╝██╔══██╗██╔════╝╚══██╔══╝██║     ██╔════╝",
+        " ██║     ███████║███████╗   ██║   ██║     █████╗  ",
+        " ██║     ██╔══██║╚════██║   ██║   ██║     ██╔══╝  ",
+        " ╚██████╗██║  ██║███████║   ██║   ███████╗███████╗",
+        "  ╚═════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝╚══════╝",
+    ]
+
+    # Gradient: top rows bright amber, bottom rows dim amber
+    colors_s = [BAMB, BAMB, BAMB, AMB, AMB, f"{DIM}{AMB}"]
+    for i, line in enumerate(sand):
+        print(f"  {colors_s[i]}{line}{RST}")
+        time.sleep(0.018)
+    colors_c = [WHT, WHT, WHT, f"{DIM}{WHT}", f"{DIM}{WHT}", f"{DIM}"]
+    for i, line in enumerate(castle):
+        print(f"  {colors_c[i]}{line}{RST}")
+        time.sleep(0.018)
+
+    print()
+    print(f"  {DIM}{'─' * 54}{RST}")
+    print(f"  {DIM}workflow orchestrator{RST}{'':>20}{CYN}v{__version__}{RST}")
+    print()
+
+    # --- Knight Rider scanner (KITT) ---
+    bar_w = 42
+    for frame in range(bar_w * 2):
+        pos = frame if frame < bar_w else bar_w * 2 - frame - 1
+        chars: list[str] = []
+        for i in range(bar_w):
+            d = abs(i - pos)
+            if d == 0:
+                chars.append(f"{WHT}█{RST}")
+            elif d == 1:
+                chars.append(f"{BAMB}▓{RST}")
+            elif d == 2:
+                chars.append(f"{AMB}▒{RST}")
+            elif d == 3:
+                chars.append(f"{DIM}░{RST}")
+            else:
+                chars.append(f"{DIM}·{RST}")
+        sys.stdout.write(f"\r  [{(''.join(chars))}{RST}]")
+        sys.stdout.flush()
+        time.sleep(0.014)
+
+    sys.stdout.write("\r" + " " * 60 + "\r")
+    sys.stdout.flush()
+
+    # --- Boot sequence with progress bars ---
+    systems = [
+        ("SANDBOX ENGINE", AMB),
+        ("WORKFLOW DAG", CYN),
+        ("TEMPLATE REGISTRY", MAG),
+        ("API SERVER", BCYN),
+        ("DASHBOARD", BAMB),
+    ]
+    seg = 16
+    for name, clr in systems:
+        dots = "\u00b7" * (22 - len(name))
+        for s in range(seg + 1):
+            pct = int(s / seg * 100)
+            filled = f"{clr}{'█' * s}{RST}"
+            empty = f"{DIM}{'░' * (seg - s)}{RST}"
+            sys.stdout.write(
+                f"\r  {DIM}{name}{RST} {DIM}{dots}{RST} [{filled}{empty}] {DIM}{pct:3d}%{RST}"
+            )
+            sys.stdout.flush()
+            time.sleep(0.010)
+        bar_full = f"{clr}{'█' * seg}{RST}"
+        sys.stdout.write(
+            f"\r  {DIM}{name}{RST} {DIM}{dots}{RST} [{bar_full}] {GRN} OK {RST}\n"
+        )
+        sys.stdout.flush()
+
+    print(f"\n  {GRN}ALL SYSTEMS ONLINE{RST}\n")
+
+
+# ---------------------------------------------------------------------------
 # Command handlers
 # ---------------------------------------------------------------------------
 
@@ -216,9 +344,9 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
     env_path = Path(".env")
 
-    print()
-    print(_color("  Sandcastle Setup", _C.BOLD))
-    print(_color("  ================", _C.BOLD))
+    _print_banner()
+    print(_color("  SETUP WIZARD", _C.BOLD))
+    print(_color("  ────────────", _C.BOLD))
     print()
 
     # Check if .env already exists
@@ -370,6 +498,8 @@ def _kill_port(port: int) -> bool:
 def _cmd_serve(args: argparse.Namespace) -> None:
     """Start the Sandcastle API server."""
     import uvicorn
+
+    _print_banner()
 
     port = args.port
     if _port_in_use(port):
