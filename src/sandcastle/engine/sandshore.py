@@ -623,6 +623,7 @@ def _extract_text(data: dict) -> str:
 
 _client_pool: dict[tuple[str, ...], SandshoreRuntime] = {}
 _pool_lock = threading.Lock()
+_MAX_POOL_SIZE = 20  # Prevent unbounded pool growth
 
 
 def get_sandshore_runtime(
@@ -642,6 +643,7 @@ def get_sandshore_runtime(
 
     The pool key includes all backend-specific parameters to ensure
     different configurations yield separate runtime instances.
+    Pool is capped at ``_MAX_POOL_SIZE`` entries to prevent memory leaks.
     """
     key = (
         anthropic_api_key,
@@ -657,6 +659,24 @@ def get_sandshore_runtime(
     with _pool_lock:
         client = _client_pool.get(key)
         if client is None:
+            # Evict oldest entry if pool is at capacity
+            if len(_client_pool) >= _MAX_POOL_SIZE:
+                oldest_key = next(iter(_client_pool))
+                evicted = _client_pool.pop(oldest_key)
+                logger.warning(
+                    "Runtime pool at capacity (%d), evicting oldest entry",
+                    _MAX_POOL_SIZE,
+                )
+                # Best-effort close - can't await in sync context
+                try:
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(evicted.close())
+                    else:
+                        loop.run_until_complete(evicted.close())
+                except Exception:
+                    pass
             client = SandshoreRuntime(
                 anthropic_api_key=anthropic_api_key,
                 e2b_api_key=e2b_api_key,

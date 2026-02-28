@@ -430,6 +430,8 @@ class DockerBackend:
             except (FileNotFoundError, ValueError) as exc:
                 logger.warning("Seccomp profile not loaded: %s", exc)
 
+            security_opt.append("no-new-privileges:true")
+
             config = {
                 "Image": self._image,
                 "Cmd": ["node", f"/home/user/{runner_file}"],
@@ -440,11 +442,14 @@ class DockerBackend:
                 "HostConfig": {
                     "AutoRemove": True,
                     "Memory": self._memory_limit,
+                    "MemorySwap": self._memory_limit,  # Prevent swap overflow
                     "CapDrop": ["ALL"],
                     "SecurityOpt": security_opt,
                     "PidsLimit": self._pids_limit,
                     "CpuPeriod": self._cpu_period,
                     "CpuQuota": self._cpu_quota,
+                    "ReadonlyRootfs": True,
+                    "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
                 },
             }
 
@@ -466,13 +471,23 @@ class DockerBackend:
             tar_stream.seek(0)
             await container.put_archive("/home/user", tar_stream.read())
 
-            # Start and collect output
+            # Start and collect output with a hard deadline.
+            # Without this, a hanging container would block forever
+            # since container.log(follow=True) never returns.
             await container.start()
             logs = await container.log(
                 stdout=True, stderr=True, follow=True
             )
 
+            deadline = time.monotonic() + timeout + 30.0  # 30s grace
             async for line in logs:
+                if time.monotonic() > deadline:
+                    logger.warning(
+                        "Docker container exceeded deadline "
+                        "(%.0fs + 30s grace), stopping",
+                        timeout,
+                    )
+                    break
                 line = line.strip()
                 if not line:
                     continue
@@ -556,8 +571,20 @@ class LocalBackend:
                 _shutil.rmtree(tools_dir, ignore_errors=True)
                 raise
 
-        # Merge host env with provided envs
-        proc_env = {**os.environ, **envs}
+        # Build a minimal env for the subprocess instead of inheriting
+        # the entire host environment. Only NODE_PATH and PATH are needed
+        # from the host so Node.js can find binaries and modules.
+        # This prevents leaking secrets like DATABASE_URL, AWS keys,
+        # ANTHROPIC_API_KEY, etc. to the subprocess.
+        _SAFE_HOST_VARS = frozenset({
+            "PATH", "NODE_PATH", "HOME", "USER", "LANG", "LC_ALL",
+            "TMPDIR", "TMP", "TEMP",
+        })
+        proc_env = {
+            k: v for k, v in os.environ.items()
+            if k in _SAFE_HOST_VARS
+        }
+        proc_env.update(envs)
 
         proc = await asyncio.create_subprocess_exec(
             "node",
@@ -629,7 +656,16 @@ class CloudflareBackend:
         worker_url: str,
         timeout: float = 300.0,
     ) -> None:
-        self._worker_url = worker_url.rstrip("/") if worker_url else ""
+        url = worker_url.rstrip("/") if worker_url else ""
+        # Enforce HTTPS for Cloudflare worker URLs since API keys
+        # and credentials are sent in the request payload.
+        if url and url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url:
+            logger.warning(
+                "Cloudflare worker URL uses HTTP - upgrading to HTTPS "
+                "to protect credentials in transit"
+            )
+            url = "https://" + url[7:]
+        self._worker_url = url
         self._timeout = timeout
         self._client: Any = None  # httpx.AsyncClient | None
         # Health cache: (result, timestamp)

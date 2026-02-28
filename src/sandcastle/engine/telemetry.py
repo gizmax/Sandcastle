@@ -209,6 +209,10 @@ def _save_local_report(event: dict) -> None:
 
         report_dir = Path(settings.data_dir) / "error_reports"
         report_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            report_dir.chmod(0o700)
+        except OSError:
+            pass
 
         timestamp = int(time.time())
         event_id = event.get("event_id", "unknown")

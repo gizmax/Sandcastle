@@ -72,6 +72,11 @@ for _k, _src in [
 
 _LINE_H = 5
 
+# Maximum markdown input size for PDF generation (2 MB).  Larger inputs are
+# truncated with a notice appended so the caller gets a valid PDF instead of
+# an OOM / unbounded CPU hang.
+_MAX_MARKDOWN_SIZE = 2 * 1024 * 1024
+
 
 # -- Font discovery ---------------------------------------------------------
 
@@ -1242,6 +1247,18 @@ def generate_branded_pdf(
     """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Guard against extremely large inputs that could cause OOM or long render
+    if len(markdown_text) > _MAX_MARKDOWN_SIZE:
+        logger.warning(
+            "PDF markdown input truncated from %d to %d bytes",
+            len(markdown_text),
+            _MAX_MARKDOWN_SIZE,
+        )
+        markdown_text = (
+            markdown_text[:_MAX_MARKDOWN_SIZE]
+            + "\n\n---\n\n> [!WARNING]\n> Report truncated - output exceeded 2 MB limit.\n"
+        )
 
     pdf = _BrandedPDF(language=language)
     pdf.alias_nb_pages()

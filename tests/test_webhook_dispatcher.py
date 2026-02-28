@@ -9,7 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sandcastle.webhooks.dispatcher import (
+    _resolve_and_check_ip,
     _sign_payload,
+    _truncate_payload,
     validate_callback_url,
     verify_signature,
 )
@@ -183,7 +185,142 @@ class TestValidateCallbackUrl:
             assert result == "https://ipv6.example.com/hook"
 
 
+class TestResolveAndCheckIp:
+    """Tests for the DNS rebinding prevention check."""
+
+    def test_public_ip_passes(self):
+        """A public IP at delivery time should pass."""
+        with patch("socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+        ]):
+            # Should not raise
+            _resolve_and_check_ip("example.com", 443)
+
+    def test_private_ip_at_delivery_time_blocked(self):
+        """DNS rebinding: hostname now resolves to private IP."""
+        with patch("socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("10.0.0.1", 443)),
+        ]):
+            with pytest.raises(ValueError, match="rebinding"):
+                _resolve_and_check_ip("evil-rebind.com", 443)
+
+    def test_localhost_at_delivery_time_blocked(self):
+        """DNS rebinding: hostname now resolves to localhost."""
+        with patch("socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("127.0.0.1", 443)),
+        ]):
+            with pytest.raises(ValueError, match="rebinding"):
+                _resolve_and_check_ip("evil-rebind.com", 443)
+
+    def test_metadata_service_at_delivery_time_blocked(self):
+        """DNS rebinding: hostname now resolves to cloud metadata endpoint."""
+        with patch("socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("169.254.169.254", 80)),
+        ]):
+            with pytest.raises(ValueError, match="rebinding"):
+                _resolve_and_check_ip("evil-rebind.com", 80)
+
+    def test_dns_failure_at_delivery_time_blocked(self):
+        """Unresolvable hostname at delivery time should fail."""
+        import socket
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("nope")):
+            with pytest.raises(ValueError, match="resolve"):
+                _resolve_and_check_ip("gone.example.com", 443)
+
+    def test_ipv6_ula_at_delivery_time_blocked(self):
+        """IPv6 unique-local address at delivery time should be blocked."""
+        with patch("socket.getaddrinfo", return_value=[
+            (10, 1, 6, "", ("fd12:3456:789a::1", 443, 0, 0)),
+        ]):
+            with pytest.raises(ValueError, match="rebinding"):
+                _resolve_and_check_ip("evil-ipv6.com", 443)
+
+
+class TestTruncatePayload:
+    """Tests for the payload truncation logic."""
+
+    def test_small_payload_not_truncated(self):
+        """Payloads under 1MB should pass through unchanged."""
+        payload = {"event": "test", "outputs": {"result": "small"}}
+        body = _truncate_payload(payload, payload.get("outputs"), "run-1")
+        import json
+        parsed = json.loads(body)
+        assert parsed["outputs"] == {"result": "small"}
+        assert "outputs_truncated" not in parsed.get("outputs", {})
+
+    def test_large_payload_truncated(self):
+        """Payloads over 1MB should have outputs truncated."""
+        import json
+        huge_output = {"data": "x" * 2_000_000}
+        payload = {
+            "event": "test",
+            "run_id": "run-1",
+            "outputs": huge_output,
+        }
+        body = _truncate_payload(payload, huge_output, "run-1")
+        parsed = json.loads(body)
+        assert parsed["outputs"]["outputs_truncated"] is True
+        assert parsed["outputs"]["_reason"] == "payload_too_large"
+        # Body must fit within 1MB
+        assert len(body.encode("utf-8")) <= 1_048_576
+
+    def test_truncated_outputs_have_preview(self):
+        """Truncated payloads should contain an output preview."""
+        import json
+        huge_output = {"data": "y" * 2_000_000}
+        payload = {
+            "event": "test",
+            "run_id": "run-2",
+            "outputs": huge_output,
+        }
+        body = _truncate_payload(payload, huge_output, "run-2")
+        parsed = json.loads(body)
+        assert parsed["outputs"]["outputs_preview"] is not None
+        assert "(truncated)" in parsed["outputs"]["outputs_preview"]
+
+    def test_none_outputs_truncation(self):
+        """Truncation with None outputs should set preview to None."""
+        import json
+        # Build a payload that is large due to a huge error field
+        payload = {
+            "event": "test",
+            "run_id": "run-3",
+            "outputs": None,
+            "error": "e" * 2_000_000,
+        }
+        body = _truncate_payload(payload, None, "run-3")
+        # Should not raise, and body must be within limit
+        assert len(body.encode("utf-8")) <= 1_048_576
+
+    def test_hard_truncation_safety_net(self):
+        """If truncated payload is still over 1MB (e.g. huge error), hard-truncate."""
+        import json
+        payload = {
+            "event": "test",
+            "run_id": "run-4",
+            "outputs": None,
+            "error": "Z" * 2_000_000,
+        }
+        body = _truncate_payload(payload, None, "run-4")
+        assert len(body.encode("utf-8")) <= 1_048_576
+
+
 class TestDispatchWebhook:
+    """Helper to build common mock patches for dispatch_webhook tests."""
+
+    @staticmethod
+    def _dispatch_patches():
+        """Return context manager patches for dispatch_webhook calls."""
+        return (
+            patch(
+                "sandcastle.webhooks.dispatcher.validate_callback_url",
+                return_value="https://ok.com/hook",
+            ),
+            patch(
+                "sandcastle.webhooks.dispatcher._resolve_and_check_ip",
+            ),
+        )
+
     @pytest.mark.asyncio
     async def test_successful_delivery(self):
         from sandcastle.webhooks.dispatcher import dispatch_webhook
@@ -196,8 +333,10 @@ class TestDispatchWebhook:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        p1, p2 = self._dispatch_patches()
         with (
-            patch("sandcastle.webhooks.dispatcher.validate_callback_url", return_value="https://ok.com/hook"),
+            p1,
+            p2,
             patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
         ):
             result = await dispatch_webhook(
@@ -229,6 +368,30 @@ class TestDispatchWebhook:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_dns_rebinding_blocked(self):
+        """dispatch_webhook should fail if DNS rebinding is detected."""
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        with (
+            patch(
+                "sandcastle.webhooks.dispatcher.validate_callback_url",
+                return_value="https://evil.com/hook",
+            ),
+            patch(
+                "sandcastle.webhooks.dispatcher._resolve_and_check_ip",
+                side_effect=ValueError("DNS rebinding detected"),
+            ),
+        ):
+            result = await dispatch_webhook(
+                url="https://evil.com/hook",
+                event="workflow.completed",
+                run_id="run-rebind",
+                workflow="wf",
+                status="completed",
+            )
+        assert result is False
+
+    @pytest.mark.asyncio
     async def test_retries_on_server_error(self):
         from sandcastle.webhooks.dispatcher import dispatch_webhook
 
@@ -243,8 +406,10 @@ class TestDispatchWebhook:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        p1, p2 = self._dispatch_patches()
         with (
-            patch("sandcastle.webhooks.dispatcher.validate_callback_url", return_value="https://ok.com"),
+            p1,
+            p2,
             patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -269,8 +434,10 @@ class TestDispatchWebhook:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        p1, p2 = self._dispatch_patches()
         with (
-            patch("sandcastle.webhooks.dispatcher.validate_callback_url", return_value="https://ok.com"),
+            p1,
+            p2,
             patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -302,8 +469,10 @@ class TestDispatchWebhook:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        p1, p2 = self._dispatch_patches()
         with (
-            patch("sandcastle.webhooks.dispatcher.validate_callback_url", return_value="https://ok.com"),
+            p1,
+            p2,
             patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
             patch("sandcastle.webhooks.dispatcher.settings") as mock_settings,
         ):
@@ -320,3 +489,124 @@ class TestDispatchWebhook:
         assert "X-Sandcastle-Event" in captured_headers
         assert captured_headers["X-Sandcastle-Event"] == "workflow.completed"
         assert len(captured_headers["X-Sandcastle-Signature"]) == 64
+
+    @pytest.mark.asyncio
+    async def test_redirect_not_followed(self):
+        """Redirects should not be followed (SSRF prevention)."""
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(status_code=302))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        p1, p2 = self._dispatch_patches()
+        with (
+            p1,
+            p2,
+            patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await dispatch_webhook(
+                url="https://ok.com/hook",
+                event="workflow.completed",
+                run_id="run-redir",
+                workflow="wf",
+                status="completed",
+            )
+
+        assert result is False
+        # Should not retry on redirect
+        assert mock_client.post.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_4xx_not_retried(self):
+        """Client errors (4xx) should not be retried."""
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=MagicMock(status_code=404))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        p1, p2 = self._dispatch_patches()
+        with (
+            p1,
+            p2,
+            patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await dispatch_webhook(
+                url="https://ok.com/hook",
+                event="workflow.completed",
+                run_id="run-404",
+                workflow="wf",
+                status="completed",
+                max_retries=3,
+            )
+
+        assert result is False
+        # Should NOT retry on client error
+        assert mock_client.post.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_webhook_does_not_block_workflow(self):
+        """Webhook failure must not raise exceptions that block workflow execution."""
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=Exception("unexpected error"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        p1, p2 = self._dispatch_patches()
+        with (
+            p1,
+            p2,
+            patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            # Should return False, not raise
+            result = await dispatch_webhook(
+                url="https://ok.com/hook",
+                event="workflow.completed",
+                run_id="run-err",
+                workflow="wf",
+                status="completed",
+                max_retries=1,
+            )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_no_hmac_when_secret_not_set(self):
+        """Without a webhook_secret, no signature header should be sent."""
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        mock_response = MagicMock(status_code=200)
+        captured_headers = {}
+
+        async def capture_post(url, content=None, headers=None):
+            captured_headers.update(headers or {})
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.post = capture_post
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        p1, p2 = self._dispatch_patches()
+        with (
+            p1,
+            p2,
+            patch("sandcastle.webhooks.dispatcher.httpx.AsyncClient", return_value=mock_client),
+            patch("sandcastle.webhooks.dispatcher.settings") as mock_settings,
+        ):
+            mock_settings.webhook_secret = ""
+            await dispatch_webhook(
+                url="https://ok.com/hook",
+                event="workflow.completed",
+                run_id="run-nosig",
+                workflow="wf",
+                status="completed",
+            )
+
+        assert "X-Sandcastle-Signature" not in captured_headers
+        assert "X-Sandcastle-Event" in captured_headers

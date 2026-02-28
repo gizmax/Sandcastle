@@ -24,7 +24,21 @@
         "sethostname",
         "setdomainname",
         "unshare",
-        "setns"
+        "setns",
+        "open_by_handle_at",
+        "bpf",
+        "userfaultfd",
+        "perf_event_open",
+        "io_uring_setup",
+        "io_uring_enter",
+        "io_uring_register",
+        "move_mount",
+        "open_tree",
+        "mount_setattr",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "fspick"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1

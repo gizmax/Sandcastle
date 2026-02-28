@@ -1256,6 +1256,21 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         if workflow.memory.scope == "agent" and not workflow.memory.agent:
             errors.append("Memory scope 'agent' requires 'agent' name to be set")
 
+    # Validate webhook URLs (early feedback; runtime also validates before delivery)
+    from sandcastle.webhooks.dispatcher import validate_callback_url
+
+    webhook_urls_to_check: list[tuple[str, str]] = []
+    if workflow.on_complete and workflow.on_complete.webhook:
+        webhook_urls_to_check.append(("on_complete.webhook", workflow.on_complete.webhook))
+    if workflow.on_failure and workflow.on_failure.webhook:
+        webhook_urls_to_check.append(("on_failure.webhook", workflow.on_failure.webhook))
+
+    for label, wh_url in webhook_urls_to_check:
+        try:
+            validate_callback_url(wh_url)
+        except ValueError as e:
+            errors.append(f"Workflow {label} URL is invalid: {e}")
+
     # Check for cycles
     cycle_errors = _detect_cycles(workflow.steps)
     errors.extend(cycle_errors)

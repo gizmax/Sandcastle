@@ -100,6 +100,17 @@ const tools = [
 
 const MAX_TOOL_RESULT_SIZE = 50_000;
 
+// --- Path validation ---
+
+function validatePath(filePath) {
+  const absPath = resolve(filePath);
+  const normalized = normalize(absPath);
+  if (!normalized.startsWith(SANDBOX_ROOT + "/") && normalized !== SANDBOX_ROOT) {
+    throw new Error(`Path '${filePath}' is outside sandbox root (${SANDBOX_ROOT})`);
+  }
+  return normalized;
+}
+
 // --- Tool execution ---
 
 function executeTool(name, args) {
@@ -116,11 +127,11 @@ function executeTool(name, args) {
         return result.slice(0, MAX_TOOL_RESULT_SIZE);
       }
       case "read_file": {
-        const absPath = resolve(args.path);
+        const absPath = validatePath(args.path);
         return readFileSync(absPath, "utf-8").slice(0, 100_000);
       }
       case "write_file": {
-        const absPath = resolve(args.path);
+        const absPath = validatePath(args.path);
         mkdirSync(dirname(absPath), { recursive: true });
         writeFileSync(absPath, args.content, "utf-8");
         return `Written ${args.content.length} bytes to ${absPath}`;

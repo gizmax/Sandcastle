@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Generator, Iterator, Optional
+from typing import Any, AsyncGenerator, Generator, Iterator, Optional
 
 import httpx
 
@@ -163,6 +163,29 @@ _TERMINAL_STATUSES = frozenset({
 })
 
 
+def _validate_pagination(limit: int, offset: int) -> None:
+    """Validate pagination parameters."""
+    if not isinstance(limit, int) or limit < 1:
+        raise ValueError("limit must be a positive integer")
+    if limit > 200:
+        raise ValueError("limit must not exceed 200")
+    if not isinstance(offset, int) or offset < 0:
+        raise ValueError("offset must be a non-negative integer")
+
+
+def _validate_path_param(value: str, name: str) -> str:
+    """Validate a value used in URL path segments.
+
+    Raises ValueError for empty strings, strings with slashes (path traversal),
+    or strings with only whitespace.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"{name} must not contain path separators")
+    return value
+
+
 def _parse_datetime(value: Any) -> Optional[datetime]:
     """Parse an ISO datetime string, returning None on failure."""
     if value is None:
@@ -308,7 +331,14 @@ def _extract_data(response: httpx.Response) -> Any:
             message = response.text[:500] if response.text else "Unknown API error"
         raise SandcastleError(response.status_code, code, message)
 
-    body = response.json()
+    try:
+        body = response.json()
+    except Exception:
+        raise SandcastleError(
+            response.status_code,
+            "INVALID_RESPONSE",
+            f"Expected JSON response, got: {response.text[:500]}"
+        )
     return body.get("data", body)
 
 
@@ -374,6 +404,8 @@ class SandcastleClient:
         api_key: Optional[str] = None,
         timeout: float = 30.0,
     ) -> None:
+        self._base_url = base_url
+        self._has_api_key = bool(api_key)
         headers: dict[str, str] = {}
         if api_key:
             headers["X-API-Key"] = api_key
@@ -382,6 +414,10 @@ class SandcastleClient:
             headers=headers,
             timeout=timeout,
         )
+
+    def __repr__(self) -> str:
+        key_str = "api_key=***" if self._has_api_key else "api_key=None"
+        return f"SandcastleClient(base_url={self._base_url!r}, {key_str})"
 
     def __enter__(self) -> SandcastleClient:
         return self
@@ -515,6 +551,7 @@ class SandcastleClient:
         Returns:
             Run object with full details including steps.
         """
+        _validate_path_param(run_id, "run_id")
         resp = self._client.get(f"/api/runs/{run_id}")
         data = _extract_data(resp)
         return _parse_run(data)
@@ -528,6 +565,7 @@ class SandcastleClient:
         Returns:
             Dict with ``cancelled`` and ``run_id`` keys.
         """
+        _validate_path_param(run_id, "run_id")
         resp = self._client.post(f"/api/runs/{run_id}/cancel")
         return _extract_data(resp)
 
@@ -541,6 +579,7 @@ class SandcastleClient:
         Returns:
             Run object for the new replay run.
         """
+        _validate_path_param(run_id, "run_id")
         resp = self._client.post(
             f"/api/runs/{run_id}/replay",
             json={"from_step": from_step},
@@ -564,6 +603,7 @@ class SandcastleClient:
         Returns:
             Run object for the new forked run.
         """
+        _validate_path_param(run_id, "run_id")
         body: dict[str, Any] = {"from_step": from_step}
         if changes is not None:
             body["changes"] = changes
@@ -590,6 +630,7 @@ class SandcastleClient:
         Returns:
             PaginatedList of RunListItem objects.
         """
+        _validate_pagination(limit, offset)
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status is not None:
             params["status"] = status
@@ -597,9 +638,16 @@ class SandcastleClient:
             params["workflow"] = workflow
 
         resp = self._client.get("/api/runs", params=params)
-        body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)  # will raise
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise SandcastleError(
+                resp.status_code, "INVALID_RESPONSE",
+                f"Expected JSON response, got: {resp.text[:500]}"
+            )
 
         data = body.get("data", [])
         meta = body.get("meta", {})
@@ -626,6 +674,7 @@ class SandcastleClient:
         Yields:
             Event dicts parsed from SSE.
         """
+        _validate_path_param(run_id, "run_id")
         with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
             if resp.status_code >= 400:
                 resp.read()
@@ -707,11 +756,19 @@ class SandcastleClient:
         Returns:
             PaginatedList of Schedule objects.
         """
+        _validate_pagination(limit, offset)
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         resp = self._client.get("/api/schedules", params=params)
-        body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise SandcastleError(
+                resp.status_code, "INVALID_RESPONSE",
+                f"Expected JSON response, got: {resp.text[:500]}"
+            )
 
         data = body.get("data", [])
         meta = body.get("meta", {})
@@ -773,6 +830,7 @@ class SandcastleClient:
         Returns:
             Updated Schedule object.
         """
+        _validate_path_param(schedule_id, "schedule_id")
         body: dict[str, Any] = {}
         if enabled is not None:
             body["enabled"] = enabled
@@ -793,6 +851,7 @@ class SandcastleClient:
         Returns:
             Dict with ``deleted`` and ``id`` keys.
         """
+        _validate_path_param(schedule_id, "schedule_id")
         resp = self._client.delete(f"/api/schedules/{schedule_id}")
         return _extract_data(resp)
 
@@ -850,6 +909,8 @@ class AsyncSandcastleClient:
         api_key: Optional[str] = None,
         timeout: float = 30.0,
     ) -> None:
+        self._base_url = base_url
+        self._has_api_key = bool(api_key)
         headers: dict[str, str] = {}
         if api_key:
             headers["X-API-Key"] = api_key
@@ -858,6 +919,10 @@ class AsyncSandcastleClient:
             headers=headers,
             timeout=timeout,
         )
+
+    def __repr__(self) -> str:
+        key_str = "api_key=***" if self._has_api_key else "api_key=None"
+        return f"AsyncSandcastleClient(base_url={self._base_url!r}, {key_str})"
 
     async def __aenter__(self) -> AsyncSandcastleClient:
         return self
@@ -993,6 +1058,7 @@ class AsyncSandcastleClient:
         Returns:
             Run object with full details including steps.
         """
+        _validate_path_param(run_id, "run_id")
         resp = await self._client.get(f"/api/runs/{run_id}")
         data = _extract_data(resp)
         return _parse_run(data)
@@ -1006,6 +1072,7 @@ class AsyncSandcastleClient:
         Returns:
             Dict with ``cancelled`` and ``run_id`` keys.
         """
+        _validate_path_param(run_id, "run_id")
         resp = await self._client.post(f"/api/runs/{run_id}/cancel")
         return _extract_data(resp)
 
@@ -1019,6 +1086,7 @@ class AsyncSandcastleClient:
         Returns:
             Run object for the new replay run.
         """
+        _validate_path_param(run_id, "run_id")
         resp = await self._client.post(
             f"/api/runs/{run_id}/replay",
             json={"from_step": from_step},
@@ -1042,6 +1110,7 @@ class AsyncSandcastleClient:
         Returns:
             Run object for the new forked run.
         """
+        _validate_path_param(run_id, "run_id")
         body: dict[str, Any] = {"from_step": from_step}
         if changes is not None:
             body["changes"] = changes
@@ -1068,6 +1137,7 @@ class AsyncSandcastleClient:
         Returns:
             PaginatedList of RunListItem objects.
         """
+        _validate_pagination(limit, offset)
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status is not None:
             params["status"] = status
@@ -1075,9 +1145,16 @@ class AsyncSandcastleClient:
             params["workflow"] = workflow
 
         resp = await self._client.get("/api/runs", params=params)
-        body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise SandcastleError(
+                resp.status_code, "INVALID_RESPONSE",
+                f"Expected JSON response, got: {resp.text[:500]}"
+            )
 
         data = body.get("data", [])
         meta = body.get("meta", {})
@@ -1092,7 +1169,9 @@ class AsyncSandcastleClient:
 
     # -- SSE streaming --
 
-    async def stream(self, run_id: str):
+    async def stream(
+        self, run_id: str,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream live events for a run via SSE.
 
         Yields dicts with an ``_event`` key indicating the event type
@@ -1104,6 +1183,7 @@ class AsyncSandcastleClient:
         Yields:
             Event dicts parsed from SSE.
         """
+        _validate_path_param(run_id, "run_id")
         async with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
             if resp.status_code >= 400:
                 await resp.aread()
@@ -1185,11 +1265,19 @@ class AsyncSandcastleClient:
         Returns:
             PaginatedList of Schedule objects.
         """
+        _validate_pagination(limit, offset)
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         resp = await self._client.get("/api/schedules", params=params)
-        body = resp.json()
         if resp.status_code >= 400:
             _extract_data(resp)
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise SandcastleError(
+                resp.status_code, "INVALID_RESPONSE",
+                f"Expected JSON response, got: {resp.text[:500]}"
+            )
 
         data = body.get("data", [])
         meta = body.get("meta", {})
@@ -1251,6 +1339,7 @@ class AsyncSandcastleClient:
         Returns:
             Updated Schedule object.
         """
+        _validate_path_param(schedule_id, "schedule_id")
         body: dict[str, Any] = {}
         if enabled is not None:
             body["enabled"] = enabled
@@ -1271,6 +1360,7 @@ class AsyncSandcastleClient:
         Returns:
             Dict with ``deleted`` and ``id`` keys.
         """
+        _validate_path_param(schedule_id, "schedule_id")
         resp = await self._client.delete(f"/api/schedules/{schedule_id}")
         return _extract_data(resp)
 

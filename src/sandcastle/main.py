@@ -90,6 +90,11 @@ async def lifespan(app: FastAPI):
             "minimax_api_key", "openrouter_api_key",
             "default_max_cost_usd", "log_level", "max_workflow_depth",
         }
+        # Keys in restorable settings that may be stored encrypted
+        _ENCRYPTED_RESTORABLE = {
+            "anthropic_api_key", "e2b_api_key", "openai_api_key",
+            "minimax_api_key", "openrouter_api_key",
+        }
         for key, value in saved.items():
             if key not in _RESTORABLE_SETTINGS:
                 if hasattr(settings, key):
@@ -98,6 +103,16 @@ async def lifespan(app: FastAPI):
                     )
                 continue
             if hasattr(settings, key):
+                # Decrypt encrypted credential values from DB
+                if key in _ENCRYPTED_RESTORABLE and isinstance(value, str) and value.startswith("gAAAAA"):
+                    try:
+                        from sandcastle.engine.crypto import decrypt_credentials
+                        decrypted = decrypt_credentials(value)
+                        if isinstance(decrypted, dict) and "v" in decrypted:
+                            value = decrypted["v"]
+                    except Exception:
+                        logger.warning("Could not decrypt saved setting '%s', skipping", key)
+                        continue
                 field_type = type(getattr(settings, key))
                 try:
                     if field_type is bool:
@@ -165,6 +180,15 @@ async def lifespan(app: FastAPI):
             "Authentication is DISABLED. All API endpoints are publicly accessible. "
             "Set AUTH_REQUIRED=true for production deployments."
         )
+
+    # Warn about default API key pepper when auth is enabled
+    if settings.auth_required:
+        import os as _os
+        if not _os.getenv("API_KEY_PEPPER"):
+            logger.warning(
+                "AUTH_REQUIRED=true but API_KEY_PEPPER is not set. "
+                "Using default pepper - set API_KEY_PEPPER env var for production."
+            )
 
     # Warn about placeholder credentials
     _placeholders = {"minioadmin", "your-webhook-signing-secret", "sandcastle"}
