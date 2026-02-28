@@ -37,7 +37,7 @@ export default function Runs() {
     });
   }, []);
 
-  const { runs, total, loading, refetch } = useRuns({
+  const { runs, total, loading, error: runsError, refetch } = useRuns({
     status: statusFilter === "all" ? undefined : statusFilter,
     workflow: workflowFilter || undefined,
     limit,
@@ -106,6 +106,7 @@ export default function Runs() {
                 setOffset(0);
                 setSelectedIds(new Set());
               }}
+              aria-pressed={statusFilter === s}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all duration-200",
                 statusFilter === s
@@ -125,6 +126,7 @@ export default function Runs() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search by ID or name..."
+              aria-label="Search runs by ID or name"
               className={cn(
                 "h-8 w-48 rounded-lg border border-border bg-background pl-8 pr-3 text-xs",
                 "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
@@ -138,6 +140,7 @@ export default function Runs() {
               setOffset(0);
               setSelectedIds(new Set());
             }}
+            aria-label="Filter by workflow"
             className={cn(
               "h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground",
               "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
@@ -195,6 +198,16 @@ export default function Runs() {
       {loading ? (
         <div className="flex h-40 items-center justify-center">
           <LoadingSpinner />
+        </div>
+      ) : runsError ? (
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{runsError}</p>
+          <button
+            onClick={() => void refetch()}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       ) : filteredRuns.length === 0 ? (
         <EmptyState

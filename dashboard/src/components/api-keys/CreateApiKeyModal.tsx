@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, inputClass as sharedInputClass } from "@/lib/utils";
 
 interface CreateApiKeyModalProps {
   open: boolean;
@@ -38,30 +38,29 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
     setMaxCost("");
   }
 
-  const inputClass = cn(
-    "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-  );
+  const inputClass = sharedInputClass;
 
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div role="dialog" aria-modal="true" aria-label="Create API Key" className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-labelledby="create-key-title" className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Create API Key</h2>
+            <h2 id="create-key-title" className="text-lg font-semibold text-foreground">Create API Key</h2>
             <button
               onClick={onClose}
+              aria-label="Close dialog"
               className="rounded-lg p-1 text-muted hover:text-foreground"
             >
-              <X className="h-5 w-5" />
+              <X aria-hidden="true" className="h-5 w-5" />
             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted">Key Name</label>
+              <label htmlFor="key-name" className="mb-1 block text-xs font-medium text-muted">Key Name</label>
               <input
+                id="key-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -73,8 +72,9 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted">Tenant ID</label>
+              <label htmlFor="key-tenant" className="mb-1 block text-xs font-medium text-muted">Tenant ID</label>
               <input
+                id="key-tenant"
                 type="text"
                 value={tenantId}
                 onChange={(e) => setTenantId(e.target.value)}
@@ -86,8 +86,9 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted">Max Cost per Run (USD)</label>
+              <label htmlFor="key-max-cost" className="mb-1 block text-xs font-medium text-muted">Max Cost per Run (USD)</label>
               <input
+                id="key-max-cost"
                 type="number"
                 value={maxCost}
                 onChange={(e) => setMaxCost(e.target.value)}

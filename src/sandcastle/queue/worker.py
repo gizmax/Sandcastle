@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 
 from sandcastle.config import settings
@@ -15,7 +16,18 @@ _background_tasks: set[asyncio.Task] = set()
 
 # Shared Redis pool for enqueue operations (avoids creating a new pool per call)
 _enqueue_redis_pool = None
-_enqueue_redis_lock = asyncio.Lock()
+# Use threading.Lock for module-level init guard (safe at import time, before event loop)
+_enqueue_redis_thread_lock = threading.Lock()
+# Per-coroutine asyncio lock (created lazily inside the event loop)
+_enqueue_redis_lock: asyncio.Lock | None = None
+
+
+def _get_enqueue_lock() -> asyncio.Lock:
+    """Return the asyncio lock for Redis pool creation, creating it lazily."""
+    global _enqueue_redis_lock
+    if _enqueue_redis_lock is None:
+        _enqueue_redis_lock = asyncio.Lock()
+    return _enqueue_redis_lock
 
 
 def _task_done_callback(task: asyncio.Task) -> None:
@@ -267,7 +279,7 @@ async def enqueue_workflow(
         from arq import create_pool
 
         if _enqueue_redis_pool is None:
-            async with _enqueue_redis_lock:
+            async with _get_enqueue_lock():
                 if _enqueue_redis_pool is None:
                     _enqueue_redis_pool = await create_pool(_parse_redis_url(settings.redis_url))
 

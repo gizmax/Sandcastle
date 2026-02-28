@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from enum import Enum
@@ -68,7 +69,10 @@ class MemoryBackendError(MemoryError):
 # ---------------------------------------------------------------------------
 
 _clients: dict[str, Any] = {}
+_clients_lock = threading.Lock()
 _graph_client: Any | None = None
+_graph_client_lock = threading.Lock()
+_graph_client_initialized = False  # True once we have attempted initialization
 
 # English stopwords for keyword extraction
 _STOPWORDS: set[str] = {
@@ -91,13 +95,31 @@ def _get_client(backend: str = "local") -> Any:
     Supported backends:
       - "local" (default): SQLite + sentence-transformers via Memory()
       - "cloud": Mem0 cloud platform (not yet implemented)
-    """
-    global _clients
 
+    Thread-safe: a lock prevents duplicate initialization under concurrent calls.
+    """
+    # Fast path (no lock needed once initialized)
     if backend in _clients:
         return _clients[backend]
 
-    if backend == "local":
+    if backend == "cloud":
+        raise NotImplementedError(
+            "Cloud memory backend is not yet implemented. "
+            "Set SANDBOX_MEMORY_BACKEND=local or install mem0ai "
+            "and use local mode. Cloud support requires a Mem0 "
+            "Platform API key - coming in a future release."
+        )
+
+    if backend != "local":
+        raise MemoryBackendError(
+            f"Unknown memory backend: {backend!r}. "
+            "Supported: 'local', 'cloud'."
+        )
+
+    with _clients_lock:
+        # Re-check inside the lock (double-checked locking pattern)
+        if backend in _clients:
+            return _clients[backend]
         try:
             from mem0 import Memory
             client = Memory()
@@ -108,51 +130,48 @@ def _get_client(backend: str = "local") -> Any:
                 f"Failed to initialize local Mem0 backend: {exc}"
             ) from exc
 
-    elif backend == "cloud":
-        raise NotImplementedError(
-            "Cloud memory backend is not yet implemented. "
-            "Set SANDBOX_MEMORY_BACKEND=local or install mem0ai "
-            "and use local mode. Cloud support requires a Mem0 "
-            "Platform API key - coming in a future release."
-        )
-
-    else:
-        raise MemoryBackendError(
-            f"Unknown memory backend: {backend!r}. "
-            "Supported: 'local', 'cloud'."
-        )
-
 
 def _get_graph_client() -> Any | None:
     """Return a graph-enabled Mem0 client if Neo4j deps are available.
 
     Returns None if graph dependencies are missing or init fails.
+    Thread-safe: uses a lock and a sentinel flag to avoid duplicate attempts.
     """
-    global _graph_client
-    if _graph_client is not None:
+    global _graph_client, _graph_client_initialized
+
+    # Fast path: already initialized (success or failure)
+    if _graph_client_initialized:
         return _graph_client
 
-    try:
-        from mem0 import Memory
-        config = {
-            "graph_store": {
-                "provider": "neo4j",
-                "config": {
-                    "url": "bolt://localhost:7687",
-                    "username": "neo4j",
-                    "password": "neo4j",
+    with _graph_client_lock:
+        # Double-checked locking
+        if _graph_client_initialized:
+            return _graph_client
+
+        try:
+            from mem0 import Memory
+            config = {
+                "graph_store": {
+                    "provider": "neo4j",
+                    "config": {
+                        "url": "bolt://localhost:7687",
+                        "username": "neo4j",
+                        "password": "neo4j",
+                    },
                 },
-            },
-        }
-        _graph_client = Memory.from_config(config)
-        logger.info("Graph memory client initialized (Neo4j)")
+            }
+            _graph_client = Memory.from_config(config)
+            logger.info("Graph memory client initialized (Neo4j)")
+        except Exception as exc:
+            logger.debug(
+                "Graph memory unavailable (Neo4j deps missing or "
+                "connection failed): %s", exc,
+            )
+            _graph_client = None
+        finally:
+            _graph_client_initialized = True
+
         return _graph_client
-    except Exception as exc:
-        logger.debug(
-            "Graph memory unavailable (Neo4j deps missing or "
-            "connection failed): %s", exc,
-        )
-        return None
 
 
 # ---------------------------------------------------------------------------

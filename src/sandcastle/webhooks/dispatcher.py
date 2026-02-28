@@ -21,13 +21,19 @@ logger = logging.getLogger(__name__)
 
 # Networks blocked for SSRF prevention
 _BLOCKED_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
+    # IPv4 private / special-purpose ranges
+    ipaddress.ip_network("0.0.0.0/8"),         # "This" network (unspecified source)
+    ipaddress.ip_network("127.0.0.0/8"),        # Loopback
+    ipaddress.ip_network("10.0.0.0/8"),         # Private class A
+    ipaddress.ip_network("172.16.0.0/12"),      # Private class B
+    ipaddress.ip_network("192.168.0.0/16"),     # Private class C
+    ipaddress.ip_network("169.254.0.0/16"),     # Link-local / APIPA
+    ipaddress.ip_network("100.64.0.0/10"),      # CGNAT (RFC 6598)
+    # IPv6 private / special-purpose ranges
+    ipaddress.ip_network("::1/128"),            # Loopback
+    ipaddress.ip_network("fc00::/7"),           # Unique local (ULA, includes fd00::/8)
+    ipaddress.ip_network("fe80::/10"),          # Link-local
+    ipaddress.ip_network("::ffff:0:0/96"),      # IPv4-mapped IPv6 addresses
 ]
 
 

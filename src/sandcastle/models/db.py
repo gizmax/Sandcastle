@@ -157,6 +157,11 @@ class Schedule(Base):
     """A scheduled workflow execution."""
 
     __tablename__ = "schedules"
+    __table_args__ = (
+        Index("ix_schedules_enabled", "enabled"),
+        Index("ix_schedules_tenant_id", "tenant_id"),
+        Index("ix_schedules_workflow_name", "workflow_name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4

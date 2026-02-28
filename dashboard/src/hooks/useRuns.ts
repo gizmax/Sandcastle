@@ -25,6 +25,7 @@ export function useRuns(options: UseRunsOptions = {}) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
 
   const fetchRuns = useCallback(async () => {
     const params: Record<string, string> = {
@@ -36,6 +37,7 @@ export function useRuns(options: UseRunsOptions = {}) {
 
     try {
       const res = await api.get<RunItem[]>("/runs", params);
+      if (!mountedRef.current) return;
       if (res.data) {
         setRuns(res.data);
         setTotal(res.meta?.total ?? res.data.length);
@@ -44,14 +46,20 @@ export function useRuns(options: UseRunsOptions = {}) {
         setError(res.error.message);
       }
     } catch {
+      if (!mountedRef.current) return;
       setError("Failed to fetch runs");
+    } finally {
+      if (mountedRef.current) setLoading(false);
     }
-    setLoading(false);
   }, [status, workflow, limit, offset]);
 
   useEffect(() => {
+    mountedRef.current = true;
     setLoading(true);
     void fetchRuns();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [fetchRuns]);
 
   const hasRunningRef = useRef(false);

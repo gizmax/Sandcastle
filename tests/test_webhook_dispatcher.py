@@ -140,6 +140,48 @@ class TestValidateCallbackUrl:
             with pytest.raises(ValueError, match="resolve"):
                 validate_callback_url("https://nonexistent.invalid/hook")
 
+    # --- New tests for extended SSRF blocklist (added in audit) ---
+
+    def test_rejects_ipv6_link_local(self):
+        """fe80::/10 was missing from the original blocklist."""
+        with patch("socket.getaddrinfo", return_value=[
+            (10, 1, 6, "", ("fe80::1", 443, 0, 1)),
+        ]):
+            with pytest.raises(ValueError, match="blocked"):
+                validate_callback_url("https://ipv6-link-local.example/hook")
+
+    def test_rejects_ipv4_mapped_ipv6_loopback(self):
+        """::ffff:127.0.0.1 (IPv4-mapped IPv6 loopback) was missing."""
+        with patch("socket.getaddrinfo", return_value=[
+            (10, 1, 6, "", ("::ffff:127.0.0.1", 443, 0, 0)),
+        ]):
+            with pytest.raises(ValueError, match="blocked"):
+                validate_callback_url("https://mapped-loopback.example/hook")
+
+    def test_rejects_cgnat(self):
+        """100.64.0.0/10 CGNAT range was missing."""
+        with patch("socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("100.64.0.1", 443)),
+        ]):
+            with pytest.raises(ValueError, match="blocked"):
+                validate_callback_url("https://cgnat.example/hook")
+
+    def test_rejects_unspecified_address(self):
+        """0.0.0.0/8 unspecified range was missing."""
+        with patch("socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("0.0.0.1", 443)),
+        ]):
+            with pytest.raises(ValueError, match="blocked"):
+                validate_callback_url("https://unspecified.example/hook")
+
+    def test_allows_public_ipv6(self):
+        """Legitimate public IPv6 addresses should be allowed."""
+        with patch("socket.getaddrinfo", return_value=[
+            (10, 1, 6, "", ("2001:db8::1", 443, 0, 0)),
+        ]):
+            result = validate_callback_url("https://ipv6.example.com/hook")
+            assert result == "https://ipv6.example.com/hook"
+
 
 class TestDispatchWebhook:
     @pytest.mark.asyncio

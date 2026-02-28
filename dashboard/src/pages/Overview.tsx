@@ -45,8 +45,9 @@ export default function Overview() {
       if (runsRes.data) setRecentRuns(runsRes.data);
     } catch {
       setError("Could not connect to the API server");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {

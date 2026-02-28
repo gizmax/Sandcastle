@@ -161,8 +161,18 @@ export default function ApprovalsPage() {
                 className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden"
               >
                 <div
-                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  aria-label={`${item.message} - ${isExpanded ? "collapse" : "expand"} details`}
+                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedId(isExpanded ? null : item.id);
+                    }
+                  }}
                 >
                   {/* Status indicator */}
                   <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", style.bg, "border")}>

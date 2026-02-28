@@ -103,6 +103,7 @@ export default function SystemHealthPage() {
   const [runtime, setRuntime] = useState<RuntimeData | null>(null);
   const [quickStats, setQuickStats] = useState<QuickStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date>(new Date());
 
@@ -111,6 +112,7 @@ export default function SystemHealthPage() {
 
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
+    setError(null);
     try {
       const [healthRes, runtimeRes, statsRes] =
         await Promise.all([
@@ -135,6 +137,8 @@ export default function SystemHealthPage() {
 
       setQuickStats({ runs, workflows, templates, apiKeys });
       setLastChecked(new Date());
+    } catch {
+      setError("Could not connect to the API server");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -215,6 +219,23 @@ export default function SystemHealthPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">System Health</h1>
+        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
+          <p className="text-sm text-error">{error}</p>
+          <button
+            onClick={() => { setLoading(true); void fetchData(); }}
+            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

@@ -90,7 +90,7 @@ export function NotificationCenter({
                 </button>
               )}
             </div>
-            <div className="max-h-80 overflow-y-auto">
+            <div className="max-h-80 overflow-y-auto" role="list" aria-label="Notification list">
               {notifications.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-muted">No notifications</p>
               ) : (
@@ -99,6 +99,7 @@ export function NotificationCenter({
                   return (
                     <button
                       key={n.id}
+                      role="listitem"
                       onClick={() => {
                         onClickNotification(n);
                         setOpen(false);

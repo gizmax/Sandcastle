@@ -86,11 +86,12 @@ export default function RunDetailPage() {
     void fetchRun();
   }, [fetchRun]);
 
+  const runStatus = run?.status ?? null;
   useEffect(() => {
-    if (!run || !["running", "queued"].includes(run.status)) return;
+    if (!runStatus || !["running", "queued"].includes(runStatus)) return;
     const interval = setInterval(fetchRun, 5000);
     return () => clearInterval(interval);
-  }, [run?.status, fetchRun]);
+  }, [runStatus, fetchRun]);
 
   const cancellingRef = useRef(false);
   const handleCancel = useCallback(async () => {
@@ -376,12 +377,14 @@ export default function RunDetailPage() {
         <div className="rounded-xl border border-border bg-surface shadow-sm">
           <button
             onClick={() => setInputExpanded(!inputExpanded)}
+            aria-expanded={inputExpanded}
+            aria-controls="run-input-data"
             className="w-full px-5 py-3 text-left text-sm font-medium text-foreground hover:bg-border/20 transition-colors"
           >
             Input Data {inputExpanded ? "[-]" : "[+]"}
           </button>
           {inputExpanded && (
-            <div className="border-t border-border px-5 py-3">
+            <div id="run-input-data" className="border-t border-border px-5 py-3">
               <pre className="max-h-48 overflow-auto font-mono text-xs text-muted">
                 {JSON.stringify(run.input_data, null, 2)}
               </pre>
