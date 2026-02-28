@@ -127,7 +127,7 @@ export default function WorkflowDetailPage() {
   if (!data) {
     return (
       <div className="py-16 text-center space-y-3">
-        <p className="text-muted">Workflow not found</p>
+        <p className="text-muted">Workflow &ldquo;{name}&rdquo; was not found. It may have been deleted or renamed.</p>
         <button
           onClick={() => navigate("/workflows")}
           className="inline-flex items-center gap-1 text-sm text-accent hover:text-accent/80 transition-colors"

@@ -89,7 +89,7 @@ async def auth_middleware(request: Request, call_next):
     # paths to avoid leaking keys in URL logs/history/referrer.
     if not api_key:
         path = request.url.path
-        if "/stream" in path or path.startswith("/api/agui/"):
+        if path.endswith("/stream") or "/stream/" in path or path.startswith("/api/agui/"):
             api_key = request.query_params.get("token")
 
     if not api_key:

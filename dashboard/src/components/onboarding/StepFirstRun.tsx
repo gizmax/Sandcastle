@@ -32,6 +32,9 @@ export function StepFirstRun({ selectedTemplate, onNext, onBack }: StepFirstRunP
   const [runId, setRunId] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const hasStarted = useRef(false);
+  const statusRef = useRef<RunStatus>(status);
+
+  useEffect(() => { statusRef.current = status; }, [status]);
 
   function addLog(text: string, type: LogLine["type"] = "info") {
     setLogs((prev) => [...prev, { time: timestamp(), text, type }]);
@@ -128,7 +131,7 @@ export function StepFirstRun({ selectedTemplate, onNext, onBack }: StepFirstRunP
       }
 
       // If stream ends and we haven't completed, check final status
-      if (status === "running") {
+      if (statusRef.current === "running") {
         await checkFinalStatus(id);
       }
     } catch {

@@ -209,7 +209,7 @@ export default function SettingsPage() {
         if (originalRef.current && settings) {
           originalRef.current = { ...settings };
         }
-        toast.success("Settings saved successfully");
+        toast.success("Settings saved");
       }
     },
     [settings]

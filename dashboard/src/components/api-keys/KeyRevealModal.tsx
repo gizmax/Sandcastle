@@ -19,10 +19,14 @@ export function KeyRevealModal({ apiKey, onClose }: KeyRevealModalProps) {
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(apiKey);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(apiKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API not available or permission denied
+    }
   }
 
   return (

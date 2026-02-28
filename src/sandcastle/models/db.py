@@ -184,6 +184,10 @@ class ApiKey(Base):
     """API key for multi-tenant authentication."""
 
     __tablename__ = "api_keys"
+    __table_args__ = (
+        Index("ix_api_keys_tenant_id", "tenant_id"),
+        Index("ix_api_keys_is_active", "is_active"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -341,6 +345,7 @@ class RoutingDecision(Base):
     __tablename__ = "routing_decisions"
     __table_args__ = (
         Index("ix_routing_decisions_run_id", "run_id"),
+        Index("ix_routing_decisions_created_model", "created_at", "selected_model"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -370,6 +375,7 @@ class PolicyViolation(Base):
     __tablename__ = "policy_violations"
     __table_args__ = (
         Index("ix_policy_violations_run_id", "run_id"),
+        Index("ix_policy_violations_created_at", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -471,6 +477,8 @@ class EvalRun(Base):
     __table_args__ = (
         Index("ix_eval_runs_status", "status"),
         Index("ix_eval_runs_created_at", "created_at"),
+        Index("ix_eval_runs_workflow_name", "workflow_name"),
+        Index("ix_eval_runs_tenant_id", "tenant_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

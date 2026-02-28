@@ -169,6 +169,11 @@ class TestSchema:
 class TestHubRegistryEndpoint:
     """Test GET /api/hub/registry."""
 
+    def setup_method(self):
+        """Clear hub cache before each test."""
+        from sandcastle.api import routes
+        routes._hub_cache.clear()
+
     def test_hub_registry_returns_data(self):
         # The endpoint proxies GitHub - mock the HTTP call
         mock_registry = {
@@ -214,6 +219,11 @@ class TestHubRegistryEndpoint:
 
 class TestHubCollectionsEndpoint:
     """Test GET /api/hub/collections."""
+
+    def setup_method(self):
+        """Clear hub cache before each test."""
+        from sandcastle.api import routes
+        routes._hub_cache.clear()
 
     def test_hub_collections_returns_enriched_data(self):
         mock_registry = {

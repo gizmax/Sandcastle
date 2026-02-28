@@ -191,7 +191,7 @@ export default function RunComparePage() {
 
         {!data.same_workflow && (
           <div className="rounded-md bg-warning/10 px-3 py-2 mb-4 text-xs text-warning">
-            Different workflows - config comparison may not be meaningful
+            These runs use different workflows, so step-level comparisons may not be directly comparable.
           </div>
         )}
 

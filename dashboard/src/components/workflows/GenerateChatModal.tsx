@@ -20,8 +20,8 @@ interface GenerateChatModalProps {
 }
 
 type ChatMessage =
-  | { role: "user"; content: string }
-  | { role: "assistant"; content: string; yaml?: GenerateResult };
+  | { id: string; role: "user"; content: string }
+  | { id: string; role: "assistant"; content: string; yaml?: GenerateResult };
 
 interface ChatResponse {
   mode: "questions" | "yaml";
@@ -80,7 +80,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     const text = input.trim();
     if (!text || loading) return;
 
-    const userMsg: ChatMessage = { role: "user", content: text };
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
@@ -126,12 +126,12 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
         setCurrentYaml(data.yaml_content);
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: data.message, yaml: yamlResult },
+          { id: crypto.randomUUID(), role: "assistant", content: data.message, yaml: yamlResult },
         ]);
       } else {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: data.message },
+          { id: crypto.randomUUID(), role: "assistant", content: data.message },
         ]);
       }
     }
@@ -168,7 +168,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     setInput(text);
     // Use a microtask to allow state to update before sending
     setTimeout(() => {
-      const userMsg: ChatMessage = { role: "user", content: text };
+      const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
       const currentMessages = messagesRef.current;
       const newMessages = [...currentMessages, userMsg];
       setMessages(newMessages);
@@ -210,12 +210,12 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
             setCurrentYaml(data.yaml_content);
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", content: data.message, yaml: yamlResult },
+              { id: crypto.randomUUID(), role: "assistant", content: data.message, yaml: yamlResult },
             ]);
           } else {
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", content: data.message },
+              { id: crypto.randomUUID(), role: "assistant", content: data.message },
             ]);
           }
         }
@@ -282,9 +282,9 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
             )}
 
             {/* Chat messages */}
-            {messages.map((msg, i) => (
+            {messages.map((msg) => (
               <div
-                key={`${msg.role}-${i}`}
+                key={msg.id}
                 className={cn(
                   "flex items-start gap-3",
                   msg.role === "user" && "flex-row-reverse"

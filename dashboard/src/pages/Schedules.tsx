@@ -143,7 +143,7 @@ export default function Schedules() {
         <EmptyState
           icon={Calendar}
           title="No schedules yet"
-          description="Automate your first workflow!"
+          description="No schedules configured. Create a schedule to run workflows on a cron timer."
           action={{ label: "New Schedule", onClick: () => setModalOpen(true) }}
         />
       ) : (

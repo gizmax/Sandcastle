@@ -107,7 +107,7 @@ export default function AutoPilotPage() {
           toast.error(`Failed to deploy variant: ${res.error.message}`);
           return;
         }
-        toast.success("Variant deployed successfully");
+        toast.success("Variant deployed");
         void fetchData();
       } finally {
         setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });

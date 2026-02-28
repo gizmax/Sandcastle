@@ -16,11 +16,17 @@ class WorkflowRunRequest(BaseModel):
     Provide either `workflow` (raw YAML) or `workflow_name` (file reference).
     """
 
-    workflow: str | None = Field(None, description="Workflow YAML content")
-    workflow_name: str | None = Field(None, description="Name of a saved workflow file to run")
+    workflow: str | None = Field(None, description="Workflow YAML content", max_length=500000)
+    workflow_name: str | None = Field(
+        None, description="Name of a saved workflow file to run", max_length=200
+    )
     input: dict[str, Any] = Field(default_factory=dict, description="Input data for the workflow")
-    callback_url: str | None = Field(None, description="Webhook URL for completion notification")
-    idempotency_key: str | None = Field(None, description="Unique key to prevent duplicate runs")
+    callback_url: str | None = Field(
+        None, description="Webhook URL for completion notification", max_length=2000
+    )
+    idempotency_key: str | None = Field(
+        None, description="Unique key to prevent duplicate runs", max_length=200
+    )
     max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run", ge=0)
     version: int | str | None = Field(None, description="Workflow version (int, 'latest', or None)")
 
@@ -84,7 +90,7 @@ class GenerateChatMessage(BaseModel):
         description="Message role: 'user' or 'assistant'",
         pattern="^(user|assistant)$",
     )
-    content: str = Field(..., description="Message content", min_length=1)
+    content: str = Field(..., description="Message content", min_length=1, max_length=100000)
 
 
 class GenerateChatRequest(BaseModel):
@@ -95,7 +101,9 @@ class GenerateChatRequest(BaseModel):
         description="Conversation history",
         min_length=1,
     )
-    existing_yaml: str | None = Field(None, description="Existing workflow YAML for edit mode")
+    existing_yaml: str | None = Field(
+        None, description="Existing workflow YAML for edit mode", max_length=500000
+    )
 
 
 class WorkflowSaveRequest(BaseModel):
@@ -107,8 +115,8 @@ class WorkflowSaveRequest(BaseModel):
         min_length=1,
         max_length=200,
     )
-    content: str = Field(..., description="Workflow YAML content", min_length=1)
-    description: str = Field("", description="Version description", max_length=1000)
+    content: str = Field(..., description="Workflow YAML content", min_length=1, max_length=500000)
+    description: str = Field("", description="Version description", max_length=5000)
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -152,7 +160,7 @@ class ApiKeyAllowlistRequest(BaseModel):
 class DeadLetterResolveRequest(BaseModel):
     """Request to manually resolve a dead letter item."""
 
-    reason: str | None = None
+    reason: str | None = Field(None, max_length=5000)
 
 
 class WorkflowPromoteRequest(BaseModel):
@@ -170,7 +178,7 @@ class WorkflowRollbackRequest(BaseModel):
 class ApprovalRespondRequest(BaseModel):
     """Request to approve/reject/skip an approval gate."""
 
-    comment: str | None = Field(None, description="Reviewer comment")
+    comment: str | None = Field(None, description="Reviewer comment", max_length=5000)
     edited_data: dict[str, Any] | None = Field(
         None, description="Edited request data (only if allow_edit is true)"
     )
@@ -607,13 +615,13 @@ class SettingsUpdateRequest(BaseModel):
     can only be changed via environment variables, not via this API.
     """
 
-    anthropic_api_key: str | None = None
-    e2b_api_key: str | None = None
-    openai_api_key: str | None = None
-    minimax_api_key: str | None = None
-    openrouter_api_key: str | None = None
+    anthropic_api_key: str | None = Field(None, max_length=500)
+    e2b_api_key: str | None = Field(None, max_length=500)
+    openai_api_key: str | None = Field(None, max_length=500)
+    minimax_api_key: str | None = Field(None, max_length=500)
+    openrouter_api_key: str | None = Field(None, max_length=500)
     default_max_cost_usd: float | None = Field(None, ge=0)
-    log_level: str | None = Field(None, pattern="^(debug|info|warning|error)$")
+    log_level: str | None = Field(None, pattern="^(debug|info|warning|error)$", max_length=50)
     max_workflow_depth: int | None = Field(None, ge=1, le=20)
 
 
@@ -675,7 +683,10 @@ class ToolCredentialUpdateRequest(BaseModel):
 class ToolConnectionCreateRequest(BaseModel):
     """Create a named connection for a tool."""
 
-    name: str = Field(..., description="Connection name (e.g. 'analytics', 'staging')")
+    name: str = Field(
+        ..., description="Connection name (e.g. 'analytics', 'staging')",
+        min_length=1, max_length=200,
+    )
     credentials: dict[str, str] = Field(..., description="Mapping of env var name to value")
 
 
@@ -691,7 +702,7 @@ class ToolConnectionUpdateRequest(BaseModel):
 class EvalSuiteRunRequest(BaseModel):
     """Request to run an eval suite."""
 
-    suite_yaml: str = Field(..., description="Eval suite YAML content")
+    suite_yaml: str = Field(..., description="Eval suite YAML content", max_length=500000)
     concurrency: int = Field(1, description="Max concurrent test cases", ge=1, le=20)
 
 

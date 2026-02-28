@@ -31,11 +31,13 @@ export function DirectoryBrowser({ open, initialPath, onSelect, onClose }: Direc
 
   useEffect(() => {
     if (!open) return;
+    let aborted = false;
     setLoading(true);
     setError(null);
     api
       .get<BrowseResult>("/browse", { path: currentPath })
       .then((res) => {
+        if (aborted) return;
         if (res.data) {
           setCurrentPath(res.data.current);
           setEntries(res.data.entries);
@@ -44,8 +46,15 @@ export function DirectoryBrowser({ open, initialPath, onSelect, onClose }: Direc
           setError(res.error.message);
         }
       })
-      .catch(() => setError("Failed to browse directory"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!aborted) setError("Failed to browse directory");
+      })
+      .finally(() => {
+        if (!aborted) setLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
   }, [open, currentPath]);
 
   if (!open) return null;
