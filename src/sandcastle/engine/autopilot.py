@@ -23,6 +23,9 @@ ROLLOUT_STAGES = {
 
 ROLLOUT_ORDER = ["canary", "partial", "full"]
 
+# Hard safety cap: maximum samples per experiment to prevent unbounded spending
+MAX_SAMPLES_PER_EXPERIMENT = 500
+
 
 async def get_or_create_experiment(
     workflow_name: str,
@@ -271,7 +274,15 @@ async def maybe_complete_experiment(
         total = await session.scalar(count_stmt)
 
         if total < config.min_samples:
-            return None
+            # Safety cap: force completion if samples exceed hard limit
+            if total < MAX_SAMPLES_PER_EXPERIMENT:
+                return None
+            logger.warning(
+                "AutoPilot experiment %s hit safety cap (%d samples). "
+                "Forcing winner selection.",
+                experiment_id,
+                total,
+            )
 
         # Get stats per variant
         stats_stmt = (

@@ -289,11 +289,44 @@ class PolicyEngine:
 # --- Helper functions ---
 
 
+# Maximum length for user-supplied regex patterns to limit complexity
+_MAX_REGEX_LENGTH = 500
+
+
+def _has_redos_risk(pattern: str) -> bool:
+    """Heuristic check for catastrophic backtracking (ReDoS) patterns.
+
+    Detects common nested-quantifier constructs such as ``(a+)+``,
+    ``(.*)*``, ``(a+)*`` etc. that can cause exponential runtime.
+    """
+    # Match a group with an inner quantifier followed by an outer quantifier
+    # e.g. (X+)+, (X+)*, (X*)+, (X*){n}, (.+)+, etc.
+    return bool(re.search(
+        r"\([^)]*[+*][^)]*\)[+*{]",
+        pattern,
+    ))
+
+
 def _get_pattern_regex(pattern: PolicyPattern) -> re.Pattern:
-    """Get compiled regex for a pattern type."""
+    """Get compiled regex for a pattern type.
+
+    User-supplied patterns (type="regex") are validated for length and
+    checked for obvious catastrophic-backtracking constructs before
+    compilation.
+    """
     if pattern.type == "regex":
         if not pattern.pattern:
             raise ValueError("Regex pattern requires a 'pattern' field")
+        if len(pattern.pattern) > _MAX_REGEX_LENGTH:
+            raise ValueError(
+                f"Regex pattern too long ({len(pattern.pattern)} chars, "
+                f"max {_MAX_REGEX_LENGTH})"
+            )
+        if _has_redos_risk(pattern.pattern):
+            raise ValueError(
+                "Regex pattern rejected: potential catastrophic backtracking "
+                f"(ReDoS) detected in '{pattern.pattern[:80]}...'"
+            )
         return re.compile(pattern.pattern)
     elif pattern.type in BUILTIN_PATTERNS:
         return re.compile(BUILTIN_PATTERNS[pattern.type])

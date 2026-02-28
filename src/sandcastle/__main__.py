@@ -127,6 +127,9 @@ def _load_dot_env() -> None:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
+            # Handle 'export KEY=VALUE' syntax
+            if line.startswith("export "):
+                line = line[7:].strip()
             if "=" not in line:
                 continue
             key, _, value = line.partition("=")
@@ -596,12 +599,22 @@ def _cmd_init_inner(args: argparse.Namespace) -> None:
         "REDIS_URL=",
     ]
     env_path.write_text("\n".join(lines) + "\n")
+    # Restrict .env file permissions to owner-only (contains secrets)
+    try:
+        env_path.chmod(0o600)
+    except OSError:
+        pass  # chmod may fail on some filesystems (e.g. FAT32)
 
-    # Create default directories
+    # Create default directories with restricted permissions
     from sandcastle.config import _DEFAULT_DATA_DIR, _DEFAULT_WORKFLOWS_DIR
 
-    Path(_DEFAULT_DATA_DIR).mkdir(parents=True, exist_ok=True)
-    Path(_DEFAULT_WORKFLOWS_DIR).mkdir(parents=True, exist_ok=True)
+    for dir_path in (_DEFAULT_DATA_DIR, _DEFAULT_WORKFLOWS_DIR):
+        p = Path(dir_path)
+        p.mkdir(parents=True, exist_ok=True)
+        try:
+            p.chmod(0o700)
+        except OSError:
+            pass  # chmod may fail on some filesystems
 
     print()
     print(_color("  .env created", _C.GREEN))
@@ -1157,7 +1170,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     if cfg and cfg.telemetry_enabled and cfg.sentry_dsn:
         try:
             importlib.import_module("sentry_sdk")
-            _pass(f"Sentry DSN configured ({cfg.sentry_dsn[:20]}...)")
+            _pass("Sentry DSN configured")
         except ImportError:
             _fail("sentry-sdk not installed (pip install sandcastle-ai[telemetry])")
     elif cfg and cfg.telemetry_enabled:

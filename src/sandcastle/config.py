@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     dashboard_origin: str = "http://localhost:5173"
 
     # Budget
-    default_max_cost_usd: float = 0.0  # 0 = no limit
+    default_max_cost_usd: float = 0.0  # 0 = no limit (must be >= 0)
 
     # Workflows directory (default: ~/.sandcastle/workflows)
     workflows_dir: str = _DEFAULT_WORKFLOWS_DIR
@@ -204,7 +204,7 @@ class Settings(BaseSettings):
     @field_validator("max_concurrent_sandboxes", mode="after")
     @classmethod
     def _validate_max_concurrent(cls, v: int) -> int:
-        """Ensure max_concurrent_sandboxes is at least 1."""
+        """Ensure max_concurrent_sandboxes is between 1 and 50."""
         if v < 1:
             _logger.warning(
                 "MAX_CONCURRENT_SANDBOXES=%d is invalid (must be >= 1), "
@@ -212,6 +212,38 @@ class Settings(BaseSettings):
                 v,
             )
             return 1
+        if v > 50:
+            _logger.warning(
+                "MAX_CONCURRENT_SANDBOXES=%d exceeds maximum (50), "
+                "clamping to 50 to prevent resource exhaustion",
+                v,
+            )
+            return 50
+        return v
+
+    @field_validator("default_max_cost_usd", mode="after")
+    @classmethod
+    def _validate_default_max_cost(cls, v: float) -> float:
+        """Ensure default_max_cost_usd is non-negative (0 = no limit)."""
+        if v < 0:
+            _logger.warning(
+                "DEFAULT_MAX_COST_USD=%.2f is invalid (must be >= 0), "
+                "using 0.0 (no limit)",
+                v,
+            )
+            return 0.0
+        return v
+
+    @field_validator("tool_smtp_port", mode="after")
+    @classmethod
+    def _validate_tool_smtp_port(cls, v: int) -> int:
+        """Ensure tool_smtp_port is a valid port number."""
+        if v < 1 or v > 65535:
+            _logger.warning(
+                "TOOL_SMTP_PORT=%d is invalid (must be 1-65535), using 587",
+                v,
+            )
+            return 587
         return v
 
     @field_validator("memory_admit_threshold", mode="after")

@@ -31,6 +31,14 @@ PUBLIC_PREFIXES = ("/api/templates", "/api/agui")
 # In production, set API_KEY_PEPPER as an environment variable.
 _API_KEY_PEPPER = os.getenv("API_KEY_PEPPER", "sandcastle-default-pepper-change-in-production")
 
+if _API_KEY_PEPPER == "sandcastle-default-pepper-change-in-production":
+    # Only warn if auth is actually enabled (avoids noise in local/dev mode)
+    import logging as _auth_logging
+
+    _auth_logging.getLogger(__name__).debug(
+        "Using default API_KEY_PEPPER. Set API_KEY_PEPPER env var for production."
+    )
+
 
 def hash_key(key: str) -> str:
     """Hash an API key with HMAC-SHA256 using a server-side pepper."""

@@ -2313,9 +2313,18 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
     )
 
 
-def _sse_event(event: str, data: dict) -> str:
-    """Format a server-sent event."""
-    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+def _sse_event(event: str, data: dict, event_id: str | int | None = None) -> str:
+    """Format a server-sent event.
+
+    If event_id is provided, includes an ``id:`` field so clients can
+    reconnect using ``Last-Event-ID`` and resume from where they left off.
+    """
+    parts = []
+    if event_id is not None:
+        parts.append(f"id: {event_id}")
+    parts.append(f"event: {event}")
+    parts.append(f"data: {json.dumps(data, default=str)}")
+    return "\n".join(parts) + "\n\n"
 
 
 @router.get("/events")
@@ -2326,12 +2335,27 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     connected dashboard clients. When auth is enabled, events are
     filtered to only show runs belonging to the authenticated tenant.
 
+    Supports ``Last-Event-ID`` header for reconnection: if the client
+    sends this header, only events with a sequence number greater than
+    the provided value will be delivered (note: only future events are
+    guaranteed since older events are not buffered).
+
     Event types: run.started, run.completed, run.failed,
     step.started, step.completed, step.failed, dlq.new
     """
     from sandcastle.engine.events import event_bus
 
     tenant_id = get_tenant_id(request)
+
+    # Parse Last-Event-ID for SSE reconnection support
+    last_event_id_header = request.headers.get("Last-Event-ID")
+    last_seen_seq = 0
+    if last_event_id_header:
+        try:
+            last_seen_seq = int(last_event_id_header)
+        except (ValueError, TypeError):
+            pass  # Ignore malformed Last-Event-ID
+
     try:
         queue = await event_bus.subscribe()
     except RuntimeError:
@@ -2371,13 +2395,24 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     async def event_generator():
         try:
             while True:
+                # Check if the client has disconnected to avoid resource leaks
+                if await request.is_disconnected():
+                    break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
+
+                    # Skip events the client has already seen (SSE reconnection)
+                    event_seq = event.get("seq", 0)
+                    if event_seq <= last_seen_seq:
+                        continue
+
                     # Tenant filter: skip events for runs not owned by this tenant
                     run_id = event.get("data", {}).get("run_id")
                     if run_id and not await _run_belongs_to_tenant(run_id):
                         continue
-                    yield _sse_event(event["type"], event["data"])
+                    yield _sse_event(
+                        event["type"], event["data"], event_id=event_seq
+                    )
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout
                     yield ": keepalive\n\n"
@@ -4805,6 +4840,25 @@ _SENSITIVE_KEYS = frozenset(
         "database_url",
         "redis_url",
         "webhook_secret",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "credential_encryption_key",
+        "admin_api_key",
+        "license_key",
+        "sentry_dsn",
+        "tool_slack_bot_token",
+        "tool_jira_api_token",
+        "tool_github_token",
+        "tool_notion_api_key",
+        "tool_hubspot_api_key",
+        "tool_salesforce_client_id",
+        "tool_salesforce_client_secret",
+        "tool_salesforce_refresh_token",
+        "tool_zendesk_api_token",
+        "tool_smtp_password",
+        "tool_google_service_account",
+        "tool_teams_webhook_url",
+        "tool_postgresql_url",
     }
 )
 
@@ -5473,15 +5527,20 @@ async def update_tool_credentials(
             ).model_dump(),
         )
 
-    # Persist to DB and apply to runtime environment
+    # Persist to DB (encrypted if key is configured) and apply to runtime
+    from sandcastle.engine.crypto import encrypt_credentials as _enc_cred
+
     async with async_session() as session:
         for env_key, env_value in body.credentials.items():
+            # Encrypt the value before storing (passthrough if no key)
+            stored_value = _enc_cred({"v": env_value})
+            db_value = stored_value if isinstance(stored_value, str) else env_value
             existing = await session.get(Setting, env_key)
             if existing:
-                existing.value = env_value
+                existing.value = db_value
             else:
-                session.add(Setting(key=env_key, value=env_value))
-            # Apply to runtime so tools work immediately
+                session.add(Setting(key=env_key, value=db_value))
+            # Apply to runtime so tools work immediately (plaintext in memory)
             os.environ[env_key] = env_value
             # Also update settings object if the field exists
             config_key = env_key.lower()

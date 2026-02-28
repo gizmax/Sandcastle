@@ -41,8 +41,20 @@ export default {
         // Write runner script into the sandbox
         await sandbox.writeFile(`/home/user/${runner_file}`, runner_content);
 
-        // Build env export string and execute
-        const envString = Object.entries(envs)
+        // Validate runner_file to prevent path traversal
+        if (runner_file.includes("..") || runner_file.startsWith("/")) {
+          return Response.json(
+            { error: "Invalid runner file path", stdout: "", stderr: "", exitCode: 1 },
+            { status: 400 }
+          );
+        }
+
+        // Build env export string and execute.
+        // Validate env var names to prevent shell injection via keys.
+        const envEntries = Object.entries(envs).filter(
+          ([k]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)
+        );
+        const envString = envEntries
           .map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`)
           .join(" && ");
 

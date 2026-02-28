@@ -10,6 +10,9 @@ from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
+# Maximum content size for a single write operation (10 MB)
+_MAX_WRITE_SIZE = 10 * 1024 * 1024
+
 
 class StorageBackend(Protocol):
     """Protocol for storage backend implementations."""
@@ -43,6 +46,11 @@ class LocalStorage:
 
     async def write(self, path: str, content: str) -> None:
         """Write content to a file atomically (write-to-temp-then-rename)."""
+        if len(content) > _MAX_WRITE_SIZE:
+            raise ValueError(
+                f"Content too large for storage write "
+                f"({len(content)} bytes, max {_MAX_WRITE_SIZE})"
+            )
         file_path = self._safe_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(
@@ -82,6 +90,7 @@ class LocalStorage:
             file_path.unlink()
 
 
+
 class S3Storage:
     """S3-compatible storage backend (works with MinIO)."""
 
@@ -97,6 +106,21 @@ class S3Storage:
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
 
+    @staticmethod
+    def _safe_key(key: str) -> str:
+        """Sanitize S3 key to prevent path traversal and null bytes."""
+        if not key or not key.strip():
+            raise ValueError("S3 key must not be empty")
+        if "\x00" in key:
+            raise ValueError("S3 key must not contain null bytes")
+        # Normalize path traversal sequences
+        import posixpath
+        normalized = posixpath.normpath(key)
+        # Reject keys that escape the root after normalization
+        if normalized.startswith("..") or normalized.startswith("/"):
+            raise ValueError(f"S3 key traversal denied: {key}")
+        return normalized
+
     def _get_session(self):
         """Create an aioboto3 session."""
         import aioboto3
@@ -108,45 +132,54 @@ class S3Storage:
 
     async def read(self, path: str) -> str | None:
         """Read content from S3."""
+        safe = self._safe_key(path)
         session = self._get_session()
         async with session.client("s3", endpoint_url=self.endpoint_url) as s3:
             try:
-                resp = await s3.get_object(Bucket=self.bucket, Key=path)
+                resp = await s3.get_object(Bucket=self.bucket, Key=safe)
                 body = await resp["Body"].read()
                 return body.decode("utf-8")
             except s3.exceptions.NoSuchKey:
                 return None
             except Exception as e:
-                logger.error(f"S3 read error for '{path}': {e}")
+                logger.error("S3 read error for '%s': %s", safe, e)
                 raise
 
     async def write(self, path: str, content: str) -> None:
         """Write content to S3."""
+        safe = self._safe_key(path)
+        if len(content) > _MAX_WRITE_SIZE:
+            raise ValueError(
+                f"Content too large for storage write "
+                f"({len(content)} bytes, max {_MAX_WRITE_SIZE})"
+            )
         session = self._get_session()
         async with session.client("s3", endpoint_url=self.endpoint_url) as s3:
             await s3.put_object(
                 Bucket=self.bucket,
-                Key=path,
+                Key=safe,
                 Body=content.encode("utf-8"),
                 ContentType="application/json",
             )
 
     async def list(self, prefix: str) -> list[str]:
         """List objects matching a prefix."""
+        safe = self._safe_key(prefix) if prefix else ""
         session = self._get_session()
         async with session.client("s3", endpoint_url=self.endpoint_url) as s3:
             results: list[str] = []
             paginator = s3.get_paginator("list_objects_v2")
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            async for page in paginator.paginate(Bucket=self.bucket, Prefix=safe):
                 for obj in page.get("Contents", []):
                     results.append(obj["Key"])
             return results
 
     async def delete(self, path: str) -> None:
         """Delete an object from S3."""
+        safe = self._safe_key(path)
         session = self._get_session()
         async with session.client("s3", endpoint_url=self.endpoint_url) as s3:
-            await s3.delete_object(Bucket=self.bucket, Key=path)
+            await s3.delete_object(Bucket=self.bucket, Key=safe)
 
 
 def create_storage() -> LocalStorage | S3Storage:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,9 @@ class EventBus:
     Subscribers receive events via asyncio.Queue instances. This is designed
     for local mode (pure in-memory); production deployments can extend this
     to fan-out via Redis Pub/Sub if needed.
+
+    Each event has a monotonically increasing ``seq`` field that consumers can
+    use to detect gaps (e.g. after SSE reconnection via ``Last-Event-ID``).
     """
 
     # Valid event types
@@ -36,6 +40,8 @@ class EventBus:
         self._subscribers: set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
         self._drop_counts: dict[int, int] = {}
+        # Monotonically increasing sequence counter for event ordering
+        self._seq_counter = itertools.count(1)
 
     async def subscribe(self) -> asyncio.Queue:
         """Create a new subscriber queue and register it.
@@ -71,6 +77,9 @@ class EventBus:
         This method is synchronous and non-blocking. Events are pushed
         into subscriber queues without awaiting - if a queue is full the
         event is silently dropped for that subscriber.
+
+        Each event is tagged with a monotonic ``seq`` number so consumers
+        can detect ordering and gaps.
         """
         if event_type not in self.EVENT_TYPES:
             logger.warning("EventBus: unknown event type '%s'", event_type)
@@ -78,6 +87,7 @@ class EventBus:
         event = {
             "type": event_type,
             "data": data,
+            "seq": next(self._seq_counter),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -100,9 +110,11 @@ class EventBus:
                         "(type=%s)", event_type
                     )
 
-        for dq in dead_queues:
-            self._subscribers.discard(dq)
-            self._drop_counts.pop(id(dq), None)
+        # Remove dead subscribers while holding the lock to prevent races
+        if dead_queues:
+            for dq in dead_queues:
+                self._subscribers.discard(dq)
+                self._drop_counts.pop(id(dq), None)
 
     @property
     def subscriber_count(self) -> int:

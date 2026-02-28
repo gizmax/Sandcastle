@@ -36,6 +36,12 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("::ffff:0:0/96"),      # IPv4-mapped IPv6 addresses
 ]
 
+# Maximum webhook payload size (1MB)
+MAX_PAYLOAD_BYTES = 1_048_576
+
+# Maximum output preview size in truncated payloads
+MAX_OUTPUT_PREVIEW_BYTES = 10_000
+
 
 def validate_callback_url(url: str) -> str:
     """Validate a callback URL to prevent SSRF attacks."""
@@ -61,6 +67,70 @@ def validate_callback_url(url: str) -> str:
     return url
 
 
+def _resolve_and_check_ip(hostname: str, port: int) -> None:
+    """Re-resolve a hostname at delivery time and check against blocked networks.
+
+    This prevents DNS rebinding attacks where a hostname resolves to a public
+    IP at validation time but to a private IP at delivery time.
+    """
+    try:
+        resolved = socket.getaddrinfo(hostname, port)
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve hostname '{hostname}' at delivery time")
+
+    for _, _, _, _, sockaddr in resolved:
+        ip = ipaddress.ip_address(sockaddr[0])
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise ValueError(
+                    f"DNS rebinding detected: '{hostname}' now resolves to "
+                    f"blocked network ({ip})"
+                )
+
+
+def _truncate_payload(
+    payload: dict[str, Any],
+    outputs: dict[str, Any] | None,
+    run_id: str,
+) -> str:
+    """Truncate a webhook payload to fit within MAX_PAYLOAD_BYTES.
+
+    Returns the JSON-encoded body string.
+    """
+    body = json.dumps(payload, default=str)
+
+    if len(body.encode("utf-8")) <= MAX_PAYLOAD_BYTES:
+        return body
+
+    logger.warning(
+        f"Webhook payload for run {run_id} exceeds {MAX_PAYLOAD_BYTES} bytes, "
+        "truncating outputs"
+    )
+    if outputs:
+        full_preview = json.dumps(outputs, default=str)
+        if len(full_preview) > MAX_OUTPUT_PREVIEW_BYTES:
+            outputs_preview = (
+                full_preview[: MAX_OUTPUT_PREVIEW_BYTES - 15] + "...(truncated)"
+            )
+        else:
+            outputs_preview = full_preview
+    else:
+        outputs_preview = None
+    payload["outputs"] = {
+        "outputs_truncated": True,
+        "outputs_preview": outputs_preview,
+        "_reason": "payload_too_large",
+    }
+    body = json.dumps(payload, default=str)
+
+    # Final safety check: if still over limit (e.g. huge error field), hard-truncate
+    body_bytes = body.encode("utf-8")
+    if len(body_bytes) > MAX_PAYLOAD_BYTES:
+        body = body_bytes[:MAX_PAYLOAD_BYTES].decode("utf-8", errors="ignore")
+
+    return body
+
+
 async def dispatch_webhook(
     url: str,
     event: str,
@@ -83,6 +153,20 @@ async def dispatch_webhook(
     except ValueError as e:
         logger.error(f"Webhook URL validation failed: {e}")
         return False
+
+    # Re-validate DNS at delivery time to prevent DNS rebinding attacks.
+    # The initial validate_callback_url() checks at creation/submission time,
+    # but the hostname could resolve to a different IP at delivery time.
+    parsed = urlparse(url)
+    default_port = 443 if parsed.scheme == "https" else 80
+    try:
+        _resolve_and_check_ip(
+            parsed.hostname or "", parsed.port or default_port
+        )
+    except ValueError as e:
+        logger.error(f"Webhook DNS rebinding check failed: {e}")
+        return False
+
     payload = {
         "event": event,
         "run_id": run_id,
@@ -96,29 +180,7 @@ async def dispatch_webhook(
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    body = json.dumps(payload, default=str)
-
-    # Guard against excessively large payloads (max 1MB)
-    max_payload_bytes = 1_048_576
-    if len(body.encode("utf-8")) > max_payload_bytes:
-        logger.warning(
-            f"Webhook payload for run {run_id} exceeds {max_payload_bytes} bytes, "
-            "truncating outputs"
-        )
-        if outputs:
-            full_preview = json.dumps(outputs, default=str)
-            if len(full_preview) > 10000:
-                outputs_preview = full_preview[:9990] + "...(truncated)"
-            else:
-                outputs_preview = full_preview
-        else:
-            outputs_preview = None
-        payload["outputs"] = {
-            "outputs_truncated": True,
-            "outputs_preview": outputs_preview,
-            "_reason": "payload_too_large",
-        }
-        body = json.dumps(payload, default=str)
+    body = _truncate_payload(payload, outputs, run_id)
 
     headers: dict[str, str] = {
         "Content-Type": "application/json",
@@ -167,6 +229,12 @@ async def dispatch_webhook(
 
             except httpx.HTTPError as e:
                 logger.warning(f"Webhook attempt {attempt} failed: {e}")
+            except Exception as e:
+                # Catch unexpected errors (e.g. SSL, encoding) so webhook
+                # failures never propagate and block workflow execution.
+                logger.error(
+                    f"Webhook attempt {attempt} unexpected error: {e}"
+                )
 
             if attempt < max_retries:
                 delay = min(2**attempt, 30)

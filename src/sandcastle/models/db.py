@@ -600,6 +600,11 @@ def _build_engine_url() -> str:
     # Local mode: SQLite in data_dir
     data_path = Path(settings.data_dir).resolve()
     data_path.mkdir(parents=True, exist_ok=True)
+    # Restrict data directory permissions to owner-only (contains DB with secrets)
+    try:
+        data_path.chmod(0o700)
+    except OSError:
+        pass  # chmod may fail on some filesystems
     return f"sqlite+aiosqlite:///{data_path}/sandcastle.db"
 
 
