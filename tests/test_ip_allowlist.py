@@ -7,6 +7,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sandcastle.api.auth import hash_key
+
+
+def _make_db_key(api_key_str, **overrides):
+    """Create a mock DB key with correct key_hash for auth matching."""
+    db_key = MagicMock()
+    db_key.key_hash = hash_key(api_key_str)
+    db_key.key_prefix = api_key_str[:8]
+    db_key.expires_at = overrides.get("expires_at", None)
+    db_key.is_active = overrides.get("is_active", True)
+    db_key.tenant_id = overrides.get("tenant_id", None)
+    db_key.id = overrides.get("id", uuid.uuid4())
+    db_key.allowed_cidrs = overrides.get("allowed_cidrs", None)
+    return db_key
+
 
 class TestIPAllowlistAuth:
     """Auth middleware should check IP against allowed_cidrs."""
@@ -16,24 +31,20 @@ class TestIPAllowlistAuth:
         """Request from an allowed IP should pass through."""
         from sandcastle.api.auth import auth_middleware
 
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "10.0.1.5"
         request.state = MagicMock()
 
-        db_key = MagicMock()
-        db_key.expires_at = None
-        db_key.is_active = True
-        db_key.tenant_id = None
-        db_key.id = uuid.uuid4()
-        db_key.allowed_cidrs = ["10.0.0.0/8"]
+        db_key = _make_db_key(api_key_str, allowed_cidrs=["10.0.0.0/8"])
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = db_key
+        mock_result.scalars.return_value.all.return_value = [db_key]
         mock_session.execute.return_value = mock_result
         mock_session.get.return_value = db_key
 
@@ -57,24 +68,20 @@ class TestIPAllowlistAuth:
         """Request from a non-allowed IP should be blocked with 403."""
         from sandcastle.api.auth import auth_middleware
 
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "192.168.1.1"
         request.state = MagicMock()
 
-        db_key = MagicMock()
-        db_key.expires_at = None
-        db_key.is_active = True
-        db_key.tenant_id = None
-        db_key.id = uuid.uuid4()
-        db_key.allowed_cidrs = ["10.0.0.0/8"]
+        db_key = _make_db_key(api_key_str, allowed_cidrs=["10.0.0.0/8"])
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = db_key
+        mock_result.scalars.return_value.all.return_value = [db_key]
         mock_session.execute.return_value = mock_result
 
         call_next = AsyncMock()
@@ -97,24 +104,20 @@ class TestIPAllowlistAuth:
         """IPv6 addresses should work in allowlists."""
         from sandcastle.api.auth import auth_middleware
 
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "::1"
         request.state = MagicMock()
 
-        db_key = MagicMock()
-        db_key.expires_at = None
-        db_key.is_active = True
-        db_key.tenant_id = None
-        db_key.id = uuid.uuid4()
-        db_key.allowed_cidrs = ["::1/128"]
+        db_key = _make_db_key(api_key_str, allowed_cidrs=["::1/128"])
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = db_key
+        mock_result.scalars.return_value.all.return_value = [db_key]
         mock_session.execute.return_value = mock_result
         mock_session.get.return_value = db_key
 
@@ -138,24 +141,20 @@ class TestIPAllowlistAuth:
         """Null/empty allowed_cidrs should allow all IPs."""
         from sandcastle.api.auth import auth_middleware
 
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "1.2.3.4"
         request.state = MagicMock()
 
-        db_key = MagicMock()
-        db_key.expires_at = None
-        db_key.is_active = True
-        db_key.tenant_id = None
-        db_key.id = uuid.uuid4()
-        db_key.allowed_cidrs = None  # No restriction
+        db_key = _make_db_key(api_key_str, allowed_cidrs=None)
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = db_key
+        mock_result.scalars.return_value.all.return_value = [db_key]
         mock_session.execute.return_value = mock_result
         mock_session.get.return_value = db_key
 

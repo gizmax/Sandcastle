@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { useEventStream } from "@/hooks/useEventStream";
 import { EventStreamContext } from "@/hooks/useEventStreamContext";
@@ -64,15 +64,18 @@ export function EventStreamProvider({ children }: EventStreamProviderProps) {
     };
   }, []);
 
+  const contextValue = useMemo(
+    () => ({
+      events,
+      connectionStatus: status,
+      subscribe,
+      clearEvents,
+    }),
+    [events, status, subscribe, clearEvents]
+  );
+
   return (
-    <EventStreamContext.Provider
-      value={{
-        events,
-        connectionStatus: status,
-        subscribe,
-        clearEvents,
-      }}
-    >
+    <EventStreamContext.Provider value={contextValue}>
       {children}
     </EventStreamContext.Provider>
   );

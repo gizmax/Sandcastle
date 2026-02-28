@@ -8,6 +8,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sandcastle.api.auth import hash_key
+
+
+def _make_db_key(api_key_str, **overrides):
+    """Create a mock DB key with correct key_hash for auth matching."""
+    db_key = MagicMock()
+    db_key.key_hash = hash_key(api_key_str)
+    db_key.key_prefix = api_key_str[:8]
+    db_key.expires_at = overrides.get("expires_at", None)
+    db_key.is_active = overrides.get("is_active", True)
+    db_key.tenant_id = overrides.get("tenant_id", None)
+    db_key.id = overrides.get("id", uuid.uuid4())
+    db_key.allowed_cidrs = overrides.get("allowed_cidrs", None)
+    return db_key
+
 
 class TestKeyExpiry:
     """Auth middleware should reject expired keys."""
@@ -17,26 +32,23 @@ class TestKeyExpiry:
         """A key with expires_at in the past should return 401."""
         from sandcastle.api.auth import auth_middleware
 
-        # Mock request
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "127.0.0.1"
         request.state = MagicMock()
 
-        # Mock DB key - expired
-        expired_key = MagicMock()
-        expired_key.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-        expired_key.is_active = True
-        expired_key.tenant_id = None
-        expired_key.id = uuid.uuid4()
-        expired_key.allowed_cidrs = None
+        expired_key = _make_db_key(
+            api_key_str,
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = expired_key
+        mock_result.scalars.return_value.all.return_value = [expired_key]
         mock_session.execute.return_value = mock_result
 
         call_next = AsyncMock()
@@ -59,24 +71,24 @@ class TestKeyExpiry:
         """A key with expires_at in the future should be allowed."""
         from sandcastle.api.auth import auth_middleware
 
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "127.0.0.1"
         request.state = MagicMock()
 
-        future_key = MagicMock()
-        future_key.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-        future_key.is_active = True
-        future_key.tenant_id = "tenant-1"
-        future_key.id = uuid.uuid4()
-        future_key.allowed_cidrs = None
+        future_key = _make_db_key(
+            api_key_str,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            tenant_id="tenant-1",
+        )
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = future_key
+        mock_result.scalars.return_value.all.return_value = [future_key]
         mock_session.execute.return_value = mock_result
         mock_session.get.return_value = future_key
 
@@ -101,24 +113,20 @@ class TestKeyExpiry:
         """A key with no expiry should always be allowed."""
         from sandcastle.api.auth import auth_middleware
 
+        api_key_str = "sc_test-key"
         request = MagicMock()
         request.url.path = "/api/workflows"
-        request.headers = {"X-API-Key": "sc_test-key"}
+        request.headers = {"X-API-Key": api_key_str}
         request.query_params = {}
         request.client = MagicMock()
         request.client.host = "127.0.0.1"
         request.state = MagicMock()
 
-        no_expiry_key = MagicMock()
-        no_expiry_key.expires_at = None
-        no_expiry_key.is_active = True
-        no_expiry_key.tenant_id = None
-        no_expiry_key.id = uuid.uuid4()
-        no_expiry_key.allowed_cidrs = None
+        no_expiry_key = _make_db_key(api_key_str, expires_at=None)
 
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = no_expiry_key
+        mock_result.scalars.return_value.all.return_value = [no_expiry_key]
         mock_session.execute.return_value = mock_result
         mock_session.get.return_value = no_expiry_key
 

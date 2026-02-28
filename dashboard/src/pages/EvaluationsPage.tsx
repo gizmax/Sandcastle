@@ -89,24 +89,28 @@ export default function EvaluationsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedCases, setExpandedCases] = useState<Set<string>>(new Set());
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (cancelled?: { current: boolean }) => {
     try {
       setError(null);
       const [runsRes, statsRes] = await Promise.all([
         api.get<EvalRun[]>("/eval/runs"),
         api.get<EvalStats>("/eval/stats"),
       ]);
+      if (cancelled?.current) return;
       if (runsRes.data) setRuns(runsRes.data);
       if (statsRes.data) setStats(statsRes.data);
     } catch {
+      if (cancelled?.current) return;
       setError("Could not connect to the API server");
     } finally {
-      setLoading(false);
+      if (!cancelled?.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void fetchData();
+    const cancelled = { current: false };
+    void fetchData(cancelled);
+    return () => { cancelled.current = true; };
   }, [fetchData]);
 
   const toggleCase = (runId: string, caseName: string) => {

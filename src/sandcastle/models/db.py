@@ -247,6 +247,9 @@ class AutoPilotExperiment(Base):
     """An AutoPilot A/B experiment for a workflow step."""
 
     __tablename__ = "autopilot_experiments"
+    __table_args__ = (
+        Index("ix_autopilot_experiments_workflow_step", "workflow_name", "step_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4
@@ -345,6 +348,7 @@ class RoutingDecision(Base):
     __tablename__ = "routing_decisions"
     __table_args__ = (
         Index("ix_routing_decisions_run_id", "run_id"),
+        Index("ix_routing_decisions_step_id", "step_id"),
         Index("ix_routing_decisions_created_model", "created_at", "selected_model"),
     )
 
@@ -423,6 +427,9 @@ class StepCache(Base):
     """Cached step results to avoid redundant sandbox executions."""
 
     __tablename__ = "step_cache"
+    __table_args__ = (
+        Index("ix_step_cache_expires_at", "expires_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)

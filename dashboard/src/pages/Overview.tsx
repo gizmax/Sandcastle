@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Castle } from "lucide-react";
 import { api } from "@/api/client";
@@ -9,7 +9,7 @@ import { RecentRuns } from "@/components/overview/RecentRuns";
 import { HealthHero } from "@/components/overview/HealthHero";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { useAdvisor } from "@/hooks/useAdvisor";
+import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 
 interface Stats {
   total_runs_today: number;
@@ -34,27 +34,31 @@ export default function Overview() {
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const advisor = useAdvisor();
-
-  const fetchData = useCallback(async () => {
-    try {
-      setError(null);
-      const [statsRes, runsRes] = await Promise.all([
-        api.get<Stats>("/stats"),
-        api.get<RunItem[]>("/runs", { limit: "5" }),
-      ]);
-      if (statsRes.data) setStats(statsRes.data);
-      if (runsRes.data) setRecentRuns(runsRes.data);
-    } catch {
-      setError("Could not connect to the API server");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [retryCount, setRetryCount] = useState(0);
+  const advisor = useAdvisorContext();
 
   useEffect(() => {
+    let cancelled = false;
+    const fetchData = async () => {
+      try {
+        setError(null);
+        const [statsRes, runsRes] = await Promise.all([
+          api.get<Stats>("/stats"),
+          api.get<RunItem[]>("/runs", { limit: "5" }),
+        ]);
+        if (cancelled) return;
+        if (statsRes.data) setStats(statsRes.data);
+        if (runsRes.data) setRecentRuns(runsRes.data);
+      } catch {
+        if (cancelled) return;
+        setError("Could not connect to the API server");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
     void fetchData();
-  }, [fetchData]);
+    return () => { cancelled = true; };
+  }, [retryCount]);
 
   if (loading) {
     return (
@@ -71,7 +75,7 @@ export default function Overview() {
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
           <p className="text-sm text-error">{error}</p>
           <button
-            onClick={() => { setLoading(true); void fetchData(); }}
+            onClick={() => { setLoading(true); setRetryCount((c) => c + 1); }}
             className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
           >
             Retry

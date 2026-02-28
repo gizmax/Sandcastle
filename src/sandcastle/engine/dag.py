@@ -1024,6 +1024,16 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
             elif dep not in step_ids:
                 errors.append(f"Step '{step.id}' depends on unknown step '{dep}'")
 
+    # Check implicit template references to nonexistent steps
+    for step in workflow.steps:
+        for text in _collect_step_template_fields(step):
+            for ref in _extract_step_refs(text):
+                if ref not in step_ids:
+                    errors.append(
+                        f"Step '{step.id}' references unknown step '{ref}' "
+                        f"via template variable"
+                    )
+
     # Reject unknown step types
     for step in workflow.steps:
         if step.type not in VALID_STEP_TYPES:
@@ -1043,7 +1053,10 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
 
     # Validate hybrid step types
     for step in workflow.steps:
-        if step.type == "http":
+        if step.type == "llm":
+            if not step.prompt or step.prompt == "llm step":
+                errors.append(f"LLM step '{step.id}' must have a prompt")
+        elif step.type == "http":
             if not step.http_config or not step.http_config.url:
                 errors.append(f"HTTP step '{step.id}' must have http_config with a url")
         elif step.type == "code":
@@ -1293,11 +1306,10 @@ def _detect_cycles(steps: list[StepDefinition]) -> list[str]:
             if neighbor in in_stack:
                 errors.append(f"Cycle detected involving step '{node}' -> '{neighbor}'")
                 found_cycle = True
-                break
-            if neighbor not in visited:
+                # Continue checking other neighbors to find all cycles
+            elif neighbor not in visited:
                 if dfs(neighbor):
                     found_cycle = True
-                    break
         in_stack.discard(node)
         return found_cycle
 
@@ -1308,19 +1320,77 @@ def _detect_cycles(steps: list[StepDefinition]) -> list[str]:
     return errors
 
 
+def _extract_step_refs(text: str) -> set[str]:
+    """Extract step IDs referenced via {steps.STEP_ID.output} patterns in a string."""
+    if not text:
+        return set()
+    return set(re.findall(r"\{steps\.([a-zA-Z0-9_\-]+)\.output", text))
+
+
+def _collect_step_template_fields(step: StepDefinition) -> list[str]:
+    """Collect all text fields from a step that may contain template variables."""
+    fields: list[str] = [step.prompt]
+    if step.condition_config:
+        fields.append(step.condition_config.expression)
+    if step.classify_config:
+        fields.append(step.classify_config.input)
+    if step.loop_config:
+        fields.append(step.loop_config.over)
+        if step.loop_config.until:
+            fields.append(step.loop_config.until)
+    if step.http_config:
+        fields.append(step.http_config.url)
+        if isinstance(step.http_config.body, str):
+            fields.append(step.http_config.body)
+    if step.transform_config:
+        fields.append(step.transform_config.template)
+    if step.notify_config:
+        fields.append(step.notify_config.message)
+        fields.append(step.notify_config.channel)
+    if step.delegate_config:
+        fields.append(step.delegate_config.task_description)
+    if step.sensor_config:
+        fields.append(step.sensor_config.url)
+        fields.append(step.sensor_config.condition)
+    if step.race_config and step.race_config.validator:
+        fields.append(step.race_config.validator)
+    return fields
+
+
+def _extract_implicit_deps(step: StepDefinition, valid_step_ids: set[str]) -> set[str]:
+    """Extract implicit dependencies from template variable references in step fields.
+
+    Scans all text fields of a step for {steps.X.output} patterns and returns
+    referenced step IDs that are valid (exist in the workflow) and are not
+    already listed in explicit depends_on.
+    """
+    refs: set[str] = set()
+    for text in _collect_step_template_fields(step):
+        refs |= _extract_step_refs(text)
+    # Only include references to steps that actually exist and are not
+    # already explicit dependencies (or self-references).
+    explicit = set(step.depends_on)
+    return (refs & valid_step_ids) - explicit - {step.id}
+
+
 def build_plan(workflow: WorkflowDefinition) -> ExecutionPlan:
     """Build an execution plan using topological sort.
 
     Groups steps into stages where all steps in a stage can run in parallel.
+    Includes both explicit depends_on and implicit dependencies inferred from
+    {steps.X.output} template variable references.
     """
     step_map = {s.id: s for s in workflow.steps}
+    valid_ids = set(step_map.keys())
     in_degree: dict[str, int] = {s.id: 0 for s in workflow.steps}
     dependents: dict[str, list[str]] = {s.id: [] for s in workflow.steps}
 
     for step in workflow.steps:
-        for dep in step.depends_on:
-            in_degree[step.id] += 1
-            dependents[dep].append(step.id)
+        all_deps = set(step.depends_on) | _extract_implicit_deps(step, valid_ids)
+        for dep in all_deps:
+            if dep in step_map:
+                in_degree[step.id] += 1
+                dependents[dep].append(step.id)
 
     stages: list[list[str]] = []
     ready = [sid for sid, deg in in_degree.items() if deg == 0]

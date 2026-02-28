@@ -742,7 +742,8 @@ steps:
         gate_output = result.outputs.get("gate")
         assert gate_output is not None
         assert gate_output["decision"] == "approved"
-        assert gate_output["strategy"] == "timeout"
+        # Gate now collects all strategy results in a list
+        assert gate_output["strategies"][0]["strategy"] == "timeout"
 
     @pytest.mark.asyncio
     async def test_gate_auto_reject_timeout(self):

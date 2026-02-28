@@ -71,18 +71,22 @@ async def auth_middleware(request: Request, call_next):
     # Skip auth if not required
     if not settings.auth_required:
         request.state.tenant_id = None
+        request.state._auth_checked = True
         return await call_next(request)
 
     # Skip auth for non-API paths (dashboard, static files)
     if not request.url.path.startswith("/api"):
+        request.state._auth_checked = True
         return await call_next(request)
 
     # Skip auth for public API paths
     if request.url.path in PUBLIC_PATHS:
+        request.state._auth_checked = True
         return await call_next(request)
 
     # Skip auth for public path prefixes (e.g. /api/templates)
     if any(request.url.path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
+        request.state._auth_checked = True
         return await call_next(request)
 
     # Extract API key from header
@@ -103,18 +107,28 @@ async def auth_middleware(request: Request, call_next):
     if not api_key:
         return _error_response(401, "UNAUTHORIZED", "API key required")
 
-    # Verify key
+    # Verify key using constant-time comparison to prevent timing attacks.
+    # We narrow candidates by key_prefix (first 8 chars of the raw key) for
+    # efficiency, then use hmac.compare_digest for the final hash check.
     key_hash = hash_key(api_key)
+    key_prefix = api_key[:8]
     try:
         async with async_session() as session:
             stmt = select(ApiKey).where(
-                ApiKey.key_hash == key_hash, ApiKey.is_active.is_(True)
+                ApiKey.key_prefix == key_prefix, ApiKey.is_active.is_(True)
             )
             result = await session.execute(stmt)
-            db_key = result.scalar_one_or_none()
+            candidates = result.scalars().all()
     except Exception as e:
         logger.error(f"Auth DB error: {e}")
         return _error_response(503, "SERVICE_UNAVAILABLE", "Authentication service unavailable")
+
+    # Constant-time comparison of the full HMAC-SHA256 hash
+    db_key = None
+    for candidate in candidates:
+        if _hmac.compare_digest(candidate.key_hash, key_hash):
+            db_key = candidate
+            break
 
     if not db_key:
         return _error_response(401, "UNAUTHORIZED", "Invalid API key")
@@ -149,6 +163,7 @@ async def auth_middleware(request: Request, call_next):
 
     # Set tenant context on request
     request.state.tenant_id = db_key.tenant_id
+    request.state._auth_checked = True
 
     # Update last_used_at
     try:
@@ -163,11 +178,21 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+_UNSET = object()  # sentinel for missing tenant_id
+
+
 def get_tenant_id(request: Request) -> str | None:
     """Extract tenant_id from request state (set by auth middleware).
 
     When auth is enabled, all tenant-scoped queries must use this to filter data.
+    Raises RuntimeError if auth middleware did not run (defense-in-depth).
     """
+    if settings.auth_required and not getattr(request.state, "_auth_checked", False):
+        logger.error(
+            "get_tenant_id called but auth middleware did not run for %s",
+            request.url.path,
+        )
+        raise RuntimeError("Auth middleware did not run - potential security bypass")
     return getattr(request.state, "tenant_id", None)
 
 

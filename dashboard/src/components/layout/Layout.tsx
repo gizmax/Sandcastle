@@ -11,7 +11,8 @@ import type { StreamEvent } from "@/hooks/useEventStream";
 import { api } from "@/api/client";
 import { Beacon } from "@/components/advisor/Beacon";
 import { AdvisorPanel } from "@/components/advisor/AdvisorPanel";
-import { useAdvisor } from "@/hooks/useAdvisor";
+import { AdvisorProvider } from "@/components/providers/AdvisorProvider";
+import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 
 const INITIAL_NOTIFICATIONS: Notification[] = [];
 
@@ -68,6 +69,14 @@ function eventToLink(event: StreamEvent): string | undefined {
 }
 
 export function Layout() {
+  return (
+    <AdvisorProvider>
+      <LayoutInner />
+    </AdvisorProvider>
+  );
+}
+
+function LayoutInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [dlqCount, setDlqCount] = useState(0);
@@ -77,7 +86,7 @@ export function Layout() {
   const navigate = useNavigate();
   const { subscribe } = useEventStreamContext();
   const { toasts, addToast, dismissToast } = useToasts();
-  const advisor = useAdvisor();
+  const advisor = useAdvisorContext();
 
   useKeyboardShortcuts();
 

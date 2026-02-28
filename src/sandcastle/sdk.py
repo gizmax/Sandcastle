@@ -109,6 +109,26 @@ class Schedule:
 
 
 @dataclass
+class Approval:
+    """Approval gate request."""
+
+    id: str
+    run_id: str
+    step_id: str
+    status: str
+    request_data: Optional[dict[str, Any]] = None
+    response_data: Optional[dict[str, Any]] = None
+    message: str = ""
+    reviewer_id: Optional[str] = None
+    reviewer_comment: Optional[str] = None
+    timeout_at: Optional[datetime] = None
+    on_timeout: str = "abort"
+    allow_edit: bool = False
+    created_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+
+
+@dataclass
 class HealthStatus:
     """Health check result."""
 
@@ -310,6 +330,26 @@ def _parse_stats(data: dict[str, Any]) -> Stats:
         avg_duration_seconds=data.get("avg_duration_seconds", 0.0),
         runs_by_day=data.get("runs_by_day", []),
         cost_by_workflow=data.get("cost_by_workflow", []),
+    )
+
+
+def _parse_approval(data: dict[str, Any]) -> Approval:
+    """Build an Approval from an API response dict."""
+    return Approval(
+        id=data.get("id", ""),
+        run_id=data.get("run_id", ""),
+        step_id=data.get("step_id", ""),
+        status=data.get("status", "unknown"),
+        request_data=data.get("request_data"),
+        response_data=data.get("response_data"),
+        message=data.get("message", ""),
+        reviewer_id=data.get("reviewer_id"),
+        reviewer_comment=data.get("reviewer_comment"),
+        timeout_at=_parse_datetime(data.get("timeout_at")),
+        on_timeout=data.get("on_timeout", "abort"),
+        allow_edit=data.get("allow_edit", False),
+        created_at=_parse_datetime(data.get("created_at")),
+        resolved_at=_parse_datetime(data.get("resolved_at")),
     )
 
 
@@ -668,6 +708,10 @@ class SandcastleClient:
         Yields dicts with an ``_event`` key indicating the event type
         (``status``, ``step``, ``result``, ``error``).
 
+        On connection errors mid-stream, yields a final error event with
+        ``_event`` set to ``"stream_error"`` and a ``message`` key describing
+        the failure, then stops iteration.
+
         Args:
             run_id: The UUID of the run to stream.
 
@@ -675,19 +719,39 @@ class SandcastleClient:
             Event dicts parsed from SSE.
         """
         _validate_path_param(run_id, "run_id")
-        with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
-            if resp.status_code >= 400:
-                resp.read()
-                _extract_data(resp)  # will raise
+        try:
+            with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
+                if resp.status_code >= 400:
+                    resp.read()
+                    _extract_data(resp)  # will raise
 
-            event_type = ""
-            data_lines: list[str] = []
-            for line in resp.iter_lines():
-                if line.startswith("event:"):
-                    event_type = line[len("event:"):].strip()
-                elif line.startswith("data:"):
-                    data_lines.append(line[len("data:"):].strip())
-                elif line == "" and data_lines:
+                event_type = ""
+                data_lines: list[str] = []
+                try:
+                    for line in resp.iter_lines():
+                        if line.startswith("event:"):
+                            event_type = line[len("event:"):].strip()
+                        elif line.startswith("data:"):
+                            data_lines.append(line[len("data:"):].strip())
+                        elif line == "" and data_lines:
+                            data_buf = "\n".join(data_lines)
+                            try:
+                                parsed = json.loads(data_buf)
+                            except json.JSONDecodeError:
+                                parsed = {"raw": data_buf}
+                            parsed["_event"] = event_type
+                            yield parsed
+                            event_type = ""
+                            data_lines = []
+                except httpx.StreamError as exc:
+                    yield {
+                        "_event": "stream_error",
+                        "message": f"Stream interrupted: {exc}",
+                    }
+                    return
+
+                # Flush remaining data if stream ended without trailing blank line
+                if data_lines:
                     data_buf = "\n".join(data_lines)
                     try:
                         parsed = json.loads(data_buf)
@@ -695,18 +759,16 @@ class SandcastleClient:
                         parsed = {"raw": data_buf}
                     parsed["_event"] = event_type
                     yield parsed
-                    event_type = ""
-                    data_lines = []
-
-            # Flush remaining data if stream ended without trailing blank line
-            if data_lines:
-                data_buf = "\n".join(data_lines)
-                try:
-                    parsed = json.loads(data_buf)
-                except json.JSONDecodeError:
-                    parsed = {"raw": data_buf}
-                parsed["_event"] = event_type
-                yield parsed
+        except httpx.ConnectError as exc:
+            raise SandcastleError(
+                0, "CONNECTION_ERROR",
+                f"Failed to connect to stream: {exc}",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise SandcastleError(
+                0, "TIMEOUT_ERROR",
+                f"Stream connection timed out: {exc}",
+            ) from exc
 
     # -- Workflows --
 
@@ -738,6 +800,107 @@ class SandcastleClient:
         )
         data = _extract_data(resp)
         return _parse_workflow(data)
+
+    # -- Approvals --
+
+    def list_approvals(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> PaginatedList:
+        """List approval requests with optional filters and pagination.
+
+        Args:
+            status: Filter by approval status (e.g. "pending", "approved").
+            limit: Max items to return (1-200).
+            offset: Number of items to skip.
+
+        Returns:
+            PaginatedList of Approval objects.
+        """
+        _validate_pagination(limit, offset)
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = status
+
+        resp = self._client.get("/api/approvals", params=params)
+        if resp.status_code >= 400:
+            _extract_data(resp)  # will raise
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise SandcastleError(
+                resp.status_code, "INVALID_RESPONSE",
+                f"Expected JSON response, got: {resp.text[:500]}"
+            )
+
+        data = body.get("data", [])
+        meta = body.get("meta", {})
+
+        items = [_parse_approval(a) for a in data]
+        return PaginatedList(
+            items=items,
+            total=meta.get("total", len(items)),
+            limit=meta.get("limit", limit),
+            offset=meta.get("offset", offset),
+        )
+
+    def approve(
+        self,
+        approval_id: str,
+        *,
+        output_data: Optional[dict[str, Any]] = None,
+        comment: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Approve an approval gate and resume the workflow.
+
+        Args:
+            approval_id: The UUID of the approval to approve.
+            output_data: Optional edited data to pass along with approval.
+            comment: Optional reviewer comment.
+
+        Returns:
+            Dict with ``approved``, ``approval_id``, and ``run_id`` keys.
+        """
+        _validate_path_param(approval_id, "approval_id")
+        body: dict[str, Any] = {}
+        if output_data is not None:
+            body["edited_data"] = output_data
+        if comment is not None:
+            body["comment"] = comment
+        resp = self._client.post(
+            f"/api/approvals/{approval_id}/approve",
+            json=body if body else None,
+        )
+        return _extract_data(resp)
+
+    def reject(
+        self,
+        approval_id: str,
+        *,
+        reason: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Reject an approval gate and fail the workflow.
+
+        Args:
+            approval_id: The UUID of the approval to reject.
+            reason: Optional rejection reason.
+
+        Returns:
+            Dict with ``rejected``, ``approval_id``, and ``run_id`` keys.
+        """
+        _validate_path_param(approval_id, "approval_id")
+        body: dict[str, Any] = {}
+        if reason is not None:
+            body["comment"] = reason
+        resp = self._client.post(
+            f"/api/approvals/{approval_id}/reject",
+            json=body if body else None,
+        )
+        return _extract_data(resp)
 
     # -- Schedules --
 
@@ -1177,6 +1340,10 @@ class AsyncSandcastleClient:
         Yields dicts with an ``_event`` key indicating the event type
         (``status``, ``step``, ``result``, ``error``).
 
+        On connection errors mid-stream, yields a final error event with
+        ``_event`` set to ``"stream_error"`` and a ``message`` key describing
+        the failure, then stops iteration.
+
         Args:
             run_id: The UUID of the run to stream.
 
@@ -1184,19 +1351,39 @@ class AsyncSandcastleClient:
             Event dicts parsed from SSE.
         """
         _validate_path_param(run_id, "run_id")
-        async with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
-            if resp.status_code >= 400:
-                await resp.aread()
-                _extract_data(resp)  # will raise
+        try:
+            async with self._client.stream("GET", f"/api/runs/{run_id}/stream") as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    _extract_data(resp)  # will raise
 
-            event_type = ""
-            data_lines: list[str] = []
-            async for line in resp.aiter_lines():
-                if line.startswith("event:"):
-                    event_type = line[len("event:"):].strip()
-                elif line.startswith("data:"):
-                    data_lines.append(line[len("data:"):].strip())
-                elif line == "" and data_lines:
+                event_type = ""
+                data_lines: list[str] = []
+                try:
+                    async for line in resp.aiter_lines():
+                        if line.startswith("event:"):
+                            event_type = line[len("event:"):].strip()
+                        elif line.startswith("data:"):
+                            data_lines.append(line[len("data:"):].strip())
+                        elif line == "" and data_lines:
+                            data_buf = "\n".join(data_lines)
+                            try:
+                                parsed = json.loads(data_buf)
+                            except json.JSONDecodeError:
+                                parsed = {"raw": data_buf}
+                            parsed["_event"] = event_type
+                            yield parsed
+                            event_type = ""
+                            data_lines = []
+                except httpx.StreamError as exc:
+                    yield {
+                        "_event": "stream_error",
+                        "message": f"Stream interrupted: {exc}",
+                    }
+                    return
+
+                # Flush remaining data if stream ended without trailing blank line
+                if data_lines:
                     data_buf = "\n".join(data_lines)
                     try:
                         parsed = json.loads(data_buf)
@@ -1204,18 +1391,16 @@ class AsyncSandcastleClient:
                         parsed = {"raw": data_buf}
                     parsed["_event"] = event_type
                     yield parsed
-                    event_type = ""
-                    data_lines = []
-
-            # Flush remaining data if stream ended without trailing blank line
-            if data_lines:
-                data_buf = "\n".join(data_lines)
-                try:
-                    parsed = json.loads(data_buf)
-                except json.JSONDecodeError:
-                    parsed = {"raw": data_buf}
-                parsed["_event"] = event_type
-                yield parsed
+        except httpx.ConnectError as exc:
+            raise SandcastleError(
+                0, "CONNECTION_ERROR",
+                f"Failed to connect to stream: {exc}",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise SandcastleError(
+                0, "TIMEOUT_ERROR",
+                f"Stream connection timed out: {exc}",
+            ) from exc
 
     # -- Workflows --
 
@@ -1247,6 +1432,107 @@ class AsyncSandcastleClient:
         )
         data = _extract_data(resp)
         return _parse_workflow(data)
+
+    # -- Approvals --
+
+    async def list_approvals(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> PaginatedList:
+        """List approval requests with optional filters and pagination.
+
+        Args:
+            status: Filter by approval status (e.g. "pending", "approved").
+            limit: Max items to return (1-200).
+            offset: Number of items to skip.
+
+        Returns:
+            PaginatedList of Approval objects.
+        """
+        _validate_pagination(limit, offset)
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = status
+
+        resp = await self._client.get("/api/approvals", params=params)
+        if resp.status_code >= 400:
+            _extract_data(resp)  # will raise
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise SandcastleError(
+                resp.status_code, "INVALID_RESPONSE",
+                f"Expected JSON response, got: {resp.text[:500]}"
+            )
+
+        data = body.get("data", [])
+        meta = body.get("meta", {})
+
+        items = [_parse_approval(a) for a in data]
+        return PaginatedList(
+            items=items,
+            total=meta.get("total", len(items)),
+            limit=meta.get("limit", limit),
+            offset=meta.get("offset", offset),
+        )
+
+    async def approve(
+        self,
+        approval_id: str,
+        *,
+        output_data: Optional[dict[str, Any]] = None,
+        comment: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Approve an approval gate and resume the workflow.
+
+        Args:
+            approval_id: The UUID of the approval to approve.
+            output_data: Optional edited data to pass along with approval.
+            comment: Optional reviewer comment.
+
+        Returns:
+            Dict with ``approved``, ``approval_id``, and ``run_id`` keys.
+        """
+        _validate_path_param(approval_id, "approval_id")
+        body: dict[str, Any] = {}
+        if output_data is not None:
+            body["edited_data"] = output_data
+        if comment is not None:
+            body["comment"] = comment
+        resp = await self._client.post(
+            f"/api/approvals/{approval_id}/approve",
+            json=body if body else None,
+        )
+        return _extract_data(resp)
+
+    async def reject(
+        self,
+        approval_id: str,
+        *,
+        reason: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Reject an approval gate and fail the workflow.
+
+        Args:
+            approval_id: The UUID of the approval to reject.
+            reason: Optional rejection reason.
+
+        Returns:
+            Dict with ``rejected``, ``approval_id``, and ``run_id`` keys.
+        """
+        _validate_path_param(approval_id, "approval_id")
+        body: dict[str, Any] = {}
+        if reason is not None:
+            body["comment"] = reason
+        resp = await self._client.post(
+            f"/api/approvals/{approval_id}/reject",
+            json=body if body else None,
+        )
+        return _extract_data(resp)
 
     # -- Schedules --
 

@@ -29,12 +29,14 @@ export default function Runs() {
   const limit = 20;
 
   useEffect(() => {
+    let cancelled = false;
     api.get<WorkflowItem[]>("/workflows").then((res) => {
-      if (res.data) setWorkflows(res.data);
+      if (!cancelled && res.data) setWorkflows(res.data);
     });
     api.get<{ success_rate: number }>("/stats").then((res) => {
-      if (res.data) setSuccessRate(res.data.success_rate);
+      if (!cancelled && res.data) setSuccessRate(res.data.success_rate);
     });
+    return () => { cancelled = true; };
   }, []);
 
   const { runs, total, loading, error: runsError, refetch } = useRuns({

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,16 +15,25 @@ from sandcastle.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Global scheduler instance
+# Global scheduler instance (guarded by _scheduler_lock for thread safety)
 _scheduler: AsyncIOScheduler | None = None
+_scheduler_lock = threading.Lock()
 
 
 def get_scheduler() -> AsyncIOScheduler:
-    """Get or create the global scheduler instance."""
+    """Get or create the global scheduler instance.
+
+    Thread-safe: uses a lock to prevent creating multiple instances
+    in multi-threaded ASGI environments (e.g., Uvicorn with thread pools).
+    """
     global _scheduler
-    if _scheduler is None:
-        _scheduler = AsyncIOScheduler()
-    return _scheduler
+    if _scheduler is not None:
+        return _scheduler
+    with _scheduler_lock:
+        # Double-checked locking: re-check after acquiring lock
+        if _scheduler is None:
+            _scheduler = AsyncIOScheduler()
+        return _scheduler
 
 
 async def start_scheduler() -> None:
@@ -121,16 +131,33 @@ async def _run_scheduled_workflow(
     workflow_name: str,
     input_data: dict,
 ) -> None:
-    """Job function: enqueue a workflow run from a schedule trigger."""
+    """Job function: enqueue a workflow run from a schedule trigger.
+
+    Uses SELECT FOR UPDATE on the schedule row to prevent TOCTOU race
+    conditions between checking the last run status and creating a new run.
+    The entire check-and-create sequence happens inside a single transaction.
+    """
+    from sqlalchemy import select
+
     from sandcastle.models.db import Run, RunStatus, Schedule, async_session
     from sandcastle.queue.worker import enqueue_workflow
 
-    # Load the schedule once and use it for both concurrent guard and tenant context
+    run_id = str(uuid.uuid4())
     tenant_id = None
     max_cost_usd = None
+
     try:
         async with async_session() as session:
-            schedule = await session.get(Schedule, uuid.UUID(schedule_id))
+            # Lock the schedule row to prevent concurrent triggers from
+            # both creating a run at the same time
+            stmt = (
+                select(Schedule)
+                .where(Schedule.id == uuid.UUID(schedule_id))
+                .with_for_update()
+            )
+            result = await session.execute(stmt)
+            schedule = result.scalar_one_or_none()
+
             if not schedule:
                 logger.warning(
                     f"Schedule '{schedule_id}' no longer exists in database, "
@@ -158,27 +185,16 @@ async def _run_scheduled_workflow(
 
             # Resolve tenant budget from API key if available
             if tenant_id:
-                from sqlalchemy import select
-
                 from sandcastle.models.db import ApiKey
 
-                stmt = select(ApiKey.max_cost_per_run_usd).where(
+                budget_stmt = select(ApiKey.max_cost_per_run_usd).where(
                     ApiKey.tenant_id == tenant_id,
                     ApiKey.is_active.is_(True),
                 ).limit(1)
-                max_cost_usd = await session.scalar(stmt)
-    except Exception as e:
-        logger.warning(f"Could not check schedule state for '{schedule_id}': {e}")
-        return
+                max_cost_usd = await session.scalar(budget_stmt)
 
-    run_id = str(uuid.uuid4())
-    logger.info(f"Schedule '{schedule_id}' triggered: creating run {run_id}")
-
-    try:
-        workflow_yaml = _load_workflow_yaml(workflow_name)
-
-        # Create the run record with tenant context
-        async with async_session() as session:
+            # Create the run and update last_run_id atomically within the
+            # same transaction that holds the row lock
             db_run = Run(
                 id=uuid.UUID(run_id),
                 workflow_name=workflow_name,
@@ -188,15 +204,18 @@ async def _run_scheduled_workflow(
                 max_cost_usd=max_cost_usd,
             )
             session.add(db_run)
-
-            # Update schedule's last_run_id
-            schedule = await session.get(
-                Schedule, uuid.UUID(schedule_id)
-            )
-            if schedule:
-                schedule.last_run_id = uuid.UUID(run_id)
+            schedule.last_run_id = uuid.UUID(run_id)
 
             await session.commit()
+
+    except Exception as e:
+        logger.warning(f"Could not check schedule state for '{schedule_id}': {e}")
+        return
+
+    logger.info(f"Schedule '{schedule_id}' triggered: creating run {run_id}")
+
+    try:
+        workflow_yaml = _load_workflow_yaml(workflow_name)
 
         # Enqueue the job (budget is read from DB by worker)
         await enqueue_workflow(workflow_yaml, input_data, run_id)
