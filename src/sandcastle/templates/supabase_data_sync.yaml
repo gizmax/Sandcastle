@@ -1,3 +1,7 @@
+# name: Supabase Data Sync
+# description: Sync data from Google Sheets to Supabase, validate records, and notify on Slack.
+# category: data
+# tags: [Supabase, Google Sheets, Data Sync, Slack]
 name: Supabase Data Sync
 description: Sync data from Google Sheets to Supabase, validate records, and notify on Slack.
 category: data

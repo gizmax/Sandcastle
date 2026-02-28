@@ -1,3 +1,7 @@
+# name: Deployment Monitor
+# description: Monitor Vercel deployments, check Datadog metrics, and alert via PagerDuty if anomalies detected.
+# category: devops
+# tags: [Vercel, Datadog, PagerDuty, Monitoring, DevOps]
 name: Deployment Monitor
 description: Monitor Vercel deployments, check Datadog metrics, and alert via PagerDuty if anomalies detected.
 category: devops
