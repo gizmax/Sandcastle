@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -6,20 +6,23 @@ import { WorkflowBuilder } from "@/components/workflows/WorkflowBuilder";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import jsYaml from "js-yaml";
 
+interface WorkflowData {
+  name: string;
+  description: string;
+  steps_count: number;
+  file_name: string;
+  steps?: Array<{
+    id: string;
+    model?: string;
+    depends_on?: string[];
+    prompt?: string;
+  }>;
+  yaml_content?: string;
+}
+
 interface WorkflowState {
-  workflow?: {
-    name: string;
-    description: string;
-    steps_count: number;
-    file_name: string;
-    steps?: Array<{
-      id: string;
-      model?: string;
-      depends_on?: string[];
-      prompt?: string;
-    }>;
-    yaml_content?: string;
-  };
+  workflow?: WorkflowData;
+  yaml?: string;
 }
 
 interface InputSchema {
@@ -27,10 +30,42 @@ interface InputSchema {
   required?: string[];
 }
 
+/** Parse raw YAML content into a WorkflowData object for the builder. */
+function parseYamlToWorkflow(yamlContent: string): WorkflowData | undefined {
+  try {
+    const parsed = jsYaml.load(yamlContent) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const rawSteps = (parsed.steps ?? []) as Array<Record<string, unknown>>;
+    const steps = rawSteps.map((s) => ({
+      id: String(s.id ?? ""),
+      model: s.model ? String(s.model) : undefined,
+      depends_on: Array.isArray(s.depends_on) ? s.depends_on.map(String) : undefined,
+      prompt: s.prompt ? String(s.prompt) : undefined,
+    }));
+    return {
+      name: String(parsed.name ?? "workflow"),
+      description: String(parsed.description ?? ""),
+      steps_count: steps.length,
+      file_name: `${String(parsed.name ?? "workflow")}.yaml`,
+      steps,
+      yaml_content: yamlContent,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export default function WorkflowBuilderPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as WorkflowState | null;
+
+  // Resolve initialWorkflow from either { workflow } or { yaml } state shape
+  const initialWorkflow = useMemo(() => {
+    if (state?.workflow) return state.workflow;
+    if (state?.yaml) return parseYamlToWorkflow(state.yaml);
+    return undefined;
+  }, [state]);
 
   const [runModal, setRunModal] = useState<{
     yaml: string;
@@ -108,7 +143,7 @@ export default function WorkflowBuilderPage() {
       <WorkflowBuilder
         onSave={handleSave}
         onRun={handleRunClick}
-        initialWorkflow={state?.workflow}
+        initialWorkflow={initialWorkflow}
       />
 
       {runModal && (

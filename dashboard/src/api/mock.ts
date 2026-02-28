@@ -758,7 +758,7 @@ const MOCK_OPTIMIZER_STATS = {
 const MOCK_TEMPLATES = [
   // --- general_ai ---
   {
-    name: "chain-of-thought-solver",
+    name: "Chain of Thought Solver",
     description: "Advanced problem solver using structured decomposition, parallel research and reasoning tracks, synthesis, and solution validation",
     tags: ["reasoning", "chain-of-thought", "problem-solving"],
     step_count: 5,
@@ -774,7 +774,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["encounter_data", "patient_context"], "properties": {"encounter_data": {"type": "string", "description": "Raw clinical encounter data - can be transcribed dictation, free-text notes, or structured intake form data describing the patient visit"}, "patient_context": {"type": "string", "description": "Patient context including age, sex, relevant medical history, current medications, allergies, and reason for visit"}, "specialty": {"type": "string", "description": "Clinical specialty context (e.g. 'general', 'cardiology', 'orthopedics', 'psychiatry', 'pediatrics', 'emergency')", "default": "general"}, "documentation_standard": {"type": "string", "description": "Documentation format standard to follow: 'SOAP', 'H&P', 'progress_note', 'discharge_summary'", "default": "SOAP"}}},
   },
   {
-    name: "course-creator",
+    name: "Course Creator",
     description: "Generate complete online course content from a topic - outline, lesson scripts, quizzes, assignments, and platform-ready export",
     tags: ["Education", "Course-Design", "E-Learning", "Content"],
     step_count: 6,
@@ -782,7 +782,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["course_topic", "target_audience", "difficulty_level", "course_length"], "properties": {"course_topic": {"type": "string", "description": "The subject of the course (e.g. 'Machine Learning for Product Managers', 'Advanced SQL for Data Engineers', 'Introduction to UX Research')"}, "target_audience": {"type": "string", "description": "Who the course is designed for (e.g. 'junior developers with 1-2 years experience', 'marketing professionals transitioning to data analytics', 'complete beginners with no technical background')"}, "difficulty_level": {"type": "string", "description": "Course difficulty: 'beginner', 'intermediate', or 'advanced'"}, "course_length": {"type": "string", "description": "Target course duration in hours (e.g. '4', '10', '20')"}, "platform": {"type": "string", "description": "Target learning platform: 'udemy', 'coursera', 'teachable', 'skillshare', 'general' (default: 'general')", "default": "general"}}},
   },
   {
-    name: "demand-forecasting",
+    name: "Demand Forecasting",
     description: "Multi-signal demand forecasting combining statistical models, market intelligence, and social trends for inventory planning",
     tags: ["Supply-Chain", "Forecasting", "Analytics", "Inventory"],
     step_count: 6,
@@ -790,7 +790,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_category"], "properties": {"product_category": {"type": "string", "description": "Product category or SKU group to forecast (e.g. 'outdoor furniture', 'GPU accelerators', 'organic snacks')"}, "historical_period": {"type": "string", "description": "Historical data window to consider (default: '12 months')", "default": "12 months"}, "forecast_horizon": {"type": "string", "description": "How far ahead to forecast (default: 'next quarter')", "default": "next quarter"}}},
   },
   {
-    name: "dynamic-pricing",
+    name: "Dynamic Pricing",
     description: "Optimize product pricing using competitor intelligence, demand elasticity, and margin analysis with A/B test design",
     tags: ["Pricing", "E-commerce", "Analytics", "Revenue"],
     step_count: 6,
@@ -798,7 +798,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_catalog", "competitor_urls"], "properties": {"product_catalog": {"type": "string", "description": "Product catalog description or SKU list to optimize pricing for (e.g. 'premium headphones line - 5 SKUs')"}, "competitor_urls": {"type": "string", "description": "Comma-separated competitor store URLs or names to monitor (e.g. 'bestbuy.com, amazon.com/headphones')"}, "pricing_strategy": {"type": "string", "description": "Pricing approach: 'value-based', 'competitive', 'premium', or 'penetration' (default: 'value-based')", "default": "value-based"}, "margin_floor": {"type": "number", "description": "Minimum acceptable gross margin percentage (default: 20)", "default": 20}}},
   },
   {
-    name: "earnings-call-intelligence",
+    name: "Earnings Call Intelligence",
     description: "Analyze earnings call transcripts for sentiment, key metrics, and investment insights",
     tags: ["Finance", "Investment", "Analytics", "Intelligence"],
     step_count: 6,
@@ -806,7 +806,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["company_ticker", "sector"], "properties": {"company_ticker": {"type": "string", "description": "Stock ticker symbol of the company (e.g. AAPL, MSFT, TSLA)"}, "sector": {"type": "string", "description": "Industry sector (e.g. technology, healthcare, financials, consumer)"}, "benchmark_peers": {"type": "string", "description": "Comma-separated ticker symbols of peer companies for comparison"}}},
   },
   {
-    name: "freelancer-proposal-generator",
+    name: "Freelancer Proposal Generator",
     description: "Generate winning freelancer proposals by analyzing project requirements, matching portfolio pieces, crafting personalized pitches, and optimizing pricing strategy",
     tags: ["Freelance", "Proposals", "Upwork", "Pricing", "Business"],
     step_count: 6,
@@ -822,7 +822,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["organization_name", "grant_program", "rfp_url_or_text", "project_description", "requested_amount"], "properties": {"organization_name": {"type": "string", "description": "Name of the applicant organization"}, "grant_program": {"type": "string", "description": "Name of the grant program or funding opportunity"}, "rfp_url_or_text": {"type": "string", "description": "Full text of the RFP/FOA, or URL to the funding opportunity announcement"}, "project_description": {"type": "string", "description": "Brief description of the proposed project (goals, approach, expected outcomes)"}, "requested_amount": {"type": "number", "description": "Total amount of funding requested in USD"}}},
   },
   {
-    name: "invoice-processor",
+    name: "Invoice Processor",
     description: "Extract data from invoices using OCR patterns, validate against PO records, detect anomalies, route for approval, and generate accounting entries",
     tags: ["Finance", "Invoices", "AP", "Accounting", "Audit"],
     step_count: 6,
@@ -830,7 +830,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["invoice_source", "company_name"], "properties": {"invoice_source": {"type": "string", "description": "Invoice data source or batch identifier (e.g. 'email inbox', 'AP folder', 'EDI feed', or raw invoice text/data)"}, "company_name": {"type": "string", "description": "Company name for matching against internal records"}, "approval_threshold": {"type": "string", "description": "Dollar amount above which invoices require additional approval (default: 10000)", "default": "10000"}, "accounting_system": {"type": "string", "description": "Target accounting system for journal entries (e.g. 'QuickBooks', 'NetSuite', 'Xero', 'SAP')", "default": "QuickBooks"}}},
   },
   {
-    name: "language-translator",
+    name: "Language Translator",
     description: "Professional-grade translation with source analysis, cultural adaptation, precise translation, and quality review",
     tags: ["translation", "language", "i18n"],
     step_count: 4,
@@ -838,7 +838,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["text", "target_language"], "properties": {"text": {"type": "string", "description": "The text to translate"}, "target_language": {"type": "string", "description": "The target language to translate into (e.g. 'Spanish', 'Japanese', 'Czech')"}, "tone": {"type": "string", "description": "Desired tone - professional, casual, formal, literary, technical, or marketing", "default": "professional"}, "domain": {"type": "string", "description": "Subject domain for terminology accuracy - general, legal, medical, technical, financial, academic, or marketing", "default": "general"}}},
   },
   {
-    name: "pdf-summary",
+    name: "PDF Summary",
     description: "Deep PDF document analysis with parallel content extraction and structure mapping, producing focused key findings and an executive brief",
     tags: ["pdf", "summarization", "parallel", "documents"],
     step_count: 5,
@@ -846,7 +846,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["directory"], "properties": {"directory": {"type": "string", "description": "Path to directory containing PDF files", "default": "~/Desktop"}, "focus_areas": {"type": "string", "description": "Specific topics, questions, or areas of interest to prioritize in the analysis (e.g. 'financial performance, risk factors, growth strategy')", "default": ""}, "output_format": {"type": "string", "description": "Desired output format - executive-brief, detailed-report, comparison-table, or slide-notes", "default": "executive-brief"}}},
   },
   {
-    name: "product-feedback-prioritizer",
+    name: "Product Feedback Prioritizer",
     description: "Aggregate product feedback from multiple channels, deduplicate, cluster by theme, score by business impact, and produce a prioritized roadmap",
     tags: ["Product", "Feedback", "Prioritization", "Roadmap", "RICE"],
     step_count: 6,
@@ -862,7 +862,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["property_address", "property_type", "listing_price", "key_features"], "properties": {"property_address": {"type": "string", "description": "Full property address including city, state, and ZIP code"}, "property_type": {"type": "string", "description": "Type of property: residential, commercial, or land", "default": "residential"}, "listing_price": {"type": "number", "description": "Proposed listing price in USD"}, "key_features": {"type": "string", "description": "Key property features (bedrooms, bathrooms, sqft, lot size, renovations, amenities, etc.)"}, "target_buyer_profile": {"type": "string", "description": "Ideal buyer demographic and psychographic profile", "default": "General buyer seeking move-in ready property"}}},
   },
   {
-    name: "research-agent",
+    name: "Research Agent",
     description: "Systematic research with scope definition, three parallel investigation tracks, rigorous synthesis, and a structured research report",
     tags: ["research", "parallel", "analysis", "extraction"],
     step_count: 6,
@@ -870,7 +870,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["topic"], "properties": {"topic": {"type": "string", "description": "The research topic to investigate"}, "research_questions": {"type": "string", "description": "Specific questions the research should answer (comma-separated)", "default": ""}, "depth": {"type": "string", "description": "Research depth - survey (broad overview), standard (balanced), or deep-dive (exhaustive)", "default": "standard"}, "perspective": {"type": "string", "description": "Analytical lens - neutral, critical, comparative, or advocate", "default": "neutral"}}},
   },
   {
-    name: "review-and-approve",
+    name: "Review and Approve",
     description: "Comprehensive content generation with parallel quality and compliance checks, revision suggestions, and human approval gate",
     tags: ["approval", "human-in-the-loop", "content", "review"],
     step_count: 5,
@@ -878,7 +878,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["brief", "audience"], "properties": {"brief": {"type": "string", "description": "The content brief describing what to generate"}, "audience": {"type": "string", "description": "The target audience for the content"}, "review_criteria": {"type": "string", "description": "Specific criteria the content must meet (e.g. 'must include 3 case studies, cite sources, stay under 2000 words')", "default": "Accuracy, clarity, engagement, and completeness"}, "standards": {"type": "string", "description": "Quality or compliance standards to check against (e.g. 'AP Style Guide', 'GDPR compliant', 'brand voice guidelines')", "default": "Professional writing standards with clear sourcing and factual accuracy"}}},
   },
   {
-    name: "supplier-risk-intelligence",
+    name: "Supplier Risk Intelligence",
     description: "Assess supplier portfolio risks across financial, geopolitical, and ESG dimensions with alternative sourcing recommendations",
     tags: ["Supply-Chain", "Risk", "Procurement", "ESG"],
     step_count: 7,
@@ -886,7 +886,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["supplier_list", "industry"], "properties": {"supplier_list": {"type": "string", "description": "Comma-separated list of supplier names to evaluate (e.g. 'Foxconn, TSMC, Samsung SDI')"}, "industry": {"type": "string", "description": "Industry vertical for context (e.g. 'automotive', 'electronics', 'pharma')"}, "risk_threshold": {"type": "string", "description": "Minimum risk level to flag: 'low', 'medium', or 'high' (default: 'medium')", "default": "medium"}}},
   },
   {
-    name: "text-summarizer",
+    name: "Text Summarizer",
     description: "Performs deep text analysis with parallel key-point extraction and structural analysis, producing a tailored executive summary",
     tags: ["text", "summarization", "formatting"],
     step_count: 4,
@@ -895,7 +895,7 @@ const MOCK_TEMPLATES = [
   },
   // --- marketing ---
   {
-    name: "ad-copy-generator",
+    name: "Ad Copy Generator",
     description: "Generate ad copy variants for Google Ads and Meta Ads campaigns",
     tags: ["Marketing", "Advertising", "Copywriting"],
     step_count: 5,
@@ -903,7 +903,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_brief"], "properties": {"product_brief": {"type": "string", "description": "Product brief describing features, target audience, and differentiators"}, "brand_voice": {"type": "string", "description": "Brand voice guidelines (e.g. professional, playful, authoritative). Optional - will be inferred from brief if not provided."}, "landing_page_url": {"type": "string", "description": "Landing page URL for display path generation and CTA alignment"}}},
   },
   {
-    name: "agency-report-generator",
+    name: "Agency Report Generator",
     description: "Generate comprehensive multi-client agency performance reports with cross-channel analytics, benchmarking, and strategic recommendations",
     tags: ["Marketing", "Analytics", "Reporting", "Agency", "Multi-Channel"],
     step_count: 6,
@@ -919,7 +919,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["blog_post"], "properties": {"blog_post": {"type": "string", "description": "The full blog post content to transform into social media posts"}, "brand_handle": {"type": "string", "description": "Your brand's social media handle (e.g. '@yourbrand') for consistent tagging"}, "industry": {"type": "string", "description": "Industry vertical for hashtag and audience context (e.g. 'SaaS', 'fintech', 'health tech')"}}},
   },
   {
-    name: "competitive-intelligence-radar",
+    name: "Competitive Intelligence Radar",
     description: "Monitor competitor activity, detect strategic changes, update battlecards, and distribute alerts",
     tags: ["Competitive-Intel", "Monitoring", "Strategy", "Battlecards"],
     step_count: 6,
@@ -927,7 +927,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["competitors", "product_name"], "properties": {"competitors": {"type": "string", "description": "Comma-separated list of competitor names to monitor (e.g. 'Acme Corp, Globex, Initech')"}, "product_name": {"type": "string", "description": "Your product name for battlecard context"}, "focus_areas": {"type": "string", "description": "Comma-separated focus areas for monitoring (default: pricing,features,positioning)", "default": "pricing,features,positioning"}}},
   },
   {
-    name: "competitor-analysis",
+    name: "Competitor Analysis",
     description: "Analyze competitor positioning, strengths, weaknesses, and opportunities",
     tags: ["Marketing", "Strategy", "Research"],
     step_count: 5,
@@ -935,7 +935,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["competitor"], "properties": {"competitor": {"type": "string", "description": "Name of the competitor to analyze"}, "our_company": {"type": "string", "description": "Your own company name and brief description for comparative positioning"}, "industry": {"type": "string", "description": "Industry or market vertical for context (e.g. 'B2B SaaS', 'e-commerce', 'fintech')"}}},
   },
   {
-    name: "content-factory",
+    name: "Content Factory",
     description: "Generate a complete multi-platform content package from a single brief with SEO-optimized article and social posts",
     tags: ["Content", "SEO", "Social-Media", "Marketing"],
     step_count: 7,
@@ -951,7 +951,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["catalog_source", "product_category", "brand_name"], "properties": {"catalog_source": {"type": "string", "description": "Raw product catalog data - can be CSV-formatted, JSON, or plain text with product names, SKUs, basic descriptions, and prices"}, "product_category": {"type": "string", "description": "Primary product category (e.g. 'outdoor furniture', 'organic skincare', 'running shoes', 'smart home devices')"}, "brand_name": {"type": "string", "description": "Brand name for consistent voice and messaging (e.g. 'TerraVerde', 'NovaPeak Athletics')"}, "target_marketplace": {"type": "string", "description": "Target e-commerce platform: 'shopify', 'amazon', 'woocommerce', 'bigcommerce', 'etsy', 'walmart'", "default": "shopify"}, "competitor_urls": {"type": "string", "description": "Comma-separated competitor product page URLs or brand names for competitive positioning analysis", "default": "No specific competitors provided"}}},
   },
   {
-    name: "email-campaign-generator",
+    name: "Email Campaign Generator",
     description: "Generate email campaign with subject line variants and A/B copy",
     tags: ["Marketing", "Email", "Campaign"],
     step_count: 6,
@@ -959,7 +959,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["campaign_brief"], "properties": {"campaign_brief": {"type": "string", "description": "The campaign brief describing target audience, goals, and brand guidelines"}, "email_platform": {"type": "string", "description": "Email platform used (e.g. 'Mailchimp', 'HubSpot', 'Klaviyo', 'SendGrid') for platform-specific best practices"}, "list_size": {"type": "string", "description": "Approximate email list size for statistical significance calculations"}, "campaign_type": {"type": "string", "description": "Type: 'promotional', 'nurture', 'announcement', 'onboarding', 're-engagement', 'event'"}}},
   },
   {
-    name: "market-entry-strategy",
+    name: "Market Entry Strategy",
     description: "Comprehensive market entry analysis covering sizing, competitive landscape, regulatory environment, customer research, and go-to-market strategy",
     tags: ["Strategy", "Market-Entry", "TAM", "Research"],
     step_count: 7,
@@ -967,7 +967,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_concept", "target_geography", "target_industry"], "properties": {"product_concept": {"type": "string", "description": "Description of the product or service entering the market"}, "target_geography": {"type": "string", "description": "Geographic market to enter (e.g. 'European Union', 'Japan', 'Southeast Asia')"}, "target_industry": {"type": "string", "description": "Industry vertical to target (e.g. 'Financial Services', 'Healthcare', 'Retail')"}}},
   },
   {
-    name: "market-opportunity-scout",
+    name: "Market Opportunity Scout",
     description: "Research market landscape, mine competitor gaps, size the TAM, and produce an actionable opportunity report",
     tags: ["Market-Research", "TAM", "Strategy", "Competitive-Intel"],
     step_count: 7,
@@ -975,7 +975,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_description", "target_industry"], "properties": {"product_description": {"type": "string", "description": "Description of the product or service to evaluate market opportunities for"}, "target_industry": {"type": "string", "description": "Industry vertical to analyze (e.g. 'HealthTech', 'FinTech', 'EdTech')"}, "geography": {"type": "string", "description": "Geographic scope for the analysis (default: Global)", "default": "Global"}}},
   },
   {
-    name: "podcast-to-empire",
+    name: "Podcast to Empire",
     description: "Transform a single podcast episode into a full content empire with blog, social, newsletter, and SEO landing page",
     tags: ["Content", "Podcast", "Repurpose", "Marketing"],
     step_count: 7,
@@ -983,7 +983,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["podcast_title", "episode_topic"], "properties": {"podcast_title": {"type": "string", "description": "Name of the podcast show"}, "episode_topic": {"type": "string", "description": "Topic or title of the specific episode to repurpose"}, "target_keywords": {"type": "string", "description": "Target SEO keywords for content optimization (comma-separated)"}, "brand_name": {"type": "string", "description": "Brand or company name for attribution and CTAs"}}},
   },
   {
-    name: "pricing-intelligence",
+    name: "Pricing Intelligence",
     description: "Analyze competitor pricing, feature-value perception, and willingness to pay to optimize packaging and pricing strategy",
     tags: ["Pricing", "Competitive-Intel", "Strategy", "Revenue"],
     step_count: 6,
@@ -991,7 +991,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_name", "competitor_urls"], "properties": {"product_name": {"type": "string", "description": "Your product name for pricing comparison context"}, "competitor_urls": {"type": "string", "description": "Comma-separated list of competitor pricing page URLs or company names"}, "target_segments": {"type": "string", "description": "Target customer segments to analyze (e.g. 'SMB, Mid-Market, Enterprise')"}}},
   },
   {
-    name: "seo-content-writer",
+    name: "SEO Content Writer",
     description: "Research keywords and create SEO-optimized article with meta tags",
     tags: ["Marketing", "SEO", "Content"],
     step_count: 4,
@@ -1007,7 +1007,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["brand_name", "platforms", "content_pillars", "posting_frequency"], "properties": {"brand_name": {"type": "string", "description": "Name of the brand or business"}, "platforms": {"type": "string", "description": "Target platforms, comma-separated (e.g., Instagram, TikTok, LinkedIn, Twitter/X, Facebook, YouTube, Pinterest)"}, "content_pillars": {"type": "string", "description": "Core content themes/pillars the brand focuses on (e.g., education, behind-the-scenes, product showcases, user stories)"}, "posting_frequency": {"type": "string", "description": "Desired posting frequency per platform (e.g., 'daily on Instagram, 3x/week on LinkedIn')"}, "brand_voice": {"type": "string", "description": "Brand voice and tone description", "default": "Professional yet approachable, informative with personality"}, "time_period": {"type": "string", "description": "Calendar planning period", "default": "30 days"}}},
   },
   {
-    name: "startup-growth-engine",
+    name: "Startup Growth Engine",
     description: "Comprehensive growth audit with parallel strategy tracks for content, SEO, and conversion optimization",
     tags: ["Growth", "Startup", "SEO", "Marketing", "Analytics"],
     step_count: 6,
@@ -1015,7 +1015,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["startup_name", "product_url"], "properties": {"startup_name": {"type": "string", "description": "Name of the startup"}, "product_url": {"type": "string", "description": "URL of the product or landing page to analyze"}, "growth_stage": {"type": "string", "description": "Current growth stage (early, growth, scale)", "default": "early"}, "monthly_budget": {"type": "number", "description": "Monthly marketing budget in USD", "default": 5000}}},
   },
   {
-    name: "trend-radar",
+    name: "Trend Radar",
     description: "Scan academic research, startup activity, social signals, and investment patterns to identify emerging trends and assess their strategic impact",
     tags: ["Trends", "Research", "Innovation", "Strategy"],
     step_count: 7,
@@ -1023,7 +1023,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["industry_keywords"], "properties": {"industry_keywords": {"type": "string", "description": "Comma-separated industry keywords to scan for trends (e.g. 'developer tools, API management, observability')"}, "technology_domains": {"type": "string", "description": "Specific technology domains to focus on (e.g. 'AI/ML, edge computing, serverless')"}, "timeframe": {"type": "string", "description": "Lookback period for trend signals (default: 6 months)", "default": "6 months"}}},
   },
   {
-    name: "video-to-shorts",
+    name: "Video to Shorts",
     description: "Analyze long-form video content, identify viral-worthy segments, generate optimized short clips with captions and hooks for TikTok, Reels, and Shorts",
     tags: ["Video", "TikTok", "Reels", "Shorts", "Social-Media", "Marketing"],
     step_count: 6,
@@ -1031,7 +1031,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["video_url", "target_platforms"], "properties": {"video_url": {"type": "string", "description": "URL of the long-form video to analyze (YouTube, Vimeo, or direct link)"}, "target_platforms": {"type": "string", "description": "Comma-separated target platforms (e.g. 'TikTok, Instagram Reels, YouTube Shorts')"}, "brand_voice": {"type": "string", "description": "Brand voice and tone guidelines (e.g. 'professional but approachable', 'bold and provocative', 'educational and calm')", "default": "engaging and authentic"}, "content_goals": {"type": "string", "description": "Primary goals for the short-form content (e.g. 'drive newsletter signups', 'build thought leadership', 'increase brand awareness', 'drive product sales')", "default": "maximize engagement and reach"}}},
   },
   {
-    name: "voice-of-market",
+    name: "Voice of Market",
     description: "Mine forums, reviews, and social channels to extract sentiment, unmet needs, and buyer personas",
     tags: ["Market-Research", "Sentiment", "VoC", "Personas"],
     step_count: 7,
@@ -1048,7 +1048,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["target_accounts", "product_description"], "properties": {"target_accounts": {"type": "string", "description": "Comma-separated list of target account names to research (e.g. 'Acme Corp, Globex Inc, Initech')"}, "product_description": {"type": "string", "description": "Brief description of your product/service and its core value proposition"}, "icp_criteria": {"type": "string", "description": "Ideal Customer Profile criteria for scoring fit (e.g. 'B2B SaaS, 200-2000 employees, Series B+, using Kubernetes')"}}},
   },
   {
-    name: "churn-prediction-pipeline",
+    name: "Churn Prediction Pipeline",
     description: "Analyze customer usage patterns, score churn risk, identify root causes, generate retention offers, and orchestrate outreach campaigns",
     tags: ["Churn", "Customer-Success", "Retention", "Analytics"],
     step_count: 6,
@@ -1056,7 +1056,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["customer_segment"], "properties": {"customer_segment": {"type": "string", "description": "Customer segment to analyze (e.g. 'Enterprise', 'Mid-Market', 'SMB', 'Starter', or 'All')"}, "lookback_period": {"type": "string", "description": "How far back to analyze usage and behavioral data (default: '90 days')", "default": "90 days"}, "risk_threshold": {"type": "number", "description": "Minimum churn risk score (0-100) to trigger retention actions (default: 70)", "default": 70}}},
   },
   {
-    name: "client-onboarding-orchestrator",
+    name: "Client Onboarding Orchestrator",
     description: "Orchestrate multi-step client onboarding with CRM updates, welcome sequences, provisioning checklists, and health score tracking",
     tags: ["Onboarding", "CRM", "Customer-Success", "Sales"],
     step_count: 6,
@@ -1064,7 +1064,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["client_name", "client_tier", "product_modules"], "properties": {"client_name": {"type": "string", "description": "Name of the client being onboarded (e.g. 'Acme Corp', 'TechStart GmbH')"}, "client_tier": {"type": "string", "description": "Client tier classification: 'enterprise', 'mid-market', or 'smb'"}, "product_modules": {"type": "string", "description": "Comma-separated list of product modules the client has purchased (e.g. 'analytics, automation, integrations, api-access')"}, "crm_source": {"type": "string", "description": "CRM system where client data originates (e.g. 'salesforce', 'hubspot', 'pipedrive', 'custom')", "default": "salesforce"}}},
   },
   {
-    name: "crm-contact-enrichment",
+    name: "CRM Contact Enrichment",
     description: "Enrich HubSpot contacts with research data and create follow-up deals",
     tags: ["CRM", "HubSpot", "Sales", "Research"],
     step_count: 4,
@@ -1072,7 +1072,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["search_query"], "properties": {"search_query": {"type": "string", "description": "Search query for HubSpot contacts (name or email)"}, "enrichment_focus": {"type": "string", "description": "What to focus enrichment on (e.g. 'company size and revenue', 'technology stack')"}, "create_deals": {"type": "boolean", "description": "Whether to create deals for qualified contacts (default: false)"}, "deal_pipeline": {"type": "string", "description": "HubSpot pipeline for new deals (default: 'default')"}}},
   },
   {
-    name: "customer-churn-predictor",
+    name: "Customer Churn Predictor",
     description: "Analyze customer signals to predict churn risk, generate retention actions, and alert sales team",
     tags: ["Sales", "Salesforce", "Churn", "Analytics", "Retention"],
     step_count: 5,
@@ -1080,7 +1080,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["segment"], "properties": {"segment": {"type": "string", "description": "Customer segment to analyze - e.g. 'Enterprise', 'Mid-Market', 'SMB', or 'All'"}, "renewal_window_days": {"type": "number", "description": "Flag accounts renewing within this many days (default: 90)", "default": 90}, "slack_channel": {"type": "string", "description": "Slack channel for churn alerts (e.g. '#customer-success')", "default": "#customer-success"}, "cohort_window": {"type": "string", "description": "Cohort grouping for trend analysis - 'monthly', 'quarterly', or 'by_contract_start' (default: 'quarterly')", "default": "quarterly"}, "health_score_weights": {"type": "string", "description": "Custom weights for health score categories - e.g. 'usage:30,support:20,engagement:25,contract:25' (default: equal 25 each)"}}},
   },
   {
-    name: "deal-velocity-optimizer",
+    name: "Deal Velocity Optimizer",
     description: "Analyze pipeline health, score deal risks, recommend actions, and build competitive battle cards to accelerate deal closure",
     tags: ["Sales", "Pipeline", "CRM", "Forecasting"],
     step_count: 5,
@@ -1088,7 +1088,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["pipeline_stage"], "properties": {"pipeline_stage": {"type": "string", "description": "Pipeline stage to focus on (e.g. 'Negotiation', 'Proposal Sent', 'Discovery', or 'All')"}, "min_deal_size": {"type": "number", "description": "Minimum deal size in USD to include in analysis (default: 10000)", "default": 10000}, "crm_source": {"type": "string", "description": "CRM system to pull pipeline data from (default: 'salesforce')", "default": "salesforce"}}},
   },
   {
-    name: "lead-enrichment",
+    name: "Lead Enrichment",
     description: "Research and enrich lead data with company info, scoring, and outreach angles",
     tags: ["Sales", "Research", "Lead-Gen"],
     step_count: 5,
@@ -1096,7 +1096,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["company_name", "company_domain"], "properties": {"company_name": {"type": "string", "description": "Name of the company to research"}, "company_domain": {"type": "string", "description": "Company website domain"}, "target_persona": {"type": "string", "description": "Target persona or role to identify among contacts"}, "icp_criteria": {"type": "string", "description": "Ideal Customer Profile criteria for lead scoring"}, "value_proposition": {"type": "string", "description": "Your value proposition for outreach angle generation"}}},
   },
   {
-    name: "lead-scoring",
+    name: "Lead Scoring",
     description: "Fetch leads from Salesforce, enrich with research data, score, and update CRM",
     tags: ["Sales", "Salesforce", "Lead-Gen", "Scoring"],
     step_count: 4,
@@ -1104,7 +1104,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["lead_source"], "properties": {"lead_source": {"type": "string", "description": "Salesforce lead source filter (e.g. 'Web', 'Event', 'Referral')"}, "min_company_size": {"type": "number", "description": "Minimum company size to qualify (number of employees, default: 10)", "default": 10}}},
   },
   {
-    name: "meeting-recap",
+    name: "Meeting Recap",
     description: "Transform meeting transcript into summary, action items, and follow-up email",
     tags: ["Sales", "Productivity", "Communication"],
     step_count: 3,
@@ -1112,7 +1112,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["transcript", "meeting_title", "sender_name"], "properties": {"transcript": {"type": "string", "description": "The meeting transcript text"}, "meeting_title": {"type": "string", "description": "Title or subject of the meeting"}, "sender_name": {"type": "string", "description": "Name of the person sending the follow-up email"}, "meeting_type": {"type": "string", "description": "Type of meeting: standup, sprint-planning, client-call, brainstorm, 1-on-1, all-hands, retrospective"}}},
   },
   {
-    name: "proposal-generator",
+    name: "Proposal Generator",
     description: "Generate a customized business proposal from meeting notes and product info",
     tags: ["Sales", "Document", "Proposal"],
     step_count: 5,
@@ -1120,7 +1120,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["meeting_notes", "client_name", "product_info", "pricing_tier"], "properties": {"meeting_notes": {"type": "string", "description": "Notes from the client meeting"}, "client_name": {"type": "string", "description": "Name of the client"}, "product_info": {"type": "string", "description": "Product catalog or feature descriptions"}, "pricing_tier": {"type": "string", "description": "Pricing tier to use in the proposal"}, "deal_size": {"type": "string", "description": "Estimated deal size or budget range discussed (e.g. '$50k-$80k ARR')"}, "contract_length": {"type": "string", "description": "Proposed contract length (e.g. '12 months', '24 months')"}}},
   },
   {
-    name: "revenue-forecast-ensemble",
+    name: "Revenue Forecast Ensemble",
     description: "Generate revenue forecasts using statistical, ML, and LLM-based methods in parallel, then synthesize into an ensemble prediction with scenario analysis",
     tags: ["Forecasting", "Revenue", "Analytics", "Finance"],
     step_count: 6,
@@ -1128,7 +1128,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["revenue_data"], "properties": {"revenue_data": {"type": "string", "description": "Description of revenue data source and format (e.g. 'Monthly ARR by segment from Jan 2023 to present, exported from Stripe')"}, "forecast_horizon": {"type": "string", "description": "Time period to forecast (default: 'next quarter')", "default": "next quarter"}, "segments": {"type": "string", "description": "Revenue segments to analyze separately (e.g. 'Enterprise, Mid-Market, SMB, Self-Serve')"}}},
   },
   {
-    name: "sales-pipeline-autopilot",
+    name: "Sales Pipeline Autopilot",
     description: "Monitor stalled deals, draft follow-ups, and alert your team on pipeline risks",
     tags: ["Sales", "Pipeline", "CRM", "Automation"],
     step_count: 4,
@@ -1136,7 +1136,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["pipeline_name"], "properties": {"pipeline_name": {"type": "string", "description": "HubSpot pipeline name to monitor (e.g. 'Sales Pipeline')"}, "stale_days": {"type": "number", "description": "Days without activity before a deal is considered stalled (default: 7)", "default": 7}, "alert_channel": {"type": "string", "description": "Slack channel for pipeline alerts (e.g. '#sales-alerts')", "default": "#sales-alerts"}}},
   },
   {
-    name: "win-loss-intelligence",
+    name: "Win-Loss Intelligence",
     description: "Ingest CRM deal data, extract win/loss signals, identify patterns, and generate strategic recommendations with updated battlecards",
     tags: ["Sales", "Win-Loss", "CRM", "Strategy"],
     step_count: 6,
@@ -1145,7 +1145,7 @@ const MOCK_TEMPLATES = [
   },
   // --- support ---
   {
-    name: "customer-health-check",
+    name: "Customer Health Check",
     description: "Aggregate Salesforce account data and Zendesk tickets to assess customer health",
     tags: ["Support", "Salesforce", "Zendesk", "Analytics"],
     step_count: 4,
@@ -1153,7 +1153,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["account_name"], "properties": {"account_name": {"type": "string", "description": "Customer account name to analyze"}}},
   },
   {
-    name: "faq-generator",
+    name: "FAQ Generator",
     description: "Analyze resolved support tickets to auto-generate FAQ entries and publish to Notion",
     tags: ["Support", "Zendesk", "Notion", "Knowledge-Base"],
     step_count: 4,
@@ -1161,7 +1161,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["days_lookback"], "properties": {"days_lookback": {"type": "number", "description": "How many days of resolved tickets to analyze (default: 30)", "default": 30}, "min_cluster_size": {"type": "number", "description": "Minimum number of similar tickets to form a FAQ topic (default: 3)", "default": 3}, "notion_page_id": {"type": "string", "description": "Notion page ID where FAQ entries will be written"}}},
   },
   {
-    name: "review-sentiment",
+    name: "Review Sentiment",
     description: "Analyze customer reviews to extract sentiment trends and actionable insights",
     tags: ["Support", "Analytics", "Sentiment"],
     step_count: 4,
@@ -1169,7 +1169,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["reviews", "product_name"], "properties": {"reviews": {"type": "string", "description": "Batch of customer reviews to analyze"}, "product_name": {"type": "string", "description": "Name of the product being reviewed"}}},
   },
   {
-    name: "sla-watchdog",
+    name: "SLA Watchdog",
     description: "Monitor SLA compliance, check ticket response times, and alert on breaches via Slack",
     tags: ["Support", "Zendesk", "SLA", "Monitoring"],
     step_count: 4,
@@ -1177,7 +1177,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["sla_policy"], "properties": {"sla_policy": {"type": "string", "description": "SLA policy to enforce - e.g. 'Critical: 1h first response, 4h resolution; High: 4h first response, 24h resolution'"}, "hours_lookback": {"type": "number", "description": "How many hours back to scan for tickets (default: 24)", "default": 24}, "slack_channel": {"type": "string", "description": "Slack channel for SLA breach alerts (e.g. '#sla-alerts')", "default": "#sla-alerts"}, "business_hours": {"type": "string", "description": "Business hours for SLA calculation - e.g. 'Mon-Fri 09:00-18:00 UTC' or '24/7' (default: '24/7')", "default": "24/7"}, "customer_tiers": {"type": "string", "description": "Optional tier-based SLA overrides - e.g. 'Platinum: 0.5x targets; Gold: 1x; Silver: 2x'"}, "escalation_chain": {"type": "string", "description": "Escalation contacts - e.g. 'L1: @support-lead; L2: @support-director; L3: @vp-cx'"}}},
   },
   {
-    name: "support-ticket-triage",
+    name: "Support Ticket Triage",
     description: "Fetch recent Zendesk tickets, classify by urgency, draft responses, and notify Slack",
     tags: ["Support", "Zendesk", "Triage", "Automation"],
     step_count: 4,
@@ -1185,7 +1185,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["hours_lookback"], "properties": {"hours_lookback": {"type": "number", "description": "How many hours back to look for new tickets (default: 4)", "default": 4}, "slack_channel": {"type": "string", "description": "Slack channel for triage notifications (e.g. '#support-triage')", "default": "#support-triage"}}},
   },
   {
-    name: "ticket-classifier",
+    name: "Ticket Classifier",
     description: "Classify support ticket, assign priority, and draft response",
     tags: ["Support", "Classification", "Automation"],
     step_count: 4,
@@ -1193,7 +1193,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["subject", "body"], "properties": {"subject": {"type": "string", "description": "Support ticket subject line"}, "body": {"type": "string", "description": "Support ticket body text"}, "customer_tier": {"type": "string", "description": "Customer tier level (e.g. free, pro, enterprise)"}}},
   },
   {
-    name: "voice-agent-pipeline",
+    name: "Voice Agent Pipeline",
     description: "Process call recordings with transcription, sentiment analysis, coaching insights, compliance checks, and agent performance scoring",
     tags: ["Support", "Call-Center", "QA", "Coaching", "Compliance"],
     step_count: 6,
@@ -1202,7 +1202,7 @@ const MOCK_TEMPLATES = [
   },
   // --- engineering ---
   {
-    name: "ai-red-team",
+    name: "AI Red Team",
     description: "Automated adversarial testing of AI models - probe for prompt injection, jailbreaks, bias, and safety vulnerabilities",
     tags: ["AI-Safety", "Security", "Testing", "Red-Team"],
     step_count: 6,
@@ -1210,7 +1210,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["target_model"], "properties": {"target_model": {"type": "string", "description": "Model to test (e.g. 'gpt-4o', 'claude-sonnet', 'llama-3.1-70b', 'gemini-2.0-flash')"}, "test_categories": {"type": "string", "description": "Comma-separated test categories to run (default: 'injection,jailbreak,bias,toxicity')", "default": "injection,jailbreak,bias,toxicity"}, "max_attempts": {"type": "number", "description": "Maximum number of adversarial attempts per test category (default: 50)", "default": 50}}},
   },
   {
-    name: "api-docs-generator",
+    name: "API Docs Generator",
     description: "Generate comprehensive API documentation from code repositories or OpenAPI specs",
     tags: ["Engineering", "GitHub", "Documentation", "API"],
     step_count: 4,
@@ -1218,7 +1218,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["repo"], "properties": {"repo": {"type": "string", "description": "GitHub repository in 'owner/repo' format (e.g. 'acme/payments-api')"}, "branch": {"type": "string", "description": "Branch to generate docs from (default: 'main')", "default": "main"}, "path_filter": {"type": "string", "description": "Path filter for API source files (e.g. 'src/api/', 'routes/')"}, "doc_style": {"type": "string", "description": "Documentation style: 'reference', 'tutorial', or 'both' (default: 'reference')", "default": "reference"}}},
   },
   {
-    name: "data-extractor",
+    name: "Data Extractor",
     description: "Extract structured data from documents with validation and error handling",
     tags: ["Product", "Data", "Automation"],
     step_count: 4,
@@ -1226,7 +1226,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["document_text"], "properties": {"document_text": {"type": "string", "description": "The document text to extract structured data from"}}},
   },
   {
-    name: "deployment-risk-analyzer",
+    name: "Deployment Risk Analyzer",
     description: "Analyze deployment risk by scanning diffs, dependencies, and performance impact before go/no-go decision",
     tags: ["DevOps", "CI-CD", "Security", "Risk"],
     step_count: 5,
@@ -1234,7 +1234,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["repo_url", "deploy_target"], "properties": {"repo_url": {"type": "string", "description": "GitHub repository URL (e.g. 'https://github.com/org/repo')"}, "branch": {"type": "string", "description": "Branch to analyze for deployment (default: main)", "default": "main"}, "deploy_target": {"type": "string", "description": "Deployment target environment (e.g. 'production', 'staging', 'canary')"}}},
   },
   {
-    name: "incident-command-center",
+    name: "Incident Command Center",
     description: "Automated incident response - ingest alerts, analyze logs and metrics in parallel, find root cause, and generate remediation runbooks",
     tags: ["DevOps", "SRE", "Incident-Response", "Monitoring"],
     step_count: 6,
@@ -1242,7 +1242,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["alert_source", "service_name"], "properties": {"alert_source": {"type": "string", "description": "Alert source integration (e.g. 'pagerduty', 'datadog', 'opsgenie')"}, "service_name": {"type": "string", "description": "Name of the affected service (e.g. 'payments-api', 'auth-service')"}, "severity": {"type": "string", "description": "Incident severity level (default: P2)", "default": "P2"}}},
   },
   {
-    name: "jira-issue-triage",
+    name: "Jira Issue Triage",
     description: "Auto-triage new Jira issues with priority, labels, and assignment suggestions",
     tags: ["Project Management", "Jira", "Triage"],
     step_count: 3,
@@ -1250,7 +1250,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["project"], "properties": {"project": {"type": "string", "description": "Jira project key (e.g. PROJ)"}, "jql_filter": {"type": "string", "description": "Additional JQL filter (default: untriaged issues from last 24h)"}, "team_context": {"type": "string", "description": "Context about team members and their areas of expertise"}}},
   },
   {
-    name: "model-evaluation-arena",
+    name: "Model Evaluation Arena",
     description: "Systematically benchmark and compare multiple AI models across safety, accuracy, cost, and latency with statistical rigor",
     tags: ["AI-Safety", "Evaluation", "Testing", "Benchmarking"],
     step_count: 6,
@@ -1258,7 +1258,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["models_to_test"], "properties": {"models_to_test": {"type": "string", "description": "Comma-separated model names to evaluate (e.g. 'sonnet, haiku, opus, openai/gpt-4o, google/gemini-2.5-pro')"}, "test_category": {"type": "string", "description": "Focus area: 'general', 'coding', 'reasoning', 'creative', 'safety', or 'domain-specific' (default: 'general')", "default": "general"}, "num_prompts": {"type": "number", "description": "Number of test prompts to generate per category (default: 20)", "default": 20}, "evaluation_criteria": {"type": "string", "description": "Comma-separated evaluation dimensions (default: 'accuracy,safety,cost,latency')", "default": "accuracy,safety,cost,latency"}}},
   },
   {
-    name: "nl-to-dashboard",
+    name: "NL to Dashboard",
     description: "Transform natural language business questions into optimized SQL queries, visualizations, and narrative insights",
     tags: ["Analytics", "SQL", "Visualization", "Data"],
     step_count: 6,
@@ -1266,7 +1266,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["business_question", "database_schema"], "properties": {"business_question": {"type": "string", "description": "The business question to answer in plain English (e.g. 'Which products have the highest return rate by region in the last 6 months?')"}, "database_schema": {"type": "string", "description": "Description of available tables and columns (e.g. 'orders(id, customer_id, product_id, amount, status, region, created_at), products(id, name, category, price), returns(id, order_id, reason, created_at)')"}, "visualization_type": {"type": "string", "description": "Preferred chart type: 'auto', 'bar', 'line', 'pie', 'table', 'heatmap' (default: 'auto')", "default": "auto"}}},
   },
   {
-    name: "product-design-specification",
+    name: "Product Design Specification",
     description: "Transform user stories and requirements into comprehensive product design specifications with wireframe descriptions, interaction patterns, and developer handoff documentation",
     tags: ["Design", "UX", "Product", "Wireframes", "Accessibility"],
     step_count: 6,
@@ -1282,7 +1282,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["document_sources", "domain"], "properties": {"document_sources": {"type": "string", "description": "Comma-separated document paths or URLs to ingest into the knowledge base (e.g. 'docs/api-reference.md, https://example.com/faq, docs/guides/')"}, "domain": {"type": "string", "description": "Knowledge domain for tuning chunking and retrieval heuristics (e.g. 'legal contracts', 'medical research', 'software documentation', 'financial reports')"}, "chunk_strategy": {"type": "string", "description": "Chunking strategy to use: 'semantic', 'fixed', 'recursive', 'document', or 'hybrid' (default: 'semantic')", "default": "semantic"}, "embedding_model": {"type": "string", "description": "Embedding model for vectorization (default: 'text-embedding-3-small'). Options include text-embedding-3-small, text-embedding-3-large, voyage-3, cohere-embed-v3", "default": "text-embedding-3-small"}}},
   },
   {
-    name: "release-notes-generator",
+    name: "Release Notes Generator",
     description: "Generate user-facing release notes and internal changelog from commit history",
     tags: ["Product", "Engineering", "Documentation"],
     step_count: 4,
@@ -1290,7 +1290,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["changelog"], "properties": {"changelog": {"type": "string", "description": "Git diff or changelog text to generate release notes from"}}},
   },
   {
-    name: "self-healing-pipeline",
+    name: "Self-Healing Pipeline",
     description: "Monitor data pipelines for schema drift and anomalies, auto-fix common issues, and report on data quality recovery",
     tags: ["Data", "ETL", "DevOps", "Automation"],
     step_count: 6,
@@ -1298,7 +1298,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["pipeline_name", "data_source"], "properties": {"pipeline_name": {"type": "string", "description": "Name of the data pipeline to monitor (e.g. 'orders-etl', 'user-events-pipeline')"}, "data_source": {"type": "string", "description": "Source system description (e.g. 'PostgreSQL orders table -> Snowflake warehouse')"}, "quality_threshold": {"type": "number", "description": "Minimum data quality score (0-100) before alerting (default: 95)", "default": 95}, "auto_fix": {"type": "string", "description": "Enable automatic fix attempts for known issue patterns: 'true' or 'false' (default: 'true')", "default": "true"}}},
   },
   {
-    name: "slack-standup-summary",
+    name: "Slack Standup Summary",
     description: "Collect daily standup updates from Slack and post a summary",
     tags: ["Communication", "Slack", "Team"],
     step_count: 3,
@@ -1306,7 +1306,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["standup_channel"], "properties": {"standup_channel": {"type": "string", "description": "Slack channel to read standups from (e.g. #daily-standup)"}, "summary_channel": {"type": "string", "description": "Slack channel to post summary to (defaults to standup_channel)"}, "lookback_hours": {"type": "number", "description": "Hours to look back for messages (default: 24)"}, "sprint_goal": {"type": "string", "description": "Current sprint goal for alignment tracking (e.g. 'Ship v2.0 checkout flow')"}, "team_members": {"type": "string", "description": "Comma-separated list of expected team members for missing-update detection"}}},
   },
   {
-    name: "soc-triage-pipeline",
+    name: "SOC Triage Pipeline",
     description: "Security Operations Center alert triage - deduplicate, enrich with threat intel, map to MITRE ATT&CK, and recommend containment",
     tags: ["Security", "SOC", "Threat-Intel", "SIEM"],
     step_count: 7,
@@ -1314,7 +1314,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["siem_source", "alert_id"], "properties": {"siem_source": {"type": "string", "description": "SIEM platform source (e.g. 'splunk', 'sentinel', 'elastic', 'crowdstrike')"}, "alert_id": {"type": "string", "description": "Alert ID from the SIEM to triage (e.g. 'ALERT-2024-00847')"}, "auto_contain": {"type": "string", "description": "Whether to auto-execute containment actions (default: 'false')", "default": "false"}}},
   },
   {
-    name: "sprint-standup",
+    name: "Sprint Standup",
     description: "Synthesize Jira sprint progress and GitHub PRs into a daily standup summary for Slack",
     tags: ["Engineering", "Jira", "GitHub", "Standup"],
     step_count: 4,
@@ -1323,7 +1323,7 @@ const MOCK_TEMPLATES = [
   },
   // --- hr_legal ---
   {
-    name: "compliance-checker",
+    name: "Compliance Checker",
     description: "Review documents for regulatory compliance against GDPR, SOC2, HIPAA, or custom frameworks",
     tags: ["Legal", "Compliance", "GDPR", "SOC2", "Audit"],
     step_count: 4,
@@ -1339,7 +1339,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["contract_type", "counterparty"], "properties": {"contract_type": {"type": "string", "description": "Type of contract to draft (e.g. SaaS, NDA, MSA, SOW, License, Employment)"}, "counterparty": {"type": "string", "description": "Name of the counterparty or organization"}, "key_terms": {"type": "string", "description": "Key terms and requirements to include (comma-separated or free text)"}}},
   },
   {
-    name: "contract-review",
+    name: "Contract Review",
     description: "Review contract for key terms, risks, and generate plain-language summary",
     tags: ["Legal", "Compliance", "Document"],
     step_count: 4,
@@ -1347,7 +1347,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["contract_text"], "properties": {"contract_text": {"type": "string", "description": "The contract document text to review"}}},
   },
   {
-    name: "employee-onboarding",
+    name: "Employee Onboarding",
     description: "Automate new employee onboarding - checklist, welcome email, accounts, training plan, and manager notification",
     tags: ["HR", "Onboarding", "Automation", "Slack", "Notion"],
     step_count: 5,
@@ -1355,7 +1355,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["employee_name", "role", "department", "start_date", "manager_email"], "properties": {"employee_name": {"type": "string", "description": "Full name of the new employee"}, "role": {"type": "string", "description": "Job title/role (e.g. 'Senior Frontend Engineer')"}, "department": {"type": "string", "description": "Department (e.g. 'Engineering', 'Marketing', 'Sales')"}, "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"}, "manager_email": {"type": "string", "description": "Direct manager's email address"}, "employee_email": {"type": "string", "description": "New employee's email address (if already provisioned)"}, "location": {"type": "string", "description": "Office location or 'Remote' (default: 'Remote')", "default": "Remote"}, "seniority_level": {"type": "string", "description": "Seniority level: 'junior', 'mid', 'senior', 'lead', 'director', 'vp' (default: 'mid')", "default": "mid"}, "buddy_email": {"type": "string", "description": "Assigned onboarding buddy/mentor email (optional - will suggest if not provided)"}}},
   },
   {
-    name: "job-description-generator",
+    name: "Job Description Generator",
     description: "Generate inclusive job description with requirements, benefits, and interview plan",
     tags: ["HR", "Recruiting", "Content"],
     step_count: 4,
@@ -1371,7 +1371,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["target_company"], "properties": {"target_company": {"type": "string", "description": "Name of the target company being evaluated for the transaction"}, "deal_type": {"type": "string", "description": "Type of transaction (e.g. acquisition, merger, asset purchase, joint venture)", "default": "acquisition"}, "focus_areas": {"type": "string", "description": "Comma-separated focus areas for the due diligence review", "default": "financials,contracts,ip,compliance"}}},
   },
   {
-    name: "org-health-pulse",
+    name: "Org Health Pulse",
     description: "Analyze employee survey data to surface sentiment trends, flight risks, and targeted intervention recommendations",
     tags: ["HR", "Analytics", "Culture", "Engagement"],
     step_count: 7,
@@ -1379,7 +1379,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["survey_data"], "properties": {"survey_data": {"type": "string", "description": "Description of survey data source or raw survey response data (e.g. 'Q4 2025 engagement survey - 450 responses across Engineering, Product, Sales, Marketing')"}, "department_filter": {"type": "string", "description": "Filter analysis to a specific department, or 'all' for company-wide (default: 'all')", "default": "all"}, "comparison_period": {"type": "string", "description": "Prior period to compare against for trend analysis (default: 'previous quarter')", "default": "previous quarter"}}},
   },
   {
-    name: "recruiting-pipeline",
+    name: "Recruiting Pipeline",
     description: "End-to-end recruiting workflow from job description to offer preparation with candidate evaluation and interview coordination",
     tags: ["HR", "Recruiting", "Hiring", "Talent"],
     step_count: 7,
@@ -1387,7 +1387,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["role_title", "department", "requirements"], "properties": {"role_title": {"type": "string", "description": "Job title for the open position (e.g. 'Senior Backend Engineer')"}, "department": {"type": "string", "description": "Hiring department (e.g. 'Engineering', 'Product', 'Marketing')"}, "requirements": {"type": "string", "description": "Key requirements, skills, and experience needed for the role"}, "salary_range": {"type": "string", "description": "Compensation range for the role (e.g. '$150K-$180K + equity')"}, "location": {"type": "string", "description": "Work location or remote policy (default: 'Remote')", "default": "Remote"}}},
   },
   {
-    name: "regulatory-change-analyzer",
+    name: "Regulatory Change Analyzer",
     description: "Monitor regulatory changes, assess compliance gaps, and generate remediation plans",
     tags: ["Compliance", "Regulatory", "Legal", "Risk"],
     step_count: 5,
@@ -1395,7 +1395,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["jurisdiction", "industry"], "properties": {"jurisdiction": {"type": "string", "description": "Primary jurisdiction to monitor (e.g. US, EU, UK, APAC)"}, "industry": {"type": "string", "description": "Industry sector (e.g. financial-services, healthcare, technology, manufacturing)"}, "regulatory_bodies": {"type": "string", "description": "Comma-separated list of regulatory bodies to monitor", "default": "SEC,FINRA,GDPR"}}},
   },
   {
-    name: "resume-screener",
+    name: "Resume Screener",
     description: "Screen resume against job description with match scoring and interview recommendations",
     tags: ["HR", "Recruiting", "Screening"],
     step_count: 4,
@@ -1404,7 +1404,7 @@ const MOCK_TEMPLATES = [
   },
   // --- data (new) ---
   {
-    name: "supabase-data-sync",
+    name: "Supabase Data Sync",
     description: "Sync data from Google Sheets to Supabase, validate records, and notify on Slack.",
     tags: ["Supabase", "Google Sheets", "Data Sync", "Slack"],
     step_count: 4,
@@ -1413,7 +1413,7 @@ const MOCK_TEMPLATES = [
   },
   // --- devops (new) ---
   {
-    name: "deployment-monitor",
+    name: "Deployment Monitor",
     description: "Monitor Vercel deployments, check Datadog metrics, and alert via PagerDuty if anomalies detected.",
     tags: ["Vercel", "Datadog", "PagerDuty", "Monitoring", "DevOps"],
     step_count: 3,
@@ -1421,7 +1421,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"type": "object", "required": ["project_name"], "properties": {"project_name": {"type": "string", "description": "Vercel project name to monitor"}, "metric_query": {"type": "string", "description": "Datadog metric query to check", "default": "avg:system.cpu.user{*}"}, "threshold": {"type": "number", "description": "Alert threshold for the metric", "default": 80}}},
   },
   {
-    name: "discord-incident-bot",
+    name: "Discord Incident Bot",
     description: "Monitor PagerDuty for new incidents, post alerts to Discord, and auto-acknowledge with status updates.",
     tags: ["Discord", "PagerDuty", "Incident Response", "DevOps"],
     step_count: 3,
@@ -1430,7 +1430,7 @@ const MOCK_TEMPLATES = [
   },
   // --- general_ai (new) ---
   {
-    name: "ai-brand-sentinel",
+    name: "AI Brand Sentinel",
     description: "Monitor how AI platforms represent your brand in generated answers, track sentiment shifts, identify source URLs influencing AI opinions, and generate corrective content recommendations",
     tags: [],
     step_count: 6,
@@ -1438,7 +1438,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["brand_name", "competitors"], "properties": {"brand_name": {"type": "string", "description": "Your brand or product name to monitor across AI platforms"}, "competitors": {"type": "string", "description": "Comma-separated list of competitor brand names to compare against"}, "ai_platforms": {"type": "string", "description": "Comma-separated list of AI platforms to probe (default: ChatGPT, Perplexity, Claude, Google AI)", "default": "ChatGPT, Perplexity, Claude, Google AI"}, "monitoring_queries": {"type": "string", "description": "Comma-separated seed queries to test across AI platforms (e.g. 'best CRM software, CRM comparison 2026')"}}},
   },
   {
-    name: "ai-rag-pipeline",
+    name: "AI RAG Pipeline",
     description: "Retrieve-augment-generate pipeline using Tavily search, Pinecone vector store, and OpenAI for answer synthesis.",
     tags: ["AI", "RAG", "Search", "Vectors"],
     step_count: 3,
@@ -1446,7 +1446,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"type": "object", "required": ["question"], "properties": {"question": {"type": "string", "description": "The question to answer using RAG"}}},
   },
   {
-    name: "board-meeting-prep",
+    name: "Board Meeting Prep",
     description: "Aggregate financial metrics, KPIs, competitive developments, and team updates into comprehensive board meeting packages with executive narratives and discussion prompts",
     tags: [],
     step_count: 6,
@@ -1454,7 +1454,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["company_name", "reporting_period"], "properties": {"company_name": {"type": "string", "description": "Name of the company preparing the board meeting"}, "reporting_period": {"type": "string", "description": "Reporting period for the board meeting (e.g., Q1 2026, FY 2025)"}, "board_members": {"type": "string", "description": "Comma-separated list of board member names and roles"}, "key_metrics_sources": {"type": "string", "description": "Comma-separated list of data sources for key metrics (e.g., Stripe, QuickBooks, Mixpanel)"}, "strategic_priorities": {"type": "string", "description": "Comma-separated list of current strategic priorities being tracked by the board"}}},
   },
   {
-    name: "carbon-footprint-reporter",
+    name: "Carbon Footprint Reporter",
     description: "Collect emissions data from energy bills, travel, supply chain, and fleet, calculate Scope 1/2/3 carbon footprints, generate regulatory-compliant ESG reports, and identify reduction opportunities",
     tags: [],
     step_count: 6,
@@ -1470,7 +1470,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["problem"], "properties": {"problem": {"type": "string", "description": "The problem to decompose and solve"}, "constraints": {"type": "string", "description": "Known constraints, requirements, or boundary conditions that the solution must satisfy", "default": ""}, "depth": {"type": "string", "description": "Analysis depth - quick (surface-level), standard (balanced), or deep (exhaustive)", "default": "standard"}}},
   },
   {
-    name: "churn-predictor-v2",
+    name: "Churn Predictor V2",
     description: "Enhanced churn prediction with multi-signal analysis, Slack alerts, and automated retention campaigns via HubSpot sequences",
     tags: [],
     step_count: 6,
@@ -1478,7 +1478,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["hubspot_list_id"], "properties": {"hubspot_list_id": {"type": "string", "description": "HubSpot contact list ID or segment name containing customers to analyze (e.g. 'active-customers', 'enterprise-tier')"}, "lookback_days": {"type": "number", "description": "Number of days of historical activity data to analyze (default: 90)", "default": 90}, "risk_threshold": {"type": "number", "description": "Minimum churn risk score (0-100) to trigger alerts and campaigns (default: 60)", "default": 60}, "slack_channel": {"type": "string", "description": "Slack channel for churn risk alerts (e.g. '#cs-alerts')", "default": "#cs-alerts"}, "hubspot_sequence_id": {"type": "string", "description": "HubSpot sequence ID for automated retention outreach (leave blank to skip enrollment)"}}},
   },
   {
-    name: "codebase-health-scanner",
+    name: "Codebase Health Scanner",
     description: "Analyze codebase for technical debt signals - complexity hotspots, test coverage gaps, dependency vulnerabilities, dead code, API contract drift, and documentation staleness with prioritized remediation roadmap",
     tags: [],
     step_count: 6,
@@ -1486,7 +1486,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["repo_url", "language"], "properties": {"repo_url": {"type": "string", "description": "Repository URL or local path to the codebase to analyze"}, "language": {"type": "string", "description": "Primary programming language (e.g. 'python', 'typescript', 'java', 'go', 'rust')"}, "focus_areas": {"type": "string", "description": "Comma-separated areas to focus on (default: all). Options: complexity, dependencies, coverage, dead_code, api_drift, docs", "default": "all"}, "tech_debt_budget": {"type": "string", "description": "Hours available per sprint for tech debt reduction (used for roadmap planning)", "default": "20"}}},
   },
   {
-    name: "competitive-teardown",
+    name: "Competitive Teardown",
     description: "Comprehensive competitor product teardown - feature-by-feature analysis, UX evaluation, pricing deconstruction, positioning critique, and strategic vulnerability assessment",
     tags: [],
     step_count: 6,
@@ -1494,7 +1494,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["competitor_product", "your_product"], "properties": {"competitor_product": {"type": "string", "description": "The competitor product to tear down - URL to product page or product name (e.g. 'https://competitor.com' or 'Notion')"}, "your_product": {"type": "string", "description": "Your product name and brief description for comparison context (e.g. 'Acme Notes - collaborative documentation tool for engineering teams')"}, "analysis_depth": {"type": "string", "description": "Depth of analysis: quick (key findings only), standard (full analysis), comprehensive (exhaustive teardown with scoring)", "default": "comprehensive"}, "focus_areas": {"type": "string", "description": "Comma-separated areas to focus on: features, ux, pricing, positioning, technical, marketing, support", "default": "features, ux, pricing, positioning"}}},
   },
   {
-    name: "compliance-audit-readiness",
+    name: "Compliance Audit Readiness",
     description: "Monitor systems against SOC 2, HIPAA, GDPR, ISO 27001 requirements, auto-generate evidence artifacts, flag control gaps, simulate auditor questions, and produce audit-ready documentation",
     tags: [],
     step_count: 6,
@@ -1502,7 +1502,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["frameworks", "organization_name"], "properties": {"frameworks": {"type": "string", "description": "Comma-separated list of compliance frameworks to audit against (e.g. 'SOC 2, HIPAA, GDPR, ISO 27001, PCI DSS')"}, "organization_name": {"type": "string", "description": "Name of the organization being assessed for compliance readiness"}, "system_scope": {"type": "string", "description": "Comma-separated list of systems, applications, and infrastructure in scope for the audit (e.g. 'AWS production, customer portal, HR database, email system')"}, "audit_date": {"type": "string", "description": "Target audit date or timeframe for readiness assessment", "default": "next quarter"}}},
   },
   {
-    name: "construction-bid-analyzer",
+    name: "Construction Bid Analyzer",
     description: "Ingest construction bid documents, extract scope items and quantities, cross-reference cost databases, flag missing items, and produce structured cost estimates with risk-adjusted ranges",
     tags: [],
     step_count: 6,
@@ -1518,7 +1518,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["niche", "target_audience"], "properties": {"niche": {"type": "string", "description": "Your content niche or industry (e.g. 'B2B SaaS marketing', 'personal finance', 'sustainable fashion')"}, "target_audience": {"type": "string", "description": "Primary target audience for the content (e.g. 'startup founders', 'mid-career professionals', 'ecommerce store owners')"}, "content_types": {"type": "string", "description": "Comma-separated content formats to include (default: 'blog post, social post, newsletter, video script')", "default": "blog post, social post, newsletter, video script"}, "posts_per_week": {"type": "number", "description": "Number of content pieces to plan per week (default: 4)", "default": 4}, "brand_voice": {"type": "string", "description": "Brand voice and tone guidelines (e.g. 'professional but approachable', 'bold and opinionated')", "default": "professional, helpful, and data-driven"}}},
   },
   {
-    name: "contract-reviewer-pro",
+    name: "Contract Reviewer Pro",
     description: "Advanced contract review with clause-by-clause risk analysis, jurisdiction-specific compliance checks, and amendment draft generation",
     tags: [],
     step_count: 5,
@@ -1526,7 +1526,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["contract_text"], "properties": {"contract_text": {"type": "string", "description": "Full text of the contract to review (paste the contract content or key sections)"}, "contract_type": {"type": "string", "description": "Type of contract (e.g. 'SaaS subscription', 'employment', 'NDA', 'MSA', 'SOW', 'vendor agreement')", "default": "general commercial"}, "jurisdiction": {"type": "string", "description": "Governing law jurisdiction (e.g. 'Delaware, US', 'England & Wales', 'California, US', 'EU/GDPR')", "default": "United States (general)"}, "review_perspective": {"type": "string", "description": "Whose interests to prioritize - 'buyer', 'seller', 'employee', or 'neutral'", "default": "buyer"}, "risk_tolerance": {"type": "string", "description": "Risk tolerance level - 'conservative' (flag everything), 'moderate' (standard business), or 'aggressive' (maximum flexibility)", "default": "moderate"}}},
   },
   {
-    name: "crisis-communication-commander",
+    name: "Crisis Communication Commander",
     description: "Real-time PR crisis management - monitor channels, draft holding statements, generate Q&A documents, coordinate multi-channel response, and track sentiment recovery",
     tags: [],
     step_count: 6,
@@ -1542,7 +1542,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["search_query"], "properties": {"search_query": {"type": "string", "description": "Search query for HubSpot contacts (name or email)"}, "enrichment_focus": {"type": "string", "description": "What to focus enrichment on (e.g. 'company size and revenue', 'technology stack')"}, "create_deals": {"type": "boolean", "description": "Whether to create deals for qualified contacts (default: false)"}, "deal_pipeline": {"type": "string", "description": "HubSpot pipeline for new deals (default: 'default')"}}},
   },
   {
-    name: "data-privacy-scanner",
+    name: "Data Privacy Scanner",
     description: "Scan codebases and data flows to discover PII/PHI, classify sensitivity levels, map data lineage, detect compliance violations, and generate Data Protection Impact Assessments",
     tags: [],
     step_count: 6,
@@ -1566,7 +1566,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["project_description", "freelancer_skills"], "properties": {"project_description": {"type": "string", "description": "Full text of the client's project posting, job description, or RFP (paste the complete listing)"}, "freelancer_skills": {"type": "string", "description": "Comma-separated list of your core skills and expertise areas (e.g. 'React, Node.js, AWS, PostgreSQL, 8 years experience')"}, "portfolio_highlights": {"type": "string", "description": "Description of relevant past projects, case studies, or portfolio pieces to reference in the proposal", "default": "no specific portfolio provided"}, "hourly_rate": {"type": "string", "description": "Your standard hourly rate or rate range (e.g. '$85/hr', '$75-100/hr', '$5000 fixed for this type')", "default": "market rate"}, "platform": {"type": "string", "description": "Freelance platform the proposal is for (affects formatting and optimization strategy)", "default": "upwork"}}},
   },
   {
-    name: "hotel-revenue-optimizer",
+    name: "Hotel Revenue Optimizer",
     description: "Analyze booking patterns, competitor rates, events, weather, and seasonal trends to generate dynamic room pricing, occupancy forecasts, and revenue management strategies",
     tags: [],
     step_count: 6,
@@ -1582,7 +1582,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["alert_id"], "properties": {"alert_id": {"type": "string", "description": "PagerDuty alert or incident ID to investigate (e.g. 'P1234ABC')"}, "pagerduty_service": {"type": "string", "description": "PagerDuty service name or ID for additional context"}, "datadog_query": {"type": "string", "description": "Custom Datadog log query to narrow log search (default: auto-detect from alert)"}, "github_repo": {"type": "string", "description": "GitHub repository to check for recent deployments (e.g. 'org/repo')"}, "slack_channel": {"type": "string", "description": "Slack channel for incident updates (e.g. '#incidents')", "default": "#incidents"}, "severity": {"type": "string", "description": "Override severity level - 'SEV1' (critical), 'SEV2' (major), 'SEV3' (minor), or 'auto' to detect from alert", "default": "auto"}}},
   },
   {
-    name: "influencer-campaign-matcher",
+    name: "Influencer Campaign Matcher",
     description: "Analyze brand requirements and campaign goals, identify optimal influencer matches by content style, audience demographics, engagement authenticity, brand safety, and predicted ROI",
     tags: [],
     step_count: 6,
@@ -1590,7 +1590,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["brand_name", "campaign_goal", "target_audience"], "properties": {"brand_name": {"type": "string", "description": "Brand or company name running the campaign"}, "campaign_goal": {"type": "string", "description": "Primary campaign objective: awareness, engagement, conversion, or launch", "default": "awareness"}, "target_audience": {"type": "string", "description": "Target audience description (demographics, interests, behaviors)"}, "budget_range": {"type": "string", "description": "Campaign budget range (e.g. '$5K-$20K')", "default": "$5K-$20K"}, "platform_focus": {"type": "string", "description": "Comma-separated platforms to focus on", "default": "Instagram, TikTok, YouTube"}, "content_category": {"type": "string", "description": "Content vertical (e.g. 'fitness', 'tech', 'beauty', 'food')"}}},
   },
   {
-    name: "insurance-claims-adjuster",
+    name: "Insurance Claims Adjuster",
     description: "Ingest insurance claims with documents and photos, extract damage assessments, cross-reference policy coverage, detect fraud indicators, estimate payouts, and generate adjuster-ready case summaries",
     tags: [],
     step_count: 6,
@@ -1614,7 +1614,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["role_brief"], "properties": {"role_brief": {"type": "string", "description": "Brief describing the role, responsibilities, and requirements"}, "company_name": {"type": "string", "description": "Company name for the About Us section"}, "salary_range": {"type": "string", "description": "Salary range to include (e.g. '$120k-$160k'). Recommended for transparency and SEO."}, "location_type": {"type": "string", "description": "Work arrangement: remote, hybrid, on-site, or flexible"}}},
   },
   {
-    name: "knowledge-base-auditor",
+    name: "Knowledge Base Auditor",
     description: "Audit knowledge bases for staleness, contradictions with recent support tickets, coverage gaps, and outdated information, then produce prioritized update recommendations with freshness scores",
     tags: [],
     step_count: 6,
@@ -1622,7 +1622,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["kb_source"], "properties": {"kb_source": {"type": "string", "description": "Knowledge base source identifier (e.g. 'zendesk', 'intercom', 'helpscout', 'confluence') or URL to the knowledge base"}, "ticket_source": {"type": "string", "description": "Support ticket source for contradiction analysis (default: zendesk)", "default": "zendesk"}, "audit_period": {"type": "string", "description": "Time period to analyze for recent tickets and changes (default: last 90 days)", "default": "last 90 days"}, "content_types": {"type": "string", "description": "Comma-separated content types to audit (default: articles, FAQs, guides)", "default": "articles, FAQs, guides"}}},
   },
   {
-    name: "memory-customer-context",
+    name: "Memory Customer Context",
     description: "Customer support agent that remembers customer history, preferences, and past issues to provide personalized, context-aware support",
     tags: [],
     step_count: 1,
@@ -1630,7 +1630,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["customer_id", "message"], "properties": {"customer_id": {"type": "string", "description": "Unique customer identifier"}, "message": {"type": "string", "description": "Customer's support message"}, "channel": {"type": "string", "description": "Support channel (email, chat, phone)", "default": "chat"}}},
   },
   {
-    name: "memory-learning-agent",
+    name: "Memory Learning Agent",
     description: "Research agent that accumulates domain knowledge across runs, learns from past analyses, and progressively improves its insights",
     tags: [],
     step_count: 1,
@@ -1638,7 +1638,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["topic", "question"], "properties": {"topic": {"type": "string", "description": "Research domain or topic area"}, "question": {"type": "string", "description": "Specific research question to investigate"}, "depth": {"type": "string", "description": "Analysis depth (quick, standard, deep)", "default": "standard"}}},
   },
   {
-    name: "memory-standup-bot",
+    name: "Memory Standup Bot",
     description: "Daily standup assistant that remembers past standups to detect patterns, recurring blockers, and track team progress over time",
     tags: [],
     step_count: 1,
@@ -1662,7 +1662,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["employee_name", "role", "department", "start_date", "manager_email"], "properties": {"employee_name": {"type": "string", "description": "Full name of the new employee"}, "role": {"type": "string", "description": "Job title/role (e.g. 'Senior Frontend Engineer')"}, "department": {"type": "string", "description": "Department (e.g. 'Engineering', 'Marketing', 'Sales')"}, "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"}, "manager_email": {"type": "string", "description": "Direct manager's email address"}, "employee_email": {"type": "string", "description": "New employee's email address (if already provisioned)"}, "location": {"type": "string", "description": "Office location or 'Remote' (default: 'Remote')", "default": "Remote"}, "seniority_level": {"type": "string", "description": "Seniority level: 'junior', 'mid', 'senior', 'lead', 'director', 'vp' (default: 'mid')", "default": "mid"}, "buddy_email": {"type": "string", "description": "Assigned onboarding buddy/mentor email (optional - will suggest if not provided)"}}},
   },
   {
-    name: "outage-postmortem-generator",
+    name: "Outage Postmortem Generator",
     description: "Collect incident timeline from monitoring tools, correlate log entries, identify root cause chains, draft blameless postmortem documents, extract action items, and track remediation",
     tags: [],
     step_count: 6,
@@ -1670,7 +1670,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["incident_id", "incident_description"], "properties": {"incident_id": {"type": "string", "description": "Unique incident identifier from your ticketing system (e.g. 'INC-2024-0847', 'PD-12345')"}, "incident_description": {"type": "string", "description": "Detailed description of what happened, including initial symptoms observed and services impacted"}, "monitoring_sources": {"type": "string", "description": "Comma-separated list of monitoring and alerting tools used (e.g. 'PagerDuty, Datadog, Slack, Grafana, CloudWatch')", "default": "PagerDuty, Datadog, Slack"}, "affected_services": {"type": "string", "description": "Comma-separated list of services, components, or systems affected by the incident (e.g. 'api-gateway, user-auth, payments-service, postgres-primary')"}, "severity": {"type": "string", "description": "Incident severity level following standard classification: SEV-1 (critical), SEV-2 (major), SEV-3 (minor), SEV-4 (low)", "default": "SEV-1"}}},
   },
   {
-    name: "patent-landscape-analyzer",
+    name: "Patent Landscape Analyzer",
     description: "Conduct prior art searches across patent databases, map competitive IP landscapes, identify innovation white spaces, and generate freedom-to-operate risk assessments",
     tags: [],
     step_count: 6,
@@ -1678,7 +1678,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["technology_domain", "company_name"], "properties": {"technology_domain": {"type": "string", "description": "The technology domain to analyze (e.g. 'natural language processing', 'battery electrode chemistry', 'autonomous vehicle perception')"}, "company_name": {"type": "string", "description": "Your company or organization name for the FTO assessment"}, "target_jurisdictions": {"type": "string", "description": "Comma-separated list of patent jurisdictions to cover", "default": "US, EP, CN"}, "search_keywords": {"type": "string", "description": "Comma-separated specific keywords and phrases to include in prior art searches (e.g. 'transformer attention mechanism, multi-head self-attention, sparse attention')"}, "competitor_names": {"type": "string", "description": "Comma-separated list of competitor companies whose patent portfolios should be analyzed"}}},
   },
   {
-    name: "permit-application-processor",
+    name: "Permit Application Processor",
     description: "Automate government permit applications - extract requirements from local codes, pre-fill forms, check completeness, flag non-compliance, and track approval across jurisdictions",
     tags: [],
     step_count: 6,
@@ -1702,7 +1702,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["product_name", "user_stories"], "properties": {"product_name": {"type": "string", "description": "Name of the product or feature being designed (e.g. 'Acme Dashboard', 'Checkout Flow Redesign')"}, "user_stories": {"type": "string", "description": "User stories, requirements, or feature descriptions to translate into design specs (paste all stories/requirements)"}, "design_system": {"type": "string", "description": "Design system to use or reference (e.g. 'Material Design 3', 'Apple HIG', 'Ant Design', 'custom')", "default": "custom"}, "target_platforms": {"type": "string", "description": "Comma-separated target platforms (e.g. 'web, iOS, Android', 'web-only', 'responsive web, native iOS')", "default": "responsive web"}, "accessibility_level": {"type": "string", "description": "Accessibility conformance target (e.g. 'WCAG 2.1 AA', 'WCAG 2.2 AAA', 'Section 508')", "default": "WCAG 2.1 AA"}}},
   },
   {
-    name: "qbr-autopilot",
+    name: "QBR Autopilot",
     description: "Generate complete Quarterly Business Review packages - pull CRM data, usage metrics, support trends, and renewal status into executive summaries, health scorecards, and strategic recommendations",
     tags: [],
     step_count: 6,
@@ -1718,7 +1718,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["changelog"], "properties": {"changelog": {"type": "string", "description": "Git diff or changelog text to generate release notes from"}}},
   },
   {
-    name: "release-notes-pro",
+    name: "Release Notes Pro",
     description: "Pull merged PRs from GitHub, classify changes, generate user-facing release notes, create changelog entries, and post to Slack and docs site",
     tags: [],
     step_count: 5,
@@ -1726,7 +1726,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["repo", "version"], "properties": {"repo": {"type": "string", "description": "GitHub repository in owner/repo format - e.g. 'acme/platform'"}, "version": {"type": "string", "description": "Release version tag - e.g. 'v2.4.0'"}, "since_tag": {"type": "string", "description": "Previous version tag to compare against - e.g. 'v2.3.0'. If empty, uses the last tag before the current version."}, "slack_channel": {"type": "string", "description": "Slack channel for release announcement (e.g. '#releases')", "default": "#releases"}, "audience": {"type": "string", "description": "Target audience for the notes - 'developers', 'end-users', 'internal', or 'all' (default: 'all')", "default": "all"}}},
   },
   {
-    name: "rfp-response-engine",
+    name: "RFP Response Engine",
     description: "Multi-agent RFP/RFQ response generator that ingests bid requirements, matches against company knowledge base, drafts section-by-section responses, and scores proposal strength",
     tags: [],
     step_count: 6,
@@ -1734,7 +1734,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["rfp_document", "company_name"], "properties": {"rfp_document": {"type": "string", "description": "Full text of the RFP/RFQ document, or URL to the bid document"}, "company_name": {"type": "string", "description": "Your company name (the bidder/proposer)"}, "knowledge_base_source": {"type": "string", "description": "Source of company knowledge base for response matching (e.g. 'confluence', 'notion', 'sharepoint', or paste key capabilities)"}, "win_themes": {"type": "string", "description": "Comma-separated strategic win themes to weave into the proposal (e.g. 'innovation leader, proven ROI, local presence')"}, "submission_deadline": {"type": "string", "description": "Submission deadline for the RFP (e.g. '2026-03-15')"}}},
   },
   {
-    name: "saas-usage-optimizer",
+    name: "SaaS Usage Optimizer",
     description: "Audit SaaS subscriptions across the organization, analyze usage vs licensed seats, identify redundant tools, calculate waste, and produce consolidation roadmap with savings projections",
     tags: [],
     step_count: 6,
@@ -1766,7 +1766,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["blog_url"], "properties": {"blog_url": {"type": "string", "description": "URL of the blog post to repurpose into social media content"}, "brand_voice": {"type": "string", "description": "Brand voice guidelines - e.g. 'professional but approachable, avoid jargon, use data-driven claims'"}, "target_platforms": {"type": "string", "description": "Comma-separated platforms to generate for - 'twitter, linkedin, instagram, tiktok' (default: all)", "default": "twitter, linkedin, instagram, tiktok"}, "cta_url": {"type": "string", "description": "Call-to-action URL to include in posts (e.g., landing page URL). Defaults to the blog URL."}, "hashtag_strategy": {"type": "string", "description": "Hashtag preferences - e.g. 'industry-specific, max 5 per post, include branded hashtag #AcmeTech'"}}},
   },
   {
-    name: "student-learning-path-builder",
+    name: "Student Learning Path Builder",
     description: "Analyze student assessment results and learning preferences to generate personalized learning paths with resource recommendations, pacing adjustments, and intervention triggers",
     tags: [],
     step_count: 6,
@@ -1782,7 +1782,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["text"], "properties": {"text": {"type": "string", "description": "The text to summarize"}, "format": {"type": "string", "description": "Output format style - executive, bullet-points, narrative, or academic", "default": "executive"}, "max_length": {"type": "string", "description": "Target length for the final summary (e.g. '500 words', '1 page', '3 paragraphs')", "default": "500 words"}, "audience": {"type": "string", "description": "Target audience - determines vocabulary complexity and assumed background knowledge", "default": "general"}}},
   },
   {
-    name: "tax-return-preprocessor",
+    name: "Tax Return Preprocessor",
     description: "Ingest W-2s, 1099s, receipts, and bank statements, categorize transactions, identify deductions, flag anomalies, and produce structured data packages ready for CPA review",
     tags: [],
     step_count: 6,
@@ -1798,7 +1798,7 @@ const MOCK_TEMPLATES = [
     input_schema: {"required": ["text", "target_language"], "properties": {"text": {"type": "string", "description": "The text to translate"}, "target_language": {"type": "string", "description": "The target language to translate into (e.g. 'Spanish', 'Japanese', 'Czech')"}, "tone": {"type": "string", "description": "Desired tone - professional, casual, formal, literary, technical, or marketing", "default": "professional"}, "domain": {"type": "string", "description": "Subject domain for terminology accuracy - general, legal, medical, technical, financial, academic, or marketing", "default": "general"}}},
   },
   {
-    name: "vendor-renewal-negotiator",
+    name: "Vendor Renewal Negotiator",
     description: "Monitor SaaS and vendor contract renewals, analyze usage vs terms, benchmark pricing against market rates, identify leverage points, and draft counter-proposals",
     tags: [],
     step_count: 6,
@@ -1807,7 +1807,7 @@ const MOCK_TEMPLATES = [
   },
   // --- marketing (new) ---
   {
-    name: "ai-content-pipeline",
+    name: "AI Content Pipeline",
     description: "Generate blog content with OpenAI, create audio version with ElevenLabs, and store assets in AWS S3.",
     tags: ["AI", "Content", "Text-to-Speech", "S3"],
     step_count: 4,
@@ -1817,7 +1817,7 @@ const MOCK_TEMPLATES = [
 ];
 
 const TEMPLATE_YAMLS: Record<string, string> = {
-  "text-summarizer": `name: "summarize"
+  "Text Summarizer": `name: "summarize"
 description: "Summarize text input with configurable detail level"
 default_model: sonnet
 default_max_turns: 10
@@ -1840,7 +1840,7 @@ steps:
     depends_on:
       - "extract"
 `,
-  "language-translator": `name: "translate"
+  "Language Translator": `name: "translate"
 description: "Detect language and translate to target language"
 default_model: sonnet
 default_max_turns: 10
@@ -1862,7 +1862,7 @@ steps:
     depends_on:
       - "detect_language"
 `,
-  "research-agent": `name: "research_agent"
+  "Research Agent": `name: "research_agent"
 description: "Multi-source research with parallel analysis and fact extraction"
 default_model: sonnet
 default_max_turns: 10
@@ -1904,7 +1904,7 @@ steps:
     depends_on:
       - "extract_facts"
 `,
-  "chain-of-thought-solver": `name: "chain_of_thought"
+  "Chain of Thought Solver": `name: "chain_of_thought"
 description: "Step-by-step reasoning through complex problems"
 default_model: sonnet
 default_max_turns: 10
@@ -1935,7 +1935,7 @@ steps:
     depends_on:
       - "reason"
 `,
-  "review-and-approve": `name: "review_and_approve"
+  "Review and Approve": `name: "review_and_approve"
 description: "Content generation with human approval gate before publishing"
 default_model: sonnet
 default_max_turns: 10
