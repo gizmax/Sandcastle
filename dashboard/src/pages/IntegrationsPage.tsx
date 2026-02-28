@@ -17,6 +17,7 @@ import {
   TOOL_ICON_MAP,
   CATEGORY_COLORS,
   CATEGORY_LABELS,
+  TOOL_DISPLAY_NAMES,
 } from "@/components/integrations/toolIcons";
 import { cn } from "@/lib/utils";
 
@@ -247,7 +248,7 @@ export default function IntegrationsPage() {
                   "hover:bg-amber-500/20 transition-colors cursor-pointer",
                 )}
               >
-                <span className="capitalize">{tool.name}</span>
+                <span>{TOOL_DISPLAY_NAMES[tool.name] ?? tool.name}</span>
                 <span className="text-amber-500/60">-</span>
                 <span className="text-amber-500/80 font-normal">
                   {tool.missing_credentials[0]}
@@ -297,8 +298,8 @@ export default function IntegrationsPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-foreground capitalize">
-                        {tool.name}
+                      <span className="text-sm font-semibold text-foreground">
+                        {TOOL_DISPLAY_NAMES[tool.name] ?? tool.name}
                       </span>
                       {hasIssue ? (
                         <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
@@ -363,8 +364,8 @@ export default function IntegrationsPage() {
                     >
                       <Icon className={cn("h-5 w-5", colors.text)} />
                     </div>
-                    <span className="text-sm font-medium text-foreground capitalize">
-                      {tool.name}
+                    <span className="text-sm font-medium text-foreground">
+                      {TOOL_DISPLAY_NAMES[tool.name] ?? tool.name}
                     </span>
                     <span className="text-[10px] text-accent font-medium">
                       Quick setup
@@ -448,8 +449,8 @@ export default function IntegrationsPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground capitalize">
-                        {tool.name}
+                      <span className="text-sm font-medium text-foreground">
+                        {TOOL_DISPLAY_NAMES[tool.name] ?? tool.name}
                       </span>
                       <span
                         className={cn(

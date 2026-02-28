@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Eye, EyeOff, CheckCircle2, AlertTriangle, Loader2, Plus, Trash2, Link2 } from "lucide-react";
+import { X, Eye, EyeOff, CheckCircle2, AlertTriangle, Loader2, Plus, Trash2, Link2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
-import { TOOL_ICON_MAP, CATEGORY_COLORS, CATEGORY_LABELS } from "./toolIcons";
+import { TOOL_ICON_MAP, CATEGORY_COLORS, CATEGORY_LABELS, TOOL_DISPLAY_NAMES, CREDENTIAL_LABELS, TOOL_SIGNUP_URLS } from "./toolIcons";
 
 interface ToolConnection {
   name: string;
@@ -29,6 +29,13 @@ interface ToolConfigPanelProps {
   tool: Tool | null;
   onClose: () => void;
   onSaved: () => void;
+}
+
+function autoLabel(envVar: string, toolName: string): string {
+  let s = envVar.replace(/^TOOL_/, "");
+  const prefix = toolName.toUpperCase().replace(/-/g, "_") + "_";
+  if (s.startsWith(prefix)) s = s.slice(prefix.length);
+  return s.split("_").map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(" ");
 }
 
 export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps) {
@@ -72,7 +79,7 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
       if (res.error) {
         toast.error(res.error.message);
       } else {
-        toast.success(`${tool.name} credentials saved`);
+        toast.success(`${TOOL_DISPLAY_NAMES[tool.name] ?? tool.name} credentials saved`);
         onSaved();
         onClose();
       }
@@ -113,7 +120,7 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
             <Icon className={cn("h-5 w-5", colors.text)} />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-foreground capitalize">{tool.name}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{TOOL_DISPLAY_NAMES[tool.name] ?? tool.name}</h2>
             <span className={cn(
               "inline-block mt-0.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
               colors.bg, colors.text
@@ -132,6 +139,19 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <p className="text-sm text-muted">{tool.description}</p>
+
+          {/* Signup link */}
+          {TOOL_SIGNUP_URLS[tool.name] && (
+            <a
+              href={TOOL_SIGNUP_URLS[tool.name].url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Get your credentials at {TOOL_SIGNUP_URLS[tool.name].label}
+            </a>
+          )}
 
           {/* Status */}
           <div className="flex items-center gap-2">
@@ -157,10 +177,12 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
               {tool.credential_env_vars.map((envVar) => {
                 const isMissing = tool.missing_credentials.includes(envVar);
                 const isVisible = visible[envVar] ?? false;
+                const credInfo = CREDENTIAL_LABELS[envVar];
+                const displayLabel = credInfo?.label ?? autoLabel(envVar, tool.name);
                 return (
                   <div key={envVar}>
-                    <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-foreground">
-                      {envVar}
+                    <label className="mb-0.5 flex items-center gap-2 text-sm font-medium text-foreground">
+                      {displayLabel}
                       {isMissing ? (
                         <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500">
                           MISSING
@@ -171,12 +193,13 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
                         </span>
                       )}
                     </label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-1.5 font-mono">{envVar}</p>
                     <div className="relative">
                       <input
                         type={isVisible ? "text" : "password"}
                         value={values[envVar] ?? ""}
                         onChange={(e) => setValues((prev) => ({ ...prev, [envVar]: e.target.value }))}
-                        placeholder={isMissing ? "Enter value..." : "Enter new value to update..."}
+                        placeholder={credInfo?.hint ?? (isMissing ? "Enter value..." : "Enter new value to update...")}
                         className={cn(
                           "w-full rounded-lg border bg-background px-3 py-2 pr-10 text-sm text-foreground",
                           "placeholder:text-muted-foreground/50",
@@ -382,14 +405,18 @@ function ConnectionsSection({ tool, onSaved }: { tool: Tool; onSaved: () => void
               )}
             />
           </div>
-          {tool.credential_env_vars.map((envVar) => (
+          {tool.credential_env_vars.map((envVar) => {
+            const credInfo = CREDENTIAL_LABELS[envVar];
+            const displayLabel = credInfo?.label ?? autoLabel(envVar, tool.name);
+            return (
             <div key={envVar}>
-              <label className="mb-1 block text-xs font-medium text-foreground">{envVar}</label>
+              <label className="mb-0.5 block text-xs font-medium text-foreground">{displayLabel}</label>
+              <p className="text-[10px] text-muted-foreground mb-1 font-mono">{envVar}</p>
               <input
                 type="password"
                 value={newCreds[envVar] ?? ""}
                 onChange={(e) => setNewCreds((prev) => ({ ...prev, [envVar]: e.target.value }))}
-                placeholder="Enter value..."
+                placeholder={credInfo?.hint ?? "Enter value..."}
                 className={cn(
                   "w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground",
                   "placeholder:text-muted-foreground/50",
@@ -397,7 +424,8 @@ function ConnectionsSection({ tool, onSaved }: { tool: Tool; onSaved: () => void
                 )}
               />
             </div>
-          ))}
+            );
+          })}
           <div className="flex gap-2 justify-end">
             <button
               onClick={() => { setShowForm(false); setNewName(""); setNewCreds({}); }}
