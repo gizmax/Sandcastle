@@ -876,7 +876,7 @@ steps:
         # Channel may have auto-injected context from depends_on
         assert "#alerts" in notify_output["channel"]
         assert "Important finding" in notify_output["message"]
-        assert notify_output["status"] == "sent"
+        assert notify_output["status"] == "logged"
 
     @pytest.mark.asyncio
     async def test_notify_with_input_vars(self):
@@ -1492,7 +1492,7 @@ steps:
         assert isinstance(looper_output, list)
         assert len(looper_output) == 3
         assert result.outputs.get("alert") is not None
-        assert result.outputs["alert"]["status"] == "sent"
+        assert result.outputs["alert"]["status"] == "logged"
 
     @pytest.mark.asyncio
     async def test_diamond_dependency(self):

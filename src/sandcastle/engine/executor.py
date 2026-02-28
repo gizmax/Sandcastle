@@ -1236,9 +1236,9 @@ async def _execute_step_once(
             try:
                 from sandcastle.engine.optimizer import (
                     SLO,
-                    CostLatencyOptimizer,
                     ModelOption,
                     calculate_budget_pressure,
+                    get_optimizer,
                 )
 
                 slo = SLO(
@@ -1253,7 +1253,7 @@ async def _execute_step_once(
                 ]
                 bp = calculate_budget_pressure(context.total_cost, context.max_cost_usd)
 
-                optimizer = CostLatencyOptimizer()
+                optimizer = get_optimizer()
                 decision = await optimizer.select_model(
                     step_id=step.id,
                     workflow_name=context.workflow_name,
@@ -2089,6 +2089,9 @@ async def _execute_http_step(
                 # Serialize dict body then resolve templates in the JSON string
                 # so that {input.X} / {steps.Y.output} inside dict values work.
                 body = resolve_templates(json.dumps(cfg.body), context, step.depends_on)
+                # Ensure Content-Type is set for JSON bodies
+                if not any(k.lower() == "content-type" for k in headers):
+                    headers["Content-Type"] = "application/json"
 
         async with httpx.AsyncClient(timeout=step.timeout) as client:
             resp = await client.request(
@@ -2501,6 +2504,14 @@ async def _execute_loop_step(
         total_cost = 0.0
 
         for i, item in enumerate(items):
+            if await _check_cancel(context.run_id):
+                return StepResult(
+                    step_id=step.id,
+                    output={"status": "cancelled", "completed_iterations": i},
+                    cost_usd=total_cost,
+                    duration_seconds=time.monotonic() - started_at,
+                    status="failed",
+                )
             child_context = context.with_item(item, i)
 
             for sub_step_id in cfg.step_ids:
@@ -2742,66 +2753,66 @@ async def _execute_sensor_step(
         current_interval = cfg.check_interval
         max_interval = min(cfg.check_interval * 32, cfg.timeout / 4)
 
-        while time.monotonic() < deadline:
-            # Check for cancellation between polls
-            if await _check_cancel(context.run_id):
-                duration = time.monotonic() - started_at
-                return StepResult(
-                    step_id=step.id,
-                    status="failed",
-                    error="Run cancelled during sensor polling",
-                    duration_seconds=duration,
-                )
+        async with httpx.AsyncClient(timeout=30) as client:
+            while time.monotonic() < deadline:
+                # Check for cancellation between polls
+                if await _check_cancel(context.run_id):
+                    duration = time.monotonic() - started_at
+                    return StepResult(
+                        step_id=step.id,
+                        status="failed",
+                        error="Run cancelled during sensor polling",
+                        duration_seconds=duration,
+                    )
 
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
+                try:
                     resp = await client.request(
                         method=cfg.method.upper(),
                         url=url,
                         headers=headers,
                     )
-                try:
-                    response_data = resp.json()
-                except Exception:
-                    raw_text = resp.text
-                    truncated = len(raw_text) > 5000
-                    if truncated:
-                        logger.warning(
-                            f"HTTP step '{step.id}': Response truncated from"
-                            f" {len(raw_text)} to 5000 chars"
-                        )
-                    response_data = {
+                    try:
+                        response_data = resp.json()
+                    except Exception:
+                        raw_text = resp.text
+                        truncated = len(raw_text) > 5000
+                        if truncated:
+                            logger.warning(
+                                f"HTTP step '{step.id}': Response truncated from"
+                                f" {len(raw_text)} to 5000 chars"
+                            )
+                        response_data = {
+                            "status_code": resp.status_code,
+                            "text": raw_text[:5000],
+                            "_truncated": truncated,
+                        }
+
+                    # Evaluate condition safely via simpleeval
+                    eval_names: dict[str, Any] = {
+                        "response": response_data,
                         "status_code": resp.status_code,
-                        "text": raw_text[:5000],
-                        "_truncated": truncated,
+                        "True": True,
+                        "False": False,
+                        "None": None,
                     }
+                    condition_met = bool(_safe_eval_expression(cfg.condition, eval_names))
 
-                # Evaluate condition safely via simpleeval
-                eval_names: dict[str, Any] = {
-                    "response": response_data,
-                    "status_code": resp.status_code,
-                    "True": True,
-                    "False": False,
-                    "None": None,
-                }
-                condition_met = bool(_safe_eval_expression(cfg.condition, eval_names))
+                    if condition_met:
+                        duration = time.monotonic() - started_at
+                        return StepResult(
+                            step_id=step.id,
+                            output=response_data,
+                            cost_usd=0.0,
+                            duration_seconds=duration,
+                            status="completed",
+                        )
+                except Exception as poll_err:
+                    logger.debug(f"Sensor poll error for step '{step.id}': {poll_err}")
 
-                if condition_met:
-                    duration = time.monotonic() - started_at
-                    return StepResult(
-                        step_id=step.id,
-                        output=response_data,
-                        cost_usd=0.0,
-                        duration_seconds=duration,
-                        status="completed",
-                    )
-            except Exception as poll_err:
-                logger.debug(f"Sensor poll error for step '{step.id}': {poll_err}")
-
-            # Exponential backoff with +/- 20% jitter
-            jitter = current_interval * random.uniform(-0.2, 0.2)
-            await asyncio.sleep(current_interval + jitter)
-            current_interval = min(current_interval * 2, max_interval)
+                # Exponential backoff with +/- 20% jitter
+                jitter = current_interval * random.uniform(-0.2, 0.2)
+                await asyncio.sleep(current_interval + jitter)
+                current_interval = min(current_interval * 2, max_interval)
 
         # Timeout reached
         duration = time.monotonic() - started_at
@@ -3090,7 +3101,8 @@ async def _execute_notify_step(
             "service": cfg.service,
             "channel": channel,
             "message": message,
-            "status": "sent",
+            "status": "logged",
+            "note": "Notification logged only - no delivery connector configured",
         }
 
         duration = time.monotonic() - started_at
@@ -3161,8 +3173,9 @@ async def _execute_delegate_step(
             if wf_path.exists():
                 sub_wf = parse_workflow(str(wf_path))
                 sub_plan = build_plan(sub_wf)
+                sub_run_id = str(uuid.uuid4())
                 sub_context = RunContext(
-                    run_id=context.run_id,
+                    run_id=sub_run_id,
                     input={**context.input, "task_description": task_description},
                     step_outputs={},
                     workflow_name=cfg.workflow,
@@ -4759,7 +4772,8 @@ async def execute_workflow(
         )
 
     finally:
-        _cancel_flags.pop(run_id, None)
+        async with _cancel_flags_lock:
+            _cancel_flags.pop(run_id, None)
 
 
 async def _save_routing_decision(

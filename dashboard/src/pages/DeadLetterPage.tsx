@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Inbox, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -11,6 +11,8 @@ export default function DeadLetterPage() {
   const [items, setItems] = useState<DLQItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
+  const unresolvedItems = useMemo(() => items.filter((i) => !i.resolved_at), [items]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -30,28 +32,40 @@ export default function DeadLetterPage() {
 
   const handleRetry = useCallback(
     async (id: string) => {
-      const res = await api.post(`/dead-letter/${id}/retry`);
-      if (res.error) {
-        toast.error(`Failed to retry: ${res.error.message}`);
-        return;
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
+      try {
+        const res = await api.post(`/dead-letter/${id}/retry`);
+        if (res.error) {
+          toast.error(`Failed to retry: ${res.error.message}`);
+          return;
+        }
+        toast.success("Item queued for retry");
+        void fetchItems();
+      } finally {
+        setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });
       }
-      toast.success("Item queued for retry");
-      void fetchItems();
     },
-    [fetchItems]
+    [fetchItems, actionLoading]
   );
 
   const handleResolve = useCallback(
     async (id: string) => {
-      const res = await api.post(`/dead-letter/${id}/resolve`);
-      if (res.error) {
-        toast.error(`Failed to resolve: ${res.error.message}`);
-        return;
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
+      try {
+        const res = await api.post(`/dead-letter/${id}/resolve`);
+        if (res.error) {
+          toast.error(`Failed to resolve: ${res.error.message}`);
+          return;
+        }
+        toast.success("Item resolved");
+        void fetchItems();
+      } finally {
+        setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });
       }
-      toast.success("Item resolved");
-      void fetchItems();
     },
-    [fetchItems]
+    [fetchItems, actionLoading]
   );
 
   if (loading) {
@@ -83,9 +97,9 @@ export default function DeadLetterPage() {
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Dead Letter Queue</h1>
 
-      {items.filter((i) => !i.resolved_at).length > 0 && (
+      {unresolvedItems.length > 0 && (
         <ContextBanner variant="error" icon={AlertTriangle}>
-          {items.filter((i) => !i.resolved_at).length} unresolved item{items.filter((i) => !i.resolved_at).length > 1 ? "s" : ""} - retry or resolve to clear the queue.
+          {unresolvedItems.length} unresolved item{unresolvedItems.length > 1 ? "s" : ""} - retry or resolve to clear the queue.
         </ContextBanner>
       )}
 

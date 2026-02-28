@@ -303,8 +303,8 @@ async def _resolve_budget(request_budget: float | None, tenant_id: str | None) -
                 result = await session.scalar(stmt)
                 if result and result > 0:
                     return result
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Budget check failed, using default: %s", e)
     # 3. Env-level default
     if settings.default_max_cost_usd > 0:
         return settings.default_max_cost_usd
@@ -2162,6 +2162,8 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
         seen_step_ids: set[tuple[str, int | None]] = set()
 
         for _ in range(600):  # Max 10 minutes of polling (1s intervals)
+            if await request.is_disconnected():
+                break
             async with async_session() as session:
                 stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
                 result = await session.execute(stmt)
@@ -3679,6 +3681,10 @@ async def list_approvals(
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List approval requests, scoped to tenant."""
+    if status:
+        valid = {s.value for s in ApprovalStatus}
+        if status not in valid:
+            raise HTTPException(status_code=400, detail=f"Invalid status '{status}'. Valid: {', '.join(sorted(valid))}")
     tenant_id = get_tenant_id(request)
 
     async with async_session() as session:

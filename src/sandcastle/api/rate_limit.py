@@ -143,10 +143,10 @@ class RedisBackend:
         redis = await self._get_redis()
         if redis is None:
             logger.error(
-                "Redis rate limit backend unavailable - rate limiting disabled for key %s",
+                "Redis rate limit backend unavailable - failing closed for key %s",
                 key,
             )
-            return 0  # Fail open if Redis unavailable
+            return max_requests + 1  # Fail closed if Redis unavailable
 
         import uuid
 
@@ -170,9 +170,9 @@ class RedisBackend:
             return int(result)
         except Exception as exc:
             logger.error(
-                "Redis rate limit error (fail-open, limiting disabled): %s", exc
+                "Redis rate limit error (failing closed): %s", exc
             )
-            return 0  # Fail open on Redis errors
+            return max_requests + 1  # Fail closed on Redis errors
 
 
 # ---------------------------------------------------------------------------

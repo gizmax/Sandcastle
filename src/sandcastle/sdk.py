@@ -127,6 +127,8 @@ class RuntimeInfo:
     queue: str
     storage: str
     data_dir: Optional[str] = None
+    sandbox_backend: str = ""
+    license: dict[str, Any] | None = None
 
 
 @dataclass
@@ -156,7 +158,7 @@ class PaginatedList:
 # ---------------------------------------------------------------------------
 
 _TERMINAL_STATUSES = frozenset({
-    "completed", "failed", "partial", "cancelled",
+    "completed", "failed", "partial", "cancelled", "error",
     "budget_exceeded", "awaiting_approval",
 })
 
@@ -271,6 +273,8 @@ def _parse_runtime(data: dict[str, Any]) -> RuntimeInfo:
         queue=data.get("queue", "unknown"),
         storage=data.get("storage", "unknown"),
         data_dir=data.get("data_dir"),
+        sandbox_backend=data.get("sandbox_backend", ""),
+        license=data.get("license"),
     )
 
 
@@ -628,18 +632,32 @@ class SandcastleClient:
                 _extract_data(resp)  # will raise
 
             event_type = ""
+            data_lines: list[str] = []
             for line in resp.iter_lines():
                 if line.startswith("event:"):
                     event_type = line[len("event:"):].strip()
                 elif line.startswith("data:"):
-                    data_str = line[len("data:"):].strip()
+                    data_lines.append(line[len("data:"):].strip())
+                elif line == "" and data_lines:
+                    data_buf = "\n".join(data_lines)
                     try:
-                        parsed = json.loads(data_str)
+                        parsed = json.loads(data_buf)
                     except json.JSONDecodeError:
-                        parsed = {"raw": data_str}
+                        parsed = {"raw": data_buf}
                     parsed["_event"] = event_type
                     yield parsed
                     event_type = ""
+                    data_lines = []
+
+            # Flush remaining data if stream ended without trailing blank line
+            if data_lines:
+                data_buf = "\n".join(data_lines)
+                try:
+                    parsed = json.loads(data_buf)
+                except json.JSONDecodeError:
+                    parsed = {"raw": data_buf}
+                parsed["_event"] = event_type
+                yield parsed
 
     # -- Workflows --
 
@@ -1092,18 +1110,32 @@ class AsyncSandcastleClient:
                 _extract_data(resp)  # will raise
 
             event_type = ""
+            data_lines: list[str] = []
             async for line in resp.aiter_lines():
                 if line.startswith("event:"):
                     event_type = line[len("event:"):].strip()
                 elif line.startswith("data:"):
-                    data_str = line[len("data:"):].strip()
+                    data_lines.append(line[len("data:"):].strip())
+                elif line == "" and data_lines:
+                    data_buf = "\n".join(data_lines)
                     try:
-                        parsed = json.loads(data_str)
+                        parsed = json.loads(data_buf)
                     except json.JSONDecodeError:
-                        parsed = {"raw": data_str}
+                        parsed = {"raw": data_buf}
                     parsed["_event"] = event_type
                     yield parsed
                     event_type = ""
+                    data_lines = []
+
+            # Flush remaining data if stream ended without trailing blank line
+            if data_lines:
+                data_buf = "\n".join(data_lines)
+                try:
+                    parsed = json.loads(data_buf)
+                except json.JSONDecodeError:
+                    parsed = {"raw": data_buf}
+                parsed["_event"] = event_type
+                yield parsed
 
     # -- Workflows --
 

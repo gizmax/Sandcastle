@@ -64,6 +64,7 @@ async def restore_schedules() -> None:
             result = await session.execute(stmt)
             schedules = result.scalars().all()
 
+        restored_count = 0
         for schedule in schedules:
             try:
                 add_schedule(
@@ -72,6 +73,7 @@ async def restore_schedules() -> None:
                     workflow_name=schedule.workflow_name,
                     input_data=schedule.input_data,
                 )
+                restored_count += 1
             except ValueError as e:
                 # Invalid cron expression - disable the schedule to prevent
                 # repeated failures on every restart
@@ -92,7 +94,7 @@ async def restore_schedules() -> None:
             except Exception as e:
                 logger.warning(f"Could not restore schedule {schedule.id}: {e}")
 
-        logger.info(f"Restored {len(schedules)} schedule(s) from database")
+        logger.info(f"Restored {restored_count} schedule(s) from database")
     except Exception as e:
         logger.warning(f"Could not restore schedules from database: {e}")
 
@@ -122,6 +124,22 @@ async def _run_scheduled_workflow(
     """Job function: enqueue a workflow run from a schedule trigger."""
     from sandcastle.models.db import Run, RunStatus, Schedule, async_session
     from sandcastle.queue.worker import enqueue_workflow
+
+    # Guard against concurrent execution of the same scheduled workflow
+    try:
+        async with async_session() as session:
+            schedule = await session.get(Schedule, uuid.UUID(schedule_id))
+            if schedule and schedule.last_run_id:
+                last_run = await session.get(Run, schedule.last_run_id)
+                if last_run and last_run.status in (RunStatus.RUNNING, RunStatus.QUEUED):
+                    logger.warning(
+                        "Skipping scheduled run for '%s' - previous run %s still active",
+                        schedule.workflow_name,
+                        schedule.last_run_id,
+                    )
+                    return
+    except Exception as e:
+        logger.warning(f"Could not check previous run status for schedule '{schedule_id}': {e}")
 
     run_id = str(uuid.uuid4())
     logger.info(f"Schedule '{schedule_id}' triggered: creating run {run_id}")
@@ -315,6 +333,16 @@ def add_schedule(
         trigger = CronTrigger.from_crontab(cron_expression, timezone=timezone.utc)
     except ValueError as e:
         raise ValueError(f"Invalid cron expression '{cron_expression}': {e}")
+
+    # Validate that the workflow YAML file exists (skip if dir missing)
+    workflows_dir = Path(settings.workflows_dir).resolve()
+    if workflows_dir.is_dir():
+        candidates = [
+            workflows_dir / f"{workflow_name}.yaml",
+            workflows_dir / workflow_name,
+        ]
+        if not any(c.resolve().is_file() for c in candidates if c.resolve().is_relative_to(workflows_dir)):
+            raise ValueError(f"Workflow '{workflow_name}' not found")
 
     scheduler.add_job(
         _run_scheduled_workflow,

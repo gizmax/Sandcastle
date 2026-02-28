@@ -105,7 +105,12 @@ async def dispatch_webhook(
             f"Webhook payload for run {run_id} exceeds {max_payload_bytes} bytes, "
             "truncating outputs"
         )
-        payload["outputs"] = {"_truncated": True, "_reason": "payload_too_large"}
+        outputs_preview = json.dumps(outputs, default=str)[:10000] if outputs else None
+        payload["outputs"] = {
+            "outputs_truncated": True,
+            "outputs_preview": outputs_preview,
+            "_reason": "payload_too_large",
+        }
         body = json.dumps(payload, default=str)
 
     headers: dict[str, str] = {
@@ -119,7 +124,7 @@ async def dispatch_webhook(
         logger.warning("Webhook dispatched without HMAC signature (no webhook_secret configured)")
 
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(10.0),
+        timeout=httpx.Timeout(30.0, connect=10.0),
         follow_redirects=False,
         max_redirects=0,
     ) as client:

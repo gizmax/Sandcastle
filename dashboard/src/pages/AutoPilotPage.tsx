@@ -75,6 +75,7 @@ export default function AutoPilotPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     try {
@@ -98,41 +99,59 @@ export default function AutoPilotPage() {
 
   const handleDeploy = useCallback(
     async (id: string, variantId: string) => {
-      const res = await api.post(`/autopilot/experiments/${id}/deploy`, { variant_id: variantId });
-      if (res.error) {
-        toast.error(`Failed to deploy variant: ${res.error.message}`);
-        return;
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
+      try {
+        const res = await api.post(`/autopilot/experiments/${id}/deploy`, { variant_id: variantId });
+        if (res.error) {
+          toast.error(`Failed to deploy variant: ${res.error.message}`);
+          return;
+        }
+        toast.success("Variant deployed successfully");
+        void fetchData();
+      } finally {
+        setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });
       }
-      toast.success("Variant deployed successfully");
-      void fetchData();
     },
-    [fetchData]
+    [fetchData, actionLoading]
   );
 
   const handleReset = useCallback(
     async (id: string) => {
-      const res = await api.post(`/autopilot/experiments/${id}/reset`);
-      if (res.error) {
-        toast.error(`Failed to reset experiment: ${res.error.message}`);
-        return;
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
+      try {
+        const res = await api.post(`/autopilot/experiments/${id}/reset`);
+        if (res.error) {
+          toast.error(`Failed to reset experiment: ${res.error.message}`);
+          return;
+        }
+        toast.success("Experiment reset");
+        void fetchData();
+      } finally {
+        setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });
       }
-      toast.success("Experiment reset");
-      void fetchData();
     },
-    [fetchData]
+    [fetchData, actionLoading]
   );
 
   const handleAdvanceRollout = useCallback(
     async (id: string) => {
-      const res = await api.post(`/autopilot/experiments/${id}/advance-rollout`);
-      if (res.error) {
-        toast.error(`Failed to advance rollout: ${res.error.message}`);
-        return;
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
+      try {
+        const res = await api.post(`/autopilot/experiments/${id}/advance-rollout`);
+        if (res.error) {
+          toast.error(`Failed to advance rollout: ${res.error.message}`);
+          return;
+        }
+        toast.success("Rollout advanced to next stage");
+        void fetchData();
+      } finally {
+        setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });
       }
-      toast.success("Rollout advanced to next stage");
-      void fetchData();
     },
-    [fetchData]
+    [fetchData, actionLoading]
   );
 
   if (loading) {
@@ -217,7 +236,16 @@ export default function AutoPilotPage() {
                 {/* Header */}
                 <div
                   className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
                   onClick={() => setExpandedId(isExpanded ? null : exp.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedId(isExpanded ? null : exp.id);
+                    }
+                  }}
                 >
                   <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border", style.bg)}>
                     <FlaskConical className={cn("h-5 w-5", style.text)} />
