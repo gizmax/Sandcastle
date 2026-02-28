@@ -100,15 +100,32 @@ export async function transcribe_audio(fileUrl) {
 }
 
 export async function text_to_speech(text, voice = "alloy") {
-  const data = await api("/audio/speech", "POST", {
-    model: "tts-1",
-    input: text,
-    voice,
-    response_format: "mp3",
-  });
-  // The response is binary audio - return base64 for portability
-  const buffer = Buffer.from(await data.arrayBuffer?.() || []);
-  return { format: "mp3", voice, bytes: buffer.length, base64: buffer.toString("base64").slice(0, 200) + "..." };
+  if (!text || typeof text !== "string") throw new Error("text is required");
+  // Cannot use api() helper because the response is binary audio, not JSON.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60_000); // TTS may take longer
+  try {
+    const resp = await fetch(`${BASE}/audio/speech`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "tts-1",
+        input: text,
+        voice,
+        response_format: "mp3",
+      }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`OpenAI TTS API ${resp.status}: ${errText.slice(0, 500)}`);
+    }
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    return { format: "mp3", voice, bytes: buffer.length, base64: buffer.toString("base64").slice(0, 200) + "..." };
+  } finally { clearTimeout(timer); }
 }
 
 // CLI dispatch

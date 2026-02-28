@@ -41,10 +41,38 @@ def _validate_runner_file(runner_file: str) -> None:
     """Validate runner_file path to prevent path traversal attacks.
 
     Raises ``ValueError`` if the path contains directory traversal
-    sequences or is an absolute path.
+    sequences, is an absolute path, contains null bytes, or uses
+    backslash separators.
     """
+    if not runner_file:
+        raise ValueError("Runner file path cannot be empty")
+    if "\x00" in runner_file:
+        raise ValueError(f"Invalid runner file path: {runner_file!r}")
+    if "\\" in runner_file:
+        raise ValueError(f"Invalid runner file path: {runner_file}")
     if ".." in runner_file or runner_file.startswith("/"):
         raise ValueError(f"Invalid runner file path: {runner_file}")
+
+
+def _validate_tool_filename(fname: str) -> None:
+    """Validate a tool connector filename to prevent path traversal.
+
+    Tool files are written into a temp directory or tar archive.
+    Malicious names like ``../../etc/cron.d/backdoor`` could escape
+    the intended directory.
+
+    Raises ``ValueError`` if the filename is unsafe.
+    """
+    if not fname:
+        raise ValueError("Tool filename cannot be empty")
+    if "\x00" in fname:
+        raise ValueError(f"Invalid tool filename: {fname!r}")
+    if "/" in fname or "\\" in fname:
+        raise ValueError(f"Invalid tool filename (contains path separator): {fname}")
+    if ".." in fname:
+        raise ValueError(f"Invalid tool filename: {fname}")
+    if fname.startswith("."):
+        raise ValueError(f"Invalid tool filename (starts with dot): {fname}")
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +229,8 @@ class E2BBackend:
 
                 # Upload tool connector files into /home/user/tools/
                 if tool_files:
+                    for fname in tool_files:
+                        _validate_tool_filename(fname)
                     await sandbox.commands.run("mkdir -p /home/user/tools", timeout=5)
                     tool_uploads = [
                         sandbox.files.write(f"/home/user/tools/{fname}", content)
@@ -455,6 +485,11 @@ class DockerBackend:
 
             container = await docker.containers.create_or_run(config=config)
 
+            # Validate tool filenames before building the tar archive
+            if tool_files:
+                for fname in tool_files:
+                    _validate_tool_filename(fname)
+
             # Upload runner script + tool connector files via tar archive
             tar_stream = io.BytesIO()
             with tarfile.open(fileobj=tar_stream, mode="w") as tar:
@@ -562,6 +597,8 @@ class LocalBackend:
         # when the runner doesn't exist.
         tools_dir = None
         if tool_files:
+            for fname in tool_files:
+                _validate_tool_filename(fname)
             tools_dir = Path(tempfile.mkdtemp(prefix="sandcastle-tools-"))
             try:
                 for fname, content in tool_files.items():
@@ -597,10 +634,26 @@ class LocalBackend:
 
         try:
             assert proc.stdout is not None
+            # Total deadline to prevent slow-drip attacks where a process
+            # outputs one line just before each per-line timeout, running
+            # indefinitely. The per-line timeout catches hung processes,
+            # while the total deadline caps the overall execution.
+            total_deadline = time.monotonic() + timeout + 30.0  # 30s grace
             while True:
+                if time.monotonic() > total_deadline:
+                    logger.warning(
+                        "Local backend exceeded total deadline "
+                        "(%.0fs + 30s grace), stopping",
+                        timeout,
+                    )
+                    break
+                remaining = max(
+                    1.0, total_deadline - time.monotonic()
+                )
+                per_line_timeout = min(timeout, remaining)
                 try:
                     line_bytes = await asyncio.wait_for(
-                        proc.stdout.readline(), timeout=timeout
+                        proc.stdout.readline(), timeout=per_line_timeout
                     )
                 except asyncio.TimeoutError:
                     logger.warning("Local backend timed out after %.0fs", timeout)
@@ -659,7 +712,7 @@ class CloudflareBackend:
         url = worker_url.rstrip("/") if worker_url else ""
         # Enforce HTTPS for Cloudflare worker URLs since API keys
         # and credentials are sent in the request payload.
-        if url and url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url:
+        if url and url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url and "[::1]" not in url:
             logger.warning(
                 "Cloudflare worker URL uses HTTP - upgrading to HTTPS "
                 "to protect credentials in transit"
@@ -742,6 +795,10 @@ class CloudflareBackend:
         runner_code = runner_path.read_text() if runner_path.exists() else ""
         if not runner_code:
             raise RuntimeError(f"Runner script not found: {runner_file}")
+
+        if tool_files:
+            for fname in tool_files:
+                _validate_tool_filename(fname)
 
         payload: dict[str, Any] = {
             "runner_file": runner_file,

@@ -77,6 +77,9 @@ _LINE_H = 5
 # an OOM / unbounded CPU hang.
 _MAX_MARKDOWN_SIZE = 2 * 1024 * 1024
 
+# Maximum number of table rows to prevent extremely large table rendering
+_MAX_TABLE_ROWS = 500
+
 
 # -- Font discovery ---------------------------------------------------------
 
@@ -142,13 +145,17 @@ class _ChartGen:
 
     def _save(self, fig: object) -> str:
         tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        fig.savefig(
-            tmp.name, dpi=150, bbox_inches="tight",
-            facecolor="white", edgecolor="none",
-        )
-        plt.close(fig)
-        self._tmpfiles.append(tmp.name)
-        return tmp.name
+        tmp_name = tmp.name
+        tmp.close()  # Close before writing to avoid resource leak / Windows lock
+        try:
+            fig.savefig(
+                tmp_name, dpi=150, bbox_inches="tight",
+                facecolor="white", edgecolor="none",
+            )
+        finally:
+            plt.close(fig)
+        self._tmpfiles.append(tmp_name)
+        return tmp_name
 
     def radar(
         self, categories: list[str], series: dict[str, list[float]],
@@ -406,15 +413,24 @@ class _BrandedPDF(FPDF):
 # -- Inline markdown stripping ---------------------------------------------
 
 def _strip_inline_md(text: str) -> str:
-    """Remove inline markdown formatting and HTML tags."""
+    """Remove inline markdown formatting and HTML tags.
+
+    Handles unbalanced markers gracefully by using non-greedy matching.
+    Input is capped at 10 000 chars to prevent ReDoS on pathological patterns.
+    """
+    # Defensive cap on input length to avoid regex cost explosion
+    if len(text) > 10_000:
+        text = text[:10_000]
     # Strip HTML tags: <br>, <br/>, <strong>, etc.
     text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
-    # Inline markdown
+    # Inline markdown - bold/italic/code/links
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"\*(.+?)\*", r"\1", text)
     text = re.sub(r"`(.+?)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Strikethrough
+    text = re.sub(r"~~(.+?)~~", r"\1", text)
     # Collapse multiple spaces
     text = re.sub(r"  +", " ", text)
     return text.strip()
@@ -678,6 +694,13 @@ def _render_table(pdf: _BrandedPDF, rows: list[list[str]]) -> None:
     if not rows:
         return
 
+    # Truncate excessively large tables to prevent memory/CPU abuse
+    if len(rows) > _MAX_TABLE_ROWS:
+        logger.warning(
+            "Table truncated from %d to %d rows", len(rows), _MAX_TABLE_ROWS
+        )
+        rows = rows[:_MAX_TABLE_ROWS]
+
     max_cols = max(len(r) for r in rows)
     usable = pdf.w - 20
     col_widths = _measure_col_widths(pdf, rows, usable)
@@ -741,11 +764,22 @@ def _render_table(pdf: _BrandedPDF, rows: list[list[str]]) -> None:
 # -- Auto-chart detection ---------------------------------------------------
 
 def _extract_numeric(text: str) -> float | None:
-    """Try to extract a numeric value from text."""
+    """Try to extract a numeric value from text.
+
+    Handles currency symbols, thousand separators, and percentage signs.
+    Returns None for empty strings, non-numeric content, and special float
+    values (inf, nan) which would break chart rendering.
+    """
     cleaned = re.sub(r"[,$%\s]", "", _strip_inline_md(text))
+    if not cleaned:
+        return None
     try:
-        return float(cleaned)
-    except ValueError:
+        val = float(cleaned)
+        # Reject inf/nan which would break chart rendering
+        if not __import__("math").isfinite(val):
+            return None
+        return val
+    except (ValueError, OverflowError):
         return None
 
 
@@ -1244,7 +1278,18 @@ def generate_branded_pdf(
 
     Returns:
         Path to the generated PDF file.
+
+    Raises:
+        ValueError: If markdown_text is not a string or output_path is empty.
+        TypeError: If markdown_text is not a string.
     """
+    if not isinstance(markdown_text, str):
+        raise TypeError(
+            f"markdown_text must be a string, got {type(markdown_text).__name__}"
+        )
+    if not output_path:
+        raise ValueError("output_path must not be empty")
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1268,6 +1313,14 @@ def generate_branded_pdf(
     try:
         _render_markdown(pdf, markdown_text, chart_gen)
         pdf.output(str(path))
+    except BaseException:
+        # Remove partially-written output on failure
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+        raise
     finally:
         chart_gen.cleanup()
 

@@ -10,6 +10,7 @@ import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 const MAX_OUTPUT = 5 * 1024 * 1024; // 5MB
@@ -70,7 +71,7 @@ export async function execute_script(script, interpreter = "bash") {
   }
 
   const ext = { bash: ".sh", sh: ".sh", python3: ".py", python: ".py", node: ".mjs" }[interpreter];
-  const tmpFile = join(tmpdir(), `sandcastle_script_${Date.now()}${ext}`);
+  const tmpFile = join(tmpdir(), `sandcastle_script_${randomUUID()}${ext}`);
   try {
     writeFileSync(tmpFile, script, "utf-8");
     const result = await execute(`${bin} ${tmpFile}`);

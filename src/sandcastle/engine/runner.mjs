@@ -35,11 +35,17 @@ if (!request.prompt || typeof request.prompt !== "string") {
 
 // --- Setup ---
 
+// Validate max_turns to prevent unbounded execution
+const rawMaxTurns = parseInt(request.max_turns, 10);
+const maxTurns = (Number.isFinite(rawMaxTurns) && rawMaxTurns > 0)
+    ? Math.min(rawMaxTurns, 200)
+    : 10;
+
 const options = {
     allowedTools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
     permissionMode: "bypassPermissions",
     model: request.model || "sonnet",
-    maxTurns: request.max_turns || 10,
+    maxTurns,
 };
 if (request.output_format) options.outputFormat = request.output_format;
 if (request.max_budget_usd) options.maxBudgetUsd = request.max_budget_usd;
@@ -98,6 +104,6 @@ try {
         }
     }
 } catch (err) {
-    emit({ type: "error", error: `Runner error: ${err.message}` });
+    emit({ type: "error", error: `Runner error: ${err?.message || String(err)}` });
     process.exit(1);
 }

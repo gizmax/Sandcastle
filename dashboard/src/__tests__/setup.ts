@@ -14,6 +14,19 @@ const localStorageMock = {
 
 Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
 
+// Mock sessionStorage (used by api/client.ts for API key storage)
+const sessionStore: Record<string, string> = {};
+const sessionStorageMock = {
+  getItem: (key: string) => sessionStore[key] ?? null,
+  setItem: (key: string, value: string) => { sessionStore[key] = value; },
+  removeItem: (key: string) => { delete sessionStore[key]; },
+  clear: () => { Object.keys(sessionStore).forEach((k) => delete sessionStore[k]); },
+  get length() { return Object.keys(sessionStore).length; },
+  key: (index: number) => Object.keys(sessionStore)[index] ?? null,
+};
+
+Object.defineProperty(globalThis, "sessionStorage", { value: sessionStorageMock });
+
 // Mock matchMedia
 Object.defineProperty(globalThis, "matchMedia", {
   value: (query: string) => ({
@@ -45,7 +58,8 @@ if (!AbortSignal.timeout) {
   };
 }
 
-// Reset localStorage between tests
+// Reset storage between tests
 afterEach(() => {
   localStorageMock.clear();
+  sessionStorageMock.clear();
 });

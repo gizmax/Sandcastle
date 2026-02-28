@@ -2,10 +2,55 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Maximum serialized size (in bytes) for free-form JSON dict fields.
+# Prevents oversized payloads that could exhaust memory or storage.
+_MAX_JSON_DICT_BYTES = 1_048_576  # 1 MB
+
+# Maximum nesting depth for JSON dict fields.
+_MAX_JSON_NESTING_DEPTH = 20
+
+
+def _check_json_dict_size(value: dict | None, field_name: str) -> dict | None:
+    """Reject dicts whose JSON serialization exceeds _MAX_JSON_DICT_BYTES."""
+    if value is None:
+        return value
+    raw = json.dumps(value, separators=(",", ":"))
+    if len(raw.encode("utf-8")) > _MAX_JSON_DICT_BYTES:
+        raise ValueError(
+            f"{field_name} JSON payload exceeds maximum size of "
+            f"{_MAX_JSON_DICT_BYTES} bytes"
+        )
+    return value
+
+
+def _check_json_nesting_depth(obj: Any, current_depth: int = 0) -> None:
+    """Raise ValueError if nesting exceeds _MAX_JSON_NESTING_DEPTH."""
+    if current_depth > _MAX_JSON_NESTING_DEPTH:
+        raise ValueError(
+            f"JSON nesting depth exceeds maximum of {_MAX_JSON_NESTING_DEPTH}"
+        )
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _check_json_nesting_depth(v, current_depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            _check_json_nesting_depth(item, current_depth + 1)
+
+
+def _validate_json_dict(value: dict | None, field_name: str) -> dict | None:
+    """Combined size + nesting depth check for JSON dict fields."""
+    if value is None:
+        return value
+    _check_json_dict_size(value, field_name)
+    _check_json_nesting_depth(value)
+    return value
+
 
 # --- Requests ---
 
@@ -30,6 +75,47 @@ class WorkflowRunRequest(BaseModel):
     max_cost_usd: float | None = Field(None, description="Maximum cost limit for this run", ge=0)
     version: int | str | None = Field(None, description="Workflow version (int, 'latest', or None)")
 
+    @field_validator("callback_url")
+    @classmethod
+    def callback_url_must_be_http(cls, v: str | None) -> str | None:
+        """Reject non-HTTP(S) callback URLs at the schema level."""
+        if v is not None:
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("callback_url must not be empty or whitespace-only")
+            if not stripped.startswith(("http://", "https://")):
+                raise ValueError("callback_url must use http:// or https:// scheme")
+        return v
+
+    @field_validator("version")
+    @classmethod
+    def version_must_be_int_or_latest(cls, v: int | str | None) -> int | str | None:
+        """Ensure version is either a positive integer or the string 'latest'."""
+        if v is None:
+            return v
+        if isinstance(v, int):
+            if v < 1:
+                raise ValueError("version must be a positive integer")
+            return v
+        if isinstance(v, str):
+            if v != "latest":
+                raise ValueError("version string must be 'latest'")
+            return v
+        raise ValueError("version must be an integer, 'latest', or null")
+
+    @field_validator("input")
+    @classmethod
+    def validate_input_dict(cls, v: dict[str, Any]) -> dict[str, Any]:
+        _validate_json_dict(v, "input")
+        return v
+
+    @model_validator(mode="after")
+    def workflow_or_name_required(self) -> WorkflowRunRequest:
+        """At least one of workflow or workflow_name must be provided."""
+        if self.workflow is None and self.workflow_name is None:
+            raise ValueError("Either 'workflow' or 'workflow_name' must be provided")
+        return self
+
 
 class ReplayRequest(BaseModel):
     """Request to replay a run from a specific step."""
@@ -46,6 +132,12 @@ class ForkRequest(BaseModel):
         description="Step overrides (e.g. prompt, model, max_turns)",
     )
 
+    @field_validator("changes")
+    @classmethod
+    def validate_changes_dict(cls, v: dict[str, Any]) -> dict[str, Any]:
+        _validate_json_dict(v, "changes")
+        return v
+
 
 class ScheduleCreateRequest(BaseModel):
     """Request to create a scheduled workflow."""
@@ -56,13 +148,56 @@ class ScheduleCreateRequest(BaseModel):
     notify: dict[str, Any] | None = None
     enabled: bool = True
 
+    @field_validator("input_data")
+    @classmethod
+    def validate_input_data_dict(cls, v: dict[str, Any]) -> dict[str, Any]:
+        _validate_json_dict(v, "input_data")
+        return v
+
+    @field_validator("notify")
+    @classmethod
+    def validate_notify_dict(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        _validate_json_dict(v, "notify")
+        return v
+
+    @field_validator("cron_expression")
+    @classmethod
+    def cron_expression_must_have_five_fields(cls, v: str) -> str:
+        """Basic cron format check: must have exactly 5 space-separated fields."""
+        parts = v.strip().split()
+        if len(parts) != 5:
+            raise ValueError(
+                "cron_expression must have exactly 5 fields "
+                "(minute hour day month weekday)"
+            )
+        return v
+
 
 class ScheduleUpdateRequest(BaseModel):
     """Request to update a schedule."""
 
     enabled: bool | None = None
-    cron_expression: str | None = Field(None, max_length=100)
+    cron_expression: str | None = Field(None, min_length=1, max_length=100)
     input_data: dict[str, Any] | None = None
+
+    @field_validator("input_data")
+    @classmethod
+    def validate_input_data_dict(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        _validate_json_dict(v, "input_data")
+        return v
+
+    @field_validator("cron_expression")
+    @classmethod
+    def cron_expression_must_have_five_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        parts = v.strip().split()
+        if len(parts) != 5:
+            raise ValueError(
+                "cron_expression must have exactly 5 fields "
+                "(minute hour day month weekday)"
+            )
+        return v
 
 
 class WorkflowGenerateRequest(BaseModel):
@@ -74,7 +209,9 @@ class WorkflowGenerateRequest(BaseModel):
         min_length=1,
         max_length=10000,
     )
-    refine_from: str | None = Field(None, description="Existing YAML to refine")
+    refine_from: str | None = Field(
+        None, description="Existing YAML to refine", max_length=500000
+    )
     refine_instruction: str | None = Field(
         None,
         description="What to change in the existing YAML",
@@ -100,6 +237,7 @@ class GenerateChatRequest(BaseModel):
         ...,
         description="Conversation history",
         min_length=1,
+        max_length=500,
     )
     existing_yaml: str | None = Field(
         None, description="Existing workflow YAML for edit mode", max_length=500000
@@ -118,6 +256,16 @@ class WorkflowSaveRequest(BaseModel):
     content: str = Field(..., description="Workflow YAML content", min_length=1, max_length=500000)
     description: str = Field("", description="Version description", max_length=5000)
 
+    @field_validator("name")
+    @classmethod
+    def name_must_be_safe_filename(cls, v: str) -> str:
+        """Reject path traversal characters in workflow names."""
+        if "/" in v or "\\" in v or ".." in v:
+            raise ValueError("Workflow name must not contain '/', '\\', or '..'")
+        if v.strip() != v:
+            raise ValueError("Workflow name must not have leading/trailing whitespace")
+        return v
+
 
 class ApiKeyCreateRequest(BaseModel):
     """Request to create a new API key."""
@@ -130,12 +278,22 @@ class ApiKeyCreateRequest(BaseModel):
     name: str = Field(..., description="Description for the key", min_length=1, max_length=200)
     max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run", ge=0)
 
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must not be whitespace-only")
+        return v
+
 
 class ApiKeyRotateRequest(BaseModel):
     """Request to rotate an API key."""
 
     grace_period_hours: int | None = Field(
-        None, description="Hours to keep old key active (default: server setting)", ge=0
+        None,
+        description="Hours to keep old key active (default: server setting)",
+        ge=0,
+        le=8760,  # Max 1 year
     )
 
 
@@ -146,15 +304,28 @@ class ApiKeyRotateResponse(BaseModel):
     new_key_id: str
     old_key_id: str
     old_key_expires_at: datetime
-    grace_period_hours: int
+    grace_period_hours: int = Field(..., ge=0)
 
 
 class ApiKeyAllowlistRequest(BaseModel):
     """Update IP allowlist for an API key."""
 
     cidrs: list[str] = Field(
-        ..., description="List of CIDR ranges (e.g. ['10.0.0.0/8', '::1/128']). Empty list clears."
+        ...,
+        description="List of CIDR ranges (e.g. ['10.0.0.0/8', '::1/128']). Empty list clears.",
+        max_length=1000,
     )
+
+    @field_validator("cidrs")
+    @classmethod
+    def validate_cidr_entries(cls, v: list[str]) -> list[str]:
+        """Validate individual CIDR string lengths."""
+        for cidr in v:
+            if len(cidr) > 50:
+                raise ValueError(f"CIDR entry too long (max 50 chars): {cidr[:60]}...")
+            if not cidr.strip():
+                raise ValueError("CIDR entries must not be empty or whitespace-only")
+        return v
 
 
 class DeadLetterResolveRequest(BaseModel):
@@ -166,13 +337,17 @@ class DeadLetterResolveRequest(BaseModel):
 class WorkflowPromoteRequest(BaseModel):
     """Request to promote a workflow version (draft->staging->production)."""
 
-    version: int | None = Field(None, description="Version to promote (default: latest)")
+    version: int | None = Field(
+        None, description="Version to promote (default: latest)", ge=1
+    )
 
 
 class WorkflowRollbackRequest(BaseModel):
     """Request to rollback a workflow to a previous version."""
 
-    target_version: int | None = Field(None, description="Target version (default: previous)")
+    target_version: int | None = Field(
+        None, description="Target version (default: previous)", ge=1
+    )
 
 
 class ApprovalRespondRequest(BaseModel):
@@ -182,6 +357,14 @@ class ApprovalRespondRequest(BaseModel):
     edited_data: dict[str, Any] | None = Field(
         None, description="Edited request data (only if allow_edit is true)"
     )
+
+    @field_validator("edited_data")
+    @classmethod
+    def validate_edited_data_dict(
+        cls, v: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        _validate_json_dict(v, "edited_data")
+        return v
 
 
 # --- Responses ---
@@ -206,9 +389,9 @@ class ApiResponse(BaseModel):
 class PaginationMeta(BaseModel):
     """Pagination metadata for list endpoints."""
 
-    total: int
-    limit: int
-    offset: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
 
 
 class RunStatusResponse(BaseModel):
@@ -219,8 +402,8 @@ class RunStatusResponse(BaseModel):
     status: str
     input_data: dict[str, Any] | None = None
     outputs: dict[str, Any] | None = None
-    total_cost_usd: float = 0.0
-    max_cost_usd: float | None = None
+    total_cost_usd: float = Field(0.0, ge=0)
+    max_cost_usd: float | None = Field(None, ge=0)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
@@ -228,7 +411,7 @@ class RunStatusResponse(BaseModel):
     parent_run_id: str | None = None
     replay_from_step: str | None = None
     fork_changes: dict[str, Any] | None = None
-    depth: int = 0
+    depth: int = Field(0, ge=0)
     sub_workflow_of_step: str | None = None
     sub_runs: list[dict[str, Any]] | None = None
 
@@ -240,9 +423,9 @@ class StepStatusResponse(BaseModel):
     parallel_index: int | None = None
     status: str
     output: Any | None = None
-    cost_usd: float = 0.0
-    duration_seconds: float = 0.0
-    attempt: int = 1
+    cost_usd: float = Field(0.0, ge=0)
+    duration_seconds: float = Field(0.0, ge=0)
+    attempt: int = Field(1, ge=1)
     error: str | None = None
     started_at: str | None = None
     pdf_artifact: bool = False
@@ -263,7 +446,7 @@ class LicenseInfoResponse(BaseModel):
     status: str  # "valid" | "expired" | "invalid" | "missing"
     tier: str  # "community" | "pro" | "enterprise"
     licensee: str = ""
-    max_seats: int = 0
+    max_seats: int = Field(0, ge=0)
     expires: str = ""
 
 
@@ -296,7 +479,7 @@ class RunListItem(BaseModel):
     run_id: str
     workflow_name: str
     status: str
-    total_cost_usd: float = 0.0
+    total_cost_usd: float = Field(0.0, ge=0)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     parent_run_id: str | None = None
@@ -314,11 +497,11 @@ class StepDiff(BaseModel):
     output_a: Any | None = None
     output_b: Any | None = None
     output_changed: bool = False
-    cost_a: float = 0.0
-    cost_b: float = 0.0
+    cost_a: float = Field(0.0, ge=0)
+    cost_b: float = Field(0.0, ge=0)
     cost_delta: float = 0.0
-    duration_a: float = 0.0
-    duration_b: float = 0.0
+    duration_a: float = Field(0.0, ge=0)
+    duration_b: float = Field(0.0, ge=0)
     duration_delta: float = 0.0
     status_a: str | None = None
     status_b: str | None = None
@@ -331,8 +514,8 @@ class RunCompareResponse(BaseModel):
 
     run_a: RunListItem
     run_b: RunListItem
-    total_cost_a: float = 0.0
-    total_cost_b: float = 0.0
+    total_cost_a: float = Field(0.0, ge=0)
+    total_cost_b: float = Field(0.0, ge=0)
     total_cost_delta: float = 0.0
     total_duration_a: float | None = None
     total_duration_b: float | None = None
@@ -356,10 +539,10 @@ class ScheduleResponse(BaseModel):
 class StatsResponse(BaseModel):
     """Aggregated statistics for the overview dashboard."""
 
-    total_runs_today: int = 0
-    success_rate: float = 0.0
-    total_cost_today: float = 0.0
-    avg_duration_seconds: float = 0.0
+    total_runs_today: int = Field(0, ge=0)
+    success_rate: float = Field(0.0, ge=0, le=100)
+    total_cost_today: float = Field(0.0, ge=0)
+    avg_duration_seconds: float = Field(0.0, ge=0)
     runs_by_day: list[dict[str, Any]] = Field(default_factory=list)
     cost_by_workflow: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -378,7 +561,7 @@ class WorkflowInfoResponse(BaseModel):
 
     name: str
     description: str
-    steps_count: int
+    steps_count: int = Field(..., ge=0)
     file_name: str
     steps: list[WorkflowStepInfo] = []
     input_schema: dict | None = None
@@ -393,10 +576,10 @@ class WorkflowVersionResponse(BaseModel):
 
     id: str
     workflow_name: str
-    version: int
+    version: int = Field(..., ge=1)
     status: str
     description: str = ""
-    steps_count: int = 0
+    steps_count: int = Field(0, ge=0)
     steps: list[WorkflowStepInfo] = []
     checksum: str = ""
     created_by: str | None = None
@@ -418,8 +601,8 @@ class WorkflowVersionListResponse(BaseModel):
 class WorkflowVersionDiffResponse(BaseModel):
     """Diff between two workflow versions."""
 
-    version_a: int
-    version_b: int
+    version_a: int = Field(..., ge=1)
+    version_b: int = Field(..., ge=1)
     yaml_a: str
     yaml_b: str
     steps_added: list[str] = []
@@ -461,7 +644,7 @@ class DeadLetterItemResponse(BaseModel):
     parallel_index: int | None = None
     error: str | None = None
     input_data: dict[str, Any] | None = None
-    attempts: int = 1
+    attempts: int = Field(1, ge=1)
     created_at: datetime | None = None
     resolved_at: datetime | None = None
     resolved_by: str | None = None
@@ -492,19 +675,19 @@ class SampleResponse(BaseModel):
     variant_id: str
     variant_config: dict[str, Any] | None = None
     quality_score: float | None = None
-    cost_usd: float = 0.0
-    duration_seconds: float = 0.0
+    cost_usd: float = Field(0.0, ge=0)
+    duration_seconds: float = Field(0.0, ge=0)
     created_at: datetime | None = None
 
 
 class AutoPilotStatsResponse(BaseModel):
     """Overview statistics for AutoPilot experiments."""
 
-    total_experiments: int = 0
-    active_experiments: int = 0
-    deploying_experiments: int = 0
-    completed_experiments: int = 0
-    total_samples: int = 0
+    total_experiments: int = Field(0, ge=0)
+    active_experiments: int = Field(0, ge=0)
+    deploying_experiments: int = Field(0, ge=0)
+    completed_experiments: int = Field(0, ge=0)
+    total_samples: int = Field(0, ge=0)
     avg_quality_improvement: float = 0.0
     total_cost_savings_usd: float = 0.0
 
@@ -545,7 +728,7 @@ class PolicyViolationResponse(BaseModel):
 class PolicyViolationStatsResponse(BaseModel):
     """Aggregated policy violation statistics."""
 
-    total_violations_30d: int = 0
+    total_violations_30d: int = Field(0, ge=0)
     violations_by_severity: dict[str, int] = Field(default_factory=dict)
     violations_by_policy: dict[str, int] = Field(default_factory=dict)
     violations_by_day: list[dict[str, Any]] = Field(default_factory=list)
@@ -560,8 +743,8 @@ class RoutingDecisionResponse(BaseModel):
     selected_model: str
     selected_variant_id: str
     reason: str | None = None
-    budget_pressure: float = 0.0
-    confidence: float = 0.1
+    budget_pressure: float = Field(0.0, ge=0, le=1)
+    confidence: float = Field(0.1, ge=0, le=1)
     alternatives: list[dict[str, Any]] | None = None
     slo: dict[str, Any] | None = None
     created_at: datetime | None = None
@@ -570,11 +753,11 @@ class RoutingDecisionResponse(BaseModel):
 class OptimizerStatsResponse(BaseModel):
     """Overview statistics for the optimizer."""
 
-    total_decisions_30d: int = 0
+    total_decisions_30d: int = Field(0, ge=0)
     model_distribution: dict[str, float] = Field(default_factory=dict)
-    avg_confidence: float = 0.0
+    avg_confidence: float = Field(0.0, ge=0, le=1)
     estimated_savings_30d_usd: float = 0.0
-    active_alerts: int = 0
+    active_alerts: int = Field(0, ge=0)
 
 
 class SettingsResponse(BaseModel):
@@ -590,12 +773,12 @@ class SettingsResponse(BaseModel):
     auth_required: bool = False
     dashboard_origin: str = ""
     # Budget
-    default_max_cost_usd: float = 0.0
+    default_max_cost_usd: float = Field(0.0, ge=0)
     # Webhooks
     webhook_secret: str = ""
     # System
     log_level: str = "info"
-    max_workflow_depth: int = 5
+    max_workflow_depth: int = Field(5, ge=1, le=20)
     # Storage (read-only info)
     storage_backend: str = "local"
     storage_bucket: str = ""
@@ -668,7 +851,7 @@ class ToolListResponse(BaseModel):
     """List of all available tools."""
 
     tools: list[ToolResponse] = []
-    total: int = 0
+    total: int = Field(0, ge=0)
 
 
 class ToolCredentialUpdateRequest(BaseModel):
@@ -678,6 +861,20 @@ class ToolCredentialUpdateRequest(BaseModel):
         ...,
         description="Mapping of env var name to value, e.g. {'TOOL_SLACK_BOT_TOKEN': 'xoxb-...'}",
     )
+
+    @field_validator("credentials")
+    @classmethod
+    def validate_credentials_entries(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 50:
+            raise ValueError("Maximum 50 credential entries allowed")
+        for key, val in v.items():
+            if len(key) > 200:
+                raise ValueError(f"Credential key too long (max 200 chars): {key[:60]}...")
+            if len(val) > 10000:
+                raise ValueError(f"Credential value too long (max 10000 chars) for key: {key}")
+            if not key.strip():
+                raise ValueError("Credential key must not be empty or whitespace-only")
+        return v
 
 
 class ToolConnectionCreateRequest(BaseModel):
@@ -689,11 +886,39 @@ class ToolConnectionCreateRequest(BaseModel):
     )
     credentials: dict[str, str] = Field(..., description="Mapping of env var name to value")
 
+    @field_validator("credentials")
+    @classmethod
+    def validate_credentials_entries(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 50:
+            raise ValueError("Maximum 50 credential entries allowed")
+        if len(v) == 0:
+            raise ValueError("At least one credential entry is required")
+        for key, val in v.items():
+            if len(key) > 200:
+                raise ValueError(f"Credential key too long (max 200 chars): {key[:60]}...")
+            if len(val) > 10000:
+                raise ValueError(f"Credential value too long (max 10000 chars) for key: {key}")
+        return v
+
 
 class ToolConnectionUpdateRequest(BaseModel):
     """Update credentials for a named connection."""
 
     credentials: dict[str, str] = Field(..., description="Mapping of env var name to value")
+
+    @field_validator("credentials")
+    @classmethod
+    def validate_credentials_entries(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 50:
+            raise ValueError("Maximum 50 credential entries allowed")
+        if len(v) == 0:
+            raise ValueError("At least one credential entry is required")
+        for key, val in v.items():
+            if len(key) > 200:
+                raise ValueError(f"Credential key too long (max 200 chars): {key[:60]}...")
+            if len(val) > 10000:
+                raise ValueError(f"Credential value too long (max 10000 chars) for key: {key}")
+        return v
 
 
 # --- Evaluations ---
@@ -702,7 +927,9 @@ class ToolConnectionUpdateRequest(BaseModel):
 class EvalSuiteRunRequest(BaseModel):
     """Request to run an eval suite."""
 
-    suite_yaml: str = Field(..., description="Eval suite YAML content", max_length=500000)
+    suite_yaml: str = Field(
+        ..., description="Eval suite YAML content", min_length=1, max_length=500000
+    )
     concurrency: int = Field(1, description="Max concurrent test cases", ge=1, le=20)
 
 
@@ -723,8 +950,8 @@ class EvalCaseResponse(BaseModel):
     case_name: str
     passed: bool
     run_id: str | None = None
-    cost_usd: float = 0.0
-    duration_seconds: float = 0.0
+    cost_usd: float = Field(0.0, ge=0)
+    duration_seconds: float = Field(0.0, ge=0)
     assertions: list[EvalAssertionResponse] = []
     output_summary: str | None = None
     error: str | None = None
@@ -737,12 +964,12 @@ class EvalRunResponse(BaseModel):
     suite_name: str
     workflow_name: str
     status: str
-    total_cases: int = 0
-    passed_cases: int = 0
-    failed_cases: int = 0
-    pass_rate: float = 0.0
-    total_cost_usd: float = 0.0
-    total_duration_seconds: float = 0.0
+    total_cases: int = Field(0, ge=0)
+    passed_cases: int = Field(0, ge=0)
+    failed_cases: int = Field(0, ge=0)
+    pass_rate: float = Field(0.0, ge=0, le=100)
+    total_cost_usd: float = Field(0.0, ge=0)
+    total_duration_seconds: float = Field(0.0, ge=0)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime | None = None
@@ -752,9 +979,9 @@ class EvalRunResponse(BaseModel):
 class EvalStatsResponse(BaseModel):
     """Aggregated eval statistics."""
 
-    total_runs: int = 0
-    avg_pass_rate: float = 0.0
-    total_cost_usd: float = 0.0
+    total_runs: int = Field(0, ge=0)
+    avg_pass_rate: float = Field(0.0, ge=0, le=100)
+    total_cost_usd: float = Field(0.0, ge=0)
     last_run_at: datetime | None = None
     pass_rate_trend: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -779,6 +1006,12 @@ class MemoryAddRequest(BaseModel):
     content: str = Field(..., description="Text to memorize", min_length=1, max_length=100000)
     metadata: dict | None = None
 
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata_dict(cls, v: dict | None) -> dict | None:
+        _validate_json_dict(v, "metadata")
+        return v
+
 
 class MemorySearchRequest(BaseModel):
     """Request to search memories by semantic query."""
@@ -802,7 +1035,7 @@ class MemoryListResponse(BaseModel):
     """List of memories."""
 
     memories: list[MemoryEntry]
-    total: int
+    total: int = Field(..., ge=0)
 
 
 # Fix forward reference for ApiResponse.meta

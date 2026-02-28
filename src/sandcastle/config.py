@@ -341,13 +341,20 @@ class Settings(BaseSettings):
     @field_validator("max_workflow_depth", mode="after")
     @classmethod
     def _validate_max_workflow_depth(cls, v: int) -> int:
-        """Ensure max_workflow_depth is at least 1."""
+        """Ensure max_workflow_depth is between 1 and 20."""
         if v < 1:
             _logger.warning(
                 "MAX_WORKFLOW_DEPTH=%d is invalid (must be >= 1), using 5",
                 v,
             )
             return 5
+        if v > 20:
+            _logger.warning(
+                "MAX_WORKFLOW_DEPTH=%d exceeds maximum (20), clamping to 20 "
+                "to prevent stack overflow in recursive workflows",
+                v,
+            )
+            return 20
         return v
 
     @field_validator("data_dir", "workflows_dir", mode="after")
@@ -357,6 +364,34 @@ class Settings(BaseSettings):
         return str(Path(v).expanduser())
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    # Fields that contain secrets and must be redacted in safe_dump / logs
+    _SENSITIVE_FIELDS: frozenset[str] = frozenset({
+        "anthropic_api_key", "e2b_api_key", "openai_api_key",
+        "openrouter_api_key", "minimax_api_key", "sentry_dsn",
+        "admin_api_key", "webhook_secret", "credential_encryption_key",
+        "aws_access_key_id", "aws_secret_access_key",
+        "database_url", "redis_url", "license_key",
+        "tool_slack_bot_token", "tool_jira_api_token",
+        "tool_github_token", "tool_notion_api_key",
+        "tool_hubspot_api_key", "tool_salesforce_client_id",
+        "tool_salesforce_client_secret", "tool_salesforce_refresh_token",
+        "tool_zendesk_api_token", "tool_smtp_password",
+        "tool_google_service_account", "tool_teams_webhook_url",
+        "tool_postgresql_url",
+    })
+
+    def safe_dump(self) -> dict:
+        """Return settings dict with sensitive values redacted.
+
+        Use this instead of model_dump() when exposing settings in logs,
+        debug endpoints, or error messages to prevent credential leakage.
+        """
+        data = self.model_dump()
+        for key in self._SENSITIVE_FIELDS:
+            if key in data and data[key]:
+                data[key] = "***"
+        return data
 
     @computed_field
     @property

@@ -70,7 +70,8 @@ def _table(headers: list[str], rows: list[list[str]], *, max_col: int = 40) -> s
     if not rows:
         return "(no data)"
 
-    rows = [r + [""] * (len(headers) - len(r)) for r in rows]
+    # Pad rows that are shorter than headers; truncate rows that are longer
+    rows = [r[:len(headers)] + [""] * max(0, len(headers) - len(r)) for r in rows]
 
     def _trunc(val: str) -> str:
         if len(val) > max_col:
@@ -163,10 +164,18 @@ def _validate_run_id(run_id: str) -> None:
         print("Error: run ID cannot be empty.", file=sys.stderr)
         sys.exit(1)
 
-    # Block path traversal and whitespace
-    if "/" in run_id or "\\" in run_id or " " in run_id:
+    # Block path traversal, whitespace, and control characters (incl. null bytes)
+    if "/" in run_id or "\\" in run_id or " " in run_id or "\x00" in run_id:
         print(
             f"Error: '{run_id}' is not a valid run ID (contains invalid characters).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Block any non-printable / control characters
+    if any(ord(c) < 32 for c in run_id):
+        print(
+            "Error: run ID contains control characters.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -292,6 +301,9 @@ def _parse_input_pairs(pairs: list[str] | None) -> dict[str, Any]:
             print(f"Error: invalid input format '{pair}' - expected KEY=VALUE", file=sys.stderr)
             sys.exit(1)
         key, _, value = pair.partition("=")
+        if not key or not key.strip():
+            print(f"Error: empty key in input pair '={value}'", file=sys.stderr)
+            sys.exit(1)
         # Try to parse JSON values (numbers, booleans, arrays, objects)
         try:
             result[key] = json.loads(value)
@@ -300,9 +312,21 @@ def _parse_input_pairs(pairs: list[str] | None) -> dict[str, Any]:
     return result
 
 
+_MAX_INPUT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
 def _load_input_file(path: str) -> dict[str, Any]:
     """Load workflow input data from a JSON file."""
     try:
+        import os as _os
+
+        file_size = _os.path.getsize(path)
+        if file_size > _MAX_INPUT_FILE_SIZE:
+            print(
+                f"Error: input file too large ({file_size} bytes, max {_MAX_INPUT_FILE_SIZE}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         with open(path) as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
@@ -739,6 +763,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
     """Run a workflow via the SDK client."""
     from pathlib import Path
 
+    # Validate max_cost if provided
+    if args.max_cost is not None and args.max_cost < 0:
+        print("Error: --max-cost cannot be negative.", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate workflow name - block path traversal for non-file names
+    workflow_name = args.workflow
+    if not workflow_name or not workflow_name.strip():
+        print("Error: workflow name cannot be empty.", file=sys.stderr)
+        sys.exit(1)
+
     client = _get_client(args)
 
     # Build input data
@@ -886,6 +921,9 @@ def _ls_runs(client: Any, args: argparse.Namespace) -> None:
     """List runs with optional status filter."""
     status_filter = getattr(args, "status", None)
     limit = getattr(args, "limit", 20)
+    if limit < 1:
+        print("Error: --limit must be at least 1.", file=sys.stderr)
+        sys.exit(1)
     runs = client.list_runs(status=status_filter, limit=limit)
 
     # Normalize to list of dicts
@@ -1412,7 +1450,19 @@ def _cmd_generate(args: argparse.Namespace) -> None:
     if output_file:
         from pathlib import Path
 
-        Path(output_file).write_text(result.yaml_content)
+        out_path = Path(output_file)
+        # Validate output file has a sane extension
+        if out_path.suffix not in (".yaml", ".yml", ""):
+            print(
+                f"Warning: output file '{output_file}' does not have a .yaml/.yml extension.",
+                file=sys.stderr,
+            )
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(result.yaml_content)
+        except OSError as exc:
+            print(f"Error: failed to write output file: {exc}", file=sys.stderr)
+            sys.exit(1)
         print(f"\n  Saved to {output_file}")
     else:
         print(f"\n{_color('--- Generated YAML ---', _C.DIM)}")
@@ -1427,6 +1477,9 @@ def _cmd_eval(args: argparse.Namespace) -> None:
 
     suite_path = args.suite
     concurrency = getattr(args, "concurrency", 1)
+    if concurrency < 1:
+        print("Error: --concurrency must be at least 1.", file=sys.stderr)
+        sys.exit(1)
     tags = getattr(args, "tag", None)
     verbose = getattr(args, "verbose", False)
 
@@ -1795,7 +1848,11 @@ def _cmd_runs(args: argparse.Namespace) -> None:
     if api_key:
         headers_dict["Authorization"] = f"Bearer {api_key}"
 
-    params: dict[str, Any] = {"limit": getattr(args, "limit", 20)}
+    limit = getattr(args, "limit", 20)
+    if limit < 1:
+        print("Error: --limit must be at least 1.", file=sys.stderr)
+        sys.exit(1)
+    params: dict[str, Any] = {"limit": limit}
     status_filter = getattr(args, "status", None)
     if status_filter:
         params["status"] = status_filter
@@ -1840,7 +1897,12 @@ def _cmd_runs(args: argparse.Namespace) -> None:
 
 
 def _find_pending_approval(base: str, headers: dict[str, str], run_id: str) -> str | None:
-    """Find the pending approval_id for a given run_id by querying the API."""
+    """Find the pending approval_id for a given run_id by querying the API.
+
+    Returns the approval_id if found, None if no pending approval exists.
+    Exits with error on network/API failures so callers can distinguish
+    "no pending approvals" from "could not reach the API".
+    """
     import httpx
 
     try:
@@ -1851,8 +1913,12 @@ def _find_pending_approval(base: str, headers: dict[str, str], run_id: str) -> s
             timeout=10,
         )
         resp.raise_for_status()
-    except Exception:
-        return None
+    except Exception as exc:
+        print(
+            f"Error: failed to query approvals API: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     body = resp.json()
     for item in body.get("data", []):
@@ -1985,16 +2051,33 @@ def _run_migrations() -> None:
 # ---------------------------------------------------------------------------
 
 _HUB_REGISTRY_URL = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
+_HUB_REGISTRY_MAX_SIZE = 5 * 1024 * 1024  # 5MB - prevent DoS via oversized registry
+_HUB_MAX_DOWNLOAD_SIZE = 512 * 1024  # 512KB per template download
 
 
 def _fetch_hub_registry() -> dict:
-    """Fetch the community hub registry."""
+    """Fetch the community hub registry with size limit protection."""
     import json
     import urllib.request
 
     try:
         with urllib.request.urlopen(_HUB_REGISTRY_URL, timeout=10) as resp:
-            return json.loads(resp.read())
+            raw = resp.read(_HUB_REGISTRY_MAX_SIZE + 1)
+            if len(raw) > _HUB_REGISTRY_MAX_SIZE:
+                print(
+                    f"{_color('Error', _C.RED)}: Hub registry exceeds size limit"
+                    f" ({_HUB_REGISTRY_MAX_SIZE} bytes)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                print(
+                    f"{_color('Error', _C.RED)}: Hub registry has invalid structure",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return data
     except Exception as exc:
         print(
             f"{_color('Error', _C.RED)}: Failed to fetch hub registry: {exc}",
@@ -2146,10 +2229,29 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    # Fetch the YAML content
+    # Fetch the YAML content with size limit and redirect validation
     try:
-        with urllib.request.urlopen(download_url, timeout=10) as resp:
-            yaml_content = resp.read().decode("utf-8")
+        req = urllib.request.Request(download_url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            # Validate final URL after any redirects
+            final_url = resp.geturl()
+            if final_url != download_url and not _validate_hub_download_url(final_url):
+                print(
+                    f"{_color('Error', _C.RED)}: Download redirected to untrusted URL: {final_url}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            raw = resp.read(_HUB_MAX_DOWNLOAD_SIZE + 1)
+            if len(raw) > _HUB_MAX_DOWNLOAD_SIZE:
+                print(
+                    f"{_color('Error', _C.RED)}: Download exceeds size limit"
+                    f" ({_HUB_MAX_DOWNLOAD_SIZE} bytes)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            yaml_content = raw.decode("utf-8")
+    except SystemExit:
+        raise
     except Exception as exc:
         print(
             f"{_color('Error', _C.RED)}: Failed to download workflow: {exc}",
@@ -2233,6 +2335,27 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
+    # Overwrite protection - warn if file already exists
+    if target_path.exists() and not force:
+        if sys.stdin.isatty():
+            try:
+                answer = input(
+                    f"  File '{target_path}' already exists. Overwrite? [y/N] "
+                ).strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print("\nAborted.")
+                return
+            if answer not in ("y", "yes"):
+                print("Installation cancelled.")
+                return
+        else:
+            print(
+                f"{_color('Error', _C.RED)}: File '{target_path}' already exists. "
+                "Use --force to overwrite.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     try:
         target_path.write_text(yaml_content)
     except OSError as exc:
@@ -2259,6 +2382,9 @@ def _cmd_hub_list(args: argparse.Namespace) -> None:
         templates = [t for t in templates if t.get("category", "").lower() == category.lower()]
 
     limit = getattr(args, "limit", 20)
+    if limit < 1:
+        print("Error: --limit must be at least 1.", file=sys.stderr)
+        sys.exit(1)
     templates = templates[:limit]
 
     if getattr(args, "json", False):
@@ -2374,7 +2500,16 @@ def _cmd_hub_install_collection(args: argparse.Namespace) -> None:
 
         try:
             with urllib.request.urlopen(dl_url, timeout=10) as resp:
-                yaml_content = resp.read().decode("utf-8")
+                # Validate final URL after redirects
+                final_url = resp.geturl()
+                if final_url != dl_url and not _validate_hub_download_url(final_url):
+                    print(f"  {_color('Skip', _C.YELLOW)}: {slug} (redirected to untrusted URL)")
+                    continue
+                raw = resp.read(_HUB_MAX_DOWNLOAD_SIZE + 1)
+                if len(raw) > _HUB_MAX_DOWNLOAD_SIZE:
+                    print(f"  {_color('Skip', _C.YELLOW)}: {slug} (exceeds size limit)")
+                    continue
+                yaml_content = raw.decode("utf-8")
             valid, err_msg = _validate_hub_yaml(yaml_content)
             if not valid:
                 print(f"  {_color('Skip', _C.YELLOW)}: {slug} (invalid YAML: {err_msg})")

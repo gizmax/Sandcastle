@@ -127,7 +127,7 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
       {totalPages > 1 && (
         <div className="flex items-center justify-between border-t border-border px-3 sm:px-5 py-3">
           <p className="text-xs text-muted">
-            Showing {offset + 1}-{Math.min(offset + limit, total)} of {total}
+            Showing {total > 0 ? offset + 1 : 0}-{Math.min(offset + limit, total)} of {total}
           </p>
           <div className="flex items-center gap-1">
             <button

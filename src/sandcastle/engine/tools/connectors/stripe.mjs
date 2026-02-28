@@ -65,7 +65,9 @@ export async function list_customers(email = "", limit = 20) {
 }
 
 export async function get_customer(customer_id) {
-  const data = await api(`/customers/${customer_id}`);
+  if (!customer_id || typeof customer_id !== "string") throw new Error("customer_id is required");
+  const safeId = encodeURIComponent(customer_id);
+  const data = await api(`/customers/${safeId}`);
   return {
     id: data.id,
     email: data.email,
@@ -95,6 +97,7 @@ export async function list_invoices(customer_id = "", status = "", limit = 20) {
 }
 
 export async function create_invoice(customer_id, items = [], description = "") {
+  if (!customer_id || typeof customer_id !== "string") throw new Error("customer_id is required");
   const invoice = await api("/invoices", "POST", {
     customer: customer_id,
     description,

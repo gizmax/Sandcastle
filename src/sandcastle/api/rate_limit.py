@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -85,8 +86,12 @@ class RateLimitBackend(Protocol):
 class InMemoryBackend:
     """Single-process in-memory sliding window backend."""
 
+    # Run cleanup every N check_and_increment calls to avoid unbounded growth
+    _CLEANUP_INTERVAL = 500
+
     def __init__(self) -> None:
         self._windows: dict[str, _Window] = defaultdict(_Window)
+        self._call_count = 0
 
     async def check_and_increment(
         self, key: str, max_requests: int, window_seconds: float
@@ -95,8 +100,28 @@ class InMemoryBackend:
         current = window.count_in_window(window_seconds)
         if current < max_requests:
             window.add()
+
+        # Periodically purge keys with no timestamps to prevent memory leak
+        self._call_count += 1
+        if self._call_count >= self._CLEANUP_INTERVAL:
+            self._call_count = 0
+            self._cleanup(window_seconds)
+
         # Return the attempted request number (1-indexed)
         return current + 1
+
+    def _cleanup(self, window_seconds: float) -> int:
+        """Remove keys whose windows are completely empty after pruning.
+
+        Returns the number of keys removed.
+        """
+        stale = [
+            k for k, w in self._windows.items()
+            if w.count_in_window(window_seconds) == 0
+        ]
+        for k in stale:
+            del self._windows[k]
+        return len(stale)
 
     @property
     def active_keys(self) -> int:
@@ -173,7 +198,7 @@ class RedisBackend:
         window_start = now - window_seconds
         redis_key = f"rl:{key}"
         member = f"{now}:{uuid.uuid4().hex[:8]}"
-        ttl = int(window_seconds) + 1
+        ttl = math.ceil(window_seconds) + 1
 
         try:
             result = await redis.eval(

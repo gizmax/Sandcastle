@@ -39,8 +39,19 @@ if (!request.prompt || typeof request.prompt !== "string") {
 const apiKey = process.env.MODEL_API_KEY || "";
 const baseURL = process.env.MODEL_BASE_URL || "https://api.openai.com/v1";
 const modelId = process.env.MODEL_ID || request.model || "gpt-4o";
-const maxTurns = request.max_turns || 10;
-const timeoutMs = (request.timeout || 300) * 1000;
+
+// Validate max_turns to prevent unbounded execution
+const rawMaxTurns = parseInt(request.max_turns, 10);
+const maxTurns = (Number.isFinite(rawMaxTurns) && rawMaxTurns > 0)
+  ? Math.min(rawMaxTurns, 200)
+  : 10;
+
+// Validate timeout - cap at 1 hour (3600s) to prevent indefinite blocking
+const rawTimeout = parseInt(request.timeout, 10);
+const timeoutSec = (Number.isFinite(rawTimeout) && rawTimeout > 0)
+  ? Math.min(rawTimeout, 3600)
+  : 300;
+const timeoutMs = timeoutSec * 1000;
 
 const client = new OpenAI({ apiKey, baseURL });
 
@@ -117,30 +128,50 @@ function executeTool(name, args) {
   try {
     switch (name) {
       case "bash": {
-        const result = execSync(args.command, {
-          encoding: "utf-8",
-          timeout: 30_000,
-          maxBuffer: 1024 * 1024,
-          cwd: SANDBOX_ROOT,
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        return result.slice(0, MAX_TOOL_RESULT_SIZE);
+        if (!args.command || typeof args.command !== "string") {
+          return "Error: 'command' argument is required and must be a string";
+        }
+        try {
+          const result = execSync(args.command, {
+            encoding: "utf-8",
+            timeout: 30_000,
+            maxBuffer: 1024 * 1024,
+            cwd: SANDBOX_ROOT,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          return (result || "").slice(0, MAX_TOOL_RESULT_SIZE);
+        } catch (execErr) {
+          // execSync throws on non-zero exit - include both stdout and stderr
+          const stdout = execErr.stdout || "";
+          const stderr = execErr.stderr || "";
+          const combined = stdout + (stderr ? `\nSTDERR: ${stderr}` : "");
+          return (combined || `Error: ${execErr.message}`).slice(0, MAX_TOOL_RESULT_SIZE);
+        }
       }
       case "read_file": {
+        if (!args.path || typeof args.path !== "string") {
+          return "Error: 'path' argument is required and must be a string";
+        }
         const absPath = validatePath(args.path);
         return readFileSync(absPath, "utf-8").slice(0, 100_000);
       }
       case "write_file": {
+        if (!args.path || typeof args.path !== "string") {
+          return "Error: 'path' argument is required and must be a string";
+        }
+        if (typeof args.content !== "string") {
+          return "Error: 'content' argument is required and must be a string";
+        }
         const absPath = validatePath(args.path);
         mkdirSync(dirname(absPath), { recursive: true });
         writeFileSync(absPath, args.content, "utf-8");
         return `Written ${args.content.length} bytes to ${absPath}`;
       }
       default:
-        return `Unknown tool: ${name}`;
+        return `Error: Unknown tool '${name}'. Available tools: bash, read_file, write_file`;
     }
   } catch (err) {
-    return `Error: ${err.message || err}`;
+    return `Error: ${err?.message || String(err)}`;
   }
 }
 
@@ -168,11 +199,65 @@ const MAX_HISTORY_MESSAGES = 80;
 
 function trimHistory(messages) {
   if (messages.length <= MAX_HISTORY_MESSAGES) return;
-  // Keep the first message (user prompt) and the most recent messages
+  // Find a safe trim point that doesn't break tool_call/tool message pairing.
+  // The OpenAI API requires that every assistant message with tool_calls
+  // is immediately followed by the corresponding tool result messages.
+  // Trim from the front (after the first user message) to preserve recent context.
   const keep = MAX_HISTORY_MESSAGES - 1;
-  const trimmed = [messages[0], ...messages.slice(-keep)];
+  let cutIndex = messages.length - keep;
+
+  // Ensure we don't cut in the middle of a tool call sequence.
+  // Walk forward from the cut point to find a safe boundary.
+  // Safe boundaries: right before a user message or an assistant message
+  // that is NOT a tool response continuation.
+  while (cutIndex < messages.length - 1) {
+    const msg = messages[cutIndex];
+    // If this is a tool result message, we might be splitting a tool call pair.
+    // Move forward until we find a non-tool message.
+    if (msg.role === "tool") {
+      cutIndex++;
+      continue;
+    }
+    // If this is an assistant message, check if the PREVIOUS message (before cut)
+    // was an assistant with tool_calls that expects tool responses after it.
+    break;
+  }
+
+  // Avoid trimming if we can't find a safe point
+  if (cutIndex >= messages.length - 1) return;
+
+  const trimmed = [messages[0], ...messages.slice(cutIndex)];
   messages.length = 0;
   messages.push(...trimmed);
+}
+
+// --- Retry helper for API calls ---
+
+const MAX_API_RETRIES = 2;
+const RETRY_BACKOFF_MS = 1000;
+
+async function callApiWithRetry(client, params) {
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
+    try {
+      return await client.chat.completions.create(params);
+    } catch (err) {
+      lastError = err;
+      const status = err.status || err.statusCode;
+      // Retry on rate limit (429) and server errors (500+)
+      if ((status === 429 || (status >= 500 && status < 600)) && attempt < MAX_API_RETRIES) {
+        const retryAfter = err.headers?.["retry-after"];
+        const waitMs = retryAfter
+          ? Math.min(parseInt(retryAfter, 10) * 1000 || RETRY_BACKOFF_MS, 60_000)
+          : RETRY_BACKOFF_MS * Math.pow(2, attempt);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      // Non-retryable error (401, 403, 400, etc.) - throw immediately
+      throw err;
+    }
+  }
+  throw lastError;
 }
 
 // --- Unhandled rejection safety net ---
@@ -202,14 +287,14 @@ async function run() {
 
     let completion;
     try {
-      completion = await client.chat.completions.create({
+      completion = await callApiWithRetry(client, {
         model: modelId,
         messages,
         tools,
         tool_choice: "auto",
       });
     } catch (err) {
-      emit({ type: "error", error: `API call failed: ${err.message}` });
+      emit({ type: "error", error: `API call failed: ${err?.message || String(err)}` });
       break;
     }
 
@@ -259,18 +344,21 @@ async function run() {
 
       const result = executeTool(tc.function.name, args);
 
+      // Ensure result is always a string before slicing
+      const resultStr = typeof result === "string" ? result : String(result ?? "");
+
       emit({
         type: "tool_use",
         tool: tc.function.name,
         args,
-        result: result.slice(0, 2000),
+        result: resultStr.slice(0, 2000),
       });
 
       // Truncate tool results in conversation history to prevent context overflow
       messages.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: result.slice(0, MAX_TOOL_RESULT_SIZE),
+        content: resultStr.slice(0, MAX_TOOL_RESULT_SIZE),
       });
     }
 
@@ -297,6 +385,6 @@ async function run() {
 }
 
 run().catch((err) => {
-  emit({ type: "error", error: `Runner crashed: ${err.message}` });
+  emit({ type: "error", error: `Runner crashed: ${err?.message || String(err)}` });
   process.exit(1);
 });

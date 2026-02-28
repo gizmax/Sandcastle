@@ -10,6 +10,7 @@ from pathlib import Path
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -75,6 +76,9 @@ class Run(Base):
         Index("ix_runs_tenant_id", "tenant_id"),
         Index("ix_runs_workflow_name", "workflow_name"),
         Index("ix_runs_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index("ix_runs_parent_run_id", "parent_run_id"),
+        CheckConstraint("total_cost_usd >= 0", name="ck_runs_total_cost_non_negative"),
+        CheckConstraint("depth >= 0", name="ck_runs_depth_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -124,6 +128,10 @@ class RunStep(Base):
     __table_args__ = (
         Index("ix_run_steps_run_id", "run_id"),
         Index("ix_run_steps_run_step_parallel", "run_id", "step_id", "parallel_index"),
+        Index("ix_run_steps_run_id_status", "run_id", "status"),
+        CheckConstraint("cost_usd >= 0", name="ck_run_steps_cost_non_negative"),
+        CheckConstraint("duration_seconds >= 0", name="ck_run_steps_duration_non_negative"),
+        CheckConstraint("attempt >= 1", name="ck_run_steps_attempt_positive"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -161,6 +169,7 @@ class Schedule(Base):
         Index("ix_schedules_enabled", "enabled"),
         Index("ix_schedules_tenant_id", "tenant_id"),
         Index("ix_schedules_workflow_name", "workflow_name"),
+        Index("ix_schedules_last_run_id", "last_run_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -280,6 +289,9 @@ class AutoPilotSample(Base):
     __tablename__ = "autopilot_samples"
     __table_args__ = (
         Index("ix_autopilot_samples_experiment_id", "experiment_id"),
+        Index("ix_autopilot_samples_run_id", "run_id"),
+        CheckConstraint("cost_usd >= 0", name="ck_autopilot_samples_cost_non_negative"),
+        CheckConstraint("duration_seconds >= 0", name="ck_autopilot_samples_duration_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -350,6 +362,8 @@ class RoutingDecision(Base):
         Index("ix_routing_decisions_run_id", "run_id"),
         Index("ix_routing_decisions_step_id", "step_id"),
         Index("ix_routing_decisions_created_model", "created_at", "selected_model"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_routing_confidence_range"),
+        CheckConstraint("budget_pressure >= 0", name="ck_routing_budget_pressure_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -429,12 +443,14 @@ class StepCache(Base):
     __tablename__ = "step_cache"
     __table_args__ = (
         Index("ix_step_cache_expires_at", "expires_at"),
+        CheckConstraint("cost_usd >= 0", name="ck_step_cache_cost_non_negative"),
+        CheckConstraint("hit_count >= 0", name="ck_step_cache_hit_count_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     workflow_name: Mapped[str] = mapped_column(String(200), default="")
-    step_id: Mapped[str] = mapped_column(String(200))
+    step_id: Mapped[str] = mapped_column(String(200), nullable=False)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
@@ -486,6 +502,9 @@ class EvalRun(Base):
         Index("ix_eval_runs_created_at", "created_at"),
         Index("ix_eval_runs_workflow_name", "workflow_name"),
         Index("ix_eval_runs_tenant_id", "tenant_id"),
+        CheckConstraint("total_cost_usd >= 0", name="ck_eval_runs_total_cost_non_negative"),
+        CheckConstraint("total_duration_seconds >= 0", name="ck_eval_runs_duration_non_negative"),
+        CheckConstraint("pass_rate >= 0 AND pass_rate <= 1", name="ck_eval_runs_pass_rate_range"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -521,6 +540,9 @@ class EvalCaseResult(Base):
     __tablename__ = "eval_case_results"
     __table_args__ = (
         Index("ix_eval_case_results_eval_run_id", "eval_run_id"),
+        Index("ix_eval_case_results_run_id", "run_id"),
+        CheckConstraint("cost_usd >= 0", name="ck_eval_case_cost_non_negative"),
+        CheckConstraint("duration_seconds >= 0", name="ck_eval_case_duration_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -661,7 +683,12 @@ async def init_db() -> None:
 
 
 def _add_missing_columns(connection, **_kw) -> None:
-    """Inspect SQLite tables and ALTER TABLE ADD COLUMN for any gaps."""
+    """Inspect SQLite tables and ALTER TABLE ADD COLUMN for any gaps.
+
+    Includes DEFAULT clause for columns that have server_default or a
+    Python-side default so that existing rows get a sensible value
+    instead of NULL (which would violate NOT NULL constraints).
+    """
     import logging
 
     from sqlalchemy import inspect as sa_inspect
@@ -677,7 +704,26 @@ def _add_missing_columns(connection, **_kw) -> None:
         for col in table.columns:
             if col.name not in existing:
                 col_type = col.type.compile(dialect=connection.dialect)
-                stmt = f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {col_type}'
+                # Build DEFAULT clause for migration safety.
+                # server_default takes priority; fall back to Python default
+                # for simple scalar values (int, float, bool, str).
+                default_clause = ""
+                if col.server_default is not None:
+                    default_clause = f" DEFAULT {col.server_default.arg}"
+                elif col.default is not None and col.default.is_scalar:
+                    val = col.default.arg
+                    if isinstance(val, bool):
+                        default_clause = f" DEFAULT {1 if val else 0}"
+                    elif isinstance(val, (int, float)):
+                        default_clause = f" DEFAULT {val}"
+                    elif isinstance(val, str):
+                        # Escape single quotes for SQL safety
+                        safe = val.replace("'", "''")
+                        default_clause = f" DEFAULT '{safe}'"
+                stmt = (
+                    f'ALTER TABLE "{table.name}" ADD COLUMN '
+                    f'"{col.name}" {col_type}{default_clause}'
+                )
                 log.info("Auto-migrating: %s", stmt)
                 connection.execute(text(stmt))
 

@@ -33,7 +33,21 @@ async function api(path, method = "GET", body = null) {
   return resp.json();
 }
 
+/**
+ * Validate and sanitize a GitHub owner/repo string.
+ * Expected format: "owner/repo" where both are alphanumeric with hyphens/dots.
+ */
+function validateRepo(repo) {
+  if (!repo || typeof repo !== "string") throw new Error("repo is required");
+  // GitHub owner/repo: alphanumeric, hyphens, dots, underscores
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+    throw new Error(`Invalid repo format: '${repo.slice(0, 100)}'. Expected 'owner/repo'`);
+  }
+  return repo;
+}
+
 export async function create_issue(repo, title, body = "", labels = "") {
+  validateRepo(repo);
   const payload = { title, body };
   if (labels) payload.labels = labels.split(",").map((l) => l.trim());
   const data = await api(`/repos/${repo}/issues`, "POST", payload);
@@ -41,7 +55,10 @@ export async function create_issue(repo, title, body = "", labels = "") {
 }
 
 export async function get_issues(repo, state = "open", limit = 20) {
-  const data = await api(`/repos/${repo}/issues?state=${state}&per_page=${limit}`);
+  validateRepo(repo);
+  const safeState = encodeURIComponent(state);
+  const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 20), 100);
+  const data = await api(`/repos/${repo}/issues?state=${safeState}&per_page=${safeLimit}`);
   return data.map((i) => ({
     number: i.number,
     title: i.title,
@@ -53,6 +70,7 @@ export async function get_issues(repo, state = "open", limit = 20) {
 }
 
 export async function create_pr(repo, title, body = "", head = "", base = "main") {
+  validateRepo(repo);
   const data = await api(`/repos/${repo}/pulls`, "POST", { title, body, head, base });
   return { number: data.number, url: data.html_url, title: data.title };
 }

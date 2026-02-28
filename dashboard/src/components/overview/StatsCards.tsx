@@ -20,7 +20,7 @@ const cards = [
     key: "rate" as const,
     label: "Success Rate",
     icon: CheckCircle,
-    format: (v: number) => `${Math.round(v * 100)}%`,
+    format: (v: number) => `${Number.isFinite(v) ? Math.round(v * 100) : 0}%`,
   },
   {
     key: "cost" as const,
