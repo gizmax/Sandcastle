@@ -1,3 +1,7 @@
+# name: Discord Incident Bot
+# description: Monitor PagerDuty for new incidents, post alerts to Discord, and auto-acknowledge with status updates.
+# category: devops
+# tags: [Discord, PagerDuty, Incident Response, DevOps]
 name: Discord Incident Bot
 description: Monitor PagerDuty for new incidents, post alerts to Discord, and auto-acknowledge with status updates.
 category: devops
