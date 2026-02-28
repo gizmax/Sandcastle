@@ -14,12 +14,21 @@ export function useUpdateCheck() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let aborted = false;
     api
       .get<UpdateCheckData>("/check-update")
       .then((res) => {
-        if (res.data) setData(res.data);
+        if (!aborted && res.data) setData(res.data);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // Network error - ignore if aborted
+      })
+      .finally(() => {
+        if (!aborted) setLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
   }, []);
 
   return {

@@ -456,7 +456,7 @@ export default function TemplatesPage() {
     if (res.error) {
       toast.error(`Run failed: ${res.error.message}`);
     } else if (res.data) {
-      toast.success("Workflow started");
+      toast.success("Workflow run queued");
       const runId = (res.data as Record<string, unknown>).run_id as string;
       if (runId) navigate(`/runs/${runId}`);
     }

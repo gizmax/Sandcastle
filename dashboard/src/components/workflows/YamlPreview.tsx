@@ -10,8 +10,12 @@ interface YamlPreviewProps {
 export function YamlPreview({ open, yaml, onClose }: YamlPreviewProps) {
   if (!open) return null;
 
-  function handleCopy() {
-    navigator.clipboard.writeText(yaml);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(yaml);
+    } catch {
+      // Clipboard API not available or permission denied
+    }
   }
 
   function handleDownload() {

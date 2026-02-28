@@ -132,6 +132,20 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
   const [monthDay, setMonthDay] = useState(initial.monthDay);
   const [custom, setCustom] = useState(value || "0 9 * * *");
 
+  // Re-sync internal state when parent changes the value prop
+  useEffect(() => {
+    const parsed = parseCron(value);
+    setFrequency(parsed.frequency);
+    setHour(parsed.hour);
+    setMinute(parsed.minute);
+    setInterval(parsed.interval);
+    setWeekdays(parsed.weekdays);
+    setMonthDay(parsed.monthDay);
+    if (parsed.frequency === "custom") {
+      setCustom(value);
+    }
+  }, [value]);
+
   useEffect(() => {
     const cron = buildCron({ frequency, hour, minute, interval, weekdays, monthDay, custom });
     onChange(cron);

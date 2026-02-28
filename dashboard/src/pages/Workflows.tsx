@@ -128,7 +128,7 @@ export default function Workflows() {
         <EmptyState
           icon={GitBranch}
           title="No workflows found"
-          description="Build your first workflow!"
+          description="No workflows found. Add YAML files to your workflows directory to get started."
           action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
         />
       ) : (

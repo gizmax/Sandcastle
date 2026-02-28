@@ -8,9 +8,11 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -85,7 +87,7 @@ from sandcastle.api.schemas import (
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
 )
-from sandcastle.config import settings
+from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
 from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime  # noqa: F401
@@ -118,6 +120,24 @@ from sandcastle.queue.worker import enqueue_workflow
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# --- Hub registry cache (5 min TTL) ---
+
+_hub_cache: dict[str, tuple[float, Any]] = {}
+_HUB_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_hub_cache(key: str) -> Any | None:
+    if key in _hub_cache:
+        ts, data = _hub_cache[key]
+        if time.time() - ts < _HUB_CACHE_TTL:
+            return data
+        del _hub_cache[key]
+    return None
+
+
+def _set_hub_cache(key: str, data: Any) -> None:
+    _hub_cache[key] = (time.time(), data)
 
 
 # --- Helpers ---
@@ -743,12 +763,18 @@ async def get_hub_registry() -> ApiResponse:
 
     Public endpoint - no authentication required.
     """
+    cached = _get_hub_cache("registry")
+    if cached is not None:
+        return ApiResponse(data=cached)
+
     registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(registry_url)
             resp.raise_for_status()
-            return ApiResponse(data=resp.json())
+            data = resp.json()
+            _set_hub_cache("registry", data)
+            return ApiResponse(data=data)
     except Exception:
         # Fallback: return empty registry
         return ApiResponse(
@@ -767,6 +793,10 @@ async def get_hub_collections() -> ApiResponse:
 
     Public endpoint - no authentication required.
     """
+    cached = _get_hub_cache("collections")
+    if cached is not None:
+        return ApiResponse(data=cached)
+
     registry_url = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/registry.json"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -783,6 +813,7 @@ async def get_hub_collections() -> ApiResponse:
                     if slug in templates_by_slug
                 ]
                 col["template_count"] = len(col["templates"])
+            _set_hub_cache("collections", collections)
             return ApiResponse(data=collections)
     except Exception:
         return ApiResponse(data=[])
@@ -1594,17 +1625,27 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         if result.status == "completed":
             if not request.callback_url and workflow.on_complete and workflow.on_complete.webhook:
                 webhook_urls.append(workflow.on_complete.webhook)
-        elif result.status not in ("awaiting_approval",):
+        elif result.status == "failed":
             if workflow.on_failure and workflow.on_failure.webhook:
                 webhook_urls.append(workflow.on_failure.webhook)
 
+        _sync_event_map = {
+            "completed": "workflow.completed",
+            "failed": "workflow.failed",
+            "cancelled": "workflow.cancelled",
+            "budget_exceeded": "workflow.budget_exceeded",
+            "awaiting_approval": "workflow.awaiting_approval",
+        }
+        event_type = _sync_event_map.get(result.status, "workflow.failed")
+
+        webhook_urls = list(dict.fromkeys(webhook_urls))
         for webhook_url in webhook_urls:
             duration = 0.0
             if result.started_at and result.completed_at:
                 duration = (result.completed_at - result.started_at).total_seconds()
             await dispatch_webhook(
                 url=webhook_url,
-                event="workflow.completed" if result.status == "completed" else "workflow.failed",
+                event=event_type,
                 run_id=run_id,
                 workflow=workflow.name,
                 status=result.status,
@@ -2340,7 +2381,15 @@ async def list_runs(
     if status:
         valid = {s.value for s in RunStatus}
         if status not in valid:
-            raise HTTPException(status_code=400, detail=f"Invalid status '{status}'. Valid: {', '.join(sorted(valid))}")
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_STATUS",
+                        message=f"Invalid status '{status}'. Valid: {', '.join(sorted(valid))}",
+                    )
+                ).model_dump(),
+            )
     tenant_id = get_tenant_id(request)
 
     async with async_session() as session:
@@ -3684,7 +3733,15 @@ async def list_approvals(
     if status:
         valid = {s.value for s in ApprovalStatus}
         if status not in valid:
-            raise HTTPException(status_code=400, detail=f"Invalid status '{status}'. Valid: {', '.join(sorted(valid))}")
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_STATUS",
+                        message=f"Invalid status '{status}'. Valid: {', '.join(sorted(valid))}",
+                    )
+                ).model_dump(),
+            )
     tenant_id = get_tenant_id(request)
 
     async with async_session() as session:
@@ -4813,6 +4870,9 @@ async def update_settings(
     if not updates:
         return ApiResponse(data=_build_settings_response())
 
+    # Validate all updates through Pydantic before applying
+    validated = Settings.model_validate({**settings.model_dump(), **updates})
+
     # Persist each setting to DB and apply to runtime config
     async with async_session() as session:
         for key, value in updates.items():
@@ -4823,8 +4883,8 @@ async def update_settings(
                 existing.value = str_value
             else:
                 session.add(Setting(key=key, value=str_value))
-            # Apply to the runtime settings object
-            setattr(settings, key, value)
+            # Apply validated value to the runtime settings object
+            setattr(settings, key, getattr(validated, key))
         await session.commit()
 
     # Special handling: update root logger level

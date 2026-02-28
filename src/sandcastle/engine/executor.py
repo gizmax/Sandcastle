@@ -6,6 +6,7 @@ import asyncio
 import collections
 import csv
 import dataclasses
+import hashlib
 import json
 import logging
 import re
@@ -31,6 +32,10 @@ from sandcastle.engine.sandshore import (
 from sandcastle.engine.storage import StorageBackend
 
 logger = logging.getLogger(__name__)
+
+# Pre-compiled regex patterns for template and storage reference resolution.
+_TEMPLATE_RE = re.compile(r"\{((?:input|steps)\.[^}]+|run_id|date|memory)\}")
+_STORAGE_RE = re.compile(r"\{storage\.([^}]+)\}")
 
 # Default instructions prepended to every step prompt to keep agent output clean.
 _STEP_SYSTEM_PREFIX = (
@@ -196,6 +201,11 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
     return _UNRESOLVED
 
 
+def _escape_braces(value: str) -> str:
+    """Escape curly braces in resolved values to prevent re-resolution."""
+    return value.replace("{", "{{").replace("}", "}}")
+
+
 def resolve_templates(
     template: str,
     context: RunContext,
@@ -218,10 +228,14 @@ def resolve_templates(
         if value is None:
             return "None"
         if isinstance(value, (dict, list)):
-            return json.dumps(value)
-        return str(value)
+            raw = json.dumps(value)
+        else:
+            raw = str(value)
+        if var_path.startswith("steps."):
+            return _escape_braces(raw)
+        return raw
 
-    resolved = re.sub(r"\{((?:input|steps)\.[^}]+|run_id|date|memory)\}", _replace, template)
+    resolved = _TEMPLATE_RE.sub(_replace, template)
 
     # Auto-inject unreferenced dependency outputs
     if depends_on:
@@ -236,7 +250,7 @@ def resolve_templates(
             for dep in missing:
                 data = context.step_outputs[dep]
                 formatted = json.dumps(data) if isinstance(data, (dict, list)) else str(data)
-                parts.append(f"[{dep}]: {formatted}")
+                parts.append(f"[{dep}]: {_escape_braces(formatted)}")
             context_block = "\n".join(parts)
             resolved = f"{resolved}\n\nContext from previous steps:\n{context_block}"
 
@@ -251,9 +265,8 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
         content = await storage.read(path)
         return content if content is not None else match.group(0)
 
-    pattern = re.compile(r"\{storage\.([^}]+)\}")
     result = prompt
-    for match in pattern.finditer(prompt):
+    for match in _STORAGE_RE.finditer(prompt):
         replacement = await _resolve(match)
         result = result.replace(match.group(0), replacement, 1)
 
@@ -299,7 +312,9 @@ async def _save_run_step(
 
         now = datetime.now(timezone.utc)
         db_status = status_map.get(status, StepStatus.PENDING)
-        output_data = output if isinstance(output, dict) else {"result": output} if output else None
+        # Store output as-is, consistent with context.step_outputs.
+        # JSON columns accept any JSON-serializable value (str, list, dict, etc.)
+        output_data = output
 
         async with async_session() as session:
             # Try to find existing step record (from the "running" INSERT)
@@ -1134,8 +1149,6 @@ def _compute_cache_key(
     model: str,
 ) -> str:
     """Compute a deterministic cache key for a step execution."""
-    import hashlib
-
     raw = f"{workflow_name}:{step_id}:{model}:{prompt}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
@@ -2529,6 +2542,10 @@ async def _execute_loop_step(
                 child_context.step_outputs[sub_step_id] = sub_result.output
                 total_cost += sub_result.cost_usd
 
+            # Sync child costs back to parent so budget checks see ongoing costs
+            context.costs.extend(child_context.costs)
+            child_context.costs.clear()
+
             # Collect last sub-step output as the loop iteration result
             last_step = cfg.step_ids[-1] if cfg.step_ids else None
             iteration_output = child_context.step_outputs.get(last_step) if last_step else item
@@ -2581,8 +2598,10 @@ async def _execute_race_step(
         return StepResult(step_id=step.id, status="failed", error="Missing race_config")
 
     try:
+        # Track partial costs per branch so cancelled branches still count
+        branch_costs: dict[int, float] = {}
 
-        async def run_branch(branch_steps: list[str]) -> dict:
+        async def run_branch(branch_idx: int, branch_steps: list[str]) -> dict:
             """Execute a sequence of steps and return the last output."""
             branch_context = RunContext(
                 run_id=context.run_id,
@@ -2607,6 +2626,9 @@ async def _execute_race_step(
                 )
                 branch_context.step_outputs[sub_step_id] = sub_result.output
                 branch_cost += sub_result.cost_usd
+                # Update shared tracker after each sub-step so partial
+                # costs from cancelled branches are not lost
+                branch_costs[branch_idx] = branch_cost
                 last_output = sub_result.output
                 if sub_result.status == "failed":
                     raise RuntimeError(f"Branch step '{sub_step_id}' failed: {sub_result.error}")
@@ -2614,11 +2636,10 @@ async def _execute_race_step(
 
         # Run all branches in parallel, cancel remaining after first valid result
         tasks = {
-            asyncio.create_task(run_branch(branch)): i
+            asyncio.create_task(run_branch(i, branch)): i
             for i, branch in enumerate(cfg.branches)
         }
         pending = set(tasks.keys())
-        total_cost = 0.0
         winning_output = None
         fallback_output = None  # best non-validated result as fallback
 
@@ -2629,7 +2650,6 @@ async def _execute_race_step(
                     result = task.result()
                 except Exception:
                     continue
-                total_cost += result["cost"]
                 # Validate if validator expression is set
                 if cfg.validator:
                     eval_names: dict[str, Any] = {
@@ -2650,20 +2670,17 @@ async def _execute_race_step(
                     winning_output = result["output"]
 
             if winning_output is not None:
-                # Cancel remaining tasks and accumulate any costs
+                # Cancel remaining tasks
                 for t in pending:
                     t.cancel()
                 # Wait for cancelled tasks to finish
                 if pending:
-                    cancelled_done, _ = await asyncio.wait(pending)
-                    for t in cancelled_done:
-                        try:
-                            r = t.result()
-                            total_cost += r["cost"]
-                        except BaseException:
-                            pass
+                    await asyncio.wait(pending)
                 pending = set()
                 break
+
+        # Accumulate costs from ALL branches (winners, losers, and cancelled)
+        total_cost = sum(branch_costs.values())
 
         if winning_output is None:
             winning_output = fallback_output

@@ -6,7 +6,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScoreRing } from "@/components/advisor/ScoreRing";
-import { useAdvisor } from "@/hooks/useAdvisor";
 import type { Insight, Severity } from "@/lib/insights";
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -43,8 +42,13 @@ function InsightRow({ insight }: { insight: Insight }) {
   );
 }
 
-export function HealthHero() {
-  const { score, activeInsights, loading } = useAdvisor();
+interface HealthHeroProps {
+  score: number;
+  activeInsights: Insight[];
+  loading: boolean;
+}
+
+export function HealthHero({ score, activeInsights, loading }: HealthHeroProps) {
 
   // Only show actionable insights (not discover tier)
   const actionable = activeInsights.filter((i) => i.severity !== "discover");

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 
@@ -265,8 +266,8 @@ class WorkerSettings:
     functions = [run_workflow_job]
     on_startup = startup
     on_shutdown = shutdown
-    max_jobs = 10
-    job_timeout = 600
+    max_jobs = int(os.environ.get("SANDCASTLE_WORKER_MAX_JOBS", "10"))
+    job_timeout = int(os.environ.get("SANDCASTLE_WORKER_JOB_TIMEOUT", "600"))
     redis_settings = None
 
 

@@ -144,7 +144,7 @@ export default function ApiKeysPage() {
         minimax_api_key: minimaxKey,
         openrouter_api_key: openrouterKey,
       };
-      toast.success("Credentials saved successfully");
+      toast.success("Credentials saved");
     }
   }, [anthropicKey, e2bKey, openaiKey, minimaxKey, openrouterKey]);
 

@@ -125,35 +125,12 @@ async def _run_scheduled_workflow(
     from sandcastle.models.db import Run, RunStatus, Schedule, async_session
     from sandcastle.queue.worker import enqueue_workflow
 
-    # Guard against concurrent execution of the same scheduled workflow
+    # Load the schedule once and use it for both concurrent guard and tenant context
+    tenant_id = None
+    max_cost_usd = None
     try:
         async with async_session() as session:
             schedule = await session.get(Schedule, uuid.UUID(schedule_id))
-            if schedule and schedule.last_run_id:
-                last_run = await session.get(Run, schedule.last_run_id)
-                if last_run and last_run.status in (RunStatus.RUNNING, RunStatus.QUEUED):
-                    logger.warning(
-                        "Skipping scheduled run for '%s' - previous run %s still active",
-                        schedule.workflow_name,
-                        schedule.last_run_id,
-                    )
-                    return
-    except Exception as e:
-        logger.warning(f"Could not check previous run status for schedule '{schedule_id}': {e}")
-
-    run_id = str(uuid.uuid4())
-    logger.info(f"Schedule '{schedule_id}' triggered: creating run {run_id}")
-
-    try:
-        workflow_yaml = _load_workflow_yaml(workflow_name)
-
-        # Load tenant context and budget from the schedule record
-        tenant_id = None
-        max_cost_usd = None
-        async with async_session() as session:
-            schedule = await session.get(
-                Schedule, uuid.UUID(schedule_id)
-            )
             if not schedule:
                 logger.warning(
                     f"Schedule '{schedule_id}' no longer exists in database, "
@@ -165,6 +142,18 @@ async def _run_scheduled_workflow(
                     f"Schedule '{schedule_id}' is disabled, skipping execution"
                 )
                 return
+
+            # Guard against concurrent execution of the same scheduled workflow
+            if schedule.last_run_id:
+                last_run = await session.get(Run, schedule.last_run_id)
+                if last_run and last_run.status in (RunStatus.RUNNING, RunStatus.QUEUED):
+                    logger.warning(
+                        "Skipping scheduled run for '%s' - previous run %s still active",
+                        schedule.workflow_name,
+                        schedule.last_run_id,
+                    )
+                    return
+
             tenant_id = schedule.tenant_id
 
             # Resolve tenant budget from API key if available
@@ -178,6 +167,15 @@ async def _run_scheduled_workflow(
                     ApiKey.is_active.is_(True),
                 ).limit(1)
                 max_cost_usd = await session.scalar(stmt)
+    except Exception as e:
+        logger.warning(f"Could not check schedule state for '{schedule_id}': {e}")
+        return
+
+    run_id = str(uuid.uuid4())
+    logger.info(f"Schedule '{schedule_id}' triggered: creating run {run_id}")
+
+    try:
+        workflow_yaml = _load_workflow_yaml(workflow_name)
 
         # Create the run record with tenant context
         async with async_session() as session:

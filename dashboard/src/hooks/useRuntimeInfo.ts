@@ -25,12 +25,21 @@ export function useRuntimeInfo() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let aborted = false;
     api
       .get<RuntimeInfo>("/runtime")
       .then((res) => {
-        if (res.data) setInfo(res.data);
+        if (!aborted && res.data) setInfo(res.data);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // Network error - ignore if aborted
+      })
+      .finally(() => {
+        if (!aborted) setLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
   }, []);
 
   return { info, loading };

@@ -141,7 +141,7 @@ class TestResolveTemplates:
     def test_dict_replacement(self):
         ctx = make_context(step_outputs={"step1": {"key": "value"}})
         result = resolve_templates("Result: {steps.step1.output}", ctx)
-        assert result == 'Result: {"key": "value"}'
+        assert result == 'Result: {{"key": "value"}}'
 
     def test_unresolved_stays(self):
         ctx = make_context()

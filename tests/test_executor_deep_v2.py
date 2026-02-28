@@ -269,7 +269,8 @@ class TestResolveTemplates:
     def test_dict_value_serialized_as_json(self):
         c = ctx(step_outputs={"s1": {"key": "val"}})
         result = resolve_templates("{steps.s1.output}", c)
-        assert json.loads(result) == {"key": "val"}
+        unescaped = result.replace("{{", "{").replace("}}", "}")
+        assert json.loads(unescaped) == {"key": "val"}
 
     def test_unknown_var_left_unchanged(self):
         c = ctx(input={})

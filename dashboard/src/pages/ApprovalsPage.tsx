@@ -69,7 +69,8 @@ export default function ApprovalsPage() {
           toast.error(`Failed to ${action}: ${res.error.message}`);
           return;
         }
-        toast.success(`Approval ${action}ed`);
+        const ACTION_PAST: Record<string, string> = { approve: "approved", reject: "rejected", skip: "skipped" };
+        toast.success(`Approval ${ACTION_PAST[action] ?? action}`);
         void fetchItems();
       } finally {
         setActionLoading((prev) => {

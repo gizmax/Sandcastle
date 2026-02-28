@@ -105,7 +105,14 @@ async def dispatch_webhook(
             f"Webhook payload for run {run_id} exceeds {max_payload_bytes} bytes, "
             "truncating outputs"
         )
-        outputs_preview = json.dumps(outputs, default=str)[:10000] if outputs else None
+        if outputs:
+            full_preview = json.dumps(outputs, default=str)
+            if len(full_preview) > 10000:
+                outputs_preview = full_preview[:9990] + "...(truncated)"
+            else:
+                outputs_preview = full_preview
+        else:
+            outputs_preview = None
         payload["outputs"] = {
             "outputs_truncated": True,
             "outputs_preview": outputs_preview,

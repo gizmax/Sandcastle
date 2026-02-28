@@ -305,7 +305,7 @@ def _extract_data(response: httpx.Response) -> Any:
             message = err.get("message", response.text)
         except Exception:
             code = "API_ERROR"
-            message = response.text
+            message = response.text[:500] if response.text else "Unknown API error"
         raise SandcastleError(response.status_code, code, message)
 
     body = response.json()

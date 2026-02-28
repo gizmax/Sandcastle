@@ -33,6 +33,16 @@ export function CreateScheduleModal({ open, onClose, onSubmit }: CreateScheduleM
   const [inputJson, setInputJson] = useState("{}");
   const [schemaInputs, setSchemaInputs] = useState<Record<string, string>>({});
 
+  // Reset form state when modal opens
+  useEffect(() => {
+    if (open) {
+      setSelectedWorkflow("");
+      setCronExpression("0 9 * * *");
+      setInputJson("{}");
+      setSchemaInputs({});
+    }
+  }, [open]);
+
   // Load workflows when modal opens
   useEffect(() => {
     if (!open) return;

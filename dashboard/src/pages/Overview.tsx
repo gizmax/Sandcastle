@@ -9,6 +9,7 @@ import { RecentRuns } from "@/components/overview/RecentRuns";
 import { HealthHero } from "@/components/overview/HealthHero";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { useAdvisor } from "@/hooks/useAdvisor";
 
 interface Stats {
   total_runs_today: number;
@@ -33,6 +34,7 @@ export default function Overview() {
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const advisor = useAdvisor();
 
   const fetchData = useCallback(async () => {
     try {
@@ -105,7 +107,7 @@ export default function Overview() {
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
 
-      <HealthHero />
+      <HealthHero score={advisor.score} activeInsights={advisor.activeInsights} loading={advisor.loading} />
 
       <StatsCards
         totalRuns={stats.total_runs_today}
