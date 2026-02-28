@@ -220,7 +220,30 @@ async def check_assertion(
 
     if atype == "regex_match":
         actual = str(target) if target is not None else ""
-        match = re.search(assertion.value, actual) if assertion.value else None
+        if not assertion.value:
+            match = None
+        else:
+            # Validate regex for safety (length and ReDoS risk)
+            from sandcastle.engine.policy import (
+                _MAX_REGEX_LENGTH,
+                _has_redos_risk,
+            )
+
+            if len(assertion.value) > _MAX_REGEX_LENGTH:
+                return AssertionResult(
+                    type=atype,
+                    passed=False,
+                    expected=assertion.value[:80],
+                    message=f"Regex pattern too long ({len(assertion.value)} chars, max {_MAX_REGEX_LENGTH})",
+                )
+            if _has_redos_risk(assertion.value):
+                return AssertionResult(
+                    type=atype,
+                    passed=False,
+                    expected=assertion.value[:80],
+                    message="Regex pattern rejected: potential catastrophic backtracking (ReDoS)",
+                )
+            match = re.search(assertion.value, actual)
         passed = match is not None
         return AssertionResult(
             type=atype,
@@ -453,7 +476,7 @@ async def run_eval_suite(
 
 async def save_eval_run(suite_result: SuiteResult, suite_yaml: str = "") -> str:
     """Persist eval run + case results to the database. Returns eval_run_id."""
-    from sandcastle.models.db import EvalCaseResult, EvalRun, async_session
+    from sandcastle.models.db import EvalCaseResult, EvalRun, EvalRunStatus, async_session
 
     eval_run_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
@@ -462,7 +485,7 @@ async def save_eval_run(suite_result: SuiteResult, suite_yaml: str = "") -> str:
         id=eval_run_id,
         suite_name=suite_result.suite_name,
         workflow_name=suite_result.workflow,
-        status="completed",
+        status=EvalRunStatus.COMPLETED,
         total_cases=suite_result.total,
         passed_cases=suite_result.passed,
         failed_cases=suite_result.failed,

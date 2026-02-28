@@ -2,6 +2,9 @@
  * Shared utilities for Sandcastle tool connectors.
  */
 
+// Maximum backoff/retry-after wait: 60 seconds
+const MAX_WAIT_MS = 60000;
+
 export async function fetchWithRetry(url, options = {}, { timeoutMs = 30000, retries = 2, backoffMs = 1000 } = {}) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -11,12 +14,16 @@ export async function fetchWithRetry(url, options = {}, { timeoutMs = 30000, ret
       const resp = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timer);
       if (resp.status === 429 && attempt < retries) {
-        const wait = parseInt(resp.headers.get("retry-after") || "5", 10);
+        const raw = parseInt(resp.headers.get("retry-after") || "5", 10);
+        // Cap retry-after to prevent malicious servers from blocking indefinitely
+        const wait = Math.min(Math.max(raw, 1), MAX_WAIT_MS / 1000);
         await sleep(wait * 1000);
         continue;
       }
       if (resp.status >= 500 && attempt < retries) {
-        await sleep(backoffMs * Math.pow(2, attempt));
+        // Exponential backoff with ceiling
+        const delay = Math.min(backoffMs * Math.pow(2, attempt), MAX_WAIT_MS);
+        await sleep(delay);
         continue;
       }
       return resp;
@@ -25,7 +32,8 @@ export async function fetchWithRetry(url, options = {}, { timeoutMs = 30000, ret
         ? new Error(`Timeout after ${timeoutMs}ms: ${url}`)
         : err;
       if (attempt < retries) {
-        await sleep(backoffMs * Math.pow(2, attempt));
+        const delay = Math.min(backoffMs * Math.pow(2, attempt), MAX_WAIT_MS);
+        await sleep(delay);
         continue;
       }
     }

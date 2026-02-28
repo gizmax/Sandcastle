@@ -927,7 +927,7 @@ class TestCircuitBreakerStress:
             await cb.record_failure()
 
         results = await asyncio.gather(
-            *[asyncio.to_thread(cb.allow_request) for _ in range(100)]
+            *[cb.allow_request() for _ in range(100)]
         )
         assert all(r is False for r in results)
 
@@ -1300,7 +1300,7 @@ class TestMixedConcurrencyStress:
             else:
                 await metrics.record_query_success(cost_usd=0.01)
                 await cb.record_success()
-            cb.allow_request()
+            await cb.allow_request()
 
         await asyncio.gather(*[record_and_check(i) for i in range(100)])
 

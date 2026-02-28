@@ -70,7 +70,7 @@ class TestCircuitBreaker:
         for _ in range(5):
             await cb.record_failure()
         assert cb.state == CircuitBreaker.OPEN
-        assert cb.allow_request() is False
+        assert await cb.allow_request() is False
 
     async def test_half_open_after_recovery_timeout(self) -> None:
         """State transitions to HALF_OPEN after recovery timeout elapses."""
@@ -82,8 +82,8 @@ class TestCircuitBreaker:
         # Wait for recovery timeout to pass
         await asyncio.sleep(0.06)
         assert cb.state == CircuitBreaker.HALF_OPEN
-        # HALF_OPEN allows requests through
-        assert cb.allow_request() is True
+        # HALF_OPEN allows one probe request through
+        assert await cb.allow_request() is True
 
     async def test_resets_on_success(self) -> None:
         """record_success resets to CLOSED and clears failure count."""
@@ -95,7 +95,7 @@ class TestCircuitBreaker:
         await cb.record_success()
         assert cb.state == CircuitBreaker.CLOSED
         assert cb._failure_count == 0
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     async def test_custom_threshold_and_timeout(self) -> None:
         """Custom failure_threshold and recovery_timeout are respected."""

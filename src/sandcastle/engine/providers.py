@@ -120,7 +120,7 @@ def is_claude_model(model_str: str) -> bool:
 FAILOVER_CHAINS: dict[str, list[str]] = {
     "sonnet": [
         "haiku", "opus",
-        "openai/codex-mini", "minimax/m2.5", "google/gemini-2.5-pro",
+        "openai/codex-mini", "openai/codex", "minimax/m2.5", "google/gemini-2.5-pro",
     ],
     "opus": [
         "sonnet", "haiku",
@@ -131,7 +131,7 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
         "minimax/m2.5", "openai/codex-mini",
     ],
     "minimax/m2.5": [
-        "openai/codex-mini", "haiku", "sonnet",
+        "openai/codex-mini", "haiku", "sonnet", "google/gemini-2.5-pro",
     ],
     "openai/codex-mini": [
         "openai/codex",
@@ -139,7 +139,7 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     ],
     "openai/codex": [
         "openai/codex-mini",
-        "sonnet", "google/gemini-2.5-pro",
+        "sonnet", "opus", "google/gemini-2.5-pro",
     ],
     "google/gemini-2.5-pro": [
         "sonnet", "opus",
@@ -149,21 +149,51 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
 
 
 class ProviderFailover:
-    """Thread-safe failover manager with per-key cooldown tracking."""
+    """Thread-safe failover manager with per-key cooldown tracking.
 
-    def __init__(self) -> None:
+    Differentiates between rate-limit (429) and server-error (5xx) cooldowns:
+    rate-limit cooldowns default to shorter duration since they typically
+    clear faster. The ``rate_limit_cooldown_seconds`` can be configured
+    separately.
+    """
+
+    def __init__(
+        self,
+        *,
+        rate_limit_cooldown_seconds: float | None = None,
+    ) -> None:
         self._cooldowns: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._rate_limit_cooldown = rate_limit_cooldown_seconds
+
+    @property
+    def rate_limit_cooldown_seconds(self) -> float:
+        """Return the cooldown for 429 rate-limit errors (shorter than 5xx)."""
+        if self._rate_limit_cooldown is not None:
+            return self._rate_limit_cooldown
+        from sandcastle.config import settings
+        # Use 1/4 of the normal cooldown for rate limits (min 10s)
+        return max(10.0, settings.failover_cooldown_seconds / 4)
 
     def mark_cooldown(
         self,
         api_key_env: str,
         duration_seconds: float | None = None,
+        *,
+        is_rate_limit: bool = False,
     ) -> None:
-        """Put *api_key_env* on cooldown until ``now + duration_seconds``."""
+        """Put *api_key_env* on cooldown until ``now + duration_seconds``.
+
+        If *duration_seconds* is None, uses the config default. If
+        *is_rate_limit* is True, uses a shorter cooldown appropriate for
+        429 errors.
+        """
         if duration_seconds is None:
-            from sandcastle.config import settings
-            duration_seconds = settings.failover_cooldown_seconds
+            if is_rate_limit:
+                duration_seconds = self.rate_limit_cooldown_seconds
+            else:
+                from sandcastle.config import settings
+                duration_seconds = settings.failover_cooldown_seconds
         with self._lock:
             self._cooldowns[api_key_env] = time.monotonic() + duration_seconds
 
@@ -177,6 +207,11 @@ class ProviderFailover:
                 del self._cooldowns[api_key_env]
                 return True
             return False
+
+    def clear_cooldown(self, api_key_env: str) -> None:
+        """Remove cooldown for *api_key_env* immediately."""
+        with self._lock:
+            self._cooldowns.pop(api_key_env, None)
 
     def get_alternatives(self, model_str: str) -> list[str]:
         """Return ordered fallback models, filtered by cooldown and configured keys."""

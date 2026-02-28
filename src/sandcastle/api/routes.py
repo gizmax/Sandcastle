@@ -3369,6 +3369,8 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
             ).model_dump(),
         )
 
+    _DLQ_MAX_RETRIES = 10  # Hard limit on retry attempts
+
     async with async_session() as session:
         # Load DLQ item with tenant check via parent Run
         stmt = select(DeadLetterItem).where(DeadLetterItem.id == item_uuid)
@@ -3392,6 +3394,17 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
                 ).model_dump(),
             )
 
+        if item.attempts >= _DLQ_MAX_RETRIES:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="MAX_RETRIES_EXCEEDED",
+                        message=f"DLQ item has reached the maximum retry limit ({_DLQ_MAX_RETRIES})",
+                    )
+                ).model_dump(),
+            )
+
         # Load the original run to get workflow name and input
         original_run = await session.get(Run, item.run_id)
         if not original_run:
@@ -3405,31 +3418,35 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
                 ).model_dump(),
             )
 
-        # Mark DLQ item as resolved by retry
-        item.resolved_at = datetime.now(timezone.utc)
-        item.resolved_by = "retry"
-        item.attempts += 1
-        await session.commit()
+        # Capture run attributes while session is open (avoid detached instance)
+        run_workflow_name = original_run.workflow_name
+        run_input_data = original_run.input_data
+        run_callback_url = original_run.callback_url
+        run_tenant_id = original_run.tenant_id
+        run_id_ref = original_run.id
+        dlq_item_id = item.id
 
-    # Re-enqueue the workflow
+    # Re-enqueue the workflow first, then mark DLQ item as resolved.
+    # This ensures that if enqueue fails, the DLQ item remains unresolved
+    # and can be retried again.
     try:
-        yaml_content = _load_workflow_yaml(original_run.workflow_name)
+        yaml_content = _load_workflow_yaml(run_workflow_name)
         new_run_id = str(uuid.uuid4())
 
         async with async_session() as session:
             new_run = Run(
                 id=uuid.UUID(new_run_id),
-                workflow_name=original_run.workflow_name,
+                workflow_name=run_workflow_name,
                 status=RunStatus.QUEUED,
-                input_data=original_run.input_data,
-                callback_url=original_run.callback_url,
-                tenant_id=original_run.tenant_id,
-                parent_run_id=original_run.id,
+                input_data=run_input_data,
+                callback_url=run_callback_url,
+                tenant_id=run_tenant_id,
+                parent_run_id=run_id_ref,
             )
             session.add(new_run)
             await session.commit()
 
-        await enqueue_workflow(yaml_content, original_run.input_data or {}, new_run_id)
+        await enqueue_workflow(yaml_content, run_input_data or {}, new_run_id)
         logger.info(f"DLQ retry: created new run {new_run_id} for item {item_id}")
 
     except Exception as e:
@@ -3440,6 +3457,15 @@ async def retry_dead_letter(item_id: str, request: Request) -> ApiResponse:
                 error=ErrorResponse(code="RETRY_ERROR", message="Could not retry dead letter item")
             ).model_dump(),
         )
+
+    # Mark DLQ item as resolved AFTER successful enqueue
+    async with async_session() as session:
+        dlq_item = await session.get(DeadLetterItem, dlq_item_id)
+        if dlq_item:
+            dlq_item.resolved_at = datetime.now(timezone.utc)
+            dlq_item.resolved_by = "retry"
+            dlq_item.attempts += 1
+            await session.commit()
 
     return ApiResponse(
         data={
@@ -4286,6 +4312,9 @@ async def list_api_keys(
 # --- Policy Violations ---
 
 
+_VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+
+
 @router.get("/runs/{run_id}/violations")
 async def get_run_violations(
     run_id: str,
@@ -4296,6 +4325,17 @@ async def get_run_violations(
 ) -> ApiResponse:
     """List policy violations for a specific run."""
     tenant_id = get_tenant_id(request)
+
+    if severity and severity not in _VALID_SEVERITIES:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SEVERITY",
+                    message=f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(_VALID_SEVERITIES))}",
+                )
+            ).model_dump(),
+        )
 
     try:
         run_uuid = uuid.UUID(run_id)
@@ -4366,6 +4406,28 @@ async def list_violations(
 ) -> ApiResponse:
     """List all policy violations with filters."""
     tenant_id = get_tenant_id(request)
+
+    if severity and severity not in _VALID_SEVERITIES:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SEVERITY",
+                    message=f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(_VALID_SEVERITIES))}",
+                )
+            ).model_dump(),
+        )
+
+    if policy_id and len(policy_id) > 255:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_POLICY_ID",
+                    message="policy_id must be 255 characters or fewer",
+                )
+            ).model_dump(),
+        )
 
     async with async_session() as session:
         base = select(PolicyViolation)
@@ -5869,6 +5931,7 @@ async def run_eval_suite_endpoint(req: Request, body: EvalSuiteRunRequest) -> Ap
     # Create a running eval_run record
     eval_run_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
+    tenant_id = get_tenant_id(req)
     async with async_session() as session:
         eval_run = EvalRun(
             id=eval_run_id,
@@ -5878,6 +5941,7 @@ async def run_eval_suite_endpoint(req: Request, body: EvalSuiteRunRequest) -> Ap
             total_cases=len(suite.cases),
             suite_yaml=body.suite_yaml,
             started_at=now,
+            tenant_id=tenant_id,
         )
         session.add(eval_run)
         await session.commit()
@@ -5994,11 +6058,18 @@ async def list_eval_runs(
 ) -> ApiResponse:
     """List eval run history."""
     _require_admin(request)
+    tenant_id = get_tenant_id(request)
+
     async with async_session() as session:
         count_stmt = select(func.count(EvalRun.id))
-        total = await session.scalar(count_stmt)
-
         stmt = select(EvalRun).order_by(EvalRun.created_at.desc()).offset(offset).limit(limit)
+
+        # Tenant isolation for eval runs
+        if settings.auth_required and tenant_id is not None:
+            count_stmt = count_stmt.where(EvalRun.tenant_id == tenant_id)
+            stmt = stmt.where(EvalRun.tenant_id == tenant_id)
+
+        total = await session.scalar(count_stmt)
         result = await session.execute(stmt)
         items = result.scalars().all()
 
@@ -6031,6 +6102,7 @@ async def list_eval_runs(
 async def get_eval_run(req: Request, eval_run_id: str) -> ApiResponse:
     """Get eval run details with case results."""
     _require_admin(req)
+    tenant_id = get_tenant_id(req)
     try:
         run_uuid = uuid.UUID(eval_run_id)
     except ValueError:
@@ -6047,6 +6119,9 @@ async def get_eval_run(req: Request, eval_run_id: str) -> ApiResponse:
             .options(selectinload(EvalRun.case_results))
             .where(EvalRun.id == run_uuid)
         )
+        # Tenant isolation for eval runs
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.where(EvalRun.tenant_id == tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
 
@@ -6096,13 +6171,26 @@ async def get_eval_run(req: Request, eval_run_id: str) -> ApiResponse:
 async def eval_stats(req: Request) -> ApiResponse:
     """Get aggregated eval statistics with 30-day trend."""
     _require_admin(req)
+    tenant_id = get_tenant_id(req)
+
     async with async_session() as session:
-        total_runs = await session.scalar(select(func.count(EvalRun.id)))
-        avg_pass_rate = await session.scalar(select(func.avg(EvalRun.pass_rate)))
-        total_cost = await session.scalar(select(func.sum(EvalRun.total_cost_usd)))
+        # Build tenant-aware base queries
+        count_stmt = select(func.count(EvalRun.id))
+        avg_stmt = select(func.avg(EvalRun.pass_rate))
+        cost_stmt = select(func.sum(EvalRun.total_cost_usd))
+        last_run_stmt = select(EvalRun.completed_at).order_by(EvalRun.created_at.desc()).limit(1)
+
+        if settings.auth_required and tenant_id is not None:
+            count_stmt = count_stmt.where(EvalRun.tenant_id == tenant_id)
+            avg_stmt = avg_stmt.where(EvalRun.tenant_id == tenant_id)
+            cost_stmt = cost_stmt.where(EvalRun.tenant_id == tenant_id)
+            last_run_stmt = last_run_stmt.where(EvalRun.tenant_id == tenant_id)
+
+        total_runs = await session.scalar(count_stmt)
+        avg_pass_rate = await session.scalar(avg_stmt)
+        total_cost = await session.scalar(cost_stmt)
 
         # Last run
-        last_run_stmt = select(EvalRun.completed_at).order_by(EvalRun.created_at.desc()).limit(1)
         last_run_at = await session.scalar(last_run_stmt)
 
         # 30-day pass rate trend
@@ -6112,6 +6200,8 @@ async def eval_stats(req: Request) -> ApiResponse:
             .where(EvalRun.created_at >= thirty_days_ago)
             .order_by(EvalRun.created_at.asc())
         )
+        if settings.auth_required and tenant_id is not None:
+            trend_stmt = trend_stmt.where(EvalRun.tenant_id == tenant_id)
         trend_result = await session.execute(trend_stmt)
         trend_runs = trend_result.scalars().all()
 
@@ -6147,6 +6237,48 @@ async def eval_stats(req: Request) -> ApiResponse:
 # Memory endpoints
 # ---------------------------------------------------------------------------
 
+import re as _re
+
+_SCOPE_ID_RE = _re.compile(
+    r"^(workflow:[a-zA-Z0-9_. -]{1,200}"
+    r"|agent:[a-zA-Z0-9_. -]{1,200}"
+    r"|global)$"
+)
+_MEMORY_ID_RE = _re.compile(r"^[a-zA-Z0-9_-]{1,200}$")
+
+
+def _validate_scope_id(scope_id: str) -> str:
+    """Validate and return scope_id, or raise 422."""
+    if not _SCOPE_ID_RE.match(scope_id):
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_SCOPE_ID",
+                    message=(
+                        "scope_id must match 'workflow:<name>', "
+                        "'agent:<name>', or 'global'"
+                    ),
+                )
+            ).model_dump(),
+        )
+    return scope_id
+
+
+def _validate_memory_id(memory_id: str) -> str:
+    """Validate memory_id format, or raise 422."""
+    if not _MEMORY_ID_RE.match(memory_id):
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_MEMORY_ID",
+                    message="memory_id must be alphanumeric with hyphens/underscores (max 200 chars)",
+                )
+            ).model_dump(),
+        )
+    return memory_id
+
 
 @router.get("/memories")
 async def list_memories(
@@ -6158,6 +6290,7 @@ async def list_memories(
 ):
     """List all memories for a given scope."""
     _require_admin(req)
+    _validate_scope_id(scope_id)
     from sandcastle.engine.memory import load_memories
 
     memories = await load_memories(scope_id, limit=limit)
@@ -6194,6 +6327,7 @@ async def search_memories(req: Request, body: MemorySearchRequest):
 async def remove_memory(req: Request, memory_id: str):
     """Delete a specific memory by ID."""
     _require_admin(req)
+    _validate_memory_id(memory_id)
     from sandcastle.engine.memory import delete_memory
 
     ok = await delete_memory(memory_id)
@@ -6216,6 +6350,7 @@ async def remove_all_memories(
 ):
     """Delete all memories for a given scope."""
     _require_admin(req)
+    _validate_scope_id(scope_id)
     from sandcastle.engine.memory import delete_all_memories
 
     ok = await delete_all_memories(scope_id)

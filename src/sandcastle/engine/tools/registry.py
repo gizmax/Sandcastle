@@ -3124,16 +3124,41 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
 # All known tool names (for YAML validation)
 KNOWN_TOOLS = frozenset(TOOL_REGISTRY.keys())
 
+# Valid tool categories (for API validation)
+VALID_CATEGORIES = frozenset(
+    {t.category for t in TOOL_REGISTRY.values()}
+)
+
+# Connection name validation: alphanumeric, hyphens, underscores only
+import re as _re
+
+_CONN_NAME_RE = _re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$")
+
 
 def parse_tool_ref(ref: str) -> tuple[str, str | None]:
     """Parse a tool reference into (tool_name, connection_name).
 
+    Connection names are validated to contain only safe characters
+    (alphanumeric, hyphens, underscores) and max 100 chars.
+
     Examples:
         "slack"                -> ("slack", None)
         "postgresql:analytics" -> ("postgresql", "analytics")
+
+    Raises ValueError if connection name contains invalid characters.
     """
     if ":" in ref:
         tool_name, connection_name = ref.split(":", 1)
+        if not connection_name:
+            raise ValueError(
+                f"Empty connection name in tool ref '{ref}'"
+            )
+        if not _CONN_NAME_RE.match(connection_name):
+            raise ValueError(
+                f"Invalid connection name '{connection_name}' in tool ref '{ref}'. "
+                "Must be 1-100 chars, alphanumeric/hyphens/underscores, "
+                "starting with alphanumeric."
+            )
         return tool_name, connection_name
     return ref, None
 
@@ -3146,7 +3171,10 @@ def get_tool(name: str) -> ToolDefinition:
 
 
 def list_tools(category: str | None = None) -> list[ToolDefinition]:
-    """List all tools, optionally filtered by category."""
+    """List all tools, optionally filtered by category.
+
+    If category is provided but not recognized, returns an empty list.
+    """
     tools = list(TOOL_REGISTRY.values())
     if category:
         tools = [t for t in tools if t.category == category]
@@ -3156,11 +3184,16 @@ def list_tools(category: str | None = None) -> list[ToolDefinition]:
 def validate_tools(tool_names: list[str]) -> list[str]:
     """Validate a list of tool names (supports tool:connection format).
 
-    Returns list of error messages.
+    Returns list of error messages. Validates both tool name existence
+    and connection name format.
     """
     errors: list[str] = []
     for ref in tool_names:
-        base_name, _ = parse_tool_ref(ref)
+        try:
+            base_name, _ = parse_tool_ref(ref)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
         if base_name not in TOOL_REGISTRY:
             errors.append(
                 f"Unknown tool '{base_name}'. Available: {', '.join(sorted(TOOL_REGISTRY))}"

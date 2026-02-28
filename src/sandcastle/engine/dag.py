@@ -1253,7 +1253,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         if step.tools:
             all_tools.update(step.tools)
     for tool_ref in all_tools:
-        base_name, _ = parse_tool_ref(tool_ref)
+        try:
+            base_name, _ = parse_tool_ref(tool_ref)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
         if base_name not in KNOWN_TOOLS:
             errors.append(
                 f"Unknown tool '{base_name}'. Available: {', '.join(sorted(KNOWN_TOOLS))}"

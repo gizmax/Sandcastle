@@ -95,10 +95,12 @@ describe("ConfirmDialog", () => {
     expect(dialog).toBeInTheDocument();
   });
 
-  it("has aria-modal and aria-label attributes", () => {
+  it("has aria-modal and aria-labelledby attributes", () => {
     render(<ConfirmDialog {...defaultProps} />);
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAttribute("aria-label", "Delete workflow");
+    // Component uses aria-labelledby pointing to the title element
+    expect(dialog).toHaveAttribute("aria-labelledby");
+    expect(dialog).toHaveAttribute("aria-describedby");
   });
 });

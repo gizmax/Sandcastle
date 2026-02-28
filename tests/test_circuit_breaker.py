@@ -19,9 +19,10 @@ class TestCircuitBreaker:
         cb = CircuitBreaker()
         assert cb.state == CircuitBreaker.CLOSED
 
-    def test_allow_request_when_closed(self):
+    @pytest.mark.asyncio
+    async def test_allow_request_when_closed(self):
         cb = CircuitBreaker()
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_stays_closed_under_threshold(self):
@@ -29,7 +30,7 @@ class TestCircuitBreaker:
         await cb.record_failure()
         await cb.record_failure()
         assert cb.state == CircuitBreaker.CLOSED
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_trips_open_at_threshold(self):
@@ -38,7 +39,7 @@ class TestCircuitBreaker:
             await cb.record_failure()
         assert cb._state == CircuitBreaker.OPEN
         assert cb.state == CircuitBreaker.OPEN
-        assert cb.allow_request() is False
+        assert await cb.allow_request() is False
 
     @pytest.mark.asyncio
     async def test_success_resets_to_closed(self):
@@ -48,7 +49,7 @@ class TestCircuitBreaker:
         assert cb._state == CircuitBreaker.OPEN
         await cb.record_success()
         assert cb.state == CircuitBreaker.CLOSED
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_half_open_after_recovery_timeout(self):
@@ -57,7 +58,7 @@ class TestCircuitBreaker:
         assert cb._state == CircuitBreaker.OPEN
         await asyncio.sleep(0.06)
         assert cb.state == CircuitBreaker.HALF_OPEN
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_success_after_half_open_resets(self):

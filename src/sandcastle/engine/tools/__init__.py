@@ -18,9 +18,11 @@ from sandcastle.engine.tools.loader import (
 from sandcastle.engine.tools.registry import (
     KNOWN_TOOLS,
     TOOL_REGISTRY,
+    VALID_CATEGORIES,
     ToolDefinition,
     get_tool,
     list_tools,
+    parse_tool_ref,
     validate_tools,
 )
 
@@ -28,6 +30,7 @@ __all__ = [
     "KNOWN_TOOLS",
     "TOOL_REGISTRY",
     "ToolDefinition",
+    "VALID_CATEGORIES",
     "bundle_tool_files",
     "generate_tool_docs",
     "generate_tool_schemas",
@@ -35,6 +38,7 @@ __all__ = [
     "get_tool_credentials",
     "list_tools",
     "mask_credential",
+    "parse_tool_ref",
     "validate_tool_credentials",
     "validate_tools",
 ]

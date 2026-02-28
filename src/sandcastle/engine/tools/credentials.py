@@ -29,7 +29,11 @@ def get_tool_credentials(tool_names: list[str]) -> dict[str, str]:
     named_refs: list[tuple[str, str]] = []
 
     for ref in tool_names:
-        base_name, conn_name = parse_tool_ref(ref)
+        try:
+            base_name, conn_name = parse_tool_ref(ref)
+        except ValueError:
+            logger.warning("Invalid tool ref '%s', skipping", ref)
+            continue
         try:
             tool = get_tool(base_name)
         except KeyError:
@@ -67,8 +71,19 @@ def _resolve_named_connections(refs: list[tuple[str, str]]) -> dict[str, str]:
         # Already in async context - use thread to run sync query
         import concurrent.futures
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_resolve_named_connections_sync, refs).result(timeout=5)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(
+                    _resolve_named_connections_sync, refs
+                ).result(timeout=5)
+        except concurrent.futures.TimeoutError:
+            logger.error(
+                "Timeout resolving named connections (refs=%s)", refs
+            )
+            return {}
+        except Exception:
+            logger.exception("Failed to resolve named connections")
+            return {}
     else:
         return asyncio.run(_resolve_named_connections_async(refs))
 
@@ -162,8 +177,11 @@ def mask_credential(value: str) -> str:
     """Mask a credential value for safe display.
 
     Shows first 4 and last 4 characters, with dots in between.
-    Short values are fully masked.
+    Short values are fully masked. Empty strings return a fixed mask
+    to avoid leaking that the value is empty.
     """
+    if not value:
+        return "****"
     if len(value) <= 8:
         return "*" * len(value)
     return value[:4] + "..." + value[-4:]

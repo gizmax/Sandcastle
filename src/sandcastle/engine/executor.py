@@ -470,7 +470,44 @@ def _escape_js_string(text: str) -> str:
         .replace("\n", "\\n")
         .replace("\r", "\\r")
         .replace("\t", "\\t")
+        .replace("`", "\\`")
+        .replace("\x00", "")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
     )
+
+
+def _validate_browser_url(url: str) -> str:
+    """Validate and sanitize a URL for browser navigation.
+
+    Rejects dangerous schemes (javascript:, data:, file:) and ensures
+    the URL uses http or https. Returns the validated URL.
+    Raises ValueError for invalid/dangerous URLs.
+    """
+    from urllib.parse import urlparse
+
+    if not url or not url.strip():
+        raise ValueError("Browser URL must not be empty")
+
+    url = url.strip()
+
+    # Reject dangerous schemes before parsing
+    lower = url.lower().lstrip()
+    for scheme in ("javascript:", "data:", "file:", "vbscript:", "blob:"):
+        if lower.startswith(scheme):
+            raise ValueError(f"Dangerous URL scheme rejected: {scheme}")
+
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(
+            f"Unsupported URL scheme '{parsed.scheme}' - only http/https allowed"
+        )
+
+    # If no scheme, prepend https
+    if not parsed.scheme:
+        url = f"https://{url}"
+
+    return url
 
 
 # In-memory cancel flags for local mode (no Redis).
@@ -1635,6 +1672,7 @@ async def _execute_step_once(
                         content,
                         metadata=meta,
                         run_id=context.run_id,
+                        skip_admission=True,  # already checked above
                     )
                     logger.info(
                         "Saved memory from step '%s' "
@@ -3569,6 +3607,8 @@ async def _browser_playwright_mode(
     """Playwright mode: augment the step prompt with browser tool instructions
     and delegate to the standard sandbox agent execution.
     """
+    import time
+
     # Build augmented prompt with browser context
     browser_instructions = (
         "You have access to a headless Chromium browser via Playwright.\n"
@@ -3593,7 +3633,16 @@ async def _browser_playwright_mode(
             context,
             step.depends_on,
         )
-        browser_instructions += f"  await page.goto('{start_url}');\n"
+        try:
+            start_url = _validate_browser_url(start_url)
+        except ValueError as e:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Invalid browser URL: {e}",
+                duration_seconds=time.monotonic() - started_at,
+            )
+        browser_instructions += f"  await page.goto('{_escape_js_string(start_url)}');\n"
 
     browser_instructions += (
         "  // ... your automation code here ...\n"
@@ -3716,6 +3765,23 @@ async def _browser_dom_mode(
 
     logger.info("Browser DOM mode: %s -> %s", step.id, cfg.start_url)
 
+    # Validate URL before proceeding
+    if not cfg.start_url:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="DOM mode requires a start_url",
+        )
+
+    try:
+        validated_url = _validate_browser_url(cfg.start_url)
+    except ValueError as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Invalid browser URL: {e}",
+        )
+
     runtime = get_sandshore_runtime()
 
     # Install playwright in sandbox
@@ -3736,7 +3802,7 @@ async def _browser_dom_mode(
         logger.warning(f"Playwright install warning (may already be present): {install_err}")
 
     # Navigate to URL
-    safe_url = _escape_js_string(cfg.start_url)
+    safe_url = _escape_js_string(validated_url)
     nav_script = (
         "const { chromium } = require('playwright');\n"
         "(async () => {\n"
@@ -3884,10 +3950,19 @@ async def _browser_computer_use_mode(
     max_actions = 200  # Safety limit
     iteration = 0
 
-    # Resolve start URL
+    # Resolve and validate start URL
     start_url = cfg.start_url
     if start_url:
         start_url = resolve_templates(start_url, context, step.depends_on)
+        try:
+            start_url = _validate_browser_url(start_url)
+        except ValueError as e:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Invalid browser URL: {e}",
+                duration_seconds=time.monotonic() - started_at,
+            )
 
     # Build and run browser launch script in sandbox
     safe_start_url = _escape_js_string(start_url) if start_url else ""
@@ -4183,6 +4258,7 @@ async def _browser_computer_use_mode(
 
     duration = time.monotonic() - started_at
 
+    timed_out = last_result is None
     if last_result is None:
         if action_count >= max_actions:
             last_result = f"Browser automation stopped after {max_actions} actions (safety limit)"
@@ -4197,6 +4273,17 @@ async def _browser_computer_use_mode(
             output = parsed
     except (json.JSONDecodeError, ValueError):
         pass
+
+    # Timeout or action limit exceeded -> report as failed
+    if timed_out:
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="failed",
+            error=str(last_result),
+        )
 
     return StepResult(
         step_id=step.id,
@@ -4220,8 +4307,13 @@ def _build_computer_use_action_script(
     ``node -e`` without shell interpolation.
     """
     coordinate = tool_input.get("coordinate", [0, 0])
-    x = coordinate[0] if len(coordinate) > 0 else 0
-    y = coordinate[1] if len(coordinate) > 1 else 0
+    if not isinstance(coordinate, (list, tuple)):
+        coordinate = [0, 0]
+    x = int(coordinate[0]) if len(coordinate) > 0 else 0
+    y = int(coordinate[1]) if len(coordinate) > 1 else 0
+    # Clamp coordinates to viewport bounds
+    x = max(0, min(x, cfg.viewport_width))
+    y = max(0, min(y, cfg.viewport_height))
     text = _escape_js_string(tool_input.get("text", ""))
 
     if action == "screenshot":
@@ -4277,6 +4369,10 @@ def _build_computer_use_action_script(
         return f"console.log('Unknown action: {safe_action}');"
 
 
+# Maximum base64 screenshot size: ~10 MB PNG -> ~13.3 MB base64
+_MAX_SCREENSHOT_B64_SIZE = 14_000_000
+
+
 async def _take_sandbox_screenshot(
     runtime: Any,
     sandbox: Any,
@@ -4302,6 +4398,12 @@ async def _take_sandbox_screenshot(
             result.get("stdout", "").strip() if isinstance(result, dict) else str(result).strip()
         )
         if output and len(output) > 100:
+            if len(output) > _MAX_SCREENSHOT_B64_SIZE:
+                logger.warning(
+                    "Screenshot too large (%d bytes base64), discarding",
+                    len(output),
+                )
+                return None
             return output
     except Exception as e:
         logger.debug(f"Screenshot failed: {e}")

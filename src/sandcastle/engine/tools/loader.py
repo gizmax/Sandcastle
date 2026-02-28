@@ -22,19 +22,35 @@ def bundle_tool_files(tool_names: list[str]) -> dict[str, str]:
     """Read and return connector .mjs files for the given tools.
 
     Returns a dict of filename -> file_content for uploading into sandboxes.
-    Only includes files that exist on disk.
+    Only includes files that exist on disk. Deduplicates tool names.
     """
     from sandcastle.engine.tools.registry import get_tool
 
     files: dict[str, str] = {}
+    seen: set[str] = set()
     for name in tool_names:
+        if name in seen:
+            continue
+        seen.add(name)
+
         try:
             tool = get_tool(name)
         except KeyError:
             logger.warning("Unknown tool '%s', skipping file bundle", name)
             continue
 
-        filepath = _CONNECTORS_DIR / tool.connector_file
+        # Path traversal guard: connector_file must not escape connectors dir
+        filepath = (_CONNECTORS_DIR / tool.connector_file).resolve()
+        connectors_root = _CONNECTORS_DIR.resolve()
+        if not str(filepath).startswith(str(connectors_root) + "/") and filepath != connectors_root:
+            logger.error(
+                "Path traversal blocked: connector_file '%s' resolves outside "
+                "connectors directory (tool: %s)",
+                tool.connector_file,
+                name,
+            )
+            continue
+
         if filepath.exists():
             files[tool.connector_file] = filepath.read_text()
         else:
@@ -47,6 +63,7 @@ def generate_tool_docs(tool_names: list[str]) -> str:
 
     The Claude Agent SDK uses Bash tool calls, so tools are documented
     as CLI commands that the agent can execute via Bash.
+    Deduplicates tool names to avoid repeated sections.
 
     Returns a documentation string to append to the step prompt.
     """
@@ -59,7 +76,11 @@ def generate_tool_docs(tool_names: list[str]) -> str:
     sections.append("Use the Bash tool to execute them from /home/user/tools/.")
     sections.append("")
 
+    seen: set[str] = set()
     for name in tool_names:
+        if name in seen:
+            continue
+        seen.add(name)
         try:
             tool = get_tool(name)
         except KeyError:
@@ -107,12 +128,16 @@ def generate_tool_schemas(tool_names: list[str]) -> list[dict]:
     """Generate OpenAI function_calling tool schemas for the given tools.
 
     Returns a list of tool definitions in OpenAI function_calling format,
-    ready to merge with the runner's built-in tools.
+    ready to merge with the runner's built-in tools. Deduplicates tool names.
     """
     from sandcastle.engine.tools.registry import get_tool
 
     schemas: list[dict] = []
+    seen: set[str] = set()
     for name in tool_names:
+        if name in seen:
+            continue
+        seen.add(name)
         try:
             tool = get_tool(name)
         except KeyError:

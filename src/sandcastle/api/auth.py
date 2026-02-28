@@ -18,14 +18,17 @@ from sandcastle.models.db import ApiKey, async_session
 
 logger = logging.getLogger(__name__)
 
-# Public endpoints that don't require authentication
+# Public endpoints that don't require authentication.
+# NOTE: /.well-known/agent.json is public per the A2A discovery spec.
+# /a2a is NOT public - it requires auth when AUTH_REQUIRED=true.
+# /api/agui is NOT public - it requires auth when AUTH_REQUIRED=true.
 PUBLIC_PATHS = {
     "/api/health", "/api/docs", "/api/openapi.json",
-    "/api/redoc", "/a2a", "/.well-known/agent.json",
+    "/api/redoc", "/.well-known/agent.json",
 }
 
 # Path prefixes that don't require authentication
-PUBLIC_PREFIXES = ("/api/templates", "/api/agui")
+PUBLIC_PREFIXES = ("/api/templates",)
 
 # Pepper for HMAC key hashing - falls back to a stable default for dev/local mode.
 # In production, set API_KEY_PEPPER as an environment variable.
@@ -74,8 +77,14 @@ async def auth_middleware(request: Request, call_next):
         request.state._auth_checked = True
         return await call_next(request)
 
-    # Skip auth for non-API paths (dashboard, static files)
-    if not request.url.path.startswith("/api"):
+    # Skip auth for non-API paths (dashboard, static files), EXCEPT for
+    # protocol endpoints that require auth (/a2a JSON-RPC endpoint).
+    # /.well-known/agent.json is handled by PUBLIC_PATHS above.
+    _AUTH_REQUIRED_NON_API_PATHS = {"/a2a"}
+    if (
+        not request.url.path.startswith("/api")
+        and request.url.path not in _AUTH_REQUIRED_NON_API_PATHS
+    ):
         request.state._auth_checked = True
         return await call_next(request)
 

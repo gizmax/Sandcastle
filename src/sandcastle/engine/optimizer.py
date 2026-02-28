@@ -518,7 +518,12 @@ def get_optimizer() -> CostLatencyOptimizer:
 
 
 def calculate_budget_pressure(current_cost: float, max_cost: float | None) -> float:
-    """Calculate current budget utilization (0-1)."""
+    """Calculate current budget utilization (0-1).
+
+    Clamps result to [0.0, 1.0] range. Negative current_cost yields 0.0.
+    """
     if not max_cost or max_cost <= 0:
+        return 0.0
+    if current_cost < 0:
         return 0.0
     return min(current_cost / max_cost, 1.0)

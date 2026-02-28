@@ -29,6 +29,12 @@ const EvaluationsPage = lazy(() => import("@/pages/EvaluationsPage"));
 const SystemHealthPage = lazy(() => import("@/pages/SystemHealthPage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
+/** Wrap a lazy-loaded page in a per-route error boundary so a crash in one
+ *  page does not take down the entire app. */
+function PageBoundary({ name, children }: { name: string; children: React.ReactNode }) {
+  return <ErrorBoundary name={name}>{children}</ErrorBoundary>;
+}
+
 function NotFound() {
   return (
     <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -61,7 +67,7 @@ export default function App() {
 
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
-      <ErrorBoundary>
+      <ErrorBoundary name="root">
       <EventStreamProvider>
         <Suspense
           fallback={
@@ -72,28 +78,28 @@ export default function App() {
         >
           <Routes>
             {/* Onboarding lives outside Layout (full-screen, no sidebar) */}
-            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/onboarding" element={<PageBoundary name="onboarding"><Onboarding /></PageBoundary>} />
 
             <Route element={<Layout />}>
-              <Route path="/" element={<Overview />} />
-              <Route path="/runs" element={<Runs />} />
-              <Route path="/runs/compare" element={<RunComparePage />} />
-              <Route path="/runs/:id" element={<RunDetailPage />} />
-              <Route path="/workflows" element={<Workflows />} />
-              <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
-              <Route path="/workflows/:name" element={<WorkflowDetailPage />} />
-              <Route path="/templates" element={<TemplatesPage />} />
-              <Route path="/integrations" element={<IntegrationsPage />} />
-              <Route path="/approvals" element={<ApprovalsPage />} />
-              <Route path="/evaluations" element={<EvaluationsPage />} />
-              <Route path="/autopilot" element={<AutoPilotPage />} />
-              <Route path="/violations" element={<ViolationsPage />} />
-              <Route path="/optimizer" element={<OptimizerPage />} />
-              <Route path="/schedules" element={<Schedules />} />
-              <Route path="/dead-letter" element={<DeadLetterPage />} />
-              <Route path="/api-keys" element={<ApiKeysPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/system-health" element={<SystemHealthPage />} />
+              <Route path="/" element={<PageBoundary name="overview"><Overview /></PageBoundary>} />
+              <Route path="/runs" element={<PageBoundary name="runs"><Runs /></PageBoundary>} />
+              <Route path="/runs/compare" element={<PageBoundary name="run-compare"><RunComparePage /></PageBoundary>} />
+              <Route path="/runs/:id" element={<PageBoundary name="run-detail"><RunDetailPage /></PageBoundary>} />
+              <Route path="/workflows" element={<PageBoundary name="workflows"><Workflows /></PageBoundary>} />
+              <Route path="/workflows/builder" element={<PageBoundary name="workflow-builder"><WorkflowBuilderPage /></PageBoundary>} />
+              <Route path="/workflows/:name" element={<PageBoundary name="workflow-detail"><WorkflowDetailPage /></PageBoundary>} />
+              <Route path="/templates" element={<PageBoundary name="templates"><TemplatesPage /></PageBoundary>} />
+              <Route path="/integrations" element={<PageBoundary name="integrations"><IntegrationsPage /></PageBoundary>} />
+              <Route path="/approvals" element={<PageBoundary name="approvals"><ApprovalsPage /></PageBoundary>} />
+              <Route path="/evaluations" element={<PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary>} />
+              <Route path="/autopilot" element={<PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary>} />
+              <Route path="/violations" element={<PageBoundary name="violations"><ViolationsPage /></PageBoundary>} />
+              <Route path="/optimizer" element={<PageBoundary name="optimizer"><OptimizerPage /></PageBoundary>} />
+              <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
+              <Route path="/dead-letter" element={<PageBoundary name="dead-letter"><DeadLetterPage /></PageBoundary>} />
+              <Route path="/api-keys" element={<PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary>} />
+              <Route path="/settings" element={<PageBoundary name="settings"><SettingsPage /></PageBoundary>} />
+              <Route path="/system-health" element={<PageBoundary name="system-health"><SystemHealthPage /></PageBoundary>} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

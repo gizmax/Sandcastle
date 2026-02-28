@@ -22,14 +22,27 @@ async function rpc(method, params = {}) {
     method,
     params,
   };
-  const resp = await fetch(SERVER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let resp;
+  try {
+    resp = await fetch(SERVER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") {
+      throw new Error(`MCP server timeout after 30s: ${SERVER_URL}`);
+    }
+    throw err;
+  }
+  clearTimeout(timer);
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`MCP server ${resp.status}: ${text.slice(0, 500)}`);

@@ -1,25 +1,44 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  /** Optional label for identifying which boundary caught the error in logs. */
+  name?: string;
 }
 
 interface State {
   hasError: boolean;
   error: Error | null;
+  isNetworkError: boolean;
 }
 
+/**
+ * Error boundary that catches render errors in its subtree.
+ * Distinguishes between network errors and application errors
+ * to provide more helpful messages.
+ */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, error: null };
+  state: State = { hasError: false, error: null, isNetworkError: false };
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    const isNetworkError =
+      error.name === "TypeError" && /fetch|network|load/i.test(error.message);
+    return { hasError: true, error, isNetworkError };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    const label = this.props.name ?? "unknown";
+    console.error(
+      `[Sandcastle] ErrorBoundary(${label}) caught error:`,
+      error,
+      info.componentStack
+    );
   }
 
   handleReset = () => {
-    this.setState({ hasError: false, error: null });
+    this.setState({ hasError: false, error: null, isNetworkError: false });
   };
 
   render() {
@@ -33,10 +52,14 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <div className="text-center space-y-2">
             <h2 className="text-lg font-semibold text-foreground">
-              Something went wrong
+              {this.state.isNetworkError
+                ? "Connection error"
+                : "Something went wrong"}
             </h2>
             <p className="text-sm text-muted max-w-md">
-              {this.state.error?.message || "An unexpected error occurred"}
+              {this.state.isNetworkError
+                ? "Could not reach the server. Check your network connection and try again."
+                : (this.state.error?.message || "An unexpected error occurred")}
             </p>
           </div>
           <button
