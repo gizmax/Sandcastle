@@ -90,7 +90,7 @@ class RunContext:
             max_cost_usd=self.max_cost_usd,
             workflow_name=self.workflow_name,
             default_tools=self.default_tools,
-            memories=self.memories,
+            memories=list(self.memories),
             _memory_config=self._memory_config,
             _memory_scope_id=self._memory_scope_id,
             branch_skip_steps=set(self.branch_skip_steps),
@@ -472,10 +472,8 @@ async def _check_cancel(run_id: str) -> bool:
     from sandcastle.config import settings
 
     if not settings.redis_url:
-        # Local mode: check in-memory OrderedDict and clean up after detection
         async with _cancel_flags_lock:
             if run_id in _cancel_flags:
-                del _cancel_flags[run_id]
                 return True
             return False
 
@@ -4761,7 +4759,7 @@ async def execute_workflow(
         )
 
     finally:
-        pass  # Singleton client - not closed per run
+        _cancel_flags.pop(run_id, None)
 
 
 async def _save_routing_decision(

@@ -272,8 +272,12 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
     run_id = task_id
     try:
         async with async_session() as session:
+            try:
+                run_uuid = uuid.UUID(run_id) if run_id else uuid.uuid4()
+            except ValueError:
+                run_uuid = uuid.uuid4()
             db_run = Run(
-                id=uuid.UUID(run_id) if len(run_id) == 36 else uuid.uuid4(),
+                id=run_uuid,
                 workflow_name=workflow.name,
                 status=RunStatus.RUNNING,
                 input_data=workflow_input,

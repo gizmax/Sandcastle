@@ -39,7 +39,7 @@ export default function ApprovalsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
 
   const fetchItems = useCallback(async () => {
     try {
@@ -61,8 +61,8 @@ export default function ApprovalsPage() {
 
   const handleAction = useCallback(
     async (id: string, action: "approve" | "reject" | "skip") => {
-      if (actionLoading) return;
-      setActionLoading(id);
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
       try {
         const res = await api.post(`/approvals/${id}/${action}`);
         if (res.error) {
@@ -72,7 +72,11 @@ export default function ApprovalsPage() {
         toast.success(`Approval ${action}ed`);
         void fetchItems();
       } finally {
-        setActionLoading(null);
+        setActionLoading((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
       }
     },
     [fetchItems, actionLoading]
@@ -131,6 +135,7 @@ export default function ApprovalsPage() {
           <button
             key={f.key}
             onClick={() => setFilter(f.key)}
+            aria-pressed={filter === f.key}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-200",
               filter === f.key
@@ -227,7 +232,7 @@ export default function ApprovalsPage() {
                   {item.status === "pending" && (
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
-                        disabled={actionLoading === item.id}
+                        disabled={actionLoading.has(item.id)}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAction(item.id, "approve");
@@ -242,7 +247,7 @@ export default function ApprovalsPage() {
                         Approve
                       </button>
                       <button
-                        disabled={actionLoading === item.id}
+                        disabled={actionLoading.has(item.id)}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAction(item.id, "reject");
@@ -257,7 +262,7 @@ export default function ApprovalsPage() {
                         Reject
                       </button>
                       <button
-                        disabled={actionLoading === item.id}
+                        disabled={actionLoading.has(item.id)}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAction(item.id, "skip");

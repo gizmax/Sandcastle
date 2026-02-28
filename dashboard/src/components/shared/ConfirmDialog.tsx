@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,9 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const dialogId = useId();
+  const titleId = `${dialogId}-title`;
+  const descId = `${dialogId}-desc`;
 
   useEffect(() => {
     if (!open) return;
@@ -41,7 +44,7 @@ export function ConfirmDialog({
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onCancel} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-desc" className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-start gap-3">
             <div
               className={cn(
@@ -58,8 +61,8 @@ export function ConfirmDialog({
               />
             </div>
             <div className="flex-1">
-              <h3 id="confirm-dialog-title" className="text-sm font-semibold text-foreground">{title}</h3>
-              <p id="confirm-dialog-desc" className="mt-1 text-sm text-muted">{description}</p>
+              <h3 id={titleId} className="text-sm font-semibold text-foreground">{title}</h3>
+              <p id={descId} className="mt-1 text-sm text-muted">{description}</p>
             </div>
             <button
               onClick={onCancel}

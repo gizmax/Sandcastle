@@ -228,11 +228,9 @@ class TestCancelFlagsStress:
 
             await cancel_run_local(run_id)
 
-            # Multiple concurrent checks - first should find it, rest should not
+            # Multiple concurrent checks - all should find it (flag persists until cleanup)
             results = await asyncio.gather(*[_check_cancel(run_id) for _ in range(10)])
-            # Exactly one True (the one that consumed the flag)
-            assert results.count(True) == 1
-            assert results.count(False) == 9
+            assert all(results), "Cancel flag should be visible to all concurrent checks"
 
     @pytest.mark.asyncio
     async def test_many_different_run_cancels(self):
@@ -266,16 +264,19 @@ class TestCancelFlagsStress:
         assert len(_cancel_flags) <= _MAX_CANCEL_FLAGS
 
     @pytest.mark.asyncio
-    async def test_cancel_check_local_idempotent(self):
-        """Checking a cancelled run consumes the flag (idempotent second check)."""
-        from sandcastle.engine.executor import _check_cancel, cancel_run_local
+    async def test_cancel_check_local_persistent(self):
+        """Cancel flag persists across multiple checks (cleaned up in finally block)."""
+        from sandcastle.engine.executor import _cancel_flags, _check_cancel, cancel_run_local
 
-        run_id = "run-idempotent"
+        run_id = "run-persistent"
 
         with patch("sandcastle.engine.executor.settings", create=True) as mock_settings:
             mock_settings.redis_url = ""
             await cancel_run_local(run_id)
             assert await _check_cancel(run_id) is True
+            assert await _check_cancel(run_id) is True  # still visible
+            # Manual cleanup (simulates finally block)
+            _cancel_flags.pop(run_id, None)
             assert await _check_cancel(run_id) is False
 
 

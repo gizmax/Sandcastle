@@ -686,8 +686,8 @@ class TestCancelFlags:
             mock_settings.redis_url = ""
             await cancel_run_local("run-abc")
             assert await _check_cancel("run-abc") is True
-            # Second check should return False (flag consumed)
-            assert await _check_cancel("run-abc") is False
+            # Flag persists until cleanup (not consumed on check)
+            assert await _check_cancel("run-abc") is True
 
 
 # ---------------------------------------------------------------------------

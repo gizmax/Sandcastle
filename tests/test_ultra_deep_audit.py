@@ -541,8 +541,9 @@ class TestCancelFlags:
             mock_settings.redis_url = ""
             result = await _executor_mod._check_cancel("run-cancel-test")
             assert result is True
+            # Flag persists until cleanup (not consumed on check)
             result2 = await _executor_mod._check_cancel("run-cancel-test")
-            assert result2 is False
+            assert result2 is True
 
     @pytest.mark.asyncio
     async def test_check_cancel_not_cancelled(self):

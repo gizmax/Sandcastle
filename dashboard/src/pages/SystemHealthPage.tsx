@@ -308,7 +308,7 @@ export default function SystemHealthPage() {
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Uptime</span>
+              <span className="text-sm text-muted-foreground">Session Duration</span>
               <span className="font-mono text-sm text-foreground">
                 {formatUptime(pageLoadTime)}
               </span>

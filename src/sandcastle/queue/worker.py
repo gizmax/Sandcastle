@@ -179,6 +179,7 @@ async def run_workflow_job(
         }
         event_type = _event_map.get(result.status, "workflow.failed")
 
+        webhook_urls = list(dict.fromkeys(webhook_urls))
         for webhook_url in webhook_urls:
             duration = 0.0
             if result.started_at and result.completed_at:
@@ -206,7 +207,7 @@ async def run_workflow_job(
             if run:
                 run.status = RunStatus.FAILED
                 run.completed_at = datetime.now(timezone.utc)
-                run.error = str(e)
+                run.error = str(e)[:4096]
                 await session.commit()
 
         # Dispatch failure webhook - try callback_url, then on_failure.webhook
@@ -220,6 +221,7 @@ async def run_workflow_job(
         except Exception:
             pass
 
+        failure_urls = list(dict.fromkeys(failure_urls))
         for url in failure_urls:
             try:
                 await dispatch_webhook(
