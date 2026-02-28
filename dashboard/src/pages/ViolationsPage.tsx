@@ -50,7 +50,7 @@ export default function ViolationsPage() {
   const [filter, setFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (cancelled?: { current: boolean }) => {
     try {
       setError(null);
       const params: Record<string, string> = {};
@@ -59,17 +59,21 @@ export default function ViolationsPage() {
         api.get<Violation[]>("/violations", params),
         api.get<ViolationStats>("/violations/stats"),
       ]);
+      if (cancelled?.current) return;
       if (itemsRes.data) setItems(itemsRes.data);
       if (statsRes.data) setStats(statsRes.data);
     } catch {
+      if (cancelled?.current) return;
       setError("Could not connect to the API server");
     } finally {
-      setLoading(false);
+      if (!cancelled?.current) setLoading(false);
     }
   }, [filter]);
 
   useEffect(() => {
-    void fetchData();
+    const cancelled = { current: false };
+    void fetchData(cancelled);
+    return () => { cancelled.current = true; };
   }, [fetchData]);
 
   const filters = [

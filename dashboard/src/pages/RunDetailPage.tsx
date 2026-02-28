@@ -60,10 +60,11 @@ export default function RunDetailPage() {
   const [modalMode, setModalMode] = useState<"replay" | "fork">("replay");
   const [modalStepId, setModalStepId] = useState("");
 
-  const fetchRun = useCallback(async () => {
+  const fetchRun = useCallback(async (cancelled?: { current: boolean }) => {
     if (!id) return;
     try {
       const res = await api.get<RunDetail>(`/runs/${id}`);
+      if (cancelled?.current) return;
       if (res.data) {
         setRun(res.data);
         setError(null);
@@ -73,24 +74,31 @@ export default function RunDetailPage() {
         setError("Run not found");
       }
     } catch {
+      if (cancelled?.current) return;
       setError("Could not connect to the API server");
     } finally {
-      setLoading(false);
+      if (!cancelled?.current) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
+    const cancelled = { current: false };
     setLoading(true);
     setRun(null);
     setError(null);
-    void fetchRun();
+    void fetchRun(cancelled);
+    return () => { cancelled.current = true; };
   }, [fetchRun]);
 
   const runStatus = run?.status ?? null;
   useEffect(() => {
     if (!runStatus || !["running", "queued"].includes(runStatus)) return;
-    const interval = setInterval(fetchRun, 5000);
-    return () => clearInterval(interval);
+    const cancelled = { current: false };
+    const interval = setInterval(() => void fetchRun(cancelled), 5000);
+    return () => {
+      cancelled.current = true;
+      clearInterval(interval);
+    };
   }, [runStatus, fetchRun]);
 
   const cancellingRef = useRef(false);

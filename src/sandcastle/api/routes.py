@@ -121,6 +121,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# --- SSE streaming configuration ---
+# Interval (in seconds) between keepalive comments sent to prevent
+# proxies / load balancers from closing idle SSE connections.
+SSE_KEEPALIVE_INTERVAL_SECONDS = 30
+
 # --- Hub registry cache (5 min TTL) ---
 
 _hub_cache: dict[str, tuple[float, Any]] = {}
@@ -294,7 +299,15 @@ async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, i
 
 
 def _apply_tenant_filter(stmt, tenant_id: str | None, column):
-    """Apply tenant_id filter to a query when auth is enabled."""
+    """Apply tenant_id filter to a query when auth is enabled.
+
+    When auth is required:
+    - tenant_id is a string: filter to that tenant's data only
+    - tenant_id is None: admin key (no tenant scope) - sees all data (by design)
+
+    When auth is not required:
+    - tenant_id is always None - no filtering applied (local/dev mode)
+    """
     if settings.auth_required and tenant_id is not None:
         return stmt.where(column == tenant_id)
     return stmt
@@ -2228,9 +2241,14 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
             )
 
     async def event_generator():
-        """Poll the database and emit SSE events as status changes."""
+        """Poll the database and emit SSE events as status changes.
+
+        Sends keepalive comments every ``SSE_KEEPALIVE_INTERVAL_SECONDS``
+        when no status change occurs to prevent proxy timeout.
+        """
         last_status = None
         seen_step_ids: set[tuple[str, int | None]] = set()
+        last_event_time = time.monotonic()
 
         for _ in range(600):  # Max 10 minutes of polling (1s intervals)
             if await request.is_disconnected():
@@ -2245,6 +2263,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 return
 
             current_status = run.status.value if hasattr(run.status, "value") else run.status
+            emitted = False
 
             # Emit status change events
             if current_status != last_status:
@@ -2257,6 +2276,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                     },
                 )
                 last_status = current_status
+                emitted = True
 
             # Emit step update events (keyed by step_id + parallel_index to avoid duplicates)
             for step in run.steps:
@@ -2276,6 +2296,10 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                             "duration_seconds": step.duration_seconds,
                         },
                     )
+                    emitted = True
+
+            if emitted:
+                last_event_time = time.monotonic()
 
             # Terminal states - emit final result and stop
             if current_status in (
@@ -2297,6 +2321,11 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                     },
                 )
                 return
+
+            # Send keepalive comment if no events were emitted recently
+            if (time.monotonic() - last_event_time) >= SSE_KEEPALIVE_INTERVAL_SECONDS:
+                yield ": keepalive\n\n"
+                last_event_time = time.monotonic()
 
             await asyncio.sleep(1.0)
 
@@ -2399,7 +2428,9 @@ async def global_event_stream(request: Request) -> StreamingResponse:
                 if await request.is_disconnected():
                     break
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=float(SSE_KEEPALIVE_INTERVAL_SECONDS)
+                    )
 
                     # Skip events the client has already seen (SSE reconnection)
                     event_seq = event.get("seq", 0)
@@ -2511,6 +2542,8 @@ async def list_runs(
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, req: Request) -> ApiResponse:
     """Cancel a running workflow. Sets a Redis flag checked by the executor."""
+    from sqlalchemy import update as sa_update
+
     tenant_id = get_tenant_id(req)
 
     try:
@@ -2524,30 +2557,49 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
         )
 
     async with async_session() as session:
+        # Read the run to check existence and current status
         stmt = select(Run).where(Run.id == run_uuid)
         stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
 
-    if not run:
-        raise HTTPException(
-            status_code=404,
-            detail=ApiResponse(
-                error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
-            ).model_dump(),
-        )
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
 
-    run_status = run.status.value if hasattr(run.status, "value") else run.status
-    if run_status not in ("queued", "running"):
-        raise HTTPException(
-            status_code=400,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="INVALID_STATUS",
-                    message=f"Cannot cancel run with status '{run_status}'",
-                )
-            ).model_dump(),
+        run_status = run.status.value if hasattr(run.status, "value") else run.status
+        if run_status not in ("queued", "running"):
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_STATUS",
+                        message=f"Cannot cancel run with status '{run_status}'",
+                    )
+                ).model_dump(),
+            )
+
+        # Atomic UPDATE: only changes status if still in a cancellable state.
+        # This prevents TOCTOU races where the run completes between the
+        # SELECT above and this UPDATE.
+        cancel_stmt = (
+            sa_update(Run)
+            .where(
+                Run.id == run_uuid,
+                Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]),
+            )
+            .values(
+                status=RunStatus.CANCELLED,
+                completed_at=datetime.now(timezone.utc),
+                error="Cancelled by user",
+            )
         )
+        await session.execute(cancel_stmt)
+        await session.commit()
 
     # Set cancel flag (Redis or in-memory).
     # Reuse the executor's shared Redis pool to avoid creating a new connection per cancel.
@@ -2563,17 +2615,6 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
         from sandcastle.engine.executor import cancel_run_local
 
         await cancel_run_local(run_id)
-
-    # Update DB status (re-check to avoid overwriting a just-completed run)
-    async with async_session() as session:
-        db_run = await session.get(Run, run_uuid)
-        if db_run:
-            current = db_run.status.value if hasattr(db_run.status, "value") else db_run.status
-            if current in ("queued", "running"):
-                db_run.status = RunStatus.CANCELLED
-                db_run.completed_at = datetime.now(timezone.utc)
-                db_run.error = "Cancelled by user"
-                await session.commit()
 
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
@@ -2629,7 +2670,14 @@ async def delete_run(run_id: str, req: Request) -> ApiResponse:
 
         from sandcastle.models.db import RunStep
 
-        for model in [RunStep, RunCheckpoint, DeadLetterItem]:
+        for model in [
+            ApprovalRequest,
+            PolicyViolation,
+            RoutingDecision,
+            RunStep,
+            RunCheckpoint,
+            DeadLetterItem,
+        ]:
             await session.execute(sa_delete(model).where(model.run_id == run_uuid))
 
         await session.delete(run)
@@ -3729,9 +3777,13 @@ async def autopilot_stats(req: Request) -> ApiResponse:
         avg_quality_improvement = 0.0
         total_cost_savings = 0.0
 
-        completed_exps_q = select(AutoPilotExperiment).where(
-            AutoPilotExperiment.status == ExperimentStatus.COMPLETED,
-            AutoPilotExperiment.deployed_variant_id.is_not(None),
+        completed_exps_q = (
+            select(AutoPilotExperiment)
+            .where(
+                AutoPilotExperiment.status == ExperimentStatus.COMPLETED,
+                AutoPilotExperiment.deployed_variant_id.is_not(None),
+            )
+            .limit(1000)
         )
         completed_exps = (await session.execute(completed_exps_q)).scalars().all()
 
@@ -4530,6 +4582,7 @@ async def get_run_routing_decisions(run_id: str, request: Request) -> ApiRespons
             select(RoutingDecision)
             .where(RoutingDecision.run_id == run_uuid)
             .order_by(RoutingDecision.created_at.asc())
+            .limit(1000)
         )
         result = await session.execute(stmt)
         items = result.scalars().all()

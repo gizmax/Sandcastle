@@ -192,6 +192,26 @@ def _format_cli_error(exc: Exception) -> str:
     """Format an exception into a user-friendly CLI error message."""
     exc_type = type(exc).__name__
 
+    # SDK structured errors - show the API error code and message clearly
+    if exc_type == "SandcastleError":
+        status = getattr(exc, "status_code", 0)
+        code = getattr(exc, "code", "UNKNOWN")
+        message = getattr(exc, "message", str(exc))
+        if status == 401:
+            return f"Authentication failed (HTTP 401): {message}\n  Check your API key."
+        if status == 403:
+            return f"Access denied (HTTP 403): {message}\n  Your API key may lack the required permissions."
+        if status == 404:
+            return f"Not found (HTTP 404): {message}"
+        if status == 422:
+            return f"Validation error (HTTP 422): {message}"
+        if status >= 500:
+            return f"Server error (HTTP {status}): {message}"
+        if status > 0:
+            return f"API error (HTTP {status}) [{code}]: {message}"
+        # Non-HTTP errors (e.g. connection errors wrapped in SandcastleError)
+        return f"API error [{code}]: {message}"
+
     # httpx connection errors
     if "ConnectError" in exc_type or "ConnectionError" in exc_type:
         return (
@@ -206,7 +226,7 @@ def _format_cli_error(exc: Exception) -> str:
             "  Is the Sandcastle server running? Start it with: sandcastle serve"
         )
 
-    # HTTP status errors
+    # HTTP status errors (fallback for non-SDK HTTP errors)
     msg = str(exc)
     if "401" in msg or "Unauthorized" in msg:
         return "Authentication failed (HTTP 401). Check your API key."
@@ -1162,7 +1182,68 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     except OSError:
         _pass(f"Port {port} is available")
 
-    # --- Section 6: Telemetry ---
+    # --- Section 6: Database & Redis ---
+    print()
+    print(_color("  Database & Redis", _C.BOLD))
+    print(_color("  ----------------", _C.BOLD))
+
+    if cfg:
+        db_url = cfg.database_url
+        if not db_url or db_url.startswith("sqlite"):
+            db_label = db_url or "sqlite (default, in-memory/local)"
+            # SQLite requires no connectivity check
+            _pass(f"Database: {db_label}")
+        elif db_url.startswith("postgresql"):
+            _pass(f"Database: PostgreSQL configured")
+            try:
+                import sqlalchemy  # noqa: F401
+                _pass("SQLAlchemy installed")
+            except ImportError:
+                _fail("SQLAlchemy not installed (needed for PostgreSQL)")
+            # Try to connect
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(3)
+                    # Parse host:port from database URL
+                    from urllib.parse import urlparse
+                    parsed = urlparse(db_url)
+                    db_host = parsed.hostname or "localhost"
+                    db_port = parsed.port or 5432
+                    result = s.connect_ex((db_host, db_port))
+                    if result == 0:
+                        _pass(f"PostgreSQL reachable at {db_host}:{db_port}")
+                    else:
+                        _warn(f"PostgreSQL unreachable at {db_host}:{db_port}")
+            except Exception as e:
+                _warn(f"Could not check PostgreSQL connectivity: {e}")
+        else:
+            _pass(f"Database: {db_url[:30]}...")
+
+        redis_url = cfg.redis_url
+        if redis_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(redis_url)
+                redis_host = parsed.hostname or "localhost"
+                redis_port = parsed.port or 6379
+            except Exception:
+                redis_host = "unknown"
+                redis_port = 6379
+            _pass(f"Redis URL configured ({redis_host}:{redis_port})")
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(3)
+                    result = s.connect_ex((redis_host, redis_port))
+                    if result == 0:
+                        _pass(f"Redis reachable at {redis_host}:{redis_port}")
+                    else:
+                        _warn(f"Redis unreachable at {redis_host}:{redis_port}")
+            except Exception as e:
+                _warn(f"Could not check Redis connectivity: {e}")
+        else:
+            _pass("Redis not configured (using in-process queue)")
+
+    # --- Section 7: Telemetry ---
     print()
     print(_color("  Telemetry", _C.BOLD))
     print(_color("  ---------", _C.BOLD))

@@ -1615,7 +1615,7 @@ class TestEventBusDropCountStress:
         for i in range(10):
             bus.publish("run.started", {"i": i})
 
-        assert bus._drop_counts.get(id(tiny_q), 0) == 10
+        assert bus._drop_counts.get(tiny_q, 0) == 10
 
         # Cleanup
         async with bus._lock:
@@ -1637,14 +1637,14 @@ class TestEventBusDropCountStress:
 
         # This publish should be dropped
         bus.publish("run.started", {"i": 0})
-        assert bus._drop_counts.get(id(q), 0) == 1
+        assert bus._drop_counts.get(q, 0) == 1
 
         # Consume one message
         q.get_nowait()
 
         # Next publish should succeed, resetting drop count
         bus.publish("run.started", {"i": 1})
-        assert bus._drop_counts.get(id(q), 0) == 0
+        assert bus._drop_counts.get(q, 0) == 0
 
         async with bus._lock:
             bus._subscribers.discard(q)

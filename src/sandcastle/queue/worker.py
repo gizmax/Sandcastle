@@ -24,11 +24,35 @@ _enqueue_redis_lock: asyncio.Lock | None = None
 
 
 def _get_enqueue_lock() -> asyncio.Lock:
-    """Return the asyncio lock for Redis pool creation, creating it lazily."""
+    """Return the asyncio lock for Redis pool creation, creating it lazily.
+
+    Uses the threading lock to prevent multiple asyncio locks from being
+    created if called from different coroutines near-simultaneously before
+    the first one finishes assignment.
+    """
     global _enqueue_redis_lock
     if _enqueue_redis_lock is None:
-        _enqueue_redis_lock = asyncio.Lock()
+        with _enqueue_redis_thread_lock:
+            if _enqueue_redis_lock is None:
+                _enqueue_redis_lock = asyncio.Lock()
     return _enqueue_redis_lock
+
+
+async def cleanup_enqueue_pool() -> None:
+    """Close the shared Redis connection pool if it exists.
+
+    Called during worker shutdown to prevent leaked Redis connections.
+    Safe to call multiple times or when no pool has been created.
+    """
+    global _enqueue_redis_pool
+    if _enqueue_redis_pool is not None:
+        try:
+            await _enqueue_redis_pool.close()
+            logger.info("Closed shared Redis enqueue connection pool")
+        except Exception as e:
+            logger.warning("Error closing Redis enqueue pool: %s", e)
+        finally:
+            _enqueue_redis_pool = None
 
 
 def _task_done_callback(task: asyncio.Task) -> None:
@@ -312,8 +336,14 @@ async def startup(ctx: dict) -> None:
 
 
 async def shutdown(ctx: dict) -> None:
-    """Worker shutdown hook."""
+    """Worker shutdown hook.
+
+    Cleans up the shared Redis connection pool to prevent leaked connections
+    on process exit.
+    """
+    global _enqueue_redis_pool
     logger.info("Sandcastle worker shutting down")
+    await cleanup_enqueue_pool()
 
 
 class WorkerSettings:
@@ -341,29 +371,53 @@ async def enqueue_workflow(
     skip_steps: list[str] | None = None,
     step_overrides: dict | None = None,
 ) -> None:
-    """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task)."""
+    """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task).
+
+    If Redis enqueue fails (connection error, timeout, etc.), the run is
+    marked as FAILED in the database so it does not stay stuck in QUEUED
+    status forever.
+
+    Note on timeouts: The arq job_timeout (default 600s, set via
+    SANDCASTLE_WORKER_JOB_TIMEOUT) must be >= the maximum sandbox execution
+    timeout defined in workflow YAML files. If a workflow's sandbox timeout
+    exceeds job_timeout, arq will kill the job mid-execution. Adjust
+    SANDCASTLE_WORKER_JOB_TIMEOUT accordingly for long-running workflows.
+    """
     global _enqueue_redis_pool
 
     if settings.redis_url:
         # Production mode: enqueue via arq/Redis using a shared connection pool
         from arq import create_pool
 
-        if _enqueue_redis_pool is None:
-            async with _get_enqueue_lock():
-                if _enqueue_redis_pool is None:
-                    _enqueue_redis_pool = await create_pool(_parse_redis_url(settings.redis_url))
+        try:
+            if _enqueue_redis_pool is None:
+                async with _get_enqueue_lock():
+                    if _enqueue_redis_pool is None:
+                        _enqueue_redis_pool = await create_pool(
+                            _parse_redis_url(settings.redis_url)
+                        )
 
-        await _enqueue_redis_pool.enqueue_job(
-            "run_workflow_job",
-            workflow_yaml,
-            input_data,
-            run_id,
-            max_cost_usd=max_cost_usd,
-            initial_context=initial_context,
-            skip_steps=skip_steps,
-            step_overrides=step_overrides,
-            _job_id=run_id,
-        )
+            await _enqueue_redis_pool.enqueue_job(
+                "run_workflow_job",
+                workflow_yaml,
+                input_data,
+                run_id,
+                max_cost_usd=max_cost_usd,
+                initial_context=initial_context,
+                skip_steps=skip_steps,
+                step_overrides=step_overrides,
+                _job_id=run_id,
+            )
+        except Exception as enqueue_err:
+            logger.error(
+                "Failed to enqueue run %s to Redis: %s", run_id, enqueue_err
+            )
+            # Mark the run as FAILED so it does not stay stuck in QUEUED
+            await _mark_run_failed(
+                run_id,
+                f"Redis enqueue failed: {enqueue_err}",
+            )
+            raise
     else:
         # Local mode: run directly in-process
         logger.info(f"Local mode: executing run {run_id} in-process")
@@ -382,3 +436,28 @@ async def enqueue_workflow(
         )
         _background_tasks.add(task)
         task.add_done_callback(_task_done_callback)
+
+
+async def _mark_run_failed(run_id: str, error_message: str) -> None:
+    """Mark a run as FAILED in the database.
+
+    Used when enqueue fails so the run does not stay stuck in QUEUED.
+    Silently handles DB errors to avoid masking the original failure.
+    """
+    import uuid as _uuid
+
+    try:
+        from sandcastle.models.db import Run, RunStatus, async_session
+
+        async with async_session() as session:
+            run = await session.get(Run, _uuid.UUID(run_id))
+            if run and run.status == RunStatus.QUEUED:
+                run.status = RunStatus.FAILED
+                run.error = error_message[:4096]
+                run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+                logger.info("Marked run %s as FAILED after enqueue failure", run_id)
+    except Exception as db_err:
+        logger.error(
+            "Failed to mark run %s as FAILED in DB: %s", run_id, db_err
+        )

@@ -1,4 +1,25 @@
-"""Webhook callback dispatcher with HMAC signing and retries."""
+"""Webhook callback dispatcher with HMAC signing and retries.
+
+Retry policy
+------------
+Failed webhook deliveries (5xx responses or network errors) are retried
+with exponential backoff: ``delay = min(2 ** attempt, MAX_RETRY_DELAY_SECONDS)``.
+The default ceiling is **30 seconds** to prevent excessively long waits.
+Client errors (4xx) and redirects (3xx) are never retried.
+
+HMAC signature format
+---------------------
+When ``WEBHOOK_SECRET`` is configured, every outgoing request includes an
+``X-Sandcastle-Signature`` header containing the hex-encoded HMAC-SHA256
+digest of the **raw JSON body** (UTF-8 encoded).
+
+Receivers should verify:
+
+    expected = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+    assert hmac.compare_digest(expected, request.headers["X-Sandcastle-Signature"])
+
+The ``X-Sandcastle-Event`` header carries the event type string.
+"""
 
 from __future__ import annotations
 
@@ -41,6 +62,9 @@ MAX_PAYLOAD_BYTES = 1_048_576
 
 # Maximum output preview size in truncated payloads
 MAX_OUTPUT_PREVIEW_BYTES = 10_000
+
+# Maximum retry delay in seconds (exponential backoff ceiling)
+MAX_RETRY_DELAY_SECONDS = 30
 
 
 def validate_callback_url(url: str) -> str:
@@ -237,7 +261,7 @@ async def dispatch_webhook(
                 )
 
             if attempt < max_retries:
-                delay = min(2**attempt, 30)
+                delay = min(2**attempt, MAX_RETRY_DELAY_SECONDS)
                 await asyncio.sleep(delay)
 
     logger.error(
@@ -248,7 +272,12 @@ async def dispatch_webhook(
 
 
 def _sign_payload(body: str, secret: str) -> str:
-    """Create HMAC-SHA256 signature for a webhook payload."""
+    """Create HMAC-SHA256 signature for a webhook payload.
+
+    The signature is the hex-encoded HMAC-SHA256 digest of the raw JSON
+    ``body`` string (UTF-8 encoded), keyed with ``secret`` (also UTF-8).
+    The full body is signed - no normalization or canonicalization is applied.
+    """
     return hmac.new(
         secret.encode("utf-8"),
         body.encode("utf-8"),
@@ -257,6 +286,13 @@ def _sign_payload(body: str, secret: str) -> str:
 
 
 def verify_signature(body: str, signature: str, secret: str) -> bool:
-    """Verify an incoming webhook signature."""
+    """Verify an incoming webhook signature (constant-time comparison).
+
+    ``body`` must be the raw JSON string exactly as received (no re-encoding).
+    ``signature`` is the value of the ``X-Sandcastle-Signature`` header.
+    ``secret`` is the shared ``WEBHOOK_SECRET`` value.
+
+    Returns True when the signature matches.
+    """
     expected = _sign_payload(body, secret)
     return hmac.compare_digest(expected, signature)

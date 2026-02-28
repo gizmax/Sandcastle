@@ -22,6 +22,25 @@ from fastapi import HTTPException, Request
 logger = logging.getLogger(__name__)
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract client IP from the request socket connection.
+
+    Always uses request.client.host (the TCP socket peer address) rather than
+    X-Forwarded-For or similar headers, which can be trivially spoofed.
+
+    When running behind a trusted reverse proxy (nginx, Cloudflare, etc.),
+    configure the proxy and ASGI server to correctly set the client IP:
+    - uvicorn: use --proxy-headers with --forwarded-allow-ips=<proxy_ip>
+    - gunicorn+uvicorn: set forwarded_allow_ips in the UvicornWorker config
+
+    This ensures request.client.host reflects the real client IP without
+    trusting arbitrary headers from untrusted sources.
+    """
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
 @dataclass
 class _Window:
     """Sliding window counter."""
@@ -197,12 +216,19 @@ class RateLimiter:
         self._backend = backend or InMemoryBackend()
 
     def _get_key(self, request: Request) -> str:
-        """Extract rate limit key from request."""
+        """Extract rate limit key from request.
+
+        Uses tenant_id when available (authenticated requests), otherwise
+        falls back to client socket IP. We intentionally use the socket IP
+        (request.client.host) rather than X-Forwarded-For to prevent rate
+        limit bypass via header spoofing. When behind a trusted reverse proxy,
+        configure the proxy to set request.client correctly (e.g. uvicorn
+        --proxy-headers with --forwarded-allow-ips).
+        """
         tenant = getattr(request.state, "tenant_id", None)
         if tenant:
             return f"tenant:{tenant}"
-        client = request.client
-        ip = client.host if client else "unknown"
+        ip = get_client_ip(request)
         return f"ip:{ip}"
 
     async def check(self, request: Request) -> None:

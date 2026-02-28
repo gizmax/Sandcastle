@@ -111,7 +111,7 @@ export default function SystemHealthPage() {
   const [pageLoadTime] = useState(() => new Date());
   const [now, setNow] = useState(Date.now());
 
-  const fetchData = useCallback(async (isRefresh = false) => {
+  const fetchData = useCallback(async (isRefresh = false, cancelled?: { current: boolean }) => {
     if (isRefresh) setRefreshing(true);
     setError(null);
     try {
@@ -122,6 +122,7 @@ export default function SystemHealthPage() {
           api.get<StatsData>("/stats"),
         ]);
 
+      if (cancelled?.current) return;
       if (healthRes.data) setHealth(healthRes.data);
       if (runtimeRes.data) setRuntime(runtimeRes.data);
 
@@ -132,6 +133,8 @@ export default function SystemHealthPage() {
         api.get<{ id: string }[]>("/templates"),
         api.get<{ id: string }[]>("/api-keys"),
       ]);
+
+      if (cancelled?.current) return;
       const workflows = Array.isArray(workflowsRes.data) ? workflowsRes.data.length : 0;
       const templates = Array.isArray(templatesRes.data) ? templatesRes.data.length : 0;
       const apiKeys = Array.isArray(keysRes.data) ? keysRes.data.length : 0;
@@ -139,15 +142,20 @@ export default function SystemHealthPage() {
       setQuickStats({ runs, workflows, templates, apiKeys });
       setLastChecked(new Date());
     } catch {
+      if (cancelled?.current) return;
       setError("Could not connect to the API server");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!cancelled?.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    void fetchData();
+    const cancelled = { current: false };
+    void fetchData(false, cancelled);
+    return () => { cancelled.current = true; };
   }, [fetchData]);
 
   // Update session duration every minute

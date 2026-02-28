@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import copy
 import csv
 import dataclasses
 import hashlib
@@ -68,6 +69,7 @@ class RunContext:
     run_id: str
     input: dict
     step_outputs: dict[str, Any] = field(default_factory=dict)
+    step_results: dict[str, StepResult] = field(default_factory=dict)
     costs: list[float] = field(default_factory=list)
     status: str = "running"
     error: str | None = None
@@ -85,11 +87,14 @@ class RunContext:
 
         Each child gets its own costs list to avoid concurrent appends
         to a shared list. The parent aggregates child costs after join.
+        Deep-copies step_outputs and step_results so that mutations in
+        the child do not leak back into the parent context.
         """
         return RunContext(
             run_id=self.run_id,
             input={**self.input, "_item": item, "_index": index},
-            step_outputs=dict(self.step_outputs),
+            step_outputs=copy.deepcopy(self.step_outputs),
+            step_results=copy.deepcopy(self.step_results),
             costs=[],
             status=self.status,
             max_cost_usd=self.max_cost_usd,
@@ -186,6 +191,18 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
             if step_data is None:
                 return None
             return _traverse(step_data, parts[3:])
+        # Resolve step metadata attributes from step_results
+        if parts[2] in ("status", "error", "cost"):
+            sr = context.step_results.get(step_id)
+            if sr is None:
+                return _UNRESOLVED
+            if parts[2] == "status":
+                return sr.status
+            if parts[2] == "error":
+                return sr.error
+            if parts[2] == "cost":
+                return sr.cost_usd
+            return _UNRESOLVED
 
     if parts[0] == "memory":
         from sandcastle.engine.memory import format_memories_for_prompt
@@ -206,6 +223,10 @@ def _escape_braces(value: str) -> str:
     return value.replace("{", "{{").replace("}", "}}")
 
 
+# Maximum template string size to prevent ReDoS or memory issues.
+_MAX_TEMPLATE_SIZE = 1024 * 1024  # 1MB
+
+
 def resolve_templates(
     template: str,
     context: RunContext,
@@ -217,7 +238,19 @@ def resolve_templates(
     explicitly referenced in the template are automatically injected so that
     DAG edges imply data flow without requiring manual ``{steps.X.output}``
     placeholders.
+
+    Behavior notes:
+    - Nested template variables (e.g. ``{steps.{input.name}.output}``) are NOT
+      supported. The inner braces break the regex and the variable is left as-is.
+    - Resolved values from step outputs are brace-escaped to prevent
+      re-resolution (injection protection).
+    - Missing/unresolvable variables are left as their original placeholder.
     """
+    if len(template) > _MAX_TEMPLATE_SIZE:
+        raise ValueError(
+            f"Template string too large ({len(template)} bytes, "
+            f"max {_MAX_TEMPLATE_SIZE})"
+        )
 
     def _replace(match: re.Match) -> str:
         var_path = match.group(1)
@@ -231,7 +264,10 @@ def resolve_templates(
             raw = json.dumps(value)
         else:
             raw = str(value)
-        if var_path.startswith("steps."):
+        # Escape braces in step outputs and memory values to prevent
+        # template injection from LLM-generated content. Input values
+        # and built-in variables (run_id, date) are trusted sources.
+        if var_path.startswith("steps.") or var_path == "memory":
             return _escape_braces(raw)
         return raw
 
@@ -2281,6 +2317,48 @@ async def _execute_code_step(
 
 _EVAL_MAX_EXPRESSION_LENGTH = 2000
 
+# Tokens that should never appear in a resolved template value, as they
+# could alter expression semantics when string-interpolated.
+_CONDITION_INJECTION_TOKENS = re.compile(
+    r"\b(or|and|not|import|exec|eval|lambda|class|def|del|global|"
+    r"yield|return|raise|from|as|with|assert|break|continue|try|except|finally)\b"
+    r"|[;@]"
+)
+
+
+def _resolve_condition_expression(
+    expression_template: str,
+    context: RunContext,
+    depends_on: list[str] | None = None,
+) -> str:
+    """Resolve template variables in a condition expression with injection checks.
+
+    Each resolved value is validated to ensure it does not contain Python
+    keywords or operators that could alter the expression's semantics.
+    """
+    def _safe_replace(match: re.Match) -> str:
+        var_path = match.group(1)
+        value = resolve_variable(var_path, context)
+        if value is _UNRESOLVED:
+            return match.group(0)
+        if value is None:
+            return "None"
+        if isinstance(value, (dict, list)):
+            raw = json.dumps(value)
+        else:
+            raw = str(value)
+        # Check for injection tokens in the resolved value
+        if isinstance(value, str) and _CONDITION_INJECTION_TOKENS.search(raw):
+            raise ValueError(
+                f"Resolved variable '{var_path}' contains unsafe tokens "
+                f"for condition evaluation: {raw!r}"
+            )
+        if var_path.startswith("steps."):
+            return _escape_braces(raw)
+        return raw
+
+    return _TEMPLATE_RE.sub(_safe_replace, expression_template)
+
 
 def _safe_eval_expression(expression: str, names: dict[str, Any]) -> Any:
     """Evaluate a workflow expression safely using simpleeval.
@@ -2317,7 +2395,9 @@ async def _execute_condition_step(
         return StepResult(step_id=step.id, status="failed", error="Missing condition_config")
 
     try:
-        expression = resolve_templates(cfg.expression, context, step.depends_on)
+        # Resolve template variables, then validate resolved values do not
+        # introduce expression-manipulation tokens (e.g. "or", "and", ";").
+        expression = _resolve_condition_expression(cfg.expression, context, step.depends_on)
 
         # Safe expression evaluation via simpleeval
         eval_names: dict[str, Any] = {
@@ -2440,17 +2520,29 @@ async def _execute_classify_step(
             + out_tok * model_info.output_price_per_m / 1_000_000
         )
 
-        # Fuzzy-match to category list
+        # Match to category list: exact first, then guarded substring.
         matched = None
         for cat in cfg.categories:
             if cat.lower() == raw_category:
                 matched = cat
                 break
         if not matched:
+            # Substring containment with a length-ratio guard to avoid
+            # short fragments matching wrong categories (e.g. "pos"
+            # spuriously matching "position").  The shorter string must
+            # be >= 60% of the longer one.
+            best_cat = None
+            best_ratio = 0.0
             for cat in cfg.categories:
-                if cat.lower() in raw_category or raw_category in cat.lower():
-                    matched = cat
-                    break
+                cat_lower = cat.lower()
+                if cat_lower in raw_category or raw_category in cat_lower:
+                    shorter = min(len(cat_lower), len(raw_category))
+                    longer = max(len(cat_lower), len(raw_category))
+                    ratio = shorter / longer if longer > 0 else 0.0
+                    if ratio >= 0.6 and ratio > best_ratio:
+                        best_ratio = ratio
+                        best_cat = cat
+            matched = best_cat
         if not matched:
             logger.warning(
                 f"Classify step '{step.id}': LLM response '{raw_category}'"
@@ -2513,6 +2605,16 @@ async def _execute_loop_step(
         # Limit iterations
         items = items[: cfg.max_iterations]
 
+        # Validate step_ids only when there are items to iterate over;
+        # an empty list with empty step_ids is a valid no-op.
+        if items and not cfg.step_ids:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="Loop step_ids must not be empty",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
         results = []
         total_cost = 0.0
 
@@ -2540,6 +2642,7 @@ async def _execute_loop_step(
                     storage,
                 )
                 child_context.step_outputs[sub_step_id] = sub_result.output
+                child_context.step_results[sub_step_id] = sub_result
                 total_cost += sub_result.cost_usd
 
             # Sync child costs back to parent so budget checks see ongoing costs
@@ -2571,6 +2674,9 @@ async def _execute_loop_step(
             duration_seconds=duration,
             status="completed",
         )
+    except WorkflowPaused:
+        # Approval gates inside loops must propagate to the main executor
+        raise
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
@@ -2625,6 +2731,7 @@ async def _execute_race_step(
                     storage,
                 )
                 branch_context.step_outputs[sub_step_id] = sub_result.output
+                branch_context.step_results[sub_step_id] = sub_result
                 branch_cost += sub_result.cost_usd
                 # Update shared tracker after each sub-step so partial
                 # costs from cancelled branches are not lost
@@ -2648,6 +2755,13 @@ async def _execute_race_step(
             for task in done:
                 try:
                     result = task.result()
+                except WorkflowPaused:
+                    # Cancel all remaining tasks before propagating
+                    for t in pending:
+                        t.cancel()
+                    if pending:
+                        await asyncio.wait(pending)
+                    raise
                 except Exception:
                     continue
                 # Validate if validator expression is set
@@ -2702,6 +2816,9 @@ async def _execute_race_step(
             duration_seconds=duration,
             status="completed",
         )
+    except WorkflowPaused:
+        # Approval gates inside race branches must propagate to the main executor
+        raise
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
@@ -2863,6 +2980,12 @@ async def _execute_gate_step(
         return StepResult(step_id=step.id, status="failed", error="Missing gate_config")
 
     try:
+        # Collect results from all strategies before returning.
+        # All strategies must approve; any rejection short-circuits.
+        total_cost = 0.0
+        strategy_results: list[dict] = []
+        pending_approval_ids: list[str] = []
+
         for strategy in cfg.strategies:
             strategy_type = strategy.get("type", "")
             strategy_config = strategy.get("config", {})
@@ -2932,22 +3055,32 @@ async def _execute_gate_step(
                     in_tok * model_info.input_price_per_m / 1_000_000
                     + out_tok * model_info.output_price_per_m / 1_000_000
                 )
+                total_cost += cost
                 approved = "approved" in llm_response or "approve" in llm_response
-                duration = time.monotonic() - started_at
-                return StepResult(
-                    step_id=step.id,
-                    output={
-                        "decision": "approved" if approved else "rejected",
-                        "reason": llm_response,
-                        "strategy": "llm_eval",
-                    },
-                    cost_usd=cost,
-                    duration_seconds=duration,
-                    status="completed",
-                )
+
+                if not approved:
+                    # Immediate rejection - no need to check further strategies
+                    duration = time.monotonic() - started_at
+                    return StepResult(
+                        step_id=step.id,
+                        output={
+                            "decision": "rejected",
+                            "reason": llm_response,
+                            "strategy": "llm_eval",
+                        },
+                        cost_usd=total_cost,
+                        duration_seconds=duration,
+                        status="completed",
+                    )
+
+                strategy_results.append({
+                    "decision": "approved",
+                    "reason": llm_response,
+                    "strategy": "llm_eval",
+                })
 
             elif strategy_type == "human":
-                # Create approval request and pause workflow (reuse existing mechanism)
+                # Create approval request - collect all before pausing
                 from sandcastle.models.db import (
                     ApprovalRequest,
                     ApprovalStatus,
@@ -2981,27 +3114,56 @@ async def _execute_gate_step(
                         run.status = RunStatus.AWAITING_APPROVAL
                     await session.commit()
                     await session.refresh(approval)
-                    approval_id = str(approval.id)
-
-                raise WorkflowPaused(approval_id=approval_id, run_id=context.run_id)
+                    pending_approval_ids.append(str(approval.id))
 
             elif strategy_type == "timeout":
                 # Auto-approve or reject after a delay
                 delay = strategy_config.get("seconds", 60)
                 action = strategy_config.get("action", "approve")
                 await asyncio.sleep(delay)
-                duration = time.monotonic() - started_at
-                return StepResult(
-                    step_id=step.id,
-                    output={
-                        "decision": "approved" if action == "approve" else "rejected",
-                        "reason": f"Auto-{action} after {delay}s timeout",
-                        "strategy": "timeout",
-                    },
-                    cost_usd=0.0,
-                    duration_seconds=duration,
-                    status="completed",
-                )
+
+                if action != "approve":
+                    # Immediate rejection
+                    duration = time.monotonic() - started_at
+                    return StepResult(
+                        step_id=step.id,
+                        output={
+                            "decision": "rejected",
+                            "reason": f"Auto-{action} after {delay}s timeout",
+                            "strategy": "timeout",
+                        },
+                        cost_usd=total_cost,
+                        duration_seconds=duration,
+                        status="completed",
+                    )
+
+                strategy_results.append({
+                    "decision": "approved",
+                    "reason": f"Auto-{action} after {delay}s timeout",
+                    "strategy": "timeout",
+                })
+
+        # If any human approvals are pending, pause the workflow.
+        # All approval requests have been created above.
+        if pending_approval_ids:
+            raise WorkflowPaused(
+                approval_id=pending_approval_ids[0],
+                run_id=context.run_id,
+            )
+
+        # All non-human strategies approved
+        if strategy_results:
+            duration = time.monotonic() - started_at
+            return StepResult(
+                step_id=step.id,
+                output={
+                    "decision": "approved",
+                    "strategies": strategy_results,
+                },
+                cost_usd=total_cost,
+                duration_seconds=duration,
+                status="completed",
+            )
 
         # No strategy matched
         duration = time.monotonic() - started_at
@@ -3038,10 +3200,23 @@ async def _execute_transform_step(
     try:
         template = cfg.template
 
+        # Guard against oversized templates
+        if len(template) > _MAX_TEMPLATE_SIZE:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Transform template too large ({len(template)} bytes, "
+                    f"max {_MAX_TEMPLATE_SIZE})"
+                ),
+                duration_seconds=time.monotonic() - started_at,
+            )
+
         # Resolve {var} template variables
         rendered = resolve_templates(template, context, step.depends_on)
 
-        # Support basic Jinja2-like {{ var }} syntax
+        # Support basic Jinja2-like {{ var }} syntax (safe regex-based
+        # resolution; does NOT use jinja2.Environment to prevent SSTI).
         def _jinja_replace(match: re.Match) -> str:
             expr = match.group(1).strip()
             # Handle tojson filter
@@ -3153,6 +3328,24 @@ async def _execute_delegate_step(
     cfg = step.delegate_config
     if not cfg:
         return StepResult(step_id=step.id, status="failed", error="Missing delegate_config")
+
+    # Early depth check - reject before loading/parsing sub-workflow YAML
+    try:
+        from sandcastle.config import settings as _delegate_settings
+
+        if depth + 1 >= _delegate_settings.max_workflow_depth:
+            duration = time.monotonic() - started_at
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Max workflow depth ({_delegate_settings.max_workflow_depth}) "
+                    f"would be exceeded by delegate step"
+                ),
+                duration_seconds=duration,
+            )
+    except Exception:
+        pass  # If settings unavailable, let execute_workflow handle it
 
     try:
         task_description = resolve_templates(
@@ -4145,6 +4338,9 @@ async def _prepare_and_run_step(
     # Skip steps that were excluded by condition/classify branching
     if step_id in context.branch_skip_steps:
         context.step_outputs[step_id] = None
+        context.step_results[step_id] = StepResult(
+            step_id=step_id, status="skipped",
+        )
         await _save_run_step(
             run_id=context.run_id,
             step_id=step.id,
@@ -4164,6 +4360,7 @@ async def _prepare_and_run_step(
         model: str | None = None,
     ) -> None:
         context.costs.append(result.cost_usd)
+        context.step_results[step_id] = result
         if result.status == "completed":
             context.step_outputs[step_id] = result.output
             await _save_run_step(
@@ -4348,6 +4545,7 @@ async def _prepare_and_run_step(
         step_overrides=overrides,
     )
     context.costs.append(result.cost_usd)
+    context.step_results[step_id] = result
     if result.status == "failed":
         on_fail = step.retry.on_failure if step.retry else "abort"
         if use_dead_letter:

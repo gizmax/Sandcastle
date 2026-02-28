@@ -257,19 +257,17 @@ app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 app.add_middleware(BaseHTTPMiddleware, dispatch=security_headers_middleware)
 
 # CORS (added third = outermost middleware, wraps everything including auth + security headers)
+# Only allow the configured dashboard origin plus the two default Vite dev
+# server ports (5173 primary, 5174 fallback). Previously ports 5173-5180 were
+# allowed, which needlessly widened the CORS attack surface.
 _cors_origins = [
     settings.dashboard_origin,
     "http://localhost:5173",
     "http://localhost:5174",
-    "http://localhost:5175",
-    "http://localhost:5176",
-    "http://localhost:5177",
-    "http://localhost:5178",
-    "http://localhost:5179",
-    "http://localhost:5180",
 ]
-# Wildcard + credentials is invalid per CORS spec - filter it out
-_cors_origins = [o for o in _cors_origins if o != "*"]
+# Wildcard + credentials is invalid per CORS spec - filter it out.
+# Also deduplicate (dashboard_origin may overlap with hardcoded Vite ports).
+_cors_origins = list(dict.fromkeys(o for o in _cors_origins if o != "*"))
 if settings.dashboard_origin == "*":
     logger.warning(
         "DASHBOARD_ORIGIN='*' is invalid with allow_credentials=True. "

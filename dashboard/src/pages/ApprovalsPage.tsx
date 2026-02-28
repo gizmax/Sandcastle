@@ -41,22 +41,26 @@ export default function ApprovalsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (cancelled?: { current: boolean }) => {
     try {
       setError(null);
       const params: Record<string, string> = {};
       if (filter !== "all") params.status = filter;
       const res = await api.get<ApprovalItem[]>("/approvals", params);
+      if (cancelled?.current) return;
       if (res.data) setItems(res.data);
     } catch {
+      if (cancelled?.current) return;
       setError("Could not connect to the API server");
     } finally {
-      setLoading(false);
+      if (!cancelled?.current) setLoading(false);
     }
   }, [filter]);
 
   useEffect(() => {
-    void fetchItems();
+    const cancelled = { current: false };
+    void fetchItems(cancelled);
+    return () => { cancelled.current = true; };
   }, [fetchItems]);
 
   const handleAction = useCallback(
