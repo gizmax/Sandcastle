@@ -81,11 +81,16 @@ export function Header({
     const lower = q.toLowerCase();
     const items: SearchResult[] = [];
 
-    const [runsRes, workflowsRes, toolsRes] = await Promise.all([
-      api.get<Array<{ run_id: string; workflow_name: string; status: string }>>("/runs", { limit: "50", offset: "0" }),
-      api.get<Array<{ name: string; file_name: string; steps_count: number }>>("/workflows"),
-      api.get<{ tools: Array<{ name: string; description: string; category: string; configured: boolean }> }>("/tools"),
-    ]);
+    let runsRes, workflowsRes, toolsRes;
+    try {
+      [runsRes, workflowsRes, toolsRes] = await Promise.all([
+        api.get<Array<{ run_id: string; workflow_name: string; status: string }>>("/runs", { limit: "50", offset: "0" }),
+        api.get<Array<{ name: string; file_name: string; steps_count: number }>>("/workflows"),
+        api.get<{ tools: Array<{ name: string; description: string; category: string; configured: boolean }> }>("/tools"),
+      ]);
+    } catch {
+      return;
+    }
 
     // Discard results from stale searches
     if (version !== searchVersionRef.current) return;
@@ -318,8 +323,14 @@ export function Header({
                 setOpen(true);
               }}
               onFocus={() => { if (results.length > 0) setOpen(true); }}
+              onKeyDown={handleSearchKeyDown}
               placeholder="Search..."
               autoFocus
+              role="combobox"
+              aria-expanded={open && results.length > 0}
+              aria-haspopup="listbox"
+              aria-autocomplete="list"
+              aria-activedescendant={activeIndex >= 0 ? `mobile-search-result-${activeIndex}` : undefined}
               className={cn(
                 "h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm",
                 "placeholder:text-muted-foreground/50",
@@ -327,18 +338,24 @@ export function Header({
               )}
             />
             {open && results.length > 0 && (
-              <div className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
+              <div role="listbox" className="absolute left-0 top-full mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden z-50">
                 {results.map((r, i) => (
                   <button
                     key={`${r.link}-${i}`}
+                    id={`mobile-search-result-${i}`}
+                    role="option"
+                    aria-selected={i === activeIndex}
                     onClick={() => { handleSelect(r); setMobileSearchOpen(false); }}
-                    className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-border/40 transition-colors"
+                    className={cn(
+                      "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-border/40 transition-colors",
+                      i === activeIndex && "bg-border/40"
+                    )}
                   >
                     {r.type === "run"
-                      ? <PlayCircle className="h-4 w-4 shrink-0 text-muted" />
+                      ? <PlayCircle aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
                       : r.type === "tool"
-                      ? <Plug className="h-4 w-4 shrink-0 text-muted" />
-                      : <GitBranch className="h-4 w-4 shrink-0 text-muted" />
+                      ? <Plug aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
+                      : <GitBranch aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
                     }
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-foreground">{r.label}</p>

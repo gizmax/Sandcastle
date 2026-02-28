@@ -798,7 +798,12 @@ async def hub_playground(request: Request) -> ApiResponse:
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_JSON", message="Invalid JSON body")
+            ).model_dump(),
+        )
     template_slug = body.get("slug", "")
     inputs = body.get("inputs", {})
 
@@ -2098,7 +2103,14 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
     # Prevent path traversal: PDF must be within the data directory
     data_dir = Path(settings.data_dir).resolve()
     if not file_path.is_relative_to(data_dir):
-        raise HTTPException(status_code=403, detail="PDF path outside data directory")
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN", message="PDF path outside data directory"
+                )
+            ).model_dump(),
+        )
 
     if not file_path.exists():
         raise HTTPException(
@@ -2109,7 +2121,14 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         )
 
     if not file_path.suffix.lower() == ".pdf":
-        raise HTTPException(status_code=400, detail="Artifact is not a PDF file")
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_ARTIFACT", message="Artifact is not a PDF file"
+                )
+            ).model_dump(),
+        )
 
     return FileResponse(
         path=str(file_path),
@@ -2253,7 +2272,12 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     except RuntimeError:
         raise HTTPException(
             status_code=503,
-            detail="Too many concurrent event stream connections",
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="TOO_MANY_CONNECTIONS",
+                    message="Too many concurrent event stream connections",
+                )
+            ).model_dump(),
         )
 
     # LRU cache of run_id -> tenant_id to avoid repeated DB lookups (bounded)
@@ -4500,8 +4524,9 @@ async def optimizer_alerts(req: Request) -> ApiResponse:
 
 
 @router.delete("/optimizer/alerts")
-async def clear_optimizer_alerts() -> ApiResponse:
-    """Clear all degradation alerts."""
+async def clear_optimizer_alerts(req: Request) -> ApiResponse:
+    """Clear all degradation alerts. Admin-only when auth is enabled."""
+    _require_admin(req)
     from sandcastle.engine.optimizer import get_optimizer
 
     optimizer = get_optimizer()
@@ -4752,49 +4777,19 @@ async def update_settings(
     request: SettingsUpdateRequest,
     req: Request,
 ) -> ApiResponse:
-    """Update server settings and persist to database."""
+    """Update server settings and persist to database.
+
+    Security-critical settings (auth_required, dashboard_origin, webhook_secret)
+    are not accepted here and must be set via environment variables.
+    Input validation (ranges, allowed values) is enforced by the request schema.
+    """
     _require_admin(req)
-    # Validate constraints
-    if request.log_level is not None:
-        if request.log_level.lower() not in ("debug", "info", "warning", "error"):
-            raise HTTPException(
-                status_code=422,
-                detail=ApiResponse(
-                    error=ErrorResponse(
-                        code="INVALID_VALUE",
-                        message="log_level must be one of: debug, info, warning, error",
-                    )
-                ).model_dump(),
-            )
-    if request.max_workflow_depth is not None:
-        if not 1 <= request.max_workflow_depth <= 20:
-            raise HTTPException(
-                status_code=422,
-                detail=ApiResponse(
-                    error=ErrorResponse(
-                        code="INVALID_VALUE",
-                        message="max_workflow_depth must be between 1 and 20",
-                    )
-                ).model_dump(),
-            )
-    if request.default_max_cost_usd is not None:
-        if request.default_max_cost_usd < 0:
-            raise HTTPException(
-                status_code=422,
-                detail=ApiResponse(
-                    error=ErrorResponse(
-                        code="INVALID_VALUE",
-                        message="default_max_cost_usd must be >= 0",
-                    )
-                ).model_dump(),
-            )
 
-    # Collect non-None updates
-    updates = {k: v for k, v in request.model_dump().items() if v is not None}
-
-    # Block mutation of security-critical settings via API.
-    # This is the ONLY allowlist of settings that can be changed at runtime.
-    # All others must be set via environment variables.
+    # Allowlist of settings that may be changed at runtime via the API.
+    # Security-critical settings (auth_required, webhook_secret, dashboard_origin,
+    # database_url, redis_url, etc.) are intentionally omitted and must be set
+    # via environment variables. The SettingsUpdateRequest schema is aligned with
+    # this set, so this is a defense-in-depth guard against future schema drift.
     _MUTABLE_SETTINGS = {
         "anthropic_api_key",
         "e2b_api_key",
@@ -4805,21 +4800,13 @@ async def update_settings(
         "log_level",
         "max_workflow_depth",
     }
-    immutable = updates.keys() - _MUTABLE_SETTINGS
-    blocked = immutable & updates.keys()
-    if blocked:
-        raise HTTPException(
-            status_code=403,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="IMMUTABLE_SETTING",
-                    message=(
-                        f"Settings {', '.join(sorted(blocked))} "
-                        "can only be changed via environment variables"
-                    ),
-                )
-            ).model_dump(),
-        )
+
+    # Collect non-None updates (schema already validated all constraints)
+    raw_updates = {k: v for k, v in request.model_dump().items() if v is not None}
+
+    # Defense-in-depth: strip any fields not in the allowlist (should not happen
+    # if SettingsUpdateRequest is kept in sync, but guards against future drift)
+    updates = {k: v for k, v in raw_updates.items() if k in _MUTABLE_SETTINGS}
 
     if not updates:
         return ApiResponse(data=_build_settings_response())
@@ -5332,7 +5319,12 @@ async def get_tool(tool_name: str) -> ApiResponse:
     try:
         tool = _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Tool '{tool_name}' not found")
+            ).model_dump(),
+        )
 
     status = validate_tool_credentials([tool_name]).get(tool_name, {})
     connections = await _get_tool_connections(tool_name)
@@ -5354,7 +5346,12 @@ async def update_tool_credentials(
     try:
         tool = _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Tool '{tool_name}' not found")
+            ).model_dump(),
+        )
 
     # Only allow setting env vars that belong to this tool
     allowed = set(tool.credential_env_vars)
@@ -5406,7 +5403,12 @@ async def list_tool_connections(tool_name: str) -> ApiResponse:
     try:
         _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Tool '{tool_name}' not found")
+            ).model_dump(),
+        )
 
     connections = await _get_tool_connections(tool_name)
     return ApiResponse(data=connections)
@@ -5425,7 +5427,12 @@ async def create_tool_connection(
     try:
         tool = _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Tool '{tool_name}' not found")
+            ).model_dump(),
+        )
 
     # Validate credential keys
     allowed = set(tool.credential_env_vars)
@@ -5506,7 +5513,12 @@ async def update_tool_connection(
     try:
         tool = _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Tool '{tool_name}' not found")
+            ).model_dump(),
+        )
 
     allowed = set(tool.credential_env_vars)
     rejected = set(body.credentials.keys()) - allowed
@@ -5533,7 +5545,15 @@ async def update_tool_connection(
         )
         conn = result.scalar_one_or_none()
         if not conn:
-            raise HTTPException(404, f"Connection '{conn_name}' not found for {tool_name}")
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Connection '{conn_name}' not found for {tool_name}",
+                    )
+                ).model_dump(),
+            )
 
         from sandcastle.engine.crypto import decrypt_credentials, encrypt_credentials
 
@@ -5575,7 +5595,12 @@ async def delete_tool_connection(
     try:
         _get_tool(tool_name)
     except KeyError:
-        raise HTTPException(404, f"Tool '{tool_name}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Tool '{tool_name}' not found")
+            ).model_dump(),
+        )
 
     async with async_session() as session:
         result = await session.execute(
@@ -5586,7 +5611,15 @@ async def delete_tool_connection(
         )
         conn = result.scalar_one_or_none()
         if not conn:
-            raise HTTPException(404, f"Connection '{conn_name}' not found for {tool_name}")
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Connection '{conn_name}' not found for {tool_name}",
+                    )
+                ).model_dump(),
+            )
 
         await session.delete(conn)
         await session.commit()
@@ -5941,7 +5974,14 @@ async def remove_memory(memory_id: str):
 
     ok = await delete_memory(memory_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Memory not found or delete failed")
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND", message="Memory not found or delete failed"
+                )
+            ).model_dump(),
+        )
     return ApiResponse(data={"deleted": True})
 
 
@@ -5954,5 +5994,12 @@ async def remove_all_memories(
 
     ok = await delete_all_memories(scope_id)
     if not ok:
-        raise HTTPException(status_code=500, detail="Failed to delete memories")
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="DELETE_FAILED", message="Failed to delete memories"
+                )
+            ).model_dump(),
+        )
     return ApiResponse(data={"deleted_all": True, "scope_id": scope_id})

@@ -169,32 +169,29 @@ export default function SettingsPage() {
 
   // -- Section save handler -------------------------------------------------
 
-  function sectionFields(section: SectionName): Partial<EditableFields> {
-    if (!settings || !originalRef.current) return {};
-    const o = originalRef.current;
-    switch (section) {
-      case "connections":
-        return {};
-      case "security":
-        return {};  // Immutable fields
-      case "budget":
-        return diffFields(
-          { default_max_cost_usd: settings.default_max_cost_usd },
-          { default_max_cost_usd: o.default_max_cost_usd }
-        );
-      case "webhooks":
-        return {};  // Immutable field
-      case "system":
-        return diffFields(
-          { log_level: settings.log_level, max_workflow_depth: settings.max_workflow_depth },
-          { log_level: o.log_level, max_workflow_depth: o.max_workflow_depth }
-        );
-    }
-  }
-
   const handleSave = useCallback(
     async (section: SectionName) => {
-      const changed = sectionFields(section);
+      if (!settings || !originalRef.current) return;
+      const o = originalRef.current;
+
+      // Compute changed fields inline to avoid stale closure on sectionFields
+      let changed: Partial<EditableFields> = {};
+      switch (section) {
+        case "budget":
+          changed = diffFields(
+            { default_max_cost_usd: settings.default_max_cost_usd },
+            { default_max_cost_usd: o.default_max_cost_usd }
+          );
+          break;
+        case "system":
+          changed = diffFields(
+            { log_level: settings.log_level, max_workflow_depth: settings.max_workflow_depth },
+            { log_level: o.log_level, max_workflow_depth: o.max_workflow_depth }
+          );
+          break;
+        default:
+          return;
+      }
       if (Object.keys(changed).length === 0) return;
 
       setSavingSections((prev) => new Set(prev).add(section));
@@ -215,7 +212,6 @@ export default function SettingsPage() {
         toast.success("Settings saved successfully");
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [settings]
   );
 

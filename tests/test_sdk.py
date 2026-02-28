@@ -426,3 +426,154 @@ class TestAsyncHealth:
         assert isinstance(result, Run)
         assert result.run_id == "async-run-1"
         assert result.status == "completed"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _poll_until_done call ordering (check status before sleeping)
+# ---------------------------------------------------------------------------
+
+
+class TestPollUntilDoneOrdering:
+    """Verify that _poll_until_done checks status BEFORE sleeping, not after.
+
+    The fix ensures we don't burn poll_interval seconds unnecessarily when
+    the run is already in a terminal state on the very first poll.
+    """
+
+    def test_sync_poll_checks_status_before_sleep(self):
+        """Sync _poll_until_done should return immediately if already done."""
+        import time
+        from unittest.mock import call
+
+        completed_resp = _mock_response(
+            json_data={
+                "data": {
+                    "run_id": "run-done",
+                    "status": "completed",
+                    "workflow_name": "wf",
+                    "total_cost_usd": 0.01,
+                },
+                "error": None,
+            }
+        )
+
+        call_order: list[str] = []
+
+        real_sleep = time.sleep
+
+        def tracked_sleep(t: float) -> None:
+            call_order.append("sleep")
+            # Don't actually sleep in tests
+
+        def tracked_get(*args, **kwargs):
+            call_order.append("get_run")
+            return completed_resp
+
+        with (
+            patch.object(httpx.Client, "get", side_effect=tracked_get),
+            patch("sandcastle.sdk.time.sleep", side_effect=tracked_sleep),
+        ):
+            client = SandcastleClient(base_url="http://test:8080")
+            run = client._poll_until_done("run-done", poll_interval=5.0)
+            client.close()
+
+        assert run.status == "completed"
+        # get_run should be called before sleep (or sleep never called since done)
+        assert "get_run" in call_order
+        # If already done, sleep should NOT have been called
+        assert "sleep" not in call_order, (
+            "_poll_until_done slept before checking status - inefficient"
+        )
+
+    def test_sync_poll_sleeps_between_polls(self):
+        """Sync _poll_until_done should sleep AFTER each non-terminal status check."""
+        import time
+
+        responses = [
+            _mock_response(
+                json_data={"data": {"run_id": "r", "status": "running", "workflow_name": "wf", "total_cost_usd": 0.0}, "error": None}
+            ),
+            _mock_response(
+                json_data={"data": {"run_id": "r", "status": "completed", "workflow_name": "wf", "total_cost_usd": 0.01}, "error": None}
+            ),
+        ]
+        call_order: list[str] = []
+        resp_iter = iter(responses)
+
+        def tracked_get(*args, **kwargs):
+            call_order.append("get")
+            return next(resp_iter)
+
+        def tracked_sleep(t: float) -> None:
+            call_order.append("sleep")
+
+        with (
+            patch.object(httpx.Client, "get", side_effect=tracked_get),
+            patch("sandcastle.sdk.time.sleep", side_effect=tracked_sleep),
+        ):
+            client = SandcastleClient(base_url="http://test:8080")
+            run = client._poll_until_done("r", poll_interval=1.0)
+            client.close()
+
+        assert run.status == "completed"
+        # Pattern should be: get, sleep, get (done - no sleep)
+        assert call_order == ["get", "sleep", "get"], f"Unexpected order: {call_order}"
+
+    def test_sync_poll_raises_timeout_error(self):
+        """Sync _poll_until_done should raise TimeoutError when max_wait exceeded."""
+        running_resp = _mock_response(
+            json_data={"data": {"run_id": "r", "status": "running", "workflow_name": "wf", "total_cost_usd": 0.0}, "error": None}
+        )
+
+        with (
+            patch.object(httpx.Client, "get", return_value=running_resp),
+            patch("sandcastle.sdk.time.sleep"),
+            patch("sandcastle.sdk.time.monotonic", side_effect=[
+                0.0,   # deadline = 0.0 + max_wait
+                100.0, # first check: not past deadline
+                200.0, # second check: past deadline -> TimeoutError
+            ]),
+        ):
+            client = SandcastleClient(base_url="http://test:8080")
+            with pytest.raises(TimeoutError, match="did not reach terminal status"):
+                client._poll_until_done("r", poll_interval=1.0, max_wait=10.0)
+            client.close()
+
+    @pytest.mark.asyncio
+    async def test_async_poll_checks_status_before_sleeping(self):
+        """Async _poll_until_done should return immediately if already done."""
+        import asyncio
+
+        completed_resp = _mock_response(
+            json_data={
+                "data": {
+                    "run_id": "async-done",
+                    "status": "completed",
+                    "workflow_name": "wf",
+                    "total_cost_usd": 0.0,
+                },
+                "error": None,
+            }
+        )
+        call_order: list[str] = []
+
+        async def tracked_sleep(t: float) -> None:
+            call_order.append("sleep")
+
+        async def tracked_get(*args, **kwargs):
+            call_order.append("get_run")
+            return completed_resp
+
+        with (
+            patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock, side_effect=tracked_get),
+            patch("asyncio.sleep", side_effect=tracked_sleep),
+        ):
+            client = AsyncSandcastleClient(base_url="http://test:8080")
+            run = await client._poll_until_done("async-done", poll_interval=5.0)
+            await client.close()
+
+        assert run.status == "completed"
+        assert "get_run" in call_order
+        assert "sleep" not in call_order, (
+            "Async _poll_until_done slept before checking status"
+        )

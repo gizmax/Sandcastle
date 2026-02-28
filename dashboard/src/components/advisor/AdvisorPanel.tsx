@@ -131,9 +131,10 @@ export function AdvisorPanel({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close advisor panel"
             className="rounded-lg p-1.5 text-muted hover:bg-border/40 hover:text-foreground transition-colors"
           >
-            <X className="h-5 w-5" />
+            <X aria-hidden="true" className="h-5 w-5" />
           </button>
         </div>
 

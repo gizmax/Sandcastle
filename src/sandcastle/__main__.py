@@ -502,6 +502,13 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     _print_banner()
 
     port = args.port
+    if not (1 <= port <= 65535):
+        print(
+            f"  {_color('Error: port must be between 1 and 65535, got ' + str(port), _C.RED)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if _port_in_use(port):
         print(
             f"\n  {_color('Port ' + str(port) + ' is already in use.', _C.YELLOW)}"
@@ -2444,52 +2451,25 @@ def _cmd_keys_delete(args: argparse.Namespace) -> None:
 
 
 def _cmd_keys_rotate(args: argparse.Namespace) -> None:
-    """Rotate an API key (create new + deactivate old).
+    """Rotate an API key using the dedicated rotate endpoint.
 
-    Since there is no dedicated rotate endpoint, this performs
-    the operation client-side: create a new key, then deactivate
-    the old one.
+    Creates a new key atomically and starts the grace period for the old one.
     """
-    # First, get the old key details to copy name/tenant
-    list_body = _api_get(args, "/api/api-keys")
-    old_key = None
-    for k in list_body.get("data", []):
-        if isinstance(k, dict) and k.get("id", "").startswith(args.key_id):
-            old_key = k
-            break
-
-    # Build create payload from old key metadata
-    create_payload: dict[str, Any] = {
-        "name": (old_key.get("name", "") if old_key else "") + " (rotated)",
-    }
-    if old_key and old_key.get("tenant_id"):
-        create_payload["tenant_id"] = old_key["tenant_id"]
-    if old_key and old_key.get("max_cost_per_run_usd"):
-        create_payload["max_cost_per_run_usd"] = old_key["max_cost_per_run_usd"]
-
-    # Create replacement key
-    create_body = _api_post(args, "/api/api-keys", create_payload)
-    new_data = create_body.get("data", {})
-
-    # Deactivate old key
-    _api_delete(args, f"/api/api-keys/{args.key_id}")
+    body = _api_post(args, f"/api/api-keys/{args.key_id}/rotate")
+    data = body.get("data", {})
 
     if getattr(args, "json", False):
-        _json_out(
-            {
-                "rotated": True,
-                "old_key_id": args.key_id,
-                "new_key_id": new_data.get("id"),
-                "new_key": new_data.get("key"),
-            }
-        )
+        _json_out(body)
         return
 
-    print(f"Key rotated: {args.key_id} -> {new_data.get('id', '?')}")
-    print("  Old key deactivated.")
+    new_id = data.get("new_key_id") or data.get("id", "?")
+    new_key = data.get("key", "")
+    print(f"Key rotated: {args.key_id} -> {new_id}")
+    if data.get("grace_expires_at"):
+        print(f"  Old key grace period expires: {data['grace_expires_at']}")
     print()
     print(_color("  New key (shown ONCE - save it now!):", _C.YELLOW))
-    print(f"  {_color(new_data.get('key', ''), _C.GREEN)}")
+    print(f"  {_color(new_key, _C.GREEN)}")
     print()
 
 

@@ -22,11 +22,14 @@ export function ContextBanner({ variant, icon: Icon, children, link, className }
   const s = VARIANT_STYLES[variant];
 
   return (
-    <div className={cn(
-      "flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5",
-      "border-l-[3px]", s.border, s.bg,
-      className,
-    )}>
+    <div
+      role={variant === "error" || variant === "warning" ? "alert" : undefined}
+      className={cn(
+        "flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5",
+        "border-l-[3px]", s.border, s.bg,
+        className,
+      )}
+    >
       <div className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-md", s.icon)}>
         <Icon className="h-3.5 w-3.5" />
       </div>

@@ -32,6 +32,9 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 
   return (
     <div
+      role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
       className={cn(
         "flex items-start gap-3 rounded-lg border bg-surface px-4 py-3 shadow-lg",
         "pointer-events-auto w-80 max-w-[calc(100vw-2rem)]",
@@ -39,13 +42,14 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       )}
       style={{ animation: "fadeIn 0.2s ease-out" }}
     >
-      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", config.color)} />
+      <Icon aria-hidden="true" className={cn("mt-0.5 h-4 w-4 shrink-0", config.color)} />
       <p className="flex-1 text-sm text-foreground">{toast.message}</p>
       <button
         onClick={() => onDismiss(toast.id)}
+        aria-label="Dismiss notification"
         className="shrink-0 text-muted hover:text-foreground transition-colors"
       >
-        <X className="h-3.5 w-3.5" />
+        <X aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
     </div>
   );

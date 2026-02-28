@@ -5700,6 +5700,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runs\/([^/]+)$/,
+    method: "GET",
     handler: (params) => getRunDetail(params._1),
   },
   {
@@ -5709,6 +5710,24 @@ const routes: MockRoute[] = [
       _data: MOCK_SCHEDULES,
       _meta: { total: MOCK_SCHEDULES.length, limit: 50, offset: 0 },
     }),
+  },
+  {
+    match: /^\/schedules$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { workflow_name?: string; cron_expression?: string; input_data?: Record<string, unknown>; enabled?: boolean } | undefined;
+      const newSched = {
+        id: `sch-${Date.now().toString(36)}`,
+        workflow_name: b?.workflow_name || "workflow",
+        cron_expression: b?.cron_expression || "0 0 * * *",
+        input_data: b?.input_data || {},
+        enabled: b?.enabled ?? true,
+        last_run_id: null,
+        created_at: new Date().toISOString(),
+      };
+      MOCK_SCHEDULES.push(newSched);
+      return newSched;
+    },
   },
   {
     match: /^\/dead-letter$/,

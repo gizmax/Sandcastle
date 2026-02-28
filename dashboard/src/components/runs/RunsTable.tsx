@@ -42,10 +42,11 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
           <thead>
             <tr className="border-b border-border bg-background/50">
               {selectable && (
-                <th className="w-10 px-3 py-3">
+                <th className="w-10 px-3 py-3" scope="col">
                   <input
                     type="checkbox"
                     checked={allSelected}
+                    aria-label="Select all runs"
                     onChange={() => {
                       if (allSelected) {
                         onSelectionChange?.(new Set());
@@ -57,11 +58,11 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                   />
                 </th>
               )}
-              <th className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
-              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Status</th>
-              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Started</th>
-              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Duration</th>
-              <th className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Cost</th>
+              <th scope="col" className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Status</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Started</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Duration</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Cost</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -69,8 +70,17 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
               <tr
                 key={run.run_id}
                 onClick={() => navigate(`/runs/${run.run_id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/runs/${run.run_id}`);
+                  }
+                }}
+                tabIndex={0}
+                role="row"
+                aria-label={`Run ${run.workflow_name}, status ${run.status}`}
                 className={cn(
-                  "cursor-pointer transition-colors duration-150 hover:bg-border/20",
+                  "cursor-pointer transition-colors duration-150 hover:bg-border/20 focus:outline-none focus:bg-border/20",
                   selectedIds?.has(run.run_id) && "bg-accent/5"
                 )}
               >
@@ -79,6 +89,7 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                     <input
                       type="checkbox"
                       checked={selectedIds?.has(run.run_id) ?? false}
+                      aria-label={`Select run ${run.run_id.slice(0, 8)}`}
                       onChange={() => {
                         const next = new Set(selectedIds);
                         if (next.has(run.run_id)) {

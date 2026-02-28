@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { GitBranch, Play, Pencil, Eye, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +16,7 @@ interface WorkflowCardProps {
   onViewVersions?: () => void;
 }
 
-export function WorkflowCard({
+export const WorkflowCard = memo(function WorkflowCard({
   name,
   description,
   stepsCount,
@@ -98,13 +99,14 @@ export function WorkflowCard({
         {onViewVersions && (
           <button
             onClick={onViewVersions}
-            title="Versions"
+            title="View versions"
+            aria-label="View versions"
             className="flex items-center justify-center rounded-lg border border-border px-2 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
           >
-            <History className="h-3 w-3" />
+            <History aria-hidden="true" className="h-3 w-3" />
           </button>
         )}
       </div>
     </div>
   );
-}
+});

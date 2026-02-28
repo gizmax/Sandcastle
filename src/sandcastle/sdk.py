@@ -490,7 +490,6 @@ class SandcastleClient:
         """
         deadline = time.monotonic() + max_wait
         while True:
-            time.sleep(poll_interval)
             run = self.get_run(run_id)
             if run.status in _TERMINAL_STATUSES:
                 return run
@@ -499,6 +498,7 @@ class SandcastleClient:
                     f"Run '{run_id}' did not reach terminal status within "
                     f"{max_wait}s (last status: {run.status})"
                 )
+            time.sleep(poll_interval)
 
     # -- Run operations --
 
@@ -954,7 +954,6 @@ class AsyncSandcastleClient:
 
         deadline = time.monotonic() + max_wait
         while True:
-            await asyncio.sleep(poll_interval)
             run = await self.get_run(run_id)
             if run.status in _TERMINAL_STATUSES:
                 return run
@@ -963,6 +962,7 @@ class AsyncSandcastleClient:
                     f"Run '{run_id}' did not reach terminal status within "
                     f"{max_wait}s (last status: {run.status})"
                 )
+            await asyncio.sleep(poll_interval)
 
     # -- Run operations --
 

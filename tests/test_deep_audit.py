@@ -640,15 +640,15 @@ class TestWorkflowHelpers:
 class TestSettingsEndpoint:
     """Test settings contract."""
 
-    def test_immutable_settings_blocked(self):
-        """Cannot change auth_required via API."""
+    def test_immutable_settings_silently_stripped(self):
+        """auth_required is not in the schema and gets silently stripped."""
         response = client.patch(
             "/api/settings",
             json={"auth_required": True},
         )
-        assert response.status_code == 403
-        body = response.json()
-        assert "IMMUTABLE_SETTING" in str(body)
+        # auth_required removed from SettingsUpdateRequest; Pydantic ignores it,
+        # route strips non-mutable keys, returns 200 with no changes.
+        assert response.status_code == 200
 
     def test_invalid_log_level_rejected(self):
         """Invalid log level returns 422."""

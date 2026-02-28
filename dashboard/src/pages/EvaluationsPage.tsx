@@ -278,8 +278,18 @@ export default function EvaluationsPage() {
               >
                 {/* Run header */}
                 <div
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  aria-label={`${run.suite_name} - ${isExpanded ? "collapse" : "expand"} cases`}
+                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
                   onClick={() => setExpandedId(isExpanded ? null : run.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedId(isExpanded ? null : run.id);
+                    }
+                  }}
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background/50">
                     <ClipboardCheck className="h-5 w-5 text-accent" />
@@ -393,10 +403,18 @@ export default function EvaluationsPage() {
                           return (
                             <Fragment key={caseKey}>
                               <tr
-                                className="cursor-pointer hover:bg-border/10 transition-colors"
+                                className="cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
+                                tabIndex={0}
+                                aria-expanded={isCaseExpanded}
                                 onClick={() =>
                                   toggleCase(run.id, c.case_name)
                                 }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    toggleCase(run.id, c.case_name);
+                                  }
+                                }}
                               >
                                 <td className="px-5 py-3">
                                   {isCaseExpanded ? (
@@ -442,7 +460,7 @@ export default function EvaluationsPage() {
                                     <div className="space-y-2">
                                       {c.assertions.map((a, i) => (
                                         <div
-                                          key={i}
+                                          key={`${a.type}-${i}`}
                                           className="flex items-center gap-2 text-xs"
                                         >
                                           {a.passed ? (

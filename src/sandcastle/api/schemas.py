@@ -601,19 +601,20 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdateRequest(BaseModel):
-    """Update server settings. Only include fields you want to change."""
+    """Update server settings. Only include fields you want to change.
+
+    Security-critical settings (auth_required, dashboard_origin, webhook_secret)
+    can only be changed via environment variables, not via this API.
+    """
 
     anthropic_api_key: str | None = None
     e2b_api_key: str | None = None
     openai_api_key: str | None = None
     minimax_api_key: str | None = None
     openrouter_api_key: str | None = None
-    auth_required: bool | None = None
-    dashboard_origin: str | None = None
-    default_max_cost_usd: float | None = None
-    webhook_secret: str | None = None
-    log_level: str | None = None
-    max_workflow_depth: int | None = None
+    default_max_cost_usd: float | None = Field(None, ge=0)
+    log_level: str | None = Field(None, pattern="^(debug|info|warning|error)$")
+    max_workflow_depth: int | None = Field(None, ge=1, le=20)
 
 
 # --- Tool Registry ---
@@ -753,18 +754,27 @@ class EvalStatsResponse(BaseModel):
 class MemoryAddRequest(BaseModel):
     """Request to add a memory."""
 
-    scope: str = "workflow"  # workflow | agent | global
-    scope_id: str  # workflow name, agent name, or "global"
-    content: str  # Text to memorize
+    scope: str = Field(
+        "workflow",
+        description="Memory scope: workflow | agent | global",
+        pattern="^(workflow|agent|global)$",
+    )
+    scope_id: str = Field(
+        ...,
+        description="Scope ID (workflow name, agent name, or 'global')",
+        min_length=1,
+        max_length=500,
+    )
+    content: str = Field(..., description="Text to memorize", min_length=1, max_length=100000)
     metadata: dict | None = None
 
 
 class MemorySearchRequest(BaseModel):
     """Request to search memories by semantic query."""
 
-    scope_id: str
-    query: str
-    limit: int = 10
+    scope_id: str = Field(..., min_length=1, max_length=500)
+    query: str = Field(..., min_length=1, max_length=10000)
+    limit: int = Field(10, ge=1, le=200)
 
 
 class MemoryEntry(BaseModel):

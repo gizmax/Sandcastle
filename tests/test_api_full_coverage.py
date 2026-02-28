@@ -985,13 +985,16 @@ class TestSettings:
         )
         assert response.status_code == 422
 
-    def test_patch_immutable_fields_blocked(self):
-        """Security-critical settings cannot be changed via API."""
+    def test_patch_immutable_fields_silently_stripped(self):
+        """Security-critical settings are not in the schema and get silently stripped."""
         response = client.patch(
             "/api/settings",
             json={"auth_required": True},
         )
-        assert response.status_code == 403
+        # auth_required was removed from SettingsUpdateRequest schema;
+        # Pydantic ignores unknown fields, route strips non-mutable keys,
+        # returns 200 with no changes applied.
+        assert response.status_code == 200
 
     def test_patch_valid_settings(self):
         response = client.patch(
