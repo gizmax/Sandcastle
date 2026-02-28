@@ -25,14 +25,14 @@ export function DeadLetterTable({ items, onRetry, onResolve }: DeadLetterTablePr
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" aria-label="Dead letter queue">
           <thead>
             <tr className="border-b border-border bg-background/50">
-              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Step</th>
-              <th className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Error</th>
-              <th className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Attempts</th>
-              <th className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
-              <th className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Step</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Error</th>
+              <th scope="col" className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Attempts</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
+              <th scope="col" className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">

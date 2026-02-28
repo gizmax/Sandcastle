@@ -586,3 +586,399 @@ class TestEdgeCases:
         issues = _check_dangerous_code([step])
         assert len(issues) > 0
         assert issues[0].step == "unknown"
+
+
+# ===================================================================
+# Nested config bypass prevention
+# ===================================================================
+
+
+class TestNestedCodeConfigBypass:
+    """Verify that dangerous code in code_config.code is caught."""
+
+    def test_code_config_code_subprocess(self):
+        step = {
+            "type": "code",
+            "id": "bypass1",
+            "code_config": {"code": "import subprocess; subprocess.run(['rm', '-rf', '/'])"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("subprocess" in i.message for i in issues)
+
+    def test_code_config_code_eval(self):
+        step = {
+            "type": "code",
+            "id": "bypass2",
+            "code_config": {"code": "eval(user_input)"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("eval()" in i.message for i in issues)
+
+    def test_code_config_code_os_system(self):
+        step = {
+            "type": "code",
+            "id": "bypass3",
+            "code_config": {"code": "os.system('whoami')"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("os.system" in i.message for i in issues)
+
+    def test_code_config_code_exec(self):
+        step = {
+            "type": "code",
+            "id": "bypass4",
+            "code_config": {"code": "exec(malicious_payload)"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("exec()" in i.message for i in issues)
+
+    def test_code_config_safe_code_passes(self):
+        step = {
+            "type": "code",
+            "id": "safe1",
+            "code_config": {"code": "result = sum([1, 2, 3])"},
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_code_config_none_value(self):
+        step = {
+            "type": "code",
+            "id": "safe2",
+            "code_config": {"code": None},
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_code_config_not_a_dict(self):
+        step = {
+            "type": "code",
+            "id": "safe3",
+            "code_config": "not a dict",
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_flat_code_still_works(self):
+        """Backward compatibility - flat 'code' field is still checked."""
+        step = {"type": "code", "id": "flat1", "code": "eval('x')"}
+        issues = _check_dangerous_code([step])
+        assert any("eval()" in i.message for i in issues)
+
+    def test_both_flat_and_nested_code_checked(self):
+        """Both flat and nested code fields contribute to detection."""
+        step = {
+            "type": "code",
+            "id": "both1",
+            "code": "import os",
+            "code_config": {"code": "subprocess.run(['ls'])"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("subprocess" in i.message for i in issues)
+
+    def test_integration_code_config_blocks_template(self):
+        """Full scan_template catches code_config bypass."""
+        content = _make_yaml(
+            steps=[{
+                "type": "code",
+                "id": "sneaky",
+                "code_config": {"code": "os.system('cat /etc/shadow')"},
+            }]
+        )
+        result = scan_template(content)
+        assert result.safe is False
+        assert any(e.code == "DANGEROUS_CODE" for e in result.errors)
+
+
+class TestNestedHttpConfigBypass:
+    """Verify that SSRF URLs in http_config.url are caught."""
+
+    def test_http_config_url_private_ip(self):
+        step = {
+            "type": "http",
+            "id": "bypass_http1",
+            "http_config": {"url": "http://10.0.0.1/admin"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_http_config_url_localhost(self):
+        step = {
+            "type": "http",
+            "id": "bypass_http2",
+            "http_config": {"url": "http://localhost:8080/secret"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_http_config_url_metadata(self):
+        step = {
+            "type": "http",
+            "id": "bypass_http3",
+            "http_config": {"url": "http://169.254.169.254/latest/meta-data/"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_http_config_url_safe_passes(self):
+        step = {
+            "type": "http",
+            "id": "safe_http",
+            "http_config": {"url": "https://api.example.com/data"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_http_config_url_none(self):
+        step = {
+            "type": "http",
+            "id": "none_http",
+            "http_config": {"url": None},
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_http_config_not_a_dict(self):
+        step = {
+            "type": "http",
+            "id": "bad_cfg",
+            "http_config": "not a dict",
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_flat_url_still_works(self):
+        """Backward compatibility - flat 'url' field is still checked."""
+        step = {"type": "http", "id": "flat_http", "url": "http://192.168.1.1/"}
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_both_flat_and_nested_http_checked(self):
+        """Both flat and nested URL fields are checked."""
+        step = {
+            "type": "http",
+            "id": "both_http",
+            "url": "https://api.example.com",
+            "http_config": {"url": "http://127.0.0.1/secret"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_integration_http_config_blocks_template(self):
+        """Full scan_template catches http_config bypass."""
+        content = _make_yaml(
+            steps=[{
+                "type": "http",
+                "id": "sneaky_http",
+                "http_config": {"url": "http://169.254.169.254/latest/"},
+            }]
+        )
+        result = scan_template(content)
+        assert result.safe is False
+        assert any(e.code == "SSRF_URL" for e in result.errors)
+
+
+class TestSensorConfigBypass:
+    """Verify that SSRF URLs in sensor_config.url are caught."""
+
+    def test_sensor_flat_url_private(self):
+        step = {"type": "sensor", "id": "sensor1", "url": "http://10.0.0.1/status"}
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_sensor_config_url_private(self):
+        step = {
+            "type": "sensor",
+            "id": "sensor2",
+            "sensor_config": {"url": "http://192.168.0.1/health"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_sensor_config_url_metadata(self):
+        step = {
+            "type": "sensor",
+            "id": "sensor3",
+            "sensor_config": {"url": "http://169.254.169.254/latest/meta-data/"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_sensor_config_url_safe(self):
+        step = {
+            "type": "sensor",
+            "id": "sensor_safe",
+            "sensor_config": {"url": "https://api.example.com/health"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_sensor_config_not_a_dict(self):
+        step = {
+            "type": "sensor",
+            "id": "sensor_bad",
+            "sensor_config": "not a dict",
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_integration_sensor_blocks_template(self):
+        """Full scan_template catches sensor_config SSRF."""
+        content = _make_yaml(
+            steps=[{
+                "type": "sensor",
+                "id": "sneaky_sensor",
+                "sensor_config": {"url": "http://localhost:9090/metrics"},
+            }]
+        )
+        result = scan_template(content)
+        assert result.safe is False
+        assert any(e.code == "SSRF_URL" for e in result.errors)
+
+
+class TestNotifyConfigBypass:
+    """Verify that SSRF URLs in notify_config.webhook_url are caught."""
+
+    def test_notify_webhook_url_private(self):
+        step = {
+            "type": "notify",
+            "id": "notify1",
+            "notify_config": {"webhook_url": "http://10.0.0.5:3000/hooks"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_notify_webhook_url_localhost(self):
+        step = {
+            "type": "notify",
+            "id": "notify2",
+            "notify_config": {"webhook_url": "http://localhost:8080/webhook"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert any(i.code == "SSRF_URL" for i in issues)
+
+    def test_notify_webhook_url_safe(self):
+        step = {
+            "type": "notify",
+            "id": "notify_safe",
+            "notify_config": {"webhook_url": "https://hooks.slack.com/services/xxx"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_notify_no_webhook_url(self):
+        step = {
+            "type": "notify",
+            "id": "notify_none",
+            "notify_config": {"service": "slack", "channel": "#general"},
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_notify_config_not_a_dict(self):
+        step = {
+            "type": "notify",
+            "id": "notify_bad",
+            "notify_config": "not a dict",
+        }
+        issues = _check_ssrf_urls([step])
+        assert issues == []
+
+    def test_integration_notify_blocks_template(self):
+        """Full scan_template catches notify_config SSRF."""
+        content = _make_yaml(
+            steps=[{
+                "type": "notify",
+                "id": "sneaky_notify",
+                "notify_config": {"webhook_url": "http://192.168.1.1:9000/hook"},
+            }]
+        )
+        result = scan_template(content)
+        assert result.safe is False
+        assert any(e.code == "SSRF_URL" for e in result.errors)
+
+
+class TestNestedPromptBypass:
+    """Verify that dangerous code in llm_config.prompt and classify_config.prompt is caught."""
+
+    def test_llm_config_prompt_eval(self):
+        step = {
+            "type": "code",
+            "id": "llm_bypass1",
+            "llm_config": {"prompt": "Run this: eval('malicious')"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("eval()" in i.message for i in issues)
+
+    def test_llm_config_system_prompt_subprocess(self):
+        step = {
+            "type": "code",
+            "id": "llm_bypass2",
+            "llm_config": {"system_prompt": "import subprocess; subprocess.call(['ls'])"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("subprocess" in i.message for i in issues)
+
+    def test_classify_config_prompt_exec(self):
+        step = {
+            "type": "code",
+            "id": "classify_bypass1",
+            "classify_config": {"prompt": "exec(payload)"},
+        }
+        issues = _check_dangerous_code([step])
+        assert any("exec()" in i.message for i in issues)
+
+    def test_flat_prompt_still_works(self):
+        """Backward compatibility - flat 'prompt' field is still checked."""
+        step = {"type": "code", "id": "flat_prompt", "code": "", "prompt": "eval('x')"}
+        issues = _check_dangerous_code([step])
+        assert any("eval()" in i.message for i in issues)
+
+    def test_nested_prompt_safe_content(self):
+        step = {
+            "type": "code",
+            "id": "safe_prompt",
+            "llm_config": {"prompt": "Summarize the following text"},
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_llm_config_none_prompt(self):
+        step = {
+            "type": "code",
+            "id": "none_prompt",
+            "llm_config": {"prompt": None},
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_llm_config_not_a_dict(self):
+        step = {
+            "type": "code",
+            "id": "bad_llm",
+            "llm_config": "not a dict",
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_classify_config_not_a_dict(self):
+        step = {
+            "type": "code",
+            "id": "bad_classify",
+            "classify_config": 42,
+        }
+        issues = _check_dangerous_code([step])
+        assert issues == []
+
+    def test_integration_nested_prompt_blocks_template(self):
+        """Full scan_template catches nested prompt bypass."""
+        content = _make_yaml(
+            steps=[{
+                "type": "code",
+                "id": "sneaky_prompt",
+                "llm_config": {"prompt": "Use os.system('cat /etc/passwd') to read"},
+            }]
+        )
+        result = scan_template(content)
+        assert result.safe is False
+        assert any(e.code == "DANGEROUS_CODE" for e in result.errors)

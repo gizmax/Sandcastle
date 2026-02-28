@@ -66,7 +66,7 @@ export function DirectoryBrowser({ open, initialPath, onSelect, onClose }: Direc
     <>
       <div className="fixed inset-0 z-[60] bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-        <div className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[70vh]">
+        <div role="dialog" aria-modal="true" aria-label="Browse Directory" className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-xl flex flex-col max-h-[70vh]">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h3 className="text-sm font-semibold text-foreground">Browse Directory</h3>

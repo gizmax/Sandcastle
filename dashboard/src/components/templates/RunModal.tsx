@@ -1,17 +1,7 @@
 import { useEffect } from "react";
 import { Loader2, Play, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface InputSchemaProperty {
-  type: string;
-  description?: string;
-  default?: unknown;
-}
-
-interface InputSchema {
-  properties: Record<string, InputSchemaProperty>;
-  required?: string[];
-}
+import type { InputSchema } from "@/types/inputSchema";
 
 interface RunModalTemplate {
   name: string;

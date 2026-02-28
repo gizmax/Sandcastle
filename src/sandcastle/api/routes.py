@@ -1244,7 +1244,12 @@ async def generate_workflow(req: Request, request: WorkflowGenerateRequest) -> A
     if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=400,
-            detail="ANTHROPIC_API_KEY is required for workflow generation",
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="MISSING_API_KEY",
+                    message="ANTHROPIC_API_KEY is required for workflow generation",
+                )
+            ).model_dump(),
         )
 
     try:
@@ -1256,14 +1261,24 @@ async def generate_workflow(req: Request, request: WorkflowGenerateRequest) -> A
     except httpx.HTTPStatusError as exc:
         logger.error(f"Anthropic API error: {exc}")
         raise HTTPException(
-            status_code=503,
-            detail=f"Anthropic API returned {exc.response.status_code}",
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UPSTREAM_ERROR",
+                    message="Upstream provider returned an error",
+                )
+            ).model_dump(),
         )
     except Exception as exc:
         logger.error("Generation failed: %s", exc)
         raise HTTPException(
-            status_code=503,
-            detail="Workflow generation failed",
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="GENERATION_FAILED",
+                    message="Workflow generation failed",
+                )
+            ).model_dump(),
         )
 
     return ApiResponse(
@@ -1287,7 +1302,12 @@ async def generate_chat(req: Request, request: GenerateChatRequest) -> ApiRespon
     if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(
             status_code=400,
-            detail="ANTHROPIC_API_KEY is required for workflow generation",
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="MISSING_API_KEY",
+                    message="ANTHROPIC_API_KEY is required for workflow generation",
+                )
+            ).model_dump(),
         )
 
     try:
@@ -1299,14 +1319,24 @@ async def generate_chat(req: Request, request: GenerateChatRequest) -> ApiRespon
     except httpx.HTTPStatusError as exc:
         logger.error("Anthropic API error: %s", exc)
         raise HTTPException(
-            status_code=503,
-            detail=f"Anthropic API returned {exc.response.status_code}",
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UPSTREAM_ERROR",
+                    message="Upstream provider returned an error",
+                )
+            ).model_dump(),
         )
     except Exception as exc:
         logger.error("Chat generation failed: %s", exc)
         raise HTTPException(
-            status_code=503,
-            detail="Chat generation failed",
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="GENERATION_FAILED",
+                    message="Chat generation failed",
+                )
+            ).model_dump(),
         )
 
     return ApiResponse(data=result)
@@ -2367,6 +2397,8 @@ async def global_event_stream(request: Request) -> StreamingResponse:
     )
 
 
+# Note: response_model intentionally omitted from decorator; the return type
+# annotation (-> ApiResponse) is used instead to allow flexible data payloads.
 @router.get("/runs")
 async def list_runs(
     request: Request,
@@ -2975,6 +3007,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
     )
 
 
+# Note: response_model intentionally omitted; return type annotation provides typing.
 @router.get("/schedules")
 async def list_schedules(
     request: Request,
@@ -3866,7 +3899,12 @@ async def _resolve_and_update_approval(
     now = datetime.now(timezone.utc)
 
     async with async_session() as session:
-        stmt = select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
+        # Use FOR UPDATE to prevent TOCTOU race on concurrent resolve requests
+        stmt = (
+            select(ApprovalRequest)
+            .where(ApprovalRequest.id == approval_uuid)
+            .with_for_update()
+        )
         if settings.auth_required and tenant_id is not None:
             stmt = stmt.join(Run, ApprovalRequest.run_id == Run.id).where(
                 Run.tenant_id == tenant_id
@@ -4112,6 +4150,7 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
         )
 
 
+# Note: response_model intentionally omitted; return type annotation provides typing.
 @router.get("/api-keys")
 async def list_api_keys(
     request: Request,

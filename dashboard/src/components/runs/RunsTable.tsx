@@ -38,7 +38,7 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" aria-label="Workflow runs">
           <thead>
             <tr className="border-b border-border bg-background/50">
               {selectable && (

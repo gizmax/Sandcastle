@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import { ApiKeyTable, type ApiKeyItem } from "@/components/api-keys/ApiKeyTable";
 import { CreateApiKeyModal } from "@/components/api-keys/CreateApiKeyModal";
 import { KeyRevealModal } from "@/components/api-keys/KeyRevealModal";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
@@ -29,6 +30,7 @@ export default function ApiKeysPage() {
   const [error, setError] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [revealKey, setRevealKey] = useState<string | null>(null);
+  const [deactivateId, setDeactivateId] = useState<string | null>(null);
 
   // External services state
   const [anthropicKey, setAnthropicKey] = useState("");
@@ -99,18 +101,22 @@ export default function ApiKeysPage() {
     [fetchKeys]
   );
 
-  const handleDeactivate = useCallback(
-    async (id: string) => {
-      const res = await api.delete(`/api-keys/${id}`);
-      if (res.error) {
-        toast.error(`Failed to deactivate key: ${res.error.message}`);
-        return;
-      }
-      toast.success("API key deactivated");
-      setKeys((prev) => prev.filter((k) => k.id !== id));
-    },
-    []
-  );
+  const handleDeactivate = useCallback((id: string) => {
+    setDeactivateId(id);
+  }, []);
+
+  const confirmDeactivate = useCallback(async () => {
+    if (!deactivateId) return;
+    const res = await api.delete(`/api-keys/${deactivateId}`);
+    if (res.error) {
+      toast.error(`Failed to deactivate key: ${res.error.message}`);
+      setDeactivateId(null);
+      return;
+    }
+    toast.success("API key deactivated");
+    setKeys((prev) => prev.filter((k) => k.id !== deactivateId));
+    setDeactivateId(null);
+  }, [deactivateId]);
 
   const credentialsDirty =
     originalRef.current != null &&
@@ -179,6 +185,7 @@ export default function ApiKeysPage() {
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">API Keys</h1>
         <button
           onClick={() => setCreateModalOpen(true)}
+          aria-label="New API key"
           className={cn(
             "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
             "hover:bg-accent-hover transition-all duration-200",
@@ -295,6 +302,14 @@ export default function ApiKeysPage() {
         />
       )}
 
+      <ConfirmDialog
+        open={!!deactivateId}
+        title="Deactivate API Key"
+        description="Are you sure you want to deactivate this API key? Any services using this key will lose access immediately."
+        confirmLabel="Deactivate"
+        onConfirm={() => void confirmDeactivate()}
+        onCancel={() => setDeactivateId(null)}
+      />
     </div>
   );
 }

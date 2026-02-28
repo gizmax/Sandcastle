@@ -3,18 +3,7 @@ import { X, Play, FileText, FormInput, Braces } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { JsonEditor } from "@/components/shared/JsonEditor";
-
-interface InputSchemaProperty {
-  type: string;
-  description?: string;
-  default?: unknown;
-  enum?: string[];
-}
-
-interface InputSchema {
-  properties: Record<string, InputSchemaProperty>;
-  required?: string[];
-}
+import type { InputSchema } from "@/types/inputSchema";
 
 interface RunWorkflowModalProps {
   open: boolean;

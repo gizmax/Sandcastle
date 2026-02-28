@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import { WorkflowBuilder } from "@/components/workflows/WorkflowBuilder";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import jsYaml from "js-yaml";
+import type { InputSchema } from "@/types/inputSchema";
 
 interface WorkflowData {
   name: string;
@@ -23,11 +24,6 @@ interface WorkflowData {
 interface WorkflowState {
   workflow?: WorkflowData;
   yaml?: string;
-}
-
-interface InputSchema {
-  properties: Record<string, { type: string; description?: string; default?: unknown }>;
-  required?: string[];
 }
 
 /** Parse raw YAML content into a WorkflowData object for the builder. */

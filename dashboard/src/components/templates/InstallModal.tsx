@@ -102,6 +102,9 @@ export function InstallModal({
       {/* Modal */}
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={phase === "done" ? `${pack.name} Installed` : `Installing ${pack.name}`}
           className={cn(
             "w-full max-w-md rounded-xl border bg-surface shadow-xl",
             "transition-all duration-300",

@@ -253,8 +253,15 @@ async def _check_approval_timeouts() -> None:
         for approval_id in timed_out_ids:
             try:
                 async with async_session() as session:
-                    # Re-fetch with fresh state to avoid TOCTOU race
-                    ap = await session.get(ApprovalRequest, approval_id)
+                    # Re-fetch with FOR UPDATE lock to prevent TOCTOU race
+                    # with concurrent approval resolution requests
+                    stmt = (
+                        select(ApprovalRequest)
+                        .where(ApprovalRequest.id == approval_id)
+                        .with_for_update()
+                    )
+                    result = await session.execute(stmt)
+                    ap = result.scalar_one_or_none()
                     if not ap or ap.status != ApprovalStatus.PENDING:
                         continue
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContextBanner } from "@/components/shared/ContextBanner";
 import { formatRelativeTime, cn } from "@/lib/utils";
@@ -89,18 +90,11 @@ export default function ViolationsPage() {
 
   if (error) {
     return (
-      <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
-        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
-          <p className="text-sm text-error">{error}</p>
-          <button
-            onClick={() => { setLoading(true); void fetchData(); }}
-            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        title="Policy Violations"
+        message={error}
+        onRetry={() => { setLoading(true); void fetchData(); }}
+      />
     );
   }
 

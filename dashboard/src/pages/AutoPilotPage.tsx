@@ -297,7 +297,7 @@ export default function AutoPilotPage() {
                     {/* Variant comparison table */}
                     {variantStats.length > 0 && (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="w-full text-sm" aria-label="AutoPilot variant comparison">
                           <thead>
                             <tr className="border-b border-border bg-background/50">
                               <th className="px-5 py-2.5 text-left font-medium text-muted">Variant</th>

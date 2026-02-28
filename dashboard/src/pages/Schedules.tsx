@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import { ScheduleTable } from "@/components/schedules/ScheduleTable";
 import { CreateScheduleModal } from "@/components/schedules/CreateScheduleModal";
 import { EditScheduleModal } from "@/components/schedules/EditScheduleModal";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ export default function Schedules() {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const fetchSchedules = useCallback(async () => {
     try {
@@ -53,15 +55,22 @@ export default function Schedules() {
     );
   }, []);
 
-  const handleDelete = useCallback(async (id: string) => {
-    const res = await api.delete(`/schedules/${id}`);
+  const handleDelete = useCallback((id: string) => {
+    setDeleteId(id);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteId) return;
+    const res = await api.delete(`/schedules/${deleteId}`);
     if (res.error) {
       toast.error(`Failed to delete schedule: ${res.error.message}`);
+      setDeleteId(null);
       return;
     }
     toast.success("Schedule deleted");
-    setSchedules((prev) => prev.filter((s) => s.id !== id));
-  }, []);
+    setSchedules((prev) => prev.filter((s) => s.id !== deleteId));
+    setDeleteId(null);
+  }, [deleteId]);
 
   const handleCreate = useCallback(
     async (data: {
@@ -128,6 +137,7 @@ export default function Schedules() {
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Schedules</h1>
         <button
           onClick={() => setModalOpen(true)}
+          aria-label="New schedule"
           className={cn(
             "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
             "hover:bg-accent-hover transition-all duration-200",
@@ -169,6 +179,15 @@ export default function Schedules() {
           onSubmit={handleEdit}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteId}
+        title="Delete Schedule"
+        description="Are you sure you want to delete this schedule? This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteId(null)}
+      />
     </div>
   );
 }

@@ -163,6 +163,9 @@ export function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:bg-accent focus:text-accent-foreground focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-medium">
+        Skip to content
+      </a>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dlqCount={dlqCount} approvalsCount={approvalsCount} />
       <div className="flex flex-1 flex-col overflow-hidden">
         {isDemo && (
@@ -177,7 +180,7 @@ export function Layout() {
           onMarkAllRead={handleMarkAllRead}
           onClickNotification={handleClickNotification}
         />
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">
+        <main id="main-content" className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6">
           <Outlet />
         </main>
       </div>

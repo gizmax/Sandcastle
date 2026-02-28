@@ -7,25 +7,16 @@ import { WorkflowList } from "@/components/workflows/WorkflowList";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import { DagGraph } from "@/components/workflows/DagGraph";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { cn } from "@/lib/utils";
+import type { InputSchema } from "@/types/inputSchema";
 
 interface WorkflowStep {
   id: string;
   model?: string;
   depends_on?: string[];
   prompt?: string;
-}
-
-interface InputSchemaProperty {
-  type: string;
-  description?: string;
-  default?: unknown;
-}
-
-interface InputSchema {
-  properties: Record<string, InputSchemaProperty>;
-  required?: string[];
 }
 
 interface WorkflowInfo {
@@ -93,18 +84,11 @@ export default function Workflows() {
 
   if (error) {
     return (
-      <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
-        <div className="rounded-xl border border-error/30 bg-error/5 p-4">
-          <p className="text-sm text-error">{error}</p>
-          <button
-            onClick={() => { setLoading(true); void fetchWorkflows(); }}
-            className="mt-2 text-xs font-medium text-accent hover:text-accent/80 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        title="Workflows"
+        message={error}
+        onRetry={() => { setLoading(true); void fetchWorkflows(); }}
+      />
     );
   }
 
@@ -114,6 +98,7 @@ export default function Workflows() {
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
         <button
           onClick={() => navigate("/workflows/builder")}
+          aria-label="New workflow"
           className={cn(
             "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
             "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
