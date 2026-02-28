@@ -35,7 +35,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 10,
-      "sha256": "b1e7091a038553cb08336286340c905c68ca710d63dc4c0d61b3097b42e3810b",
+      "sha256": "945a67e79b22d07a462a444e7a1bf66f968bed65048e835ec97eba03d783f0cc",
       "input_schema": {
         "required": [
           "project_description",
@@ -104,7 +104,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 73,
-      "sha256": "99652d9aed3956ca67152c56d05f80d7c86075249e09c821f5f7149d8665e435",
+      "sha256": "775d3655092b31eb75eb5ebd86f0e0c23d37a7a8a6553d61db2e40e444c293a6",
       "input_schema": {
         "required": [
           "brief",
@@ -169,7 +169,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 13,
-      "sha256": "4649f272187ed9b48de914611f797a180b049de42aabe2abfa3ce10aaa552ace",
+      "sha256": "c3fab4abeb1b68230f593403b6558327f4869fa10f00928bbc4dd8fb2523374b",
       "input_schema": {
         "required": [
           "student_profile",
@@ -242,7 +242,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 19,
-      "sha256": "95f89cebccb508637ff8d3dc57065d1c046ec980338bf81fd0c855b4d7358724",
+      "sha256": "e2ecac3fb37a86b0dc3811e4b4063cd5f5e815779d6ac73bcc0cc631016e13e8",
       "input_schema": {
         "required": [
           "spreadsheet_id",
@@ -302,7 +302,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 21,
-      "sha256": "6f7b9d6d9792818d238585507253d86e23257c3501d9011a19fca411ccdd0cb6",
+      "sha256": "880d7d85749d7a7e11bd15ae9e7499d43205026f1ea889ea00b7d83925d3472c",
       "input_schema": {
         "required": [
           "competitors",
@@ -358,7 +358,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 71,
-      "sha256": "42a27d52c94e4122a25e7aae158f994cc8bde8eb073deb148e0cf04c9d4168f8",
+      "sha256": "e70ff9772b6af29c8732d3665596f6224745a4d7fb4501b5d04fa61b3adab74b",
       "input_schema": {
         "required": [
           "competitor"
@@ -415,7 +415,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 48,
-      "sha256": "f333c8d156e82b2d1e484e1880dfd46d41a76e658c22afcb8c69cb9ff8e498ed",
+      "sha256": "3121d1d6c9e2373fa8eeadc11b20ab45eab28e9731137f3d46a27e8e9d8fad4b",
       "input_schema": {
         "required": [
           "niche",
@@ -483,7 +483,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 74,
-      "sha256": "87a5308b7ee001ed364e61beea9f0faeaeafd72b3ccd5143d678192847c2946f",
+      "sha256": "bc92021f974484dca58fb44c5b6658913bfe6ee3ae019a488d55b5448068f2f2",
       "input_schema": {
         "required": [
           "campaign_brief"
@@ -544,7 +544,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 21,
-      "sha256": "f836f7a6614bcf47898d73be0a051314cb4dda1c664a5ac428c94dee2d7e1886",
+      "sha256": "e0db8523fed1af94a8052750c563a5822ea0278e2ef75ef6e2c50b438d78ab0d",
       "input_schema": {
         "required": [
           "podcast_title",
@@ -607,7 +607,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 23,
-      "sha256": "a8251341b9cbb09cfcc855c7630c4bb515cff9b0e2d4225284a00f5a8196aa63",
+      "sha256": "a7330b8362cc4c50d5a7d69976345a09fc5a081ad199a308a80c376e4c7fba02",
       "input_schema": {
         "required": [
           "brand_name",
@@ -686,7 +686,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 41,
-      "sha256": "17f4b10241fff99ed726cb8f97ddb6ad3e02707d795ef99ab371c45f684fd41f",
+      "sha256": "6d2298af5d4be07beaa03c2612da723d84be0e0ed1aa620b4d0338c026eb2eda",
       "input_schema": {
         "required": [
           "question"
@@ -733,7 +733,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 26,
-      "sha256": "27bbb1c8c87ae6113b676fdf2a8c0fbe98af2b9c2a3e68cfddd28ca2d05f6d80",
+      "sha256": "721f480c4bf03a686607f2917da396d7a20c5b2f7afdadb46aacb343b85e1406",
       "input_schema": {
         "required": [
           "company_name",
@@ -800,7 +800,7 @@
       "license": "MIT",
       "rating": 4.9,
       "review_count": 34,
-      "sha256": "2f0c1dfe3b48a49c2befeeaaafab9aaf45bd35f8567cf7da60525587b9fe1805",
+      "sha256": "1fe0eb776d6c2fa44f67378fafce285cc78c04cfcbc6e82575251ba623e5705f",
       "input_schema": {
         "required": [
           "topic",
@@ -859,7 +859,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 24,
-      "sha256": "3eb21b206141d2559cbc16802562c77d8b8ff1e7b5cca4d9b4afb417c5aca226",
+      "sha256": "8f32a995ed190c6d0c9ee8ba726ea7263cf23363bc5fd57553250cd7f04dc6f7",
       "input_schema": {
         "required": [
           "models_to_test"
@@ -923,7 +923,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 75,
-      "sha256": "a72554727dc59d3e04d5e371ec6c07b84013cf27cb70a6f9bfd9574f67ea6030",
+      "sha256": "053506ff4adbed098fab70b6750c0b104f030d56ea342bd7260397f5b15b9f68",
       "input_schema": {
         "required": [
           "directory"
@@ -983,7 +983,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 4,
-      "sha256": "a29b1eaeb0b330cf62d2d6370fdef30fc5374184a37896498821f6221d78f29f",
+      "sha256": "2613eada99b43cf3266177225f2c42ebe86e73b9d08351776cac924a117541db",
       "input_schema": {
         "required": [
           "product_name",
@@ -1042,7 +1042,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 27,
-      "sha256": "f80a3f9ad64975efb9af58b3970c9b35603ae909f5905425904a12bdfd009e9c",
+      "sha256": "5a7b13cf3696e6f6440fcab2d0e0b45950d7901266f8c82da5f3f498ce76c648",
       "input_schema": {
         "required": [
           "document_sources",
@@ -1110,7 +1110,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 47,
-      "sha256": "9e7505315e988c6e14abb3ffb172f169f02ad277a52b391203a13a2a200033d1",
+      "sha256": "c53d11a3637440afcdd4bf584af02b4c9040c1a04995ac18231d4d910015f7c0",
       "input_schema": {
         "required": [
           "repo",
@@ -1180,7 +1180,7 @@
       "license": "MIT",
       "rating": 4.7,
       "review_count": 23,
-      "sha256": "547f48b041b7ed74cb8d476e090bd4c70b394579bbf0717896f43049af3f7d6c",
+      "sha256": "1200373502ba49887d5bc19edc7a129bf99be69a8bdeba90ee041f6f936c5792",
       "input_schema": {
         "required": [
           "agency_name",
@@ -1253,7 +1253,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 5,
-      "sha256": "a232d2d0ed1b56ef64df90b4b23438af5a07d2591aa12ea0dbb81cd572fdabf6",
+      "sha256": "86de662abf6c6ab40df9da70f9d3d5dcb27c52790e2899c0be4e7354ded5abb8",
       "input_schema": {
         "required": [
           "brand_name",
@@ -1315,7 +1315,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 33,
-      "sha256": "981ec7feba742fb49af3670158cdaba63456713cfe1c969a7f3c3c7e5e5974df",
+      "sha256": "0e615fc366f276b3cfb7fac412689f04663c4e0ab60fda1cc9570be95e12fbca",
       "input_schema": {
         "required": [
           "blog_post"
@@ -1371,7 +1371,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 6,
-      "sha256": "9be4bfbeea172df656c312fd908bcb8122233daa98e2e61ba9c9192901651db2",
+      "sha256": "0d4b185f42bae00078e3e0d6bb9acd9ad1a48b55c53eb511f99cc4bef898c004",
       "input_schema": {
         "required": [
           "competitor_product",
@@ -1436,7 +1436,7 @@
       "license": "MIT",
       "rating": 3.9,
       "review_count": 16,
-      "sha256": "cfc7ce74db1b858ff314fc8a076cc795bd2276a0f522b864ef101360828adf59",
+      "sha256": "548e4a01fa6daa10f027f104bbd64711da03c6b710d3f87b38f4696123bfae16",
       "input_schema": {
         "required": [
           "catalog_source",
@@ -1509,7 +1509,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 13,
-      "sha256": "ed169dbd053d979b838564a67dc9f0d0e3ba742608c8c1020f9a5a45f5add18f",
+      "sha256": "09d665e93da53f1f86c0d6a616577e06ebbf424c4fdfcdb9c020a3c6a8a8bb7c",
       "input_schema": {
         "required": [
           "target_accounts",
@@ -1566,7 +1566,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 10,
-      "sha256": "9c04d56b343734c8bc7cc6b32766697c00dbaf107c81b079e2463cdd49a94728",
+      "sha256": "1ee4f2e173bb3d3912fe778c7515098bf17c3e19afc1768c9e02304844fe6b88",
       "input_schema": {
         "required": [
           "client_name",
@@ -1628,7 +1628,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 14,
-      "sha256": "aa2913fcd4de35ca6eedc701f2607306dbd443dc6614f14304389971cb59e963",
+      "sha256": "f118aec15e022faae62bfc82e2f9a6bd9cf5a1d173c4ed12978e28c4d8645c16",
       "input_schema": {
         "required": [
           "contract_text"
@@ -1678,7 +1678,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 37,
-      "sha256": "0a0b8b8730b2c254f29df00903526f619f84b63ec0bac41235b79d8ff12700e2",
+      "sha256": "9a021ff8e8e7bdde2e5ad4d20de2db09f6cd8b08fb5988ee3ffeae07be8b9a00",
       "input_schema": {
         "required": [
           "segment"
@@ -1746,7 +1746,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 72,
-      "sha256": "eb6b38ce7d9ac5c4865f02bbaa0843ba7e1e54157dc6e225fe89e41357aa021d",
+      "sha256": "4a0dfd8906f8420275c3726824c5f62367a596ecad092886e6bf7523adc7e80e",
       "input_schema": {
         "required": [
           "company_name",
@@ -1813,7 +1813,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 23,
-      "sha256": "ea73d339efbf54164b753f557aee2c335f0ba5edcf812c03b0920e2a25e411cb",
+      "sha256": "6c8ebaef3102ff67715b403515a84d684337bd9757640469d3f5c78d5d0f3301",
       "input_schema": {
         "required": [
           "product_description",
@@ -1870,7 +1870,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 74,
-      "sha256": "a597e4d7670418184f21c8c0a4533fd9fdba692f9ca61147b46445b7b181492f",
+      "sha256": "8491795361ce3168a9d2ba5ea8063347ccbaff6aa9cd9689a2902a9086e1c86f",
       "input_schema": {
         "required": [
           "reviews",
@@ -1925,7 +1925,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 18,
-      "sha256": "ee90d147852f5d9942f8296dc9dbea74886e44373f3008afdf0154a3ce206757",
+      "sha256": "599288528880d07f029ce6ad5cc1c61b620ca7c50b30e467e684cc0abdea9242",
       "input_schema": {
         "required": [
           "hours_lookback"
@@ -1980,7 +1980,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 14,
-      "sha256": "7553ae3fac6b537acea01e173fe7264e568115b3c39ee11b658934cb19e72776",
+      "sha256": "6eb58fc99ae940a17e6e0acfff1d810b3110598fd806da98787655fd66711f93",
       "input_schema": {
         "required": [
           "crm_source"
@@ -2039,7 +2039,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 24,
-      "sha256": "2937195eae37af4bdcaf1a4796679b7d0f2e6ae17531e1f6702329b548ac835b",
+      "sha256": "bc5d32939cc05d4dd2d5ea1791152a4fdf535fab86a9845b1f1e2da8e4c1ad18",
       "input_schema": {
         "required": [
           "project_type",
@@ -2109,7 +2109,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 22,
-      "sha256": "7374c673f3646a78221493ab6346983e0dfbd6624b565fabcd4583c0926b19ac",
+      "sha256": "8ab7195f848c63d1d003a538d3cd92c4a3baa1cd2d8004c240cc45c7d15abf32",
       "input_schema": {
         "required": [
           "search_query"
@@ -2171,7 +2171,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 22,
-      "sha256": "6b3221b0c6e120137d5a35ba603f1237f4a6be5a104ac965cca9146557b271c2",
+      "sha256": "33dc300a4a12cc6171e9be8f60b498186f54cabed151fc8a68555b6d826ccb26",
       "input_schema": {
         "required": [
           "organization_name",
@@ -2243,7 +2243,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 71,
-      "sha256": "98b9e342598e786f1899879f6b4229b70298d225addec1939a403be031cdbfba",
+      "sha256": "5467b32a2ff26283865233c0724be3ffa10105ffd4b9f795bd0269abfd39d3eb",
       "input_schema": {
         "required": [
           "lead_source"
@@ -2296,7 +2296,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 12,
-      "sha256": "d78f25cd64970a00f799928faa475c1ea6b0ec0acabef862f9ee13d29408fe29",
+      "sha256": "a4995a55d5bd9e3583a22e5d85f00d9155008598ea54a6fdf35ba1cbf6dd13ad",
       "input_schema": {
         "required": [
           "project_type",
@@ -2365,7 +2365,7 @@
       "license": "MIT",
       "rating": 4.7,
       "review_count": 23,
-      "sha256": "edc5d3d41735e565f4fd3d73b01ac9fc0e8036c4b4a65b2d37a0db14f0816fbe",
+      "sha256": "9b5e01d015df982f1fa6f9437020b235cafbaab4648fe367741de9fe03a2dfa2",
       "input_schema": {
         "required": [
           "property_address",
@@ -2439,7 +2439,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 54,
-      "sha256": "9f2f9cb25502ef1f1faa2b9e6ec5adccde6afe6b00900e20270a3c5d7180413e",
+      "sha256": "8418c6682cfc380c18677dc19d2ed9fdc6b2726bafb282b694962250142e2083",
       "input_schema": {
         "required": [
           "pipeline_name"
@@ -2500,7 +2500,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 22,
-      "sha256": "18f51b4845a960aae4f51d5b49f80dccdaaf6d8cf66f797923f787c552152cc0",
+      "sha256": "0a43bba715d1491780e01001d7daceca202fe7478a55606d3b01e3f0908d86d4",
       "input_schema": {
         "required": [
           "project_name"
@@ -2560,7 +2560,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 15,
-      "sha256": "3674735285361cf6c801d0c31195f1ec707201421f999dabf689973d838d890f",
+      "sha256": "64add59379eecb80abe4bf5e4a157a94ac40b77406d6f87f4427c06ac264b0c9",
       "input_schema": {
         "required": [
           "discord_channel_id"
@@ -2617,7 +2617,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 73,
-      "sha256": "e770019065af60155b50f7830cbbbaf06d6dfb31a5ee77f0ab9046b812ec63c2",
+      "sha256": "d89dc14afe55e0f1207dcbb0344dbbccd61685bac1aa6459f6f51a82e7f873fc",
       "input_schema": {
         "required": [
           "alert_id"
@@ -2692,7 +2692,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 16,
-      "sha256": "3de21f0f4ac00bd7a0216a5ee230ee011d5d9d1fef7aa39bb139f1c9ab4f5fa7",
+      "sha256": "0c59adabb1e71b8a4fc621c2ae52e3448999c5dea435e0639f5d4d95e80a8c83",
       "input_schema": {
         "required": [
           "business_question",
@@ -2753,7 +2753,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 27,
-      "sha256": "10b938a69831ee997138a971f8706fa706bf6fd6604a86bf9675d644b3ab0fb5",
+      "sha256": "b30ab3386873b55c4aab0eee58d33ec831af6ef4859cf67654d0b112ce63bfa5",
       "input_schema": {
         "required": [
           "pipeline_name",
@@ -2818,7 +2818,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 80,
-      "sha256": "d5135087f0e5145a8adcad04f5f6c7f723da5f0e63727fa36ead7d011597dc57",
+      "sha256": "15456c4aa5d666d70b597407a2f49365622cf69ac7209cd2da90cb055f39d35b",
       "input_schema": {
         "required": [
           "standup_channel"
@@ -2888,7 +2888,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 59,
-      "sha256": "8bb41280172674ce9f3d69c775054a68cf501639df36d5ac7d19a6bf15619b7c",
+      "sha256": "f789d5d592fea88f90b9945417dac89cb96ec61fb206ff0f0390027737255c5a",
       "input_schema": {
         "required": [
           "jira_project",
@@ -2946,7 +2946,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 19,
-      "sha256": "507339b5c2c9dacb1d77b3867cc7a6c8a6f1d29c42336e63d481ee61a8d7e77b",
+      "sha256": "92c7c369ff3077b9fb997826c23cbae9562b1bdd0b9b9141632307206d69aa4f",
       "input_schema": {
         "required": [
           "target_model"
@@ -3007,7 +3007,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 11,
-      "sha256": "520914cfcd607c79786eb65063934982b191a36468552ac751167c47cd757ff6",
+      "sha256": "d49a37ff32fb3b23a7eb1606afa9bc0a1a70a56da5a48a8787a928061d99c857",
       "input_schema": {
         "required": [
           "frameworks",
@@ -3072,7 +3072,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 27,
-      "sha256": "64796c159192e808cfb4c27ea36b5410c2f61e3e154c4e94b577f7fd2054010c",
+      "sha256": "b099e34ec67e112142702ac9d92fde6b7757f9f866c88f4763fbf8899df1ee6d",
       "input_schema": {
         "required": [
           "scan_scope",
@@ -3143,7 +3143,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 20,
-      "sha256": "bec897d5843db1934bdef95c2c908fbe070ab7772936c7ac0f4a89f540df21e7",
+      "sha256": "30e541db82055290a432c2a1ab95291701d04c8b18419bf691f810a267da7fa9",
       "input_schema": {
         "required": [
           "repo_url",
@@ -3204,7 +3204,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 9,
-      "sha256": "09029c7a4d345479e97d589630812fc67106fa81269341bfab2296f9b0a7ac4f",
+      "sha256": "8eb582ea013a54dd0b171edc3d1a14cee4f1cadb9714756126cdfffcd95963dd",
       "input_schema": {
         "required": [
           "alert_source",
@@ -3266,7 +3266,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 20,
-      "sha256": "2bcb2728473e582259b1796d8d023d2f473543bcd58ced1876c7cf977dc7a8a0",
+      "sha256": "ea6dab406b7f1ab7a3c83bbbb3964818790bafdd466fe13f2ae3295bf800ddbc",
       "input_schema": {
         "required": [
           "siem_source",
@@ -3324,7 +3324,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 15,
-      "sha256": "e9544cef1e504c4f3e5697c43a3015a61df526d4e2cf4b213911eda746f322ac",
+      "sha256": "e82c359bfc33b18d4839477a59efe665c6bfe32aa54be765702a157bf636427d",
       "input_schema": {
         "required": [
           "contract_type",
@@ -3382,7 +3382,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 29,
-      "sha256": "2cab47501869daf6a1c74b22e477cd4b997b528a6790dbe7bdfa487cbb1f33d5",
+      "sha256": "127e76649ef45425975b150277d6237ef26cf97fc5d57bcf460c2f167459bce9",
       "input_schema": {
         "required": [
           "contract_text"
@@ -3457,7 +3457,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 26,
-      "sha256": "80ee99fbc1d6fe4475755b43ac7036891b2357b5c73122464661c503c1ea040d",
+      "sha256": "2abd99f33fde0dc77275142864d2df2a55c496450676d4215790dcc9efccd40f",
       "input_schema": {
         "required": [
           "employee_name",
@@ -3549,7 +3549,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 8,
-      "sha256": "e53e465fbd8c6b6e13249a5cd6c38ae1ac2051d2117c033ef515c888c8fd306b",
+      "sha256": "5e517a3e47e32f745bb19dbb3377483524d55add4606a4f02b7a9860ca15d0cc",
       "input_schema": {
         "required": [
           "technology_domain",
@@ -3616,7 +3616,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 62,
-      "sha256": "f3ac23d9ff73975119a0bd0423efe68da896127219fe442eba8c8bcd55f7acf2",
+      "sha256": "eee29ae32fd6909df210d8a89fc8e257fcd772d6000a5d5f099e7a34190702dc",
       "input_schema": {
         "required": [
           "resume_text",
@@ -3672,7 +3672,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 62,
-      "sha256": "71d5575a9e8784f4eff6596ad6b5327b1ec1763d3d2f77be7733f3a151c28497",
+      "sha256": "c16ce6d5f0d9ac822b2eb1a15e3a6ce3608a7cd01cac617d6ec5d3ea553d5984",
       "input_schema": {
         "required": [
           "product_brief"
@@ -3731,7 +3731,7 @@
       "license": "MIT",
       "rating": 4.7,
       "review_count": 29,
-      "sha256": "1f293d5be4c3d9010ea006ddd03f6c9ae338b36a1993dd331a753bfed10a21c2",
+      "sha256": "325e643039b729e04f2a6e5e1271b8d3df5014c41c1d36de128318144b32152e",
       "input_schema": {
         "required": [
           "topic"
@@ -3791,7 +3791,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 15,
-      "sha256": "1dd337c11478971f23cdf1710eb3b2651b5b5c2d843279ac59b24b859cd99a14",
+      "sha256": "d8ccd68dc6a0056f41b897b258b528e9a44bfe1fba5dbbef930c0204b5e810e8",
       "input_schema": {
         "required": [
           "topic",
@@ -3855,7 +3855,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 16,
-      "sha256": "ae40048886f8d06982e648aa5b06d17d3588c39a266ff11695ace50896b74c61",
+      "sha256": "48f590919bdef6dd5626e05f24e67345a0633ee7cb7482e06f38870e006c589e",
       "input_schema": {
         "required": [
           "course_topic",
@@ -3929,7 +3929,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 17,
-      "sha256": "47f0bc33920bee38346c7fb04ae1de45fddae3e61e7b2b9254290c0fe4b7c593",
+      "sha256": "1346f8ab45e385e056de06f50da5e772d5999ab04410104bb192e07fa1111ec9",
       "input_schema": {
         "required": [
           "crisis_description",
@@ -3998,7 +3998,7 @@
       "license": "MIT",
       "rating": 3.9,
       "review_count": 8,
-      "sha256": "51dc85682a6b7d492674b2ee7057f35f066579f80925c5c16120fe40d9cedb3e",
+      "sha256": "980c5804e57cbf4ba35c7473b38a7bb764af0e9c51b15b4b9d5d3cfb8d9ca4a3",
       "input_schema": {
         "required": [
           "product_concept",
@@ -4055,7 +4055,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 41,
-      "sha256": "096167f91aa6f913e4c5ee6a6d13e82a7659cb8ac521ea474424c807a85e97fc",
+      "sha256": "829168abe1d6f2994f0fb5038b31c82be7715d9f5aef29b398feaabcb98135a2",
       "input_schema": {
         "required": [
           "topic"
@@ -4112,7 +4112,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 15,
-      "sha256": "2c854e95fbdd6c5f33f14d63da1a9edccde12ee470d4f6f501cb90139f36f616",
+      "sha256": "4b86f85869dd111acf08cceeb9cdf3ecb613a62fa077c06cbaa10360e48a850f",
       "input_schema": {
         "required": [
           "startup_name",
@@ -4176,7 +4176,7 @@
       "license": "MIT",
       "rating": 3.9,
       "review_count": 6,
-      "sha256": "6b5965d9ab8050477482c336b437e2eec24725cd35b80ee49f3470a1b736a319",
+      "sha256": "b4c4ed34aca2f5b95bba3bb855b15b963c7f3b10665571772e52cc139bb1f20a",
       "input_schema": {
         "required": [
           "industry_keywords"
@@ -4235,7 +4235,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 9,
-      "sha256": "7605b0cca9003bb76fb67ab764f716e064e32cc05fd82f82a4fd7718eecedb4a",
+      "sha256": "c8655c5a1a0f66ad798842bbfa444dea011e621d966c4fe5845041d90192c868",
       "input_schema": {
         "required": [
           "video_url",
@@ -4301,7 +4301,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 24,
-      "sha256": "fa961139dbeb3f7ac2e13dea212f1b0317629921915db2219a01186d7c217487",
+      "sha256": "84e7ec3ca17e6f4460bb7b441e63607235c6b899acdf9a637e2cccbdaaf92b65",
       "input_schema": {
         "required": [
           "document_text",
@@ -4357,7 +4357,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 74,
-      "sha256": "13f709c3b486ac188dd76ca3ffb0723d7ba12f4e8885067af9c4dad6853784cd",
+      "sha256": "f66b7d664bc1a0342ff5d12e2a32ba08acf7493b20c563b1d9b92893a890e0b6",
       "input_schema": {
         "required": [
           "role_brief"
@@ -4420,7 +4420,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 16,
-      "sha256": "03bc5b1a838a6c526a6b29039bd2943d85ef54f4afdce199a15bd32ae81cb190",
+      "sha256": "e73463dff5df12b1bbec9187c04ae725fc73855a494086242dd7508d98354f10",
       "input_schema": {
         "required": [
           "survey_data"
@@ -4480,7 +4480,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 18,
-      "sha256": "f4cd256fc531b462bd71e7be6f12bf41e59ded161c9b3d1769f7cf9f3e3df5e1",
+      "sha256": "8ba75cf2c33210615f701583d500679e6bfb9bf48beb49fec0aec549b746ce24",
       "input_schema": {
         "required": [
           "jurisdiction",
@@ -4539,7 +4539,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 26,
-      "sha256": "91c8a981c21fd8c0af59919ddd0766ab617a4a23cb5c3eb077d9c7c6a4023873",
+      "sha256": "1846f3a0fb6d9560b2d8737201b568bb347ea29ceb163eb1162183188031d0cd",
       "input_schema": {
         "required": [
           "pipeline_stage"
@@ -4600,7 +4600,7 @@
       "license": "MIT",
       "rating": 4.9,
       "review_count": 47,
-      "sha256": "0a52219de0b48655b73f64b1cd9b13305ec484f3513d1cd8845288f7a0ef5160",
+      "sha256": "9dc003dafe3bc29ab80e212a8ebe1348bcdb8452866dcd8a613683e6b52336b4",
       "input_schema": {
         "required": [
           "days_lookback"
@@ -4661,7 +4661,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 9,
-      "sha256": "8a243ca6410f127b7d02f15f21206048e78b32b485562edd9d32ee6c34b57126",
+      "sha256": "c5b33e36f4187e154e840df16f1b6263aae5f7102b53d885086789962fe47cf5",
       "input_schema": {
         "required": [
           "kb_source"
@@ -4724,7 +4724,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 75,
-      "sha256": "f591e482e8418286e26799f8fd799eb0bf5b1e5a05ba380e90e981c65cadd21d",
+      "sha256": "4605a225958583d6005a8f12f5886c516781a6d3aef51d81b04263526446deb6",
       "input_schema": {
         "required": [
           "subject",
@@ -4782,7 +4782,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 25,
-      "sha256": "2d30e84f36a0e76b7d03e7663c517032bc869d5df6fd206fb1a870790e9c5a6c",
+      "sha256": "82de1fecd6d423d1b9f0da3eeef17163b418a48d3e61b26b57b4d7c6c52c56cf",
       "input_schema": {
         "required": [
           "call_source",
@@ -4852,7 +4852,7 @@
       "license": "MIT",
       "rating": 4.7,
       "review_count": 31,
-      "sha256": "907403502d522bbed6ee946e61c8eedb9b5d664cd6cc912050ac4c50399795a4",
+      "sha256": "5673fc59c5682647cde0b7b612d83cd308dc1a4ac8f018618ba5f1214a95f6ce",
       "input_schema": {
         "required": [
           "team_member",
@@ -4905,7 +4905,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 12,
-      "sha256": "a0204400c51f58b360be9cfe3a3859d4de9fd121726cc8cd614d86ac5e0389c1",
+      "sha256": "3d05fe3449810bc941770ff64ec1d6ae733a78e1a55cac9e6544bf5cef7cc607",
       "input_schema": {
         "required": [
           "incident_id",
@@ -4973,7 +4973,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 42,
-      "sha256": "8969d3ba32f017b19feff481f16e12ac7b74b35bb8dff21f17593ca5c26bc55c",
+      "sha256": "2f33e1b9722ffbee9e5c5115968ab192508ad6be3706c5d4537b4d6d1bd5f35d",
       "input_schema": {
         "required": [
           "changelog"
@@ -5020,7 +5020,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 18,
-      "sha256": "005b49b8f9dbe58ad30a53240dae7fbe80d73cd8f5ba83b3e0fac525d9bda590",
+      "sha256": "6aea70f5895eb4dd3436b6720a9cb2426fcd69fbd4c0bf3ee59b460d32948f7a",
       "input_schema": {
         "required": [
           "organization_name",
@@ -5090,7 +5090,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 17,
-      "sha256": "beafce17eecec8719481f55821cf03d2d163b7524d0f9cd4e197e4c81678f79f",
+      "sha256": "bcdd74fbee0d38e5e719669cb8c3f2cb3181de7a6165728d908194cfe0953aa5",
       "input_schema": {
         "required": [
           "product_catalog",
@@ -5155,7 +5155,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 17,
-      "sha256": "129f163733a6076b8fdd355a820c7b9fbac916ce53995a7ebae243cd2f91a859",
+      "sha256": "3a7fb8c94d2b4b44ac951e4285ba57c14a8d2cb6b5a610bb7bda41210716b058",
       "input_schema": {
         "required": [
           "hotel_name",
@@ -5223,7 +5223,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 15,
-      "sha256": "036bb4173a465bcdb3c30824db80b33de9a0c76b075cc7e4a2a5c0d6a5a03f53",
+      "sha256": "82f58d2f77cdb63ea515b064079afe730c48d0e5b033a3aead6b5f3d4165ecf0",
       "input_schema": {
         "required": [
           "product_name",
@@ -5281,7 +5281,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 26,
-      "sha256": "279b30aa4f4941060123718fbde05130b06fbda1e6f5412866b18cc8550f5476",
+      "sha256": "6cf079f3fec9e50ca48814f63c79a3aff278eb5fc1fee0808cb8e85fddc48e07",
       "input_schema": {
         "required": [
           "competitors"
@@ -5348,7 +5348,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 8,
-      "sha256": "6092bc12717675f8c77122e0ef865536c3f22449b1bd49de2f7b555570dc0623",
+      "sha256": "7d74e5f1f0db9a5add2136614f48401b73d201348ee453349015367cd54c09f4",
       "input_schema": {
         "required": [
           "company_ticker",
@@ -5406,7 +5406,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 6,
-      "sha256": "5bd73f727c34a2d3df4dfad7a947f6021158a898a6f4675a26b6cbfc8ab0576e",
+      "sha256": "8a425565ce65dc8e915d84ebdc4effed40f8c48738cc5ba683529e8fec5d2ad2",
       "input_schema": {
         "required": [
           "invoice_source",
@@ -5470,7 +5470,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 10,
-      "sha256": "94448e9d46de53f31aedb12a2a628a4b7ab2a3accc3777f49af4f19e6b61b6c4",
+      "sha256": "32546ae83012d65a1d364116d20b188e1be78b42fa3ff9ab4ac5e3571cc1d199",
       "input_schema": {
         "required": [
           "target_company"
@@ -5527,7 +5527,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 44,
-      "sha256": "aecb4a6f36c8146f7e9625348a1a6e24c702d791eaa6a5b54732a37f838e34c1",
+      "sha256": "040ce13834f8c7aa2e3b321a24ca650b3c2bbb46ba1151c875e2d74bb04734dd",
       "input_schema": {
         "required": [
           "topic"
@@ -5592,7 +5592,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 12,
-      "sha256": "70a81f546ebdf6b4ee0fde70d7db22f3b9c9df000143365235c6432435db8da6",
+      "sha256": "71709cc30cf687b149ede0827a7434d572787fb36c87c5d25c2055200a0297d3",
       "input_schema": {
         "required": [
           "revenue_data"
@@ -5647,7 +5647,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 67,
-      "sha256": "d5d07bebc8ce3ec3cd77c52c56e8894300a1580d7cf90a62b322d70f1f4cc187",
+      "sha256": "a2388b9259f5d0bda0390ce7643f0fbca3c2e313581e47c5d3cf510e49a007ca",
       "input_schema": {
         "required": [
           "text"
@@ -5713,7 +5713,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 16,
-      "sha256": "e34eba532d3b08bc785711ea9f0679a74e4dd4beed42f798e222f844a4db62ba",
+      "sha256": "8090d887c66da1d3e1e65fe7dcb375b082de1d860bda72cbd9b426cd95eb9954",
       "input_schema": {
         "required": [
           "tax_year",
@@ -5774,7 +5774,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 21,
-      "sha256": "f7cf62d779e944d3bdde446a2b648272f28a00ce41dc93b73f69e189b6fa76e2",
+      "sha256": "e14f0509492637090fb0f13a71afe1a140dcb8ce34cee554d9a7cd41dc471999",
       "input_schema": {
         "required": [
           "text",
@@ -5839,7 +5839,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 9,
-      "sha256": "fced868aa28a96cec38add14e11d9d2ee935f55b8eaa7eb0afbafd6d38d8b46e",
+      "sha256": "4523de12dbd54c6ac7a388625ae1bfcafc52e84fa5273788be3b143ed46a6642",
       "input_schema": {
         "required": [
           "vendor_list",
@@ -5910,7 +5910,7 @@
       "license": "MIT",
       "rating": 3.8,
       "review_count": 5,
-      "sha256": "515b3f0dc406dc9731c8ae28abb03f3649ad7cb4cbecc46eee724c92bf60aefc",
+      "sha256": "4c6b0311f7ef2b6c93d371f522e964f8fca5731afcc15bf341d6522dce9ddea2",
       "input_schema": {
         "required": [
           "customer_segment"
@@ -5966,7 +5966,7 @@
       "license": "MIT",
       "rating": 4.9,
       "review_count": 42,
-      "sha256": "cb6480bd00d2e18a3d86a934ed565ecf9942f4c7374735ffeb06d2888f7cbf06",
+      "sha256": "c5601d3eab9d3183f28410c12ed1cbb75720f2f2b28a18cdf695691d5b162fbd",
       "input_schema": {
         "required": [
           "transcript",
@@ -6027,7 +6027,7 @@
       "license": "MIT",
       "rating": 4.1,
       "review_count": 20,
-      "sha256": "8d0a538452b4a9107b18bfaf983f7c185917c194a7f42752ad198b1afdd1bb7e",
+      "sha256": "6814e285dd8799bf81d930f86d127d0e8a68969384a1ffa8cac57dc68580ff7f",
       "input_schema": {
         "required": [
           "meeting_notes",
@@ -6102,7 +6102,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 31,
-      "sha256": "dba805ad25168570711b4516a065599cb91b5b433b188d131adc6b7160e1fbbd",
+      "sha256": "b383d821d90afa603278b056694107cf2e6fbf17ea46956b027a3daea30b7358",
       "input_schema": {
         "required": [
           "account_name",
@@ -6174,7 +6174,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 13,
-      "sha256": "89e25c95b46994a1fd8a933c16a6d3bc65fc678424f2652f17bf1a48357667e0",
+      "sha256": "d656993fc15a90f3a548226f896854e61891994e44d25d366baed72f72886172",
       "input_schema": {
         "required": [
           "rfp_document",
@@ -6245,7 +6245,7 @@
       "license": "MIT",
       "rating": 4.7,
       "review_count": 38,
-      "sha256": "6c5b90ddaea64a6a9c17060bee568bf665801e0de1669d47bdb0a47459453e19",
+      "sha256": "840b8eecdb5c7d830e7f2f6aee442a8bf7a1ffbf1db8ea18ac0ddf5fc2f553a5",
       "input_schema": {
         "required": [
           "hubspot_list_id"
@@ -6315,7 +6315,7 @@
       "license": "MIT",
       "rating": 3.9,
       "review_count": 7,
-      "sha256": "a71433a36383463df7125fecbcb6885eca918e803c2bdaf9f1bfbacd79ac2862",
+      "sha256": "37f6ad708ce2f59127e49ec3d321ac9ac4079dfd111fe81c32a0a62a9f32f208",
       "input_schema": {
         "required": [
           "brand_name",
@@ -6391,7 +6391,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 31,
-      "sha256": "4c7cd55022adeae1a8408185a989ccbf828bf773eff4f1085c604d306effdaaa",
+      "sha256": "3d198c5eec1c727ab32464e59c2e1c9f7c431b09b5f5b17d3c0c2f075a596665",
       "input_schema": {
         "required": [
           "blog_url"
@@ -6457,7 +6457,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 27,
-      "sha256": "2be3cbb42f02843fc0cf3d9f106f77f48f668a7f30dc625bee73afe1cac70699",
+      "sha256": "7b72203f53c5ac4e8c7ee679acd96d110634c8935bfb0cf825260fb567b38ed7",
       "input_schema": {
         "required": [
           "product_category",
@@ -6517,7 +6517,7 @@
       "license": "MIT",
       "rating": 4.8,
       "review_count": 58,
-      "sha256": "f2bbadafd07f28393957198fae89486b6061703f0771fd336731412ea76c805c",
+      "sha256": "cfeed836b1e7c15df21378fe0b535ae506e41fa9ffdef4b3d77bfec0e8af688e",
       "input_schema": {
         "required": [
           "account_name"
@@ -6563,7 +6563,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 26,
-      "sha256": "8bb041b4ac9772e1a0a7b26050ada01dcd62f2dc28d6582eb9b039ee53b52429",
+      "sha256": "823cdb8b22d32d63de433a1529e249d4cb5db94fb76c9c7440cdcdef23b87e6b",
       "input_schema": {
         "required": [
           "customer_id",
@@ -6624,7 +6624,7 @@
       "license": "MIT",
       "rating": 4.7,
       "review_count": 36,
-      "sha256": "6b5e8f19d0bcc7a6b836d7565cac7b2648f3a8ab1c719330b57e37ebac4cc488",
+      "sha256": "23b04ae87ba6c091cf2abe3a2474724bc98b81eb5733e24ec209173e6e12b541",
       "input_schema": {
         "required": [
           "ticket_content"
@@ -6695,7 +6695,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 58,
-      "sha256": "600ed94d54ebd9f7390d4c046cc513cd2ad5e628fc1bd8b8394f98a5e5aaf1fe",
+      "sha256": "d407764393e835e9167061c7fe2a8d21c59dbd613c2ab2c60ae1b40131a9df8f",
       "input_schema": {
         "required": [
           "sla_policy"
@@ -6770,7 +6770,7 @@
       "license": "MIT",
       "rating": 4.4,
       "review_count": 17,
-      "sha256": "77f627d96f2d674555f6d5a3056ea51f03c826addbe6ca261dce35f9d7f91867",
+      "sha256": "d9c0207f1649c2eace7e7a514c46b3fd7dae77283973a317d7f08325c5ec5577",
       "input_schema": {
         "required": [
           "repo"
@@ -6836,7 +6836,7 @@
       "license": "MIT",
       "rating": 3.9,
       "review_count": 13,
-      "sha256": "d91b5dd82a339a8c725027dd21623984757a2b913ececfef312f97d9e65406e5",
+      "sha256": "b49774f1462400fcf08844c5e034992b6e82d52f364dbb733d464690d8d8c873",
       "input_schema": {
         "required": [
           "repo_url",
@@ -6899,7 +6899,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 58,
-      "sha256": "9f56f4c320e9304006e5b0412a05b9f0f7b54ab1d03361be02b9a4815da54166",
+      "sha256": "b7ae6c067d9436ea8891dd1d0e5132404ca0014df0fee66976adc053c0c14ef6",
       "input_schema": {
         "required": [
           "document_text"
@@ -6946,7 +6946,7 @@
       "license": "MIT",
       "rating": 5.0,
       "review_count": 50,
-      "sha256": "7591611901f5885078ab8328e3c45e7b87f9f0fd6d5134a46db8fbce91d1e572",
+      "sha256": "105320d4b08aca1524d67f782209a842bf534d8af01c2ee8841df1b4005530bf",
       "input_schema": {
         "required": [
           "project"
@@ -7003,7 +7003,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 18,
-      "sha256": "99cb65ad453c337d05d687cc885f920d2c39a21e6e7b84f8bc61484c262243b7",
+      "sha256": "44d750ea503715d6539084df46a689dbe9d5a0f1d5c1ba2f7fa4d24b16179ce8",
       "input_schema": {
         "required": [
           "product_name",
@@ -7075,7 +7075,7 @@
       "license": "MIT",
       "rating": 3.9,
       "review_count": 10,
-      "sha256": "5deb88048d9d2adba4f75e5217cea2b3a9461b3a54231781c367ccfc67cc56cf",
+      "sha256": "c540a14e535236bfca51a05c3a1f667cd8278a4be705bcc14434b988df53f95f",
       "input_schema": {
         "required": [
           "organization_name",
@@ -7143,7 +7143,7 @@
       "license": "MIT",
       "rating": 4.2,
       "review_count": 23,
-      "sha256": "a51e13796a1d371010ab7748e4f01f3c835cf1331d1b95248efd30c6df798650",
+      "sha256": "4d48097e717a84937b690d0ffbf2a912ab8cf7429cc3cf077d31ce790fddecb5",
       "input_schema": {
         "required": [
           "problem"
@@ -7202,7 +7202,7 @@
       "license": "MIT",
       "rating": 4.6,
       "review_count": 25,
-      "sha256": "e59b611ff4af8c7a42c56ff9f10cdca7fcc3ddae1767e376a8a5d1b5f13776ee",
+      "sha256": "0409e5148811a54f22194ef5326ebcf0318e992239b1a540c38fdd759e445f55",
       "input_schema": {
         "required": [
           "encounter_data",
@@ -7266,7 +7266,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 19,
-      "sha256": "72714f567bf512b109adc3baf921c802aba2602053fdf286f69242e9d8d213b4",
+      "sha256": "6cb66e84b530fbd22c84f8f860eef9aa2611bde26254fce56bbcf34c6a64ae1d",
       "input_schema": {
         "required": [
           "product_category"
@@ -7325,7 +7325,7 @@
       "license": "MIT",
       "rating": 4.5,
       "review_count": 24,
-      "sha256": "b7b9fee65455b2be5ea721f3a47c5098a40490a215695456a0e9fa8d17530748",
+      "sha256": "80dbbd3d833ab31c72d2f80906588895f77d9925c226f1bdbb120acc6ccf932e",
       "input_schema": {
         "required": [
           "claim_id",
@@ -7395,7 +7395,7 @@
       "license": "MIT",
       "rating": 4.3,
       "review_count": 14,
-      "sha256": "9482b43719ec76ab193fac23e16a96f65fe911dc1ad8ad07c670e3a9944ad71d",
+      "sha256": "57a9b1fc9e1a0c111983d54b571526843269c3cdc19cd8e08b0a9980aa2328ed",
       "input_schema": {
         "required": [
           "role_title",
@@ -7464,7 +7464,7 @@
       "license": "MIT",
       "rating": 4.0,
       "review_count": 9,
-      "sha256": "51283cb3961d9551c3428423000964e5012e3387ef1abce6583f7d567c1d51ce",
+      "sha256": "725aab942d416dda72efce52c417a1e41b877b8f0d94dbff71c4d43f366d9454",
       "input_schema": {
         "required": [
           "supplier_list",
@@ -7545,7 +7545,8 @@
             "example": "financial performance, risk factors, growth strategy"
           }
         }
-      }
+      },
+      "sha256": "880d7d85749d7a7e11bd15ae9e7499d43205026f1ea889ea00b7d83925d3472c"
     },
     {
       "slug": "gizmax/voice-of-market",
@@ -7598,7 +7599,8 @@
             "example": "automation, productivity, developer tools"
           }
         }
-      }
+      },
+      "sha256": "7b72203f53c5ac4e8c7ee679acd96d110634c8935bfb0cf825260fb567b38ed7"
     },
     {
       "slug": "gizmax/pricing-intelligence",
@@ -7652,7 +7654,8 @@
             "example": "Enterprise, Mid-Market, SMB"
           }
         }
-      }
+      },
+      "sha256": "82f58d2f77cdb63ea515b064079afe730c48d0e5b033a3aead6b5f3d4165ecf0"
     },
     {
       "slug": "gizmax/trend-radar",
@@ -7706,7 +7709,8 @@
             "example": "6 months"
           }
         }
-      }
+      },
+      "sha256": "b4c4ed34aca2f5b95bba3bb855b15b963c7f3b10665571772e52cc139bb1f20a"
     },
     {
       "slug": "gizmax/market-entry-strategy",
@@ -7762,7 +7766,8 @@
             "example": "FinTech"
           }
         }
-      }
+      },
+      "sha256": "980c5804e57cbf4ba35c7473b38a7bb764af0e9c51b15b4b9d5d3cfb8d9ca4a3"
     },
     {
       "slug": "gizmax/deal-velocity-optimizer",
@@ -7818,7 +7823,8 @@
             "example": "salesforce"
           }
         }
-      }
+      },
+      "sha256": "1846f3a0fb6d9560b2d8737201b568bb347ea29ceb163eb1162183188031d0cd"
     },
     {
       "slug": "gizmax/revenue-forecast-ensemble",
@@ -7873,7 +7879,8 @@
             "example": "Enterprise, Mid-Market, SMB"
           }
         }
-      }
+      },
+      "sha256": "71709cc30cf687b149ede0827a7434d572787fb36c87c5d25c2055200a0297d3"
     },
     {
       "slug": "gizmax/churn-prediction-pipeline",
@@ -7931,7 +7938,8 @@
             "example": "70"
           }
         }
-      }
+      },
+      "sha256": "4c6b0311f7ef2b6c93d371f522e964f8fca5731afcc15bf341d6522dce9ddea2"
     },
     {
       "slug": "gizmax/incident-command-center",
@@ -7989,7 +7997,8 @@
             "example": "P2"
           }
         }
-      }
+      },
+      "sha256": "8eb582ea013a54dd0b171edc3d1a14cee4f1cadb9714756126cdfffcd95963dd"
     },
     {
       "slug": "gizmax/deployment-risk-analyzer",
@@ -8046,7 +8055,8 @@
             "example": "production"
           }
         }
-      }
+      },
+      "sha256": "30e541db82055290a432c2a1ab95291701d04c8b18419bf691f810a267da7fa9"
     },
     {
       "slug": "gizmax/soc-triage-pipeline",
@@ -8105,7 +8115,8 @@
             "example": "false"
           }
         }
-      }
+      },
+      "sha256": "ea6dab406b7f1ab7a3c83bbbb3964818790bafdd466fe13f2ae3295bf800ddbc"
     },
     {
       "slug": "gizmax/ai-red-team",
@@ -8160,7 +8171,8 @@
             "example": "50"
           }
         }
-      }
+      },
+      "sha256": "92c7c369ff3077b9fb997826c23cbae9562b1bdd0b9b9141632307206d69aa4f"
     },
     {
       "slug": "gizmax/ma-due-diligence",
@@ -8215,7 +8227,8 @@
             "example": "financial performance, risk factors, growth strategy"
           }
         }
-      }
+      },
+      "sha256": "32546ae83012d65a1d364116d20b188e1be78b42fa3ff9ab4ac5e3571cc1d199"
     },
     {
       "slug": "gizmax/regulatory-change-analyzer",
@@ -8272,7 +8285,8 @@
             "example": "SEC,FINRA,GDPR"
           }
         }
-      }
+      },
+      "sha256": "8ba75cf2c33210615f701583d500679e6bfb9bf48beb49fec0aec549b746ce24"
     },
     {
       "slug": "gizmax/contract-lifecycle",
@@ -8326,7 +8340,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "e82c359bfc33b18d4839477a59efe665c6bfe32aa54be765702a157bf636427d"
     },
     {
       "slug": "gizmax/earnings-call-intelligence",
@@ -8380,7 +8395,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "7d74e5f1f0db9a5add2136614f48401b73d201348ee453349015367cd54c09f4"
     },
     {
       "slug": "gizmax/content-factory",
@@ -8443,7 +8459,8 @@
             "example": "linkedin,twitter,instagram"
           }
         }
-      }
+      },
+      "sha256": "d8ccd68dc6a0056f41b897b258b528e9a44bfe1fba5dbbef930c0204b5e810e8"
     },
     {
       "slug": "gizmax/podcast-to-empire",
@@ -8502,7 +8519,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "e0db8523fed1af94a8052750c563a5822ea0278e2ef75ef6e2c50b438d78ab0d"
     },
     {
       "slug": "gizmax/startup-growth-engine",
@@ -8564,7 +8582,8 @@
             "example": "5000"
           }
         }
-      }
+      },
+      "sha256": "4b86f85869dd111acf08cceeb9cdf3ecb613a62fa077c06cbaa10360e48a850f"
     },
     {
       "slug": "gizmax/supplier-risk-intelligence",
@@ -8619,7 +8638,8 @@
             "example": "medium"
           }
         }
-      }
+      },
+      "sha256": "725aab942d416dda72efce52c417a1e41b877b8f0d94dbff71c4d43f366d9454"
     },
     {
       "slug": "gizmax/demand-forecasting",
@@ -8674,7 +8694,8 @@
             "example": "next quarter"
           }
         }
-      }
+      },
+      "sha256": "6cb66e84b530fbd22c84f8f860eef9aa2611bde26254fce56bbcf34c6a64ae1d"
     },
     {
       "slug": "gizmax/dynamic-pricing",
@@ -8737,7 +8758,8 @@
             "example": "20"
           }
         }
-      }
+      },
+      "sha256": "bcdd74fbee0d38e5e719669cb8c3f2cb3181de7a6165728d908194cfe0953aa5"
     },
     {
       "slug": "gizmax/recruiting-pipeline",
@@ -8805,7 +8827,8 @@
             "example": "Remote (US)"
           }
         }
-      }
+      },
+      "sha256": "57a9b1fc9e1a0c111983d54b571526843269c3cdc19cd8e08b0a9980aa2328ed"
     },
     {
       "slug": "gizmax/org-health-pulse",
@@ -8862,7 +8885,8 @@
             "example": "previous quarter"
           }
         }
-      }
+      },
+      "sha256": "e73463dff5df12b1bbec9187c04ae725fc73855a494086242dd7508d98354f10"
     },
     {
       "slug": "gizmax/self-healing-pipeline",
@@ -8926,7 +8950,8 @@
             "example": "true"
           }
         }
-      }
+      },
+      "sha256": "b30ab3386873b55c4aab0eee58d33ec831af6ef4859cf67654d0b112ce63bfa5"
     },
     {
       "slug": "gizmax/nl-to-dashboard",
@@ -8983,7 +9008,8 @@
             "example": "auto"
           }
         }
-      }
+      },
+      "sha256": "0c59adabb1e71b8a4fc621c2ae52e3448999c5dea435e0639f5d4d95e80a8c83"
     },
     {
       "slug": "gizmax/model-evaluation-arena",
@@ -9045,7 +9071,8 @@
             "example": "accuracy,safety,cost,latency"
           }
         }
-      }
+      },
+      "sha256": "8f32a995ed190c6d0c9ee8ba726ea7263cf23363bc5fd57553250cd7f04dc6f7"
     },
     {
       "slug": "gizmax/product-feedback-prioritizer",
@@ -9101,7 +9128,8 @@
             "example": "last 90 days"
           }
         }
-      }
+      },
+      "sha256": "2613eada99b43cf3266177225f2c42ebe86e73b9d08351776cac924a117541db"
     },
     {
       "slug": "gizmax/invoice-processor",
@@ -9163,7 +9191,8 @@
             "example": "QuickBooks"
           }
         }
-      }
+      },
+      "sha256": "8a425565ce65dc8e915d84ebdc4effed40f8c48738cc5ba683529e8fec5d2ad2"
     },
     {
       "slug": "gizmax/video-to-shorts",
@@ -9226,7 +9255,8 @@
             "example": "drive newsletter signups"
           }
         }
-      }
+      },
+      "sha256": "c8655c5a1a0f66ad798842bbfa444dea011e621d966c4fe5845041d90192c868"
     },
     {
       "slug": "gizmax/rag-knowledge-base",
@@ -9288,7 +9318,8 @@
             "example": "text-embedding-3-small"
           }
         }
-      }
+      },
+      "sha256": "5a7b13cf3696e6f6440fcab2d0e0b45950d7901266f8c82da5f3f498ce76c648"
     },
     {
       "slug": "gizmax/course-creator",
@@ -9355,7 +9386,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "48f590919bdef6dd5626e05f24e67345a0633ee7cb7482e06f38870e006c589e"
     },
     {
       "slug": "gizmax/real-estate-listing",
@@ -9424,7 +9456,8 @@
             "example": "Young professionals, ages 28-40, dual income, first-time homebuyers"
           }
         }
-      }
+      },
+      "sha256": "9b5e01d015df982f1fa6f9437020b235cafbaab4648fe367741de9fe03a2dfa2"
     },
     {
       "slug": "gizmax/social-media-calendar",
@@ -9498,7 +9531,8 @@
             "example": "30 days"
           }
         }
-      }
+      },
+      "sha256": "a7330b8362cc4c50d5a7d69976345a09fc5a081ad199a308a80c376e4c7fba02"
     },
     {
       "slug": "gizmax/grant-proposal",
@@ -9566,7 +9600,8 @@
             "example": "5000"
           }
         }
-      }
+      },
+      "sha256": "33dc300a4a12cc6171e9be8f60b498186f54cabed151fc8a68555b6d826ccb26"
     },
     {
       "slug": "gizmax/agency-report-generator",
@@ -9634,7 +9669,8 @@
             "example": "ROAS target 4.0, CPA under $35, CTR above 2.5%, email open rate 25%+"
           }
         }
-      }
+      },
+      "sha256": "1200373502ba49887d5bc19edc7a129bf99be69a8bdeba90ee041f6f936c5792"
     },
     {
       "slug": "gizmax/clinical-notes",
@@ -9696,7 +9732,8 @@
             "example": "SOAP"
           }
         }
-      }
+      },
+      "sha256": "0409e5148811a54f22194ef5326ebcf0318e992239b1a540c38fdd759e445f55"
     },
     {
       "slug": "gizmax/ecommerce-catalog",
@@ -9764,7 +9801,8 @@
             "example": "No specific competitors provided"
           }
         }
-      }
+      },
+      "sha256": "548e4a01fa6daa10f027f104bbd64711da03c6b710d3f87b38f4696123bfae16"
     },
     {
       "slug": "gizmax/voice-agent-pipeline",
@@ -9832,7 +9870,8 @@
             "example": "40% resolution, 30% compliance, 20% empathy, 10% efficiency"
           }
         }
-      }
+      },
+      "sha256": "82de1fecd6d423d1b9f0da3eeef17163b418a48d3e61b26b57b4d7c6c52c56cf"
     },
     {
       "slug": "gizmax/freelancer-proposal",
@@ -9900,7 +9939,8 @@
             "example": "upwork"
           }
         }
-      }
+      },
+      "sha256": "945a67e79b22d07a462a444e7a1bf66f968bed65048e835ec97eba03d783f0cc"
     },
     {
       "slug": "gizmax/product-design-spec",
@@ -9968,7 +10008,8 @@
             "example": "WCAG 2.1 AA"
           }
         }
-      }
+      },
+      "sha256": "44d750ea503715d6539084df46a689dbe9d5a0f1d5c1ba2f7fa4d24b16179ce8"
     },
     {
       "slug": "gizmax/ai-brand-sentinel",
@@ -10031,7 +10072,8 @@
             "example": "best CRM software, CRM comparison 2026"
           }
         }
-      }
+      },
+      "sha256": "86de662abf6c6ab40df9da70f9d3d5dcb27c52790e2899c0be4e7354ded5abb8"
     },
     {
       "slug": "gizmax/rfp-response-engine",
@@ -10098,7 +10140,8 @@
             "example": "2026-04-01"
           }
         }
-      }
+      },
+      "sha256": "d656993fc15a90f3a548226f896854e61891994e44d25d366baed72f72886172"
     },
     {
       "slug": "gizmax/codebase-health-scanner",
@@ -10162,7 +10205,8 @@
             "example": "5000"
           }
         }
-      }
+      },
+      "sha256": "b49774f1462400fcf08844c5e034992b6e82d52f364dbb733d464690d8d8c873"
     },
     {
       "slug": "gizmax/knowledge-base-auditor",
@@ -10226,7 +10270,8 @@
             "example": "articles, FAQs, guides"
           }
         }
-      }
+      },
+      "sha256": "c5b33e36f4187e154e840df16f1b6263aae5f7102b53d885086789962fe47cf5"
     },
     {
       "slug": "gizmax/crisis-communication-commander",
@@ -10295,7 +10340,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "1346f8ab45e385e056de06f50da5e772d5999ab04410104bb192e07fa1111ec9"
     },
     {
       "slug": "gizmax/outage-postmortem-generator",
@@ -10362,7 +10408,8 @@
             "example": "P2"
           }
         }
-      }
+      },
+      "sha256": "3d05fe3449810bc941770ff64ec1d6ae733a78e1a55cac9e6544bf5cef7cc607"
     },
     {
       "slug": "gizmax/compliance-audit-readiness",
@@ -10425,7 +10472,8 @@
             "example": "2026-04-01"
           }
         }
-      }
+      },
+      "sha256": "d49a37ff32fb3b23a7eb1606afa9bc0a1a70a56da5a48a8787a928061d99c857"
     },
     {
       "slug": "gizmax/insurance-claims-adjuster",
@@ -10491,7 +10539,8 @@
             "example": "A detailed description of the subject for analysis"
           }
         }
-      }
+      },
+      "sha256": "80dbbd3d833ab31c72d2f80906588895f77d9925c226f1bdbb120acc6ccf932e"
     },
     {
       "slug": "gizmax/tax-return-preprocessor",
@@ -10553,7 +10602,8 @@
             "example": "individual"
           }
         }
-      }
+      },
+      "sha256": "8090d887c66da1d3e1e65fe7dcb375b082de1d860bda72cbd9b426cd95eb9954"
     },
     {
       "slug": "gizmax/carbon-footprint-reporter",
@@ -10622,7 +10672,8 @@
             "example": "GHG Protocol"
           }
         }
-      }
+      },
+      "sha256": "c540a14e535236bfca51a05c3a1f667cd8278a4be705bcc14434b988df53f95f"
     },
     {
       "slug": "gizmax/patent-landscape-analyzer",
@@ -10687,7 +10738,8 @@
             "example": "Zapier, Make, n8n"
           }
         }
-      }
+      },
+      "sha256": "5e517a3e47e32f745bb19dbb3377483524d55add4606a4f02b7a9860ca15d0cc"
     },
     {
       "slug": "gizmax/permit-application-processor",
@@ -10753,7 +10805,8 @@
             "example": "construction start by March 2026, occupancy by December 2026"
           }
         }
-      }
+      },
+      "sha256": "a4995a55d5bd9e3583a22e5d85f00d9155008598ea54a6fdf35ba1cbf6dd13ad"
     },
     {
       "slug": "gizmax/vendor-renewal-negotiator",
@@ -10819,7 +10872,8 @@
             "example": "high"
           }
         }
-      }
+      },
+      "sha256": "4523de12dbd54c6ac7a388625ae1bfcafc52e84fa5273788be3b143ed46a6642"
     },
     {
       "slug": "gizmax/competitive-teardown",
@@ -10880,7 +10934,8 @@
             "example": "financial performance, risk factors, growth strategy"
           }
         }
-      }
+      },
+      "sha256": "0d4b185f42bae00078e3e0d6bb9acd9ad1a48b55c53eb511f99cc4bef898c004"
     },
     {
       "slug": "gizmax/qbr-autopilot",
@@ -10947,7 +11002,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "b383d821d90afa603278b056694107cf2e6fbf17ea46956b027a3daea30b7358"
     },
     {
       "slug": "gizmax/board-meeting-prep",
@@ -11012,7 +11068,8 @@
             "example": "example input text"
           }
         }
-      }
+      },
+      "sha256": "721f480c4bf03a686607f2917da396d7a20c5b2f7afdadb46aacb343b85e1406"
     },
     {
       "slug": "gizmax/saas-usage-optimizer",
@@ -11078,7 +11135,8 @@
             "example": "reduce_waste"
           }
         }
-      }
+      },
+      "sha256": "6aea70f5895eb4dd3436b6720a9cb2426fcd69fbd4c0bf3ee59b460d32948f7a"
     },
     {
       "slug": "gizmax/influencer-campaign-matcher",
@@ -11152,7 +11210,8 @@
             "example": "project management tools"
           }
         }
-      }
+      },
+      "sha256": "37f6ad708ce2f59127e49ec3d321ac9ac4079dfd111fe81c32a0a62a9f32f208"
     },
     {
       "slug": "gizmax/construction-bid-analyzer",
@@ -11218,7 +11277,8 @@
             "example": "$12M"
           }
         }
-      }
+      },
+      "sha256": "bc5d32939cc05d4dd2d5ea1791152a4fdf535fab86a9845b1f1e2da8e4c1ad18"
     },
     {
       "slug": "gizmax/hotel-revenue-optimizer",
@@ -11284,7 +11344,8 @@
             "example": "30 days"
           }
         }
-      }
+      },
+      "sha256": "3a7fb8c94d2b4b44ac951e4285ba57c14a8d2cb6b5a610bb7bda41210716b058"
     },
     {
       "slug": "gizmax/student-learning-path-builder",
@@ -11352,7 +11413,8 @@
             "example": "video, text, interactive, labs"
           }
         }
-      }
+      },
+      "sha256": "c3fab4abeb1b68230f593403b6558327f4869fa10f00928bbc4dd8fb2523374b"
     },
     {
       "slug": "gizmax/data-privacy-scanner",
@@ -11420,7 +11482,8 @@
             "example": "medium"
           }
         }
-      }
+      },
+      "sha256": "b099e34ec67e112142702ac9d92fde6b7757f9f866c88f4763fbf8899df1ee6d"
     }
   ],
   "categories": [
