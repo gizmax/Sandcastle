@@ -113,6 +113,10 @@ async def auth_middleware(request: Request, call_next):
         if path.endswith("/stream") or "/stream/" in path or path.startswith("/api/agui/"):
             api_key = request.query_params.get("token")
 
+    # Strip whitespace to handle "Bearer  key" (double space) or padded headers
+    if api_key:
+        api_key = api_key.strip()
+
     if not api_key:
         return _error_response(401, "UNAUTHORIZED", "API key required")
 

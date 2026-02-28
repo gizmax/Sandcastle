@@ -13,6 +13,15 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
   const [tenantId, setTenantId] = useState("");
   const [maxCost, setMaxCost] = useState("");
 
+  // Reset form fields when modal opens
+  useEffect(() => {
+    if (open) {
+      setName("");
+      setTenantId("");
+      setMaxCost("");
+    }
+  }, [open]);
+
   // Close on Escape key
   useEffect(() => {
     if (!open) return;
@@ -27,15 +36,18 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
     const parsed = maxCost !== "" ? parseFloat(maxCost) : undefined;
+    // Guard against NaN from invalid number input (e.g. pasted text)
+    const safeCost = parsed !== undefined && Number.isFinite(parsed) && parsed >= 0
+      ? parsed
+      : undefined;
     onSubmit({
-      name,
-      tenant_id: tenantId,
-      ...(parsed !== undefined ? { max_cost_per_run_usd: parsed } : {}),
+      name: trimmedName,
+      tenant_id: tenantId.trim(),
+      ...(safeCost !== undefined ? { max_cost_per_run_usd: safeCost } : {}),
     });
-    setName("");
-    setTenantId("");
-    setMaxCost("");
   }
 
   const inputClass = sharedInputClass;

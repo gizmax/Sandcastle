@@ -73,7 +73,9 @@ export async function crawl(url, options = "{}") {
 }
 
 export async function get_crawl_status(crawlId) {
-  const data = await api(`/crawl/${crawlId}`);
+  if (!crawlId || typeof crawlId !== "string") throw new Error("crawlId is required");
+  const safeId = encodeURIComponent(crawlId);
+  const data = await api(`/crawl/${safeId}`);
   return {
     status: data.status,
     total: data.total,

@@ -72,8 +72,10 @@ export async function send_email(to, subject, html_content = "", text_content = 
 export async function list_contacts(query = "", limit = 50) {
   let data;
   if (query) {
+    // Sanitize query to prevent SGQL injection - escape single quotes and backslashes
+    const sanitized = query.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/%/g, "\\%");
     data = await api("/marketing/contacts/search", "POST", {
-      query: `email LIKE '%${query}%' OR first_name LIKE '%${query}%' OR last_name LIKE '%${query}%'`,
+      query: `email LIKE '%${sanitized}%' OR first_name LIKE '%${sanitized}%' OR last_name LIKE '%${sanitized}%'`,
     });
   } else {
     data = await api(`/marketing/contacts?page_size=${limit}`);

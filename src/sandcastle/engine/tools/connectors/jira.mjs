@@ -49,7 +49,17 @@ export async function create_issue(project, summary, description = "", issue_typ
   return { key: data.key, id: data.id, self: data.self };
 }
 
+function validateIssueKey(key) {
+  if (!key || typeof key !== "string") throw new Error("issue_key is required");
+  // Jira issue keys: PROJECT-123
+  if (!/^[A-Z][A-Z0-9_]+-\d+$/i.test(key)) {
+    throw new Error(`Invalid Jira issue key format: '${key.slice(0, 50)}'`);
+  }
+  return key;
+}
+
 export async function get_issue(issue_key) {
+  validateIssueKey(issue_key);
   const data = await api(`/issue/${issue_key}`);
   return {
     key: data.key,
@@ -72,6 +82,7 @@ export async function search_issues(jql, max_results = 20) {
 }
 
 export async function add_comment(issue_key, body) {
+  validateIssueKey(issue_key);
   const data = await api(`/issue/${issue_key}/comment`, "POST", {
     body: {
       type: "doc",

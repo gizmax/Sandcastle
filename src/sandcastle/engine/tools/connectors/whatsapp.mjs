@@ -73,11 +73,14 @@ export async function get_media(mediaId) {
   return { id: mediaId, url: data.url, mime_type: data.mime_type, file_size: data.file_size };
 }
 
-const funcs = { send_message, send_template, send_media, get_media };
-const [,, fn, ...args] = process.argv;
-if (fn) {
-  const f = funcs[fn];
-  if (!f) { console.error(`Unknown: ${fn}. Available: ${Object.keys(funcs).join(", ")}`); process.exit(1); }
+// CLI dispatch - only when run directly, not when imported as module
+if (process.argv[1]?.endsWith("whatsapp.mjs")) {
+  const funcs = { send_message, send_template, send_media, get_media };
+  const [fn, ...args] = process.argv.slice(2);
+  if (!fn || !funcs[fn]) {
+    console.error(`Usage: node whatsapp.mjs <${Object.keys(funcs).join("|")}> [args...]`);
+    process.exit(1);
+  }
   const parsed = args.map((a) => { try { return JSON.parse(a); } catch { return a; } });
-  f(...parsed).then((r) => console.log(JSON.stringify(r, null, 2))).catch((e) => { console.error(e.message); process.exit(1); });
+  funcs[fn](...parsed).then((r) => console.log(JSON.stringify(r, null, 2))).catch((e) => { console.error(e.message); process.exit(1); });
 }

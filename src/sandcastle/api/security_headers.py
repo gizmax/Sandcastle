@@ -19,6 +19,9 @@ _CSP_POLICY = (
     "img-src 'self' data: blob:; "
     "font-src 'self' data:; "
     "connect-src 'self' https://www.google-analytics.com https://pypi.org; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
     "frame-ancestors 'none'"
 )
 
@@ -27,6 +30,10 @@ async def security_headers_middleware(request: Request, call_next) -> Response:
     """Add security headers to every response."""
     response: Response = await call_next(request)
 
+    # Normalize the path for case-insensitive prefix matching to prevent
+    # CSP bypass via case variations like /API/... or /Api/...
+    path_lower = request.url.path.lower()
+
     # Standard security headers (all paths)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -34,6 +41,8 @@ async def security_headers_middleware(request: Request, call_next) -> Response:
     response.headers["Permissions-Policy"] = (
         "camera=(), microphone=(), geolocation=(), payment=()"
     )
+    # Block Adobe Flash cross-domain policy loading
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     # HSTS: instruct browsers to only use HTTPS for future requests.
     # Only set when not running in local mode (production with TLS termination).
     if not settings.is_local_mode:
@@ -41,12 +50,12 @@ async def security_headers_middleware(request: Request, call_next) -> Response:
             "max-age=31536000; includeSubDomains"
         )
     # Prevent caching of API responses that may contain sensitive data
-    if request.url.path.startswith("/api"):
+    if path_lower.startswith("/api"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
 
-    # CSP only on dashboard paths (not /api)
-    if not request.url.path.startswith("/api"):
+    # CSP only on dashboard paths (not /api) - use case-insensitive check
+    if not path_lower.startswith("/api"):
         header_name = (
             "Content-Security-Policy-Report-Only"
             if settings.csp_report_only

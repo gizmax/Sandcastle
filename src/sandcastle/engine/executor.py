@@ -2385,13 +2385,17 @@ def _resolve_condition_expression(
             raw = json.dumps(value)
         else:
             raw = str(value)
-        # Check for injection tokens in the resolved value
+        # Check for injection tokens in the resolved value.
+        # Both input and step output values are checked as defense-in-depth:
+        # in multi-tenant environments, input may come from untrusted API
+        # callers who could manipulate condition outcomes via keyword injection
+        # (e.g., "5 or True" turning a > comparison truthy).
         if isinstance(value, str) and _CONDITION_INJECTION_TOKENS.search(raw):
             raise ValueError(
                 f"Resolved variable '{var_path}' contains unsafe tokens "
                 f"for condition evaluation: {raw!r}"
             )
-        if var_path.startswith("steps."):
+        if var_path.startswith("steps.") or var_path == "memory":
             return _escape_braces(raw)
         return raw
 
@@ -3317,7 +3321,9 @@ async def _execute_notify_step(
 
     try:
         message = resolve_templates(cfg.message, context, step.depends_on)
-        channel = resolve_templates(cfg.channel, context, step.depends_on) if cfg.channel else ""
+        # Channel is a target identifier (Slack channel, email, webhook URL)
+        # and should NOT have dependency context auto-injected into it.
+        channel = resolve_templates(cfg.channel, context) if cfg.channel else ""
 
         logger.info(
             "Notify step '%s': service=%s channel=%s message=%s",

@@ -50,7 +50,8 @@ export async function list_records(table, options = "{}") {
 }
 
 export async function get_record(table, recordId) {
-  const data = await api(`/${encodeURIComponent(table)}/${recordId}`);
+  if (!recordId || typeof recordId !== "string") throw new Error("recordId is required");
+  const data = await api(`/${encodeURIComponent(table)}/${encodeURIComponent(recordId)}`);
   return { id: data.id, fields: data.fields, createdTime: data.createdTime };
 }
 

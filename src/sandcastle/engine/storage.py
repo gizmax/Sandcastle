@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Protocol
@@ -12,6 +13,20 @@ logger = logging.getLogger(__name__)
 
 # Maximum content size for a single write operation (10 MB)
 _MAX_WRITE_SIZE = 10 * 1024 * 1024
+
+# Maximum S3 key length (AWS limit is 1024 bytes)
+_MAX_S3_KEY_LENGTH = 1024
+
+# Control characters (C0 range except tab/newline/carriage-return, plus DEL)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _validate_key_common(key: str, label: str = "key") -> None:
+    """Shared validation for storage keys / paths."""
+    if not key or not key.strip():
+        raise ValueError(f"{label} must not be empty")
+    if _CONTROL_CHAR_RE.search(key):
+        raise ValueError(f"{label} must not contain control characters")
 
 
 class StorageBackend(Protocol):
@@ -31,10 +46,20 @@ class LocalStorage:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _safe_path(self, path: str) -> Path:
-        """Resolve path and ensure it stays within base_dir."""
+        """Resolve path and ensure it stays within base_dir.
+
+        Also rejects null bytes and control characters which could confuse
+        filesystem APIs or logging.
+        """
+        _validate_key_common(path, "Storage path")
         resolved = (self.base_dir / path).resolve()
         if not resolved.is_relative_to(self.base_dir):
             raise ValueError(f"Path traversal denied: {path}")
+        # Reject symlinks that resolve outside base_dir (defense-in-depth)
+        if resolved.is_symlink():
+            real = resolved.resolve(strict=False)
+            if not real.is_relative_to(self.base_dir):
+                raise ValueError(f"Symlink traversal denied: {path}")
         return resolved
 
     async def read(self, path: str) -> str | None:
@@ -42,14 +67,24 @@ class LocalStorage:
         file_path = self._safe_path(path)
         if not file_path.exists():
             return None
+        # Guard against reading symlinks that point outside base_dir
+        if file_path.is_symlink():
+            real = file_path.resolve()
+            if not real.is_relative_to(self.base_dir):
+                raise ValueError(f"Symlink traversal denied: {path}")
         return file_path.read_text(encoding="utf-8")
 
     async def write(self, path: str, content: str) -> None:
-        """Write content to a file atomically (write-to-temp-then-rename)."""
-        if len(content) > _MAX_WRITE_SIZE:
+        """Write content to a file atomically (write-to-temp-then-rename).
+
+        Size limit is enforced on the UTF-8 encoded byte length, not the
+        character count, to prevent oversized writes from multi-byte content.
+        """
+        byte_len = len(content.encode("utf-8"))
+        if byte_len > _MAX_WRITE_SIZE:
             raise ValueError(
                 f"Content too large for storage write "
-                f"({len(content)} bytes, max {_MAX_WRITE_SIZE})"
+                f"({byte_len} bytes, max {_MAX_WRITE_SIZE})"
             )
         file_path = self._safe_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,14 +105,20 @@ class LocalStorage:
             raise
 
     async def list(self, prefix: str) -> list[str]:
-        """List files matching a prefix."""
-        safe_base = self._safe_path(prefix)
-        search_dir = safe_base.parent if not safe_base.is_dir() else safe_base
+        """List files matching a prefix.
+
+        An empty prefix lists all files under the base directory.
+        """
+        if not prefix:
+            search_dir = self.base_dir
+        else:
+            safe_base = self._safe_path(prefix)
+            search_dir = safe_base.parent if not safe_base.is_dir() else safe_base
         if not search_dir.exists():
             return []
         results: list[str] = []
         for p in search_dir.rglob("*"):
-            if p.is_file():
+            if p.is_file() and not p.is_symlink():
                 rel = str(p.relative_to(self.base_dir))
                 if rel.startswith(prefix):
                     results.append(rel)
@@ -101,6 +142,8 @@ class S3Storage:
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
     ) -> None:
+        if not bucket or not bucket.strip():
+            raise ValueError("S3 bucket name must not be empty")
         self.bucket = bucket
         self.endpoint_url = endpoint_url
         self.aws_access_key_id = aws_access_key_id
@@ -108,11 +151,14 @@ class S3Storage:
 
     @staticmethod
     def _safe_key(key: str) -> str:
-        """Sanitize S3 key to prevent path traversal and null bytes."""
-        if not key or not key.strip():
-            raise ValueError("S3 key must not be empty")
-        if "\x00" in key:
-            raise ValueError("S3 key must not contain null bytes")
+        """Sanitize S3 key to prevent path traversal, control chars, and
+        enforce the AWS 1024-byte key length limit."""
+        _validate_key_common(key, "S3 key")
+        # Enforce AWS key length limit
+        if len(key.encode("utf-8")) > _MAX_S3_KEY_LENGTH:
+            raise ValueError(
+                f"S3 key exceeds maximum length ({_MAX_S3_KEY_LENGTH} bytes)"
+            )
         # Normalize path traversal sequences
         import posixpath
         normalized = posixpath.normpath(key)
@@ -146,19 +192,23 @@ class S3Storage:
                 raise
 
     async def write(self, path: str, content: str) -> None:
-        """Write content to S3."""
+        """Write content to S3.
+
+        Size limit is enforced on the UTF-8 encoded byte length.
+        """
         safe = self._safe_key(path)
-        if len(content) > _MAX_WRITE_SIZE:
+        encoded = content.encode("utf-8")
+        if len(encoded) > _MAX_WRITE_SIZE:
             raise ValueError(
                 f"Content too large for storage write "
-                f"({len(content)} bytes, max {_MAX_WRITE_SIZE})"
+                f"({len(encoded)} bytes, max {_MAX_WRITE_SIZE})"
             )
         session = self._get_session()
         async with session.client("s3", endpoint_url=self.endpoint_url) as s3:
             await s3.put_object(
                 Bucket=self.bucket,
                 Key=safe,
-                Body=content.encode("utf-8"),
+                Body=encoded,
                 ContentType="application/json",
             )
 

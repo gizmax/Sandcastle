@@ -724,15 +724,16 @@ def get_sandshore_runtime(
                     "Runtime pool at capacity (%d), evicting oldest entry",
                     _MAX_POOL_SIZE,
                 )
-                # Best-effort close - can't await in sync context
+                # Best-effort close - can't await in sync context.
+                # Use get_running_loop() instead of deprecated
+                # get_event_loop() to avoid DeprecationWarning in
+                # Python 3.12+.
                 try:
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        loop.create_task(evicted.close())
-                    else:
-                        loop.run_until_complete(evicted.close())
-                except Exception:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(evicted.close())
+                except RuntimeError:
+                    # No running loop - skip async close; the evicted
+                    # runtime's backend will be GC'd.
                     pass
             client = SandshoreRuntime(
                 anthropic_api_key=anthropic_api_key,

@@ -168,8 +168,9 @@ class TestRequestValidation:
             "/api/workflows/run/sync",
             json={"input": {"name": "test"}},
         )
-        # Both workflow and workflow_name are optional, but one must be provided
-        assert response.status_code == 400
+        # Both workflow and workflow_name are optional, but one must be provided.
+        # Pydantic model_validator catches this -> FastAPI returns 422.
+        assert response.status_code == 422
 
     def test_workflow_with_cycle(self):
         cycle_yaml = """

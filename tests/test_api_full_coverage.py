@@ -329,7 +329,8 @@ class TestWorkflowRunAsync:
             "/api/workflows/run",
             json={"input": {"name": "test"}},
         )
-        assert response.status_code == 400
+        # Pydantic model_validator catches missing workflow/workflow_name -> 422
+        assert response.status_code == 422
 
     def test_invalid_yaml(self):
         response = client.post(
@@ -427,7 +428,8 @@ class TestWorkflowRunSync:
             "/api/workflows/run/sync",
             json={"input": {"name": "test"}},
         )
-        assert response.status_code == 400
+        # Pydantic model_validator catches missing workflow/workflow_name -> 422
+        assert response.status_code == 422
 
     def test_successful_sync_run(self):
         from sandcastle.engine.executor import WorkflowResult

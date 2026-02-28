@@ -15,16 +15,14 @@ const PG_URL = process.env.TOOL_POSTGRESQL_URL || "";
 function runPsql(sql, readOnly = true) {
   if (!PG_URL) throw new Error("TOOL_POSTGRESQL_URL is not configured");
 
-  // Escape single quotes in SQL for shell
-  const escapedSql = sql.replace(/'/g, "'\\''");
-
+  // Use PGDATABASE-style env vars or pass connection string via env to avoid
+  // shell injection through the connection URL.
+  // The SQL is passed via stdin to avoid shell metacharacter issues.
   const flags = [
-    `"${PG_URL}"`,
     "--no-password",
     "--tuples-only",
     "--no-align",
-    "-F '\\t'",  // Tab-separated
-    `-c '${escapedSql}'`,
+    "-F", "\t",
   ];
 
   if (readOnly) {
@@ -32,14 +30,18 @@ function runPsql(sql, readOnly = true) {
   }
 
   try {
-    const result = execSync(`psql ${flags.join(" ")}`, {
+    const result = execSync("psql " + flags.map(f => `'${f.replace(/'/g, "'\\''")}'`).join(" "), {
       encoding: "utf-8",
       timeout: 30000,
       maxBuffer: 5 * 1024 * 1024,
+      input: sql,
+      env: { ...process.env, DATABASE_URL: PG_URL },
     });
     return result.trim();
   } catch (err) {
-    throw new Error(`PostgreSQL error: ${err.stderr || err.message}`);
+    // Mask connection string from error output to prevent credential leaks
+    const errMsg = (err.stderr || err.message || "").replace(PG_URL, "***");
+    throw new Error(`PostgreSQL error: ${errMsg}`);
   }
 }
 
@@ -58,25 +60,25 @@ export async function query(sql) {
 
   // Run psql once with headers (no --tuples-only) to get columns + data
   if (!PG_URL) throw new Error("TOOL_POSTGRESQL_URL is not configured");
-  const escapedSql = sql.replace(/'/g, "'\\''");
   const flags = [
-    `"${PG_URL}"`,
     "--no-password",
     "--no-align",
-    "-F '\\t'",
+    "-F", "\t",
     "--set=ON_ERROR_STOP=1",
-    `-c '${escapedSql}'`,
   ];
 
   let headerOutput;
   try {
-    headerOutput = execSync(`psql ${flags.join(" ")}`, {
+    headerOutput = execSync("psql " + flags.map(f => `'${f.replace(/'/g, "'\\''")}'`).join(" "), {
       encoding: "utf-8",
       timeout: 30000,
       maxBuffer: 5 * 1024 * 1024,
+      input: sql,
+      env: { ...process.env, DATABASE_URL: PG_URL },
     }).trim();
   } catch (err) {
-    throw new Error(`PostgreSQL error: ${err.stderr || err.message}`);
+    const errMsg = (err.stderr || err.message || "").replace(PG_URL, "***");
+    throw new Error(`PostgreSQL error: ${errMsg}`);
   }
 
   const headerLines = headerOutput.split("\n").filter(Boolean);

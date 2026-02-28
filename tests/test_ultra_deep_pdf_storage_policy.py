@@ -199,7 +199,7 @@ class TestS3StorageKeySanitization:
             S3Storage._safe_key("   ")
 
     def test_safe_key_rejects_null_bytes(self):
-        with pytest.raises(ValueError, match="null bytes"):
+        with pytest.raises(ValueError, match="control characters|null bytes"):
             S3Storage._safe_key("data/\x00evil.json")
 
     def test_safe_key_rejects_dotdot_traversal(self):
