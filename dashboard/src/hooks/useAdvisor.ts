@@ -34,6 +34,7 @@ export function useAdvisor() {
   });
 
   const lastRefreshRef = useRef(0);
+  const mountedRef = useRef(true);
   const { subscribe } = useEventStreamContext();
 
   const fetchAll = useCallback(async () => {
@@ -67,6 +68,9 @@ export function useAdvisor() {
       api.get<AdvisorData["apiKeys"][number][]>("/api-keys"),
     ]);
 
+    // Don't update state if the component unmounted during fetch
+    if (!mountedRef.current) return;
+
     const data: AdvisorData = {
       health: healthRes.data ?? null,
       stats: statsRes.data ?? null,
@@ -97,6 +101,14 @@ export function useAdvisor() {
     }));
 
     lastRefreshRef.current = Date.now();
+  }, []);
+
+  // Track mounted state for cleanup
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   // Initial fetch

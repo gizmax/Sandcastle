@@ -113,7 +113,9 @@ async def pick_variant(
         total, avg_q = stats.get(variant.id, (0, 0.5))
         # Convert to Beta distribution parameters
         # alpha = successes + 1, beta = failures + 1
-        successes = int(total * avg_q)
+        # Use round() instead of int() to avoid systematic downward bias
+        # from truncation at low sample counts
+        successes = round(total * avg_q)
         failures = total - successes
         alpha = max(successes + 1, 1)
         beta_param = max(failures + 1, 1)
@@ -396,8 +398,11 @@ def select_winner(variant_stats: list, config: AutoPilotConfig) -> dict | None:
     elif config.optimize_for == "pareto":
         # Simple Pareto: normalize and find best combined score
         # Lower cost and duration is better, higher quality is better
-        max_cost = max(c["avg_cost"] for c in candidates) or 1
-        max_dur = max(c["avg_duration"] for c in candidates) or 1
+        # Use max(value, 1e-9) to avoid division by near-zero floats
+        max_cost = max(c["avg_cost"] for c in candidates)
+        max_dur = max(c["avg_duration"] for c in candidates)
+        max_cost = max_cost if max_cost > 1e-9 else 1.0
+        max_dur = max_dur if max_dur > 1e-9 else 1.0
         for c in candidates:
             cost_score = 1 - (c["avg_cost"] / max_cost)
             dur_score = 1 - (c["avg_duration"] / max_dur)
@@ -417,6 +422,11 @@ def _two_tailed_p_value(t_stat: float, df: float) -> float:
     For df > ~30 this is very accurate; for smaller df it's a reasonable
     approximation without requiring scipy.
     """
+    # Guard against NaN/Inf inputs
+    if math.isnan(t_stat) or math.isnan(df):
+        return 1.0
+    if math.isinf(t_stat):
+        return 0.0
     # Use the Cornish-Fisher expansion for t -> z conversion:
     # z ~ t * (1 - 1/(4*df)) for moderate df
     # For large df, t ~ z directly
@@ -447,10 +457,18 @@ def _check_significance(
 
     mean1 = sum(winner_scores) / n1
     mean2 = sum(runner_up_scores) / n2
+
+    # Guard against NaN/Inf in input scores
+    if math.isnan(mean1) or math.isnan(mean2):
+        return False, 1.0
+
     var1 = sum((x - mean1) ** 2 for x in winner_scores) / (n1 - 1)
     var2 = sum((x - mean2) ** 2 for x in runner_up_scores) / (n2 - 1)
 
-    se = math.sqrt(var1 / n1 + var2 / n2)
+    se_sq = var1 / n1 + var2 / n2
+    if se_sq < 0 or math.isnan(se_sq):
+        return False, 1.0
+    se = math.sqrt(se_sq)
     if se == 0:
         return mean1 > mean2, 0.0 if mean1 != mean2 else 1.0
 

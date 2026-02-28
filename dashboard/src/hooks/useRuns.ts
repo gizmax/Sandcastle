@@ -26,8 +26,17 @@ export function useRuns(options: UseRunsOptions = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  // Guard against overlapping fetches from polling + manual refetch
+  const fetchInFlightRef = useRef(false);
+  // Track the latest fetch ID to discard stale responses when params change rapidly
+  const fetchIdRef = useRef(0);
 
   const fetchRuns = useCallback(async () => {
+    // Skip if another fetch is already in progress (prevents overlapping polls)
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
+    const currentFetchId = ++fetchIdRef.current;
+
     const params: Record<string, string> = {
       limit: String(limit),
       offset: String(offset),
@@ -38,6 +47,8 @@ export function useRuns(options: UseRunsOptions = {}) {
     try {
       const res = await api.get<RunItem[]>("/runs", params);
       if (!mountedRef.current) return;
+      // Discard if a newer fetch was started while this one was in flight
+      if (currentFetchId !== fetchIdRef.current) return;
       if (res.data) {
         setRuns(res.data);
         setTotal(res.meta?.total ?? res.data.length);
@@ -47,14 +58,20 @@ export function useRuns(options: UseRunsOptions = {}) {
       }
     } catch {
       if (!mountedRef.current) return;
+      if (currentFetchId !== fetchIdRef.current) return;
       setError("Failed to fetch runs");
     } finally {
-      if (mountedRef.current) setLoading(false);
+      fetchInFlightRef.current = false;
+      if (mountedRef.current && currentFetchId === fetchIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [status, workflow, limit, offset]);
 
   useEffect(() => {
     mountedRef.current = true;
+    // Reset in-flight guard on param changes so the new fetch is not blocked
+    fetchInFlightRef.current = false;
     setLoading(true);
     void fetchRuns();
     return () => {

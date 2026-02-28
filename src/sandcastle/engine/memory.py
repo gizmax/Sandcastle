@@ -14,6 +14,7 @@ Features beyond v1:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
@@ -88,6 +89,24 @@ _STOPWORDS: set[str] = {
     "who", "whom", "there", "here", "after", "before", "between",
 }
 
+# Scope ID format: must be "workflow:<name>", "agent:<name>", or "global".
+# Also accept the internal "__health_check__" scope for health probes.
+_VALID_SCOPE_RE = re.compile(
+    r"^(workflow:[a-zA-Z0-9_. -]{1,200}"
+    r"|agent:[a-zA-Z0-9_. -]{1,200}"
+    r"|global"
+    r"|__health_check__)$"
+)
+
+
+def _validate_scope(scope_id: str) -> None:
+    """Raise ValueError if scope_id has an unexpected format."""
+    if not _VALID_SCOPE_RE.match(scope_id):
+        raise ValueError(
+            f"Invalid scope_id format: {scope_id!r}. "
+            "Expected 'workflow:<name>', 'agent:<name>', or 'global'."
+        )
+
 
 def _get_client(backend: str = "local") -> Any:
     """Get or create a Mem0 client for the given backend.
@@ -154,9 +173,9 @@ def _get_graph_client() -> Any | None:
                 "graph_store": {
                     "provider": "neo4j",
                     "config": {
-                        "url": "bolt://localhost:7687",
-                        "username": "neo4j",
-                        "password": "neo4j",
+                        "url": os.getenv("NEO4J_URL", "bolt://localhost:7687"),
+                        "username": os.getenv("NEO4J_USERNAME", "neo4j"),
+                        "password": os.getenv("NEO4J_PASSWORD", ""),
                     },
                 },
             }
@@ -382,7 +401,7 @@ def detect_conflicts(
         if not mem_words:
             continue
 
-        # Symmetric overlap: intersection / min(len_a, len_b)
+        # Overlap coefficient (Szymkiewicz-Simpson): intersection / min(len_a, len_b)
         intersection = new_words & mem_words
         smaller = min(len(new_words), len(mem_words))
         if smaller == 0:
@@ -481,6 +500,8 @@ async def load_memories(
     """
     import asyncio
 
+    _validate_scope(scope_id)
+
     try:
         client = _get_client(backend)
         if query:
@@ -555,6 +576,19 @@ async def save_memory(
     """
     import asyncio
 
+    _validate_scope(scope_id)
+
+    # Reject oversized content to prevent storage abuse.
+    # API schema limits to 100KB; enforce the same limit for internal calls.
+    _MAX_CONTENT_SIZE = 100_000
+    if len(content) > _MAX_CONTENT_SIZE:
+        original_len = len(content)
+        content = content[:_MAX_CONTENT_SIZE]
+        logger.warning(
+            "Memory content for %s truncated from %d to %d chars",
+            scope_id, original_len, _MAX_CONTENT_SIZE,
+        )
+
     meta = metadata or {}
     if run_id:
         meta["run_id"] = run_id
@@ -625,6 +659,7 @@ async def delete_all_memories(
 ) -> bool:
     """Delete all memories for a scope."""
     import asyncio
+    _validate_scope(scope_id)
     try:
         client = _get_client(backend)
         await asyncio.to_thread(client.delete_all, user_id=scope_id)
@@ -655,7 +690,13 @@ def format_memories_for_prompt(
     if not memories:
         return ""
 
-    lines: list[str] = ["[Agent Memory]"]
+    header = "[Agent Memory]"
+    footer = "[End of Agent Memory]"
+    # Reserve space for header, footer, and newlines between them
+    reserved = len(header) + len(footer) + 2  # 2 newlines
+    budget = max(0, max_chars - reserved)
+
+    lines: list[str] = [header]
     total = 0
 
     for m in memories:
@@ -664,7 +705,7 @@ def format_memories_for_prompt(
             continue
 
         # Build suffix with tags/keywords if available
-        meta = m.get("metadata", {})
+        meta = m.get("metadata") or {}
         suffix_parts: list[str] = []
         tags_str = meta.get("tags", "")
         if tags_str:
@@ -679,12 +720,12 @@ def format_memories_for_prompt(
         suffix = f" [{', '.join(suffix_parts)}]" if suffix_parts else ""
         line = f"- {text}{suffix}"
 
-        if total + len(line) > max_chars:
+        if total + len(line) > budget:
             break
         lines.append(line)
         total += len(line)
 
-    lines.append("[End of Agent Memory]")
+    lines.append(footer)
     return "\n".join(lines)
 
 

@@ -163,6 +163,15 @@ class TestGetFailoverSingleton:
 class TestSandshoreFailoverIntegration:
     """Test _is_retriable_provider_error and async failover logic."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_failover_singleton(self):
+        """Reset the global failover singleton to avoid cross-test pollution."""
+        import sandcastle.engine.providers as _pmod
+        old = _pmod._failover_instance
+        _pmod._failover_instance = None
+        yield
+        _pmod._failover_instance = old
+
     @pytest.mark.parametrize(
         "msg",
         [

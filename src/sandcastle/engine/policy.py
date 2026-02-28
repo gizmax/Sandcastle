@@ -19,6 +19,10 @@ from simpleeval import simple_eval
 logger = logging.getLogger(__name__)
 
 
+# Valid severity levels for policy definitions
+VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
+
+
 # --- Built-in regex patterns ---
 
 BUILTIN_PATTERNS: dict[str, str] = {
@@ -106,7 +110,17 @@ class PolicyEngine:
     def __init__(self, policies: list[PolicyDefinition]):
         self.policies = policies
         self._compiled: dict[str, re.Pattern] = {}
+        self._validate_policies()
         self._compile_patterns()
+
+    def _validate_policies(self) -> None:
+        """Validate policy definitions for correctness."""
+        for policy in self.policies:
+            if policy.severity not in VALID_SEVERITIES:
+                raise ValueError(
+                    f"Invalid severity '{policy.severity}' for policy '{policy.id}'. "
+                    f"Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"
+                )
 
     def _compile_patterns(self) -> None:
         """Pre-compile all regex patterns for performance."""
@@ -159,7 +173,8 @@ class PolicyEngine:
 
             if policy.action.type == "redact":
                 modified_output = self._apply_redaction(
-                    modified_output, policy.trigger.patterns, policy.action
+                    modified_output, policy.trigger.patterns, policy.action,
+                    policy_id=policy.id,
                 )
                 violation.output_modified = True
                 if policy.action.apply_to:
@@ -184,6 +199,7 @@ class PolicyEngine:
                         modified_output,
                         policy.trigger.patterns,
                         PolicyAction(type="redact", replacement="[BLOCKED]"),
+                        policy_id=policy.id,
                     )
                     violation.output_modified = True
 
@@ -206,7 +222,8 @@ class PolicyEngine:
             for p in self.policies:
                 if p.action.type == "redact" and p.trigger.patterns:
                     redacted_output = self._apply_redaction(
-                        redacted_output, p.trigger.patterns, p.action
+                        redacted_output, p.trigger.patterns, p.action,
+                        policy_id=p.id,
                     )
 
         return PolicyEvalResult(
@@ -269,6 +286,7 @@ class PolicyEngine:
         output: Any,
         patterns: list[PolicyPattern] | None,
         action: PolicyAction,
+        policy_id: str = "",
     ) -> Any:
         """Replace all pattern matches with replacement string."""
         if not patterns:
@@ -276,7 +294,9 @@ class PolicyEngine:
         replacement = action.replacement or "[REDACTED]"
         output_str = json.dumps(output) if isinstance(output, dict) else str(output)
         for pattern in patterns:
-            regex = _get_pattern_regex(pattern)
+            # Use the pre-compiled regex from cache when available
+            key = f"{policy_id}:{pattern.type}:{pattern.pattern or ''}"
+            regex = self._compiled.get(key) or _get_pattern_regex(pattern)
             output_str = regex.sub(replacement, output_str)
         if isinstance(output, dict):
             try:
@@ -292,19 +312,26 @@ class PolicyEngine:
 # Maximum length for user-supplied regex patterns to limit complexity
 _MAX_REGEX_LENGTH = 500
 
+# Maximum length for condition expressions to prevent abuse
+_MAX_EXPRESSION_LENGTH = 1000
+
 
 def _has_redos_risk(pattern: str) -> bool:
     """Heuristic check for catastrophic backtracking (ReDoS) patterns.
 
     Detects common nested-quantifier constructs such as ``(a+)+``,
-    ``(.*)*``, ``(a+)*`` etc. that can cause exponential runtime.
+    ``(.*)*``, ``(a+)*``, ``([a-z]+)+`` etc. that can cause exponential runtime.
+    Also detects alternation-based amplification like ``(a|a)+``.
     """
     # Match a group with an inner quantifier followed by an outer quantifier
-    # e.g. (X+)+, (X+)*, (X*)+, (X*){n}, (.+)+, etc.
-    return bool(re.search(
-        r"\([^)]*[+*][^)]*\)[+*{]",
-        pattern,
-    ))
+    # e.g. (X+)+, (X+)*, (X*)+, (X*){n}, (.+)+, ([a-z]+)+, etc.
+    if re.search(r"\([^)]*[+*][^)]*\)[+*{]", pattern):
+        return True
+    # Detect nested groups with quantifiers: ((a+)b)+
+    if re.search(r"\([^)]*\([^)]*[+*]", pattern):
+        if re.search(r"\)[^)]*\)[+*{]", pattern):
+            return True
+    return False
 
 
 def _get_pattern_regex(pattern: PolicyPattern) -> re.Pattern:
@@ -339,16 +366,32 @@ def _safe_eval(expression: str, variables: dict[str, Any]) -> Any:
     Supports comparisons, dot access, len(), basic math, and/or/not.
     Never uses Python eval/exec.
     """
+    if len(expression) > _MAX_EXPRESSION_LENGTH:
+        raise ValueError(
+            f"Expression too long ({len(expression)} chars, "
+            f"max {_MAX_EXPRESSION_LENGTH})"
+        )
     functions = {"len": len}
     return simple_eval(expression, names=variables, functions=functions)
 
 
-def _resolve_policy_template(template: str, output: Any, context: dict[str, Any]) -> str:
-    """Resolve {output.field} and {context.field} placeholders in policy messages."""
+def _resolve_policy_template(
+    template: str, output: Any, context: dict[str, Any],
+    _max_depth: int = 10,
+    _max_resolved_len: int = 500,
+) -> str:
+    """Resolve {output.field} and {context.field} placeholders in policy messages.
+
+    Args:
+        _max_depth: Maximum traversal depth for nested dict access.
+        _max_resolved_len: Maximum length for each resolved value string.
+    """
 
     def _replace(match: re.Match) -> str:
         var_path = match.group(1)
         parts = var_path.split(".")
+        if len(parts) > _max_depth + 1:
+            return match.group(0)
         if parts[0] == "output":
             obj = output
             for part in parts[1:]:
@@ -356,7 +399,8 @@ def _resolve_policy_template(template: str, output: Any, context: dict[str, Any]
                     obj = obj.get(part, match.group(0))
                 else:
                     return match.group(0)
-            return str(obj)
+            resolved = str(obj)
+            return resolved[:_max_resolved_len] if len(resolved) > _max_resolved_len else resolved
         elif parts[0] == "input":
             obj = context.get("input", {})
             for part in parts[1:]:
@@ -364,7 +408,8 @@ def _resolve_policy_template(template: str, output: Any, context: dict[str, Any]
                     obj = obj.get(part, match.group(0))
                 else:
                     return match.group(0)
-            return str(obj)
+            resolved = str(obj)
+            return resolved[:_max_resolved_len] if len(resolved) > _max_resolved_len else resolved
         return match.group(0)
 
     return re.sub(r"\{([^}]+)\}", _replace, template)

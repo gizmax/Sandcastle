@@ -638,7 +638,7 @@ class TestCircuitBreakerSecurity:
         for _ in range(3):
             await cb.record_failure()
         assert cb.state == CircuitBreaker.OPEN
-        assert cb.allow_request() is False
+        assert await cb.allow_request() is False
 
     @pytest.mark.asyncio
     async def test_half_open_after_recovery_timeout(self):
@@ -647,7 +647,7 @@ class TestCircuitBreakerSecurity:
         assert cb.state == CircuitBreaker.OPEN
         time.sleep(0.02)
         assert cb.state == CircuitBreaker.HALF_OPEN
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_resets_on_success(self):
@@ -656,7 +656,7 @@ class TestCircuitBreakerSecurity:
         await cb.record_failure()
         await cb.record_success()
         assert cb.state == CircuitBreaker.CLOSED
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
 
     @pytest.mark.asyncio
     async def test_success_resets_after_trip(self):
@@ -665,7 +665,7 @@ class TestCircuitBreakerSecurity:
         assert cb.state == CircuitBreaker.OPEN
         time.sleep(0.02)
         # In half-open, allow one request
-        assert cb.allow_request() is True
+        assert await cb.allow_request() is True
         await cb.record_success()
         assert cb.state == CircuitBreaker.CLOSED
 

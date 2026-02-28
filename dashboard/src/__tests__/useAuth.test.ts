@@ -7,6 +7,10 @@ vi.mock("@/api/client", () => ({
     setApiKey: vi.fn(),
     isMockMode: false,
     onMockChange: vi.fn(() => () => {}),
+    hasStoredKey: vi.fn(() => false),
+    getStoredKey: vi.fn(() => null),
+    storeApiKey: vi.fn(),
+    clearStoredKey: vi.fn(),
   },
   // Re-export API_BASE_URL from constants mock below
 }));
@@ -22,6 +26,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/api/client";
 
 const mockSetApiKey = api.setApiKey as ReturnType<typeof vi.fn>;
+const mockHasStoredKey = api.hasStoredKey as ReturnType<typeof vi.fn>;
+const mockGetStoredKey = api.getStoredKey as ReturnType<typeof vi.fn>;
+const mockStoreApiKey = api.storeApiKey as ReturnType<typeof vi.fn>;
+const mockClearStoredKey = api.clearStoredKey as ReturnType<typeof vi.fn>;
 
 describe("useAuth", () => {
   let originalFetch: typeof fetch;
@@ -29,7 +37,12 @@ describe("useAuth", () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     mockSetApiKey.mockReset();
+    mockHasStoredKey.mockReset().mockReturnValue(false);
+    mockGetStoredKey.mockReset().mockReturnValue(null);
+    mockStoreApiKey.mockReset();
+    mockClearStoredKey.mockReset();
     localStorage.clear();
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -60,11 +73,10 @@ describe("useAuth", () => {
     });
   });
 
-  it("uses saved key from localStorage", async () => {
-    localStorage.setItem("sandcastle_api_key", "saved-key-123");
-    let callCount = 0;
+  it("uses saved key from storage", async () => {
+    mockHasStoredKey.mockReturnValue(true);
+    mockGetStoredKey.mockReturnValue("saved-key-123");
     globalThis.fetch = vi.fn().mockImplementation(async (_url: string, opts: RequestInit) => {
-      callCount++;
       const headers = opts?.headers as Record<string, string>;
       // First call: no key (probe), returns 401
       if (!headers?.["X-API-Key"]) {
@@ -86,7 +98,8 @@ describe("useAuth", () => {
   });
 
   it("removes invalid saved key and becomes unauthenticated", async () => {
-    localStorage.setItem("sandcastle_api_key", "bad-key");
+    mockHasStoredKey.mockReturnValue(true);
+    mockGetStoredKey.mockReturnValue("bad-key");
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 401 }));
 
     const { result } = renderHook(() => useAuth());
@@ -94,10 +107,10 @@ describe("useAuth", () => {
     await waitFor(() => {
       expect(result.current.state).toBe("unauthenticated");
     });
-    expect(localStorage.getItem("sandcastle_api_key")).toBeNull();
+    expect(mockClearStoredKey).toHaveBeenCalled();
   });
 
-  it("login() saves key and sets authenticated on success", async () => {
+  it("login() saves key to sessionStorage and sets authenticated on success", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
 
     const { result } = renderHook(() => useAuth());
@@ -111,7 +124,7 @@ describe("useAuth", () => {
       loginResult = await result.current.login("new-key");
     });
     expect(loginResult!).toBe(true);
-    expect(localStorage.getItem("sandcastle_api_key")).toBe("new-key");
+    expect(mockStoreApiKey).toHaveBeenCalledWith("new-key");
     expect(mockSetApiKey).toHaveBeenCalledWith("new-key");
   });
 
@@ -153,7 +166,7 @@ describe("useAuth", () => {
     });
 
     expect(result.current.state).toBe("unauthenticated");
-    expect(localStorage.getItem("sandcastle_api_key")).toBeNull();
+    expect(mockClearStoredKey).toHaveBeenCalled();
     expect(mockSetApiKey).toHaveBeenCalledWith(null);
   });
 

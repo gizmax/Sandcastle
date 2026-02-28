@@ -8,6 +8,51 @@ interface ApiResponse<T = unknown> {
 }
 
 const REQUEST_TIMEOUT = 15_000; // 15 seconds
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+// Use sessionStorage instead of localStorage for API keys to reduce XSS
+// exposure. sessionStorage is cleared when the tab closes, limiting the
+// window for token theft. localStorage is still checked as a migration
+// fallback so existing users are not forced to re-enter their key.
+const SESSION_KEY = "sandcastle_api_key";
+const LEGACY_LOCAL_KEY = "sandcastle_api_key";
+
+function readStoredKey(): string | null {
+  // Prefer sessionStorage (more secure)
+  const sessionKey = sessionStorage.getItem(SESSION_KEY);
+  if (sessionKey) return sessionKey;
+  // Fall back to localStorage for users who authenticated before this change
+  const localKey = localStorage.getItem(LEGACY_LOCAL_KEY);
+  if (localKey) {
+    // Migrate: copy to sessionStorage and remove from localStorage
+    sessionStorage.setItem(SESSION_KEY, localKey);
+    localStorage.removeItem(LEGACY_LOCAL_KEY);
+    return localKey;
+  }
+  return null;
+}
+
+function storeKey(key: string): void {
+  sessionStorage.setItem(SESSION_KEY, key);
+  // Ensure the legacy localStorage key is cleaned up
+  localStorage.removeItem(LEGACY_LOCAL_KEY);
+}
+
+function clearStoredKey(): void {
+  sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(LEGACY_LOCAL_KEY);
+}
+
+/** Check if an HTTP status code is retryable (server error or rate limit). */
+function isRetryableStatus(status: number): boolean {
+  return status >= 500 || status === 429;
+}
+
+/** Wait for a specified number of milliseconds. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 class ApiClient {
   private baseUrl: string;
@@ -15,11 +60,12 @@ class ApiClient {
   private useMock = false;
   private initPromise: Promise<void> | null = null;
   private _mockListeners: Array<(mock: boolean) => void> = [];
+  private _inflightRequests = new Map<string, Promise<ApiResponse<unknown>>>();
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
     // Restore saved API key before probing
-    const savedKey = localStorage.getItem("sandcastle_api_key");
+    const savedKey = readStoredKey();
     if (savedKey) this.apiKey = savedKey;
     // Probe backend on first load
     this.initPromise = this.probe();
@@ -71,6 +117,32 @@ class ApiClient {
     this.apiKey = key;
   }
 
+  /** Check whether an API key is currently stored in session/local storage. */
+  hasStoredKey(): boolean {
+    return readStoredKey() !== null;
+  }
+
+  /** Read the stored API key prefix for display (first 8 chars). */
+  storedKeyPrefix(): string | null {
+    const key = readStoredKey();
+    return key ? key.slice(0, 8) : null;
+  }
+
+  /** Retrieve the full stored API key (for auth validation probes). */
+  getStoredKey(): string | null {
+    return readStoredKey();
+  }
+
+  /** Persist an API key to sessionStorage (not localStorage). */
+  storeApiKey(key: string): void {
+    storeKey(key);
+  }
+
+  /** Remove the stored API key from all storage. */
+  clearStoredKey(): void {
+    clearStoredKey();
+  }
+
   private headers(): HeadersInit {
     const h: HeadersInit = { "Content-Type": "application/json" };
     if (this.apiKey) {
@@ -100,28 +172,71 @@ class ApiClient {
     return mockFetch(path, params, method, body) as ApiResponse<T>;
   }
 
+  /**
+   * Execute a fetch request with retry logic for 5xx and 429 responses.
+   * Returns the Response on success, or throws on exhausted retries / network error.
+   */
+  private async fetchWithRetry(
+    input: string,
+    init: RequestInit,
+    retries: number = MAX_RETRIES
+  ): Promise<Response> {
+    let lastResponse: Response | null = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const res = await fetch(input, init);
+      if (!isRetryableStatus(res.status) || attempt === retries) {
+        return res;
+      }
+      lastResponse = res;
+      // Wait before retrying, with exponential backoff
+      const backoff = RETRY_DELAY_MS * Math.pow(2, attempt);
+      console.info(
+        `[Sandcastle] Request to ${input} returned ${res.status}, retrying in ${backoff}ms (attempt ${attempt + 1}/${retries})`
+      );
+      await delay(backoff);
+    }
+    // This should not be reached, but return lastResponse as safety net
+    return lastResponse!;
+  }
+
   async get<T>(path: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
     await this.ensureInit();
     if (this.useMock) return this.mock<T>(path, params);
 
-    try {
-      const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
-      if (params) {
-        Object.entries(params).forEach(([k, v]) => {
-          if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
-        });
-      }
-      const res = await fetch(url.toString(), {
-        headers: this.headers(),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+    // Build a deduplication key for GET requests
+    const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
       });
-      return this.handleResponse<T>(res);
-    } catch {
-      // Only fall back to mock on actual network errors (backend unreachable)
-      console.info(`[Sandcastle] Backend unavailable, using demo data`);
-      this.setMock(true);
-      return this.mock<T>(path, params);
     }
+    const dedupeKey = `GET:${url.toString()}`;
+
+    // Return existing in-flight request if one is pending (request deduplication)
+    const existing = this._inflightRequests.get(dedupeKey);
+    if (existing) {
+      return existing as Promise<ApiResponse<T>>;
+    }
+
+    const requestPromise = (async (): Promise<ApiResponse<T>> => {
+      try {
+        const res = await this.fetchWithRetry(url.toString(), {
+          headers: this.headers(),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        });
+        return this.handleResponse<T>(res);
+      } catch {
+        // Only fall back to mock on actual network errors (backend unreachable)
+        console.info(`[Sandcastle] Backend unavailable, using demo data`);
+        this.setMock(true);
+        return this.mock<T>(path, params);
+      } finally {
+        this._inflightRequests.delete(dedupeKey);
+      }
+    })();
+
+    this._inflightRequests.set(dedupeKey, requestPromise as Promise<ApiResponse<unknown>>);
+    return requestPromise;
   }
 
   private async handleResponse<T>(res: Response): Promise<ApiResponse<T>> {
@@ -136,7 +251,13 @@ class ApiClient {
         if (json.detail && typeof json.detail === "string") {
           return { data: null, error: { code: `HTTP_${res.status}`, message: json.detail } };
         }
-        return json;
+        // Validate response structure before returning - ensure it has the
+        // expected shape to prevent downstream code from reading undefined fields
+        if (json && typeof json === "object" && ("data" in json || "error" in json)) {
+          return json;
+        }
+        // Unknown error shape - wrap it
+        return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
       } catch {
         return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
       }
@@ -151,12 +272,17 @@ class ApiClient {
     }
 
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: "POST",
-        headers: this.headers(),
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT),
-      });
+      const res = await this.fetchWithRetry(
+        `${this.baseUrl}${path}`,
+        {
+          method: "POST",
+          headers: this.headers(),
+          body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT),
+        },
+        // Only retry idempotent-safe requests; POST mutations get 0 retries
+        0
+      );
       return this.handleResponse<T>(res);
     } catch {
       return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
@@ -170,12 +296,16 @@ class ApiClient {
     }
 
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: "PATCH",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-      });
+      const res = await this.fetchWithRetry(
+        `${this.baseUrl}${path}`,
+        {
+          method: "PATCH",
+          headers: this.headers(),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        },
+        0
+      );
       return this.handleResponse<T>(res);
     } catch {
       return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
@@ -189,12 +319,16 @@ class ApiClient {
     }
 
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: "PUT",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-      });
+      const res = await this.fetchWithRetry(
+        `${this.baseUrl}${path}`,
+        {
+          method: "PUT",
+          headers: this.headers(),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        },
+        0
+      );
       return this.handleResponse<T>(res);
     } catch {
       return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
@@ -208,11 +342,15 @@ class ApiClient {
     }
 
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: "DELETE",
-        headers: this.headers(),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-      });
+      const res = await this.fetchWithRetry(
+        `${this.baseUrl}${path}`,
+        {
+          method: "DELETE",
+          headers: this.headers(),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        },
+        0
+      );
       return this.handleResponse<T>(res);
     } catch {
       return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };

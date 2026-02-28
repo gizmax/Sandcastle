@@ -5,6 +5,13 @@ compatible frontends via Server-Sent Events (SSE).
 
 Endpoint:
   GET /api/agui/stream/{run_id} - SSE stream of AG-UI events for a run
+
+Security:
+  - When AUTH_REQUIRED=true, the auth middleware validates credentials
+    before this handler runs. Tenant isolation ensures a user can only
+    stream events for runs belonging to their tenant.
+  - run_id is validated as a UUID to prevent injection.
+  - Client disconnection is detected via request.is_disconnected().
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from sandcastle.config import settings
 from sandcastle.engine.events import event_bus
 from sandcastle.models.db import Run, async_session
 
@@ -133,6 +141,14 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
     return None
 
 
+def _get_tenant_id_safe(request: Request) -> str | None:
+    """Extract tenant_id from request state without raising.
+
+    Returns None when auth is disabled or tenant_id is not set.
+    """
+    return getattr(request.state, "tenant_id", None)
+
+
 @agui_router.get("/stream/{run_id}")
 async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
     """Stream AG-UI typed events for a running workflow via SSE.
@@ -140,7 +156,13 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
     Subscribes to the Sandcastle EventBus and transforms internal events
     to AG-UI format. Also polls the DB for initial state and terminal
     detection.
+
+    Security:
+      - run_id is validated as a UUID.
+      - When auth is enabled, tenant isolation ensures only the run's
+        owner can stream its events.
     """
+    # Validate run_id format
     try:
         run_uuid = uuid.UUID(run_id)
     except ValueError:
@@ -155,9 +177,17 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
             },
         )
 
-    # Verify the run exists
+    # Normalize run_id to the canonical UUID string (lowercase, no extra chars)
+    run_id = str(run_uuid)
+
+    # Verify the run exists and apply tenant isolation
+    tenant_id = _get_tenant_id_safe(request)
+
     async with async_session() as session:
         stmt = select(Run).where(Run.id == run_uuid)
+        # Tenant isolation: only allow streaming runs belonging to the caller
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.where(Run.tenant_id == tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
 

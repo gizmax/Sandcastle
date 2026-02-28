@@ -516,7 +516,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* API Key / Session */}
-      {localStorage.getItem("sandcastle_api_key") && (
+      {api.hasStoredKey() && (
         <SectionCard
           icon={LogOut}
           title="Session"
@@ -524,11 +524,11 @@ export default function SettingsPage() {
         >
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">
-              Key: <span className="font-mono">{localStorage.getItem("sandcastle_api_key")?.slice(0, 8)}...</span>
+              Key: <span className="font-mono">{api.storedKeyPrefix()}...</span>
             </p>
             <button
               onClick={() => {
-                localStorage.removeItem("sandcastle_api_key");
+                api.clearStoredKey();
                 window.location.reload();
               }}
               className="flex items-center gap-2 rounded-lg border border-error/30 px-3 py-1.5 text-sm font-medium text-error hover:bg-error/10 transition-colors cursor-pointer"

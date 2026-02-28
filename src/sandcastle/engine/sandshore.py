@@ -96,7 +96,11 @@ class CircuitBreaker:
     Three states:
     - CLOSED: normal operation, requests pass through.
     - OPEN: backend is failing, reject immediately.
-    - HALF_OPEN: cooldown expired, allow one test request.
+    - HALF_OPEN: cooldown expired, allow exactly one test request.
+
+    The half-open state is properly guarded: only a single probe request
+    is allowed through. If it succeeds the breaker resets to CLOSED; if
+    it fails the breaker trips back to OPEN immediately.
     """
 
     CLOSED = "closed"
@@ -113,11 +117,16 @@ class CircuitBreaker:
         self._state = self.CLOSED
         self._failure_count = 0
         self._last_failure_time = 0.0
+        self._half_open_permitted = False
         self._lock = asyncio.Lock()
 
     @property
     def state(self) -> str:
-        """Return the current effective state, accounting for recovery timeout."""
+        """Return the current effective state, accounting for recovery timeout.
+
+        Note: this is a snapshot for observability. Use ``allow_request()``
+        for the authoritative gate decision (it holds the lock).
+        """
         if self._state == self.OPEN:
             if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
                 return self.HALF_OPEN
@@ -128,13 +137,27 @@ class CircuitBreaker:
         async with self._lock:
             self._failure_count = 0
             self._state = self.CLOSED
+            self._half_open_permitted = False
 
     async def record_failure(self) -> None:
-        """Record a failed execution - trip to OPEN after threshold."""
+        """Record a failed execution - trip to OPEN after threshold.
+
+        In HALF_OPEN state a single failure trips back to OPEN immediately
+        with the failure counter preserved (so recovery_timeout restarts).
+        """
         async with self._lock:
             self._failure_count += 1
             self._last_failure_time = time.monotonic()
-            if self._failure_count >= self.failure_threshold:
+            self._half_open_permitted = False
+            if self._state == self.HALF_OPEN:
+                # Probe failed - trip back to OPEN immediately
+                logger.warning(
+                    "Circuit breaker half-open probe failed, "
+                    "tripping back to OPEN (failures=%d)",
+                    self._failure_count,
+                )
+                self._state = self.OPEN
+            elif self._failure_count >= self.failure_threshold:
                 if self._state != self.OPEN:
                     logger.warning(
                         "Circuit breaker tripped OPEN after %d consecutive failures",
@@ -142,9 +165,30 @@ class CircuitBreaker:
                     )
                 self._state = self.OPEN
 
-    def allow_request(self) -> bool:
-        """Return True if a request should be allowed through."""
-        return self.state != self.OPEN
+    async def allow_request(self) -> bool:
+        """Return True if a request should be allowed through.
+
+        Holds the lock so that only one request passes through in
+        HALF_OPEN state (the probe request).
+        """
+        async with self._lock:
+            if self._state == self.CLOSED:
+                return True
+            if self._state == self.OPEN:
+                if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
+                    # Transition to HALF_OPEN and allow exactly one probe
+                    if not self._half_open_permitted:
+                        self._state = self.HALF_OPEN
+                        self._half_open_permitted = True
+                        return True
+                    # Another request while probe is in-flight - reject
+                    return False
+                return False
+            # HALF_OPEN but probe already dispatched
+            if self._half_open_permitted:
+                return False
+            self._half_open_permitted = True
+            return True
 
 
 # ------------------------------------------------------------------
@@ -431,6 +475,12 @@ class SandshoreRuntime:
             return True
         return False
 
+    @staticmethod
+    def _is_rate_limit_error(error_msg: str) -> bool:
+        """Return True if error_msg specifically indicates a 429 rate limit."""
+        msg = error_msg.lower()
+        return "429" in msg or "rate limit" in msg or "too many requests" in msg
+
     async def _stream_backend_once(
         self,
         request: dict,
@@ -443,7 +493,7 @@ class SandshoreRuntime:
         and raises ``SandshoreError`` so the failover wrapper can retry.
         """
         # Check circuit breaker
-        if not self._circuit_breaker.allow_request():
+        if not await self._circuit_breaker.allow_request():
             await self._metrics.record_circuit_breaker_rejection()
             raise SandshoreError(
                 f"Circuit breaker is OPEN for backend "
@@ -527,13 +577,16 @@ class SandshoreRuntime:
             if not self._is_retriable_provider_error(str(exc)):
                 raise
             # Mark the primary model's key on cooldown
+            rate_limited = self._is_rate_limit_error(str(exc))
             try:
                 info = resolve_model(model_str)
-                failover.mark_cooldown(info.api_key_env)
+                failover.mark_cooldown(
+                    info.api_key_env, is_rate_limit=rate_limited,
+                )
                 logger.warning(
-                    "Model '%s' hit retriable error: %s - "
-                    "trying alternatives",
+                    "Model '%s' hit %s error: %s - trying alternatives",
                     model_str,
+                    "rate-limit" if rate_limited else "server",
                     exc,
                 )
             except KeyError:
@@ -563,9 +616,13 @@ class SandshoreRuntime:
             except SandshoreError as exc:
                 last_error = exc
                 if self._is_retriable_provider_error(str(exc)):
+                    alt_rate_limited = self._is_rate_limit_error(str(exc))
                     try:
                         alt_info = resolve_model(alt_model)
-                        failover.mark_cooldown(alt_info.api_key_env)
+                        failover.mark_cooldown(
+                            alt_info.api_key_env,
+                            is_rate_limit=alt_rate_limited,
+                        )
                     except KeyError:
                         pass
                     logger.warning(

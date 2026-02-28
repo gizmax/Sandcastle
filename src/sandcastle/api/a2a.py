@@ -5,13 +5,24 @@ and interact with Sandcastle workflows via a standardized JSON-RPC 2.0
 interface.
 
 Endpoints:
-  GET  /.well-known/agent.json  - Agent Card (discovery)
+  GET  /.well-known/agent.json  - Agent Card (discovery, public)
   POST /a2a                     - JSON-RPC 2.0 task operations
+
+Security:
+  - The Agent Card endpoint is intentionally public (discovery).
+  - The /a2a JSON-RPC endpoint respects auth when AUTH_REQUIRED=true.
+    Auth middleware runs before this handler; tenant_id is extracted for
+    tenant isolation on tasks/get and tasks/cancel.
+  - Rate limiting is applied to tasks/send (expensive - creates sandboxes).
+  - Request body size is capped at 512 KB to prevent DoS.
+  - JSON-RPC 2.0 version field is validated.
+  - Workflow names are validated against path traversal.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +43,18 @@ logger = logging.getLogger(__name__)
 
 a2a_router = APIRouter(tags=["A2A Protocol"])
 
+# Maximum JSON-RPC request body size (512 KB)
+_MAX_BODY_SIZE = 512 * 1024
+
+# Maximum allowed length for workflow names to prevent abuse
+_MAX_WORKFLOW_NAME_LENGTH = 255
+
+# Maximum allowed length for task IDs
+_MAX_TASK_ID_LENGTH = 255
+
+# Allowed skill IDs for tasks/send
+_VALID_SKILL_IDS = {"run-workflow", "list-workflows"}
+
 
 # -- State mapping: Sandcastle -> A2A --
 
@@ -50,6 +73,15 @@ _STATUS_MAP: dict[str, str] = {
 def _map_status(sandcastle_status: str) -> str:
     """Map a Sandcastle run status to an A2A task state."""
     return _STATUS_MAP.get(sandcastle_status, "unknown")
+
+
+def _get_tenant_id_safe(request: Request) -> str | None:
+    """Extract tenant_id from request state, returning None if unavailable.
+
+    Unlike auth.get_tenant_id(), this does not raise on missing auth state
+    because A2A endpoints may be accessed without auth when AUTH_REQUIRED=false.
+    """
+    return getattr(request.state, "tenant_id", None)
 
 
 # -- Agent Card --
@@ -84,12 +116,20 @@ def _build_agent_card(base_url: str) -> dict[str, Any]:
         ],
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["application/json"],
+        "authentication": {
+            "schemes": ["apiKey"],
+            "credentials": None if not settings.auth_required else "required",
+        },
     }
 
 
 @a2a_router.get("/.well-known/agent.json")
 async def agent_card(request: Request) -> JSONResponse:
-    """Return the A2A Agent Card for service discovery."""
+    """Return the A2A Agent Card for service discovery.
+
+    This endpoint is intentionally public per the A2A protocol spec -
+    agents need to discover capabilities before authenticating.
+    """
     base_url = str(request.base_url).rstrip("/")
     return JSONResponse(content=_build_agent_card(base_url))
 
@@ -149,27 +189,45 @@ def _extract_workflow_name(message: dict[str, Any]) -> str | None:
     Supports both text/plain (just the workflow name) and
     application/json ({"workflow_name": "...", "input": {...}}).
     """
+    if not isinstance(message, dict):
+        return None
     parts = message.get("parts", [])
+    if not isinstance(parts, list):
+        return None
     for part in parts:
+        if not isinstance(part, dict):
+            continue
         if part.get("type") == "data":
             data = part.get("data", {})
             if isinstance(data, dict):
-                return data.get("workflow_name")
+                name = data.get("workflow_name")
+                if isinstance(name, str):
+                    return name
         if part.get("type") == "text":
-            text = part.get("text", "").strip()
-            if text:
-                return text
+            text = part.get("text", "")
+            if isinstance(text, str):
+                text = text.strip()
+                if text:
+                    return text
     return None
 
 
 def _extract_input(message: dict[str, Any]) -> dict[str, Any]:
     """Extract workflow input parameters from an A2A message."""
+    if not isinstance(message, dict):
+        return {}
     parts = message.get("parts", [])
+    if not isinstance(parts, list):
+        return {}
     for part in parts:
+        if not isinstance(part, dict):
+            continue
         if part.get("type") == "data":
             data = part.get("data", {})
             if isinstance(data, dict):
-                return data.get("input", {})
+                input_val = data.get("input", {})
+                if isinstance(input_val, dict):
+                    return input_val
     return {}
 
 
@@ -201,13 +259,32 @@ def _build_task_response(
     return task
 
 
-async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
-    """Handle tasks/send - create and execute a workflow."""
+async def _handle_tasks_send(
+    params: dict[str, Any],
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Handle tasks/send - create and execute a workflow.
+
+    Args:
+        params: JSON-RPC params dict.
+        tenant_id: Tenant ID from auth middleware (None if auth disabled).
+    """
     task_id = params.get("id", str(uuid.uuid4()))
+
+    # Validate task ID format and length
+    if not isinstance(task_id, str) or len(task_id) > _MAX_TASK_ID_LENGTH:
+        return _build_task_response(
+            "unknown", "failed", error="Invalid task id"
+        )
+
     message = params.get("message", {})
 
-    # Determine skill from message
+    # Validate and restrict skill IDs
     skill_id = params.get("skillId", "run-workflow")
+    if not isinstance(skill_id, str) or skill_id not in _VALID_SKILL_IDS:
+        return _build_task_response(
+            task_id, "failed", error=f"Unknown skill: {skill_id}"
+        )
 
     if skill_id == "list-workflows":
         workflows = await _list_available_workflows()
@@ -222,6 +299,12 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
             task_id, "failed", error="Missing workflow_name in message"
         )
 
+    # Validate workflow name length
+    if len(workflow_name) > _MAX_WORKFLOW_NAME_LENGTH:
+        return _build_task_response(
+            task_id, "failed", error="Workflow name too long"
+        )
+
     workflow_input = _extract_input(message)
 
     # Reject path traversal in workflow name
@@ -230,9 +313,13 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
             task_id, "failed", error=f"Invalid workflow name: '{workflow_name}'"
         )
 
-    # Load workflow YAML
-    import re
+    # Reject null bytes and control characters in workflow name
+    if any(ord(c) < 32 for c in workflow_name):
+        return _build_task_response(
+            task_id, "failed", error="Invalid characters in workflow name"
+        )
 
+    # Load workflow YAML
     workflows_dir = Path(settings.workflows_dir).resolve()
     slug = re.sub(r"[^a-z0-9]+", "-", workflow_name.lower()).strip("-")
     yaml_content: str | None = None
@@ -268,7 +355,7 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
 
     plan = build_plan(workflow)
 
-    # Create DB run record
+    # Create DB run record with tenant isolation
     run_id = task_id
     try:
         async with async_session() as session:
@@ -282,6 +369,7 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
                 status=RunStatus.RUNNING,
                 input_data=workflow_input,
                 started_at=datetime.now(timezone.utc),
+                tenant_id=tenant_id,
             )
             run_id = str(db_run.id)
             session.add(db_run)
@@ -328,11 +416,20 @@ async def _handle_tasks_send(params: dict[str, Any]) -> dict[str, Any]:
     return _build_task_response(run_id, a2a_state, output_data=output)
 
 
-async def _handle_tasks_get(params: dict[str, Any]) -> dict[str, Any]:
-    """Handle tasks/get - return task status from the DB."""
+async def _handle_tasks_get(
+    params: dict[str, Any],
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Handle tasks/get - return task status from the DB.
+
+    When auth is enabled, only returns tasks belonging to the caller's tenant.
+    """
     task_id = params.get("id")
     if not task_id:
         return _build_task_response("unknown", "failed", error="Missing task id")
+
+    if not isinstance(task_id, str) or len(task_id) > _MAX_TASK_ID_LENGTH:
+        return _build_task_response("unknown", "failed", error="Invalid task id")
 
     try:
         run_uuid = uuid.UUID(task_id)
@@ -343,6 +440,9 @@ async def _handle_tasks_get(params: dict[str, Any]) -> dict[str, Any]:
 
     async with async_session() as session:
         stmt = select(Run).where(Run.id == run_uuid)
+        # Tenant isolation: filter by tenant_id when auth is enabled
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.where(Run.tenant_id == tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
 
@@ -369,11 +469,20 @@ async def _handle_tasks_get(params: dict[str, Any]) -> dict[str, Any]:
     return task
 
 
-async def _handle_tasks_cancel(params: dict[str, Any]) -> dict[str, Any]:
-    """Handle tasks/cancel - cancel a running workflow."""
+async def _handle_tasks_cancel(
+    params: dict[str, Any],
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Handle tasks/cancel - cancel a running workflow.
+
+    When auth is enabled, only allows cancelling tasks belonging to the caller's tenant.
+    """
     task_id = params.get("id")
     if not task_id:
         return _build_task_response("unknown", "failed", error="Missing task id")
+
+    if not isinstance(task_id, str) or len(task_id) > _MAX_TASK_ID_LENGTH:
+        return _build_task_response("unknown", "failed", error="Invalid task id")
 
     try:
         run_uuid = uuid.UUID(task_id)
@@ -384,6 +493,9 @@ async def _handle_tasks_cancel(params: dict[str, Any]) -> dict[str, Any]:
 
     async with async_session() as session:
         stmt = select(Run).where(Run.id == run_uuid)
+        # Tenant isolation
+        if settings.auth_required and tenant_id is not None:
+            stmt = stmt.where(Run.tenant_id == tenant_id)
         result = await session.execute(stmt)
         run = result.scalar_one_or_none()
 
@@ -435,9 +547,35 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
       - tasks/send: Execute a workflow
       - tasks/get: Get task status
       - tasks/cancel: Cancel a running task
+
+    Security:
+      - Auth middleware runs before this handler (unless AUTH_REQUIRED=false).
+      - Rate limiting is applied to tasks/send.
+      - Request body size is capped at 512 KB.
+      - JSON-RPC version field is validated.
     """
+    # Enforce body size limit to prevent DoS
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > _MAX_BODY_SIZE:
+                return _jsonrpc_error(
+                    None, -32600, "Request body too large"
+                )
+        except ValueError:
+            pass
+
     try:
-        body = await request.json()
+        body_bytes = await request.body()
+    except Exception:
+        return _jsonrpc_error(None, -32700, "Parse error")
+
+    if len(body_bytes) > _MAX_BODY_SIZE:
+        return _jsonrpc_error(None, -32600, "Request body too large")
+
+    try:
+        import json
+        body = json.loads(body_bytes)
     except Exception:
         return _jsonrpc_error(None, -32700, "Parse error")
 
@@ -446,10 +584,19 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
         return _jsonrpc_error(None, -32600, "Invalid Request")
 
     req_id = body.get("id")
+
+    # Validate JSON-RPC version field
+    jsonrpc_version = body.get("jsonrpc")
+    if jsonrpc_version != "2.0":
+        return _jsonrpc_error(
+            req_id, -32600,
+            "Invalid Request: jsonrpc field must be '2.0'"
+        )
+
     method = body.get("method")
     params = body.get("params", {})
 
-    if not method:
+    if not method or not isinstance(method, str):
         return _jsonrpc_error(req_id, -32600, "Invalid Request: missing method")
 
     handler = _METHOD_HANDLERS.get(method)
@@ -461,8 +608,28 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
     if not isinstance(params, dict):
         return _jsonrpc_error(req_id, -32602, "Invalid params: expected object")
 
+    # Rate limit tasks/send (expensive - creates sandboxes)
+    if method == "tasks/send":
+        from sandcastle.api.rate_limit import execution_limiter
+
+        try:
+            await execution_limiter.check(request)
+        except Exception as exc:
+            # Convert HTTPException to JSON-RPC error format
+            status_code = getattr(exc, "status_code", 429)
+            if status_code == 429:
+                return _jsonrpc_error(
+                    req_id, -32000,
+                    "Rate limit exceeded",
+                    data={"retry_after": 60},
+                )
+            raise
+
+    # Extract tenant_id for tenant isolation
+    tenant_id = _get_tenant_id_safe(request)
+
     try:
-        result = await handler(params)
+        result = await handler(params, tenant_id=tenant_id)
         return _jsonrpc_result(req_id, result)
     except Exception:
         logger.exception("A2A handler error for method=%s", method)
