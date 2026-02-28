@@ -127,10 +127,15 @@ class TestResponseContractFidelity:
 
     def test_run_list_empty_returns_empty_array_not_null(self):
         """Empty list of runs returns [] not null."""
-        response = client.get("/api/runs?status=nonexistent_status")
+        response = client.get("/api/runs?status=completed")
         assert response.status_code == 200
         body = response.json()
         assert body["data"] == [] or isinstance(body["data"], list)
+
+    def test_run_list_invalid_status_returns_400(self):
+        """Invalid status filter returns 400."""
+        response = client.get("/api/runs?status=nonexistent_status")
+        assert response.status_code == 400
 
     def test_schedule_response_created_at_is_iso8601(self):
         """Datetime fields in responses should be ISO 8601 formatted."""

@@ -58,12 +58,13 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
 
   // Close on Escape
   useEffect(() => {
+    if (!tool) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, tool]);
 
   const isDirty = Object.values(values).some((v) => v.length > 0);
 

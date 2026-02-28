@@ -403,8 +403,12 @@ class TestAddScheduleValidation:
         with pytest.raises(ValueError, match="Invalid cron"):
             add_schedule("sched1", "not a cron", "workflow")
 
-    def test_valid_schedule_creates_job(self):
+    def test_valid_schedule_creates_job(self, tmp_path, monkeypatch):
         from sandcastle.queue.scheduler import add_schedule, get_scheduler
+
+        wf = tmp_path / "test-workflow.yaml"
+        wf.write_text("name: test-workflow\nsteps: []")
+        monkeypatch.setattr("sandcastle.queue.scheduler.settings.workflows_dir", str(tmp_path))
 
         add_schedule("test-valid-123", "0 * * * *", "test-workflow")
         scheduler = get_scheduler()
@@ -422,8 +426,12 @@ class TestRemoveSchedule:
         result = remove_schedule("nonexistent-schedule-id")
         assert result is False
 
-    def test_remove_existing_returns_true(self):
+    def test_remove_existing_returns_true(self, tmp_path, monkeypatch):
         from sandcastle.queue.scheduler import add_schedule, remove_schedule
+
+        wf = tmp_path / "test-workflow.yaml"
+        wf.write_text("name: test-workflow\nsteps: []")
+        monkeypatch.setattr("sandcastle.queue.scheduler.settings.workflows_dir", str(tmp_path))
 
         add_schedule("to-remove-123", "0 * * * *", "test-workflow")
         result = remove_schedule("to-remove-123")
@@ -530,7 +538,8 @@ class TestWebhookPayloadSizeLimit:
 
         assert result is True
         payload = json.loads(captured_body["content"])
-        assert payload["outputs"]["_truncated"] is True
+        assert payload["outputs"]["outputs_truncated"] is True
+        assert "outputs_preview" in payload["outputs"]
 
     @pytest.mark.asyncio
     async def test_normal_payload_not_truncated(self):
@@ -988,7 +997,7 @@ class TestSdkTerminalStatuses:
 
         expected = {
             "completed", "failed", "partial", "cancelled",
-            "budget_exceeded", "awaiting_approval",
+            "budget_exceeded", "awaiting_approval", "error",
         }
         assert _TERMINAL_STATUSES == expected
 

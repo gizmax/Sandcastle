@@ -35,7 +35,6 @@ export default function WorkflowDetailPage() {
   const [data, setData] = useState<VersionListData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
-  const [, setSelectedYaml] = useState<string | null>(null);
   const [diffModal, setDiffModal] = useState<{ a: number; b: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareYaml, setShareYaml] = useState<string | null>(null);
@@ -67,11 +66,7 @@ export default function WorkflowDetailPage() {
   const handleSelectVersion = useCallback(async (version: number) => {
     setSelectedVersion(version);
     if (!name) return;
-    const res = await api.get<Record<string, unknown>>(`/workflows/${name}/versions/${version}`);
-    if (res.data && typeof res.data === "object") {
-      // YAML might not be in the response schema directly, but steps are
-      setSelectedYaml(null); // Will show step info instead
-    }
+    await api.get<Record<string, unknown>>(`/workflows/${name}/versions/${version}`);
   }, [name]);
 
   const handlePromote = useCallback(async (version: number) => {

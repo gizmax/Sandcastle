@@ -11,6 +11,7 @@ Scans downloaded YAML templates for dangerous patterns before installation:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import ipaddress
 import re
 from dataclasses import dataclass, field
@@ -166,7 +167,7 @@ def compute_sha256(content: str) -> str:
 
 def verify_checksum(content: str, expected: str) -> bool:
     """Return ``True`` when SHA-256 of *content* matches *expected*."""
-    return compute_sha256(content) == expected.lower().strip()
+    return hmac.compare_digest(compute_sha256(content), expected.lower().strip())
 
 
 # ---------------------------------------------------------------------------

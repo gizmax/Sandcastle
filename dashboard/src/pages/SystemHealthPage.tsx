@@ -84,8 +84,8 @@ function statusLabel(status: ServiceStatus) {
   }
 }
 
-function formatUptime(startedAt: Date): string {
-  const diffMs = Date.now() - startedAt.getTime();
+function formatUptime(startedAt: Date, currentTime?: number): string {
+  const diffMs = (currentTime ?? Date.now()) - startedAt.getTime();
   const seconds = Math.floor(diffMs / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -109,6 +109,7 @@ export default function SystemHealthPage() {
 
   // Use page load time as a rough "started_at" for uptime display
   const [pageLoadTime] = useState(() => new Date());
+  const [now, setNow] = useState(Date.now());
 
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -148,6 +149,12 @@ export default function SystemHealthPage() {
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  // Update session duration every minute
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Build service checks from health + runtime data
   const serviceChecks: ServiceCheck[] = [];
@@ -310,7 +317,7 @@ export default function SystemHealthPage() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Session Duration</span>
               <span className="font-mono text-sm text-foreground">
-                {formatUptime(pageLoadTime)}
+                {formatUptime(pageLoadTime, now)}
               </span>
             </div>
             <div className="flex items-center justify-between">

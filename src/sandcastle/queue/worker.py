@@ -136,23 +136,34 @@ async def run_workflow_job(
             "awaiting_approval": RunStatus.AWAITING_APPROVAL,
         }
 
-        # Update DB with result
-        try:
-            async with async_session() as session:
-                run = await session.get(Run, run_uuid)
-                if run:
-                    run.status = status_map.get(result.status, RunStatus.FAILED)
-                    run.output_data = result.outputs
-                    run.total_cost_usd = result.total_cost_usd
-                    # Don't set completed_at for paused workflows
-                    if result.status != "awaiting_approval":
-                        run.completed_at = datetime.now(timezone.utc)
-                    run.error = result.error
-                    await session.commit()
-        except Exception as db_err:
+        # Update DB with result (retry up to 3 times on failure)
+        db_persist_ok = False
+        for db_attempt in range(1, 4):
+            try:
+                async with async_session() as session:
+                    run = await session.get(Run, run_uuid)
+                    if run:
+                        run.status = status_map.get(result.status, RunStatus.FAILED)
+                        run.output_data = result.outputs
+                        run.total_cost_usd = result.total_cost_usd
+                        # Don't set completed_at for paused workflows
+                        if result.status != "awaiting_approval":
+                            run.completed_at = datetime.now(timezone.utc)
+                        run.error = result.error
+                        await session.commit()
+                db_persist_ok = True
+                break
+            except Exception as db_err:
+                logger.warning(
+                    f"DB persist attempt {db_attempt}/3 failed for run {run_id}: {db_err}"
+                )
+                if db_attempt < 3:
+                    await asyncio.sleep(1)
+        if not db_persist_ok:
             logger.error(
-                f"Failed to persist result for run {run_id}: {db_err}. "
-                "Workflow completed but DB update failed."
+                f"Failed to persist result for run {run_id} after 3 attempts. "
+                f"Workflow completed but DB update failed. "
+                f"Status={result.status}, outputs={result.outputs}"
             )
 
         # Dispatch webhook - on_complete or on_failure depending on status
@@ -294,6 +305,7 @@ async def enqueue_workflow(
             initial_context=initial_context,
             skip_steps=skip_steps,
             step_overrides=step_overrides,
+            _job_id=run_id,
         )
     else:
         # Local mode: run directly in-process

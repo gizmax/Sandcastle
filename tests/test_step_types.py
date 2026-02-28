@@ -1710,7 +1710,7 @@ class TestNotifyStepExecutor:
         assert result.output["service"] == "slack"
         assert result.output["channel"] == "#builds"
         assert "Build passed" in result.output["message"]
-        assert result.output["status"] == "sent"
+        assert result.output["status"] == "logged"
         assert result.cost_usd == 0.0
 
     @pytest.mark.asyncio

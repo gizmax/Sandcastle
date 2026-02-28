@@ -205,8 +205,9 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
             idx += 1
             time.sleep(1.5)
     except KeyboardInterrupt:
-        print("\r\033[KCancelled.")
-        return {"id": run_id, "status": "cancelled"}
+        print("\r\033[KInterrupted.")
+        print("\n(Note: the run is still executing on the server)")
+        return {"id": run_id, "status": "interrupted"}
 
 
 # ---------------------------------------------------------------------------
@@ -439,24 +440,28 @@ def _cmd_init_inner(args: argparse.Namespace) -> None:
     license_key = input("  LICENSE_KEY (optional, Enter to skip): ").strip()
 
     # Write .env
+    def _quote(val: str) -> str:
+        """Wrap a value in double quotes, escaping embedded quotes."""
+        return '"' + val.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
     lines = [
-        f"ANTHROPIC_API_KEY={anthropic_key}",
-        f"E2B_API_KEY={e2b_key}" if e2b_key else "# E2B_API_KEY=",
+        f"ANTHROPIC_API_KEY={_quote(anthropic_key)}",
+        f"E2B_API_KEY={_quote(e2b_key)}" if e2b_key else "# E2B_API_KEY=",
         "",
         "# Sandbox backend: e2b | docker | local | cloudflare",
-        f"SANDBOX_BACKEND={sandbox_backend}",
+        f"SANDBOX_BACKEND={_quote(sandbox_backend)}",
     ]
     if cf_worker_url:
-        lines.append(f"CLOUDFLARE_WORKER_URL={cf_worker_url}")
+        lines.append(f"CLOUDFLARE_WORKER_URL={_quote(cf_worker_url)}")
     lines += [
         "",
         "# Multi-model provider keys (optional)",
-        f"MINIMAX_API_KEY={minimax_key}" if minimax_key else "# MINIMAX_API_KEY=",
-        f"OPENAI_API_KEY={openai_key}" if openai_key else "# OPENAI_API_KEY=",
-        f"OPENROUTER_API_KEY={openrouter_key}" if openrouter_key else "# OPENROUTER_API_KEY=",
+        f"MINIMAX_API_KEY={_quote(minimax_key)}" if minimax_key else "# MINIMAX_API_KEY=",
+        f"OPENAI_API_KEY={_quote(openai_key)}" if openai_key else "# OPENAI_API_KEY=",
+        f"OPENROUTER_API_KEY={_quote(openrouter_key)}" if openrouter_key else "# OPENROUTER_API_KEY=",
         "",
         "# License key (Pro/Enterprise)",
-        f"LICENSE_KEY={license_key}" if license_key else "# LICENSE_KEY=",
+        f"LICENSE_KEY={_quote(license_key)}" if license_key else "# LICENSE_KEY=",
         "",
         "# Local mode (SQLite + in-process queue) - leave empty",
         "DATABASE_URL=",
@@ -991,7 +996,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     print(_color("  Network", _C.BOLD))
     print(_color("  -------", _C.BOLD))
 
-    port = 8080
+    port = int(os.getenv("PORT", "8080"))
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)

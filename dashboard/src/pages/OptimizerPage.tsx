@@ -271,7 +271,15 @@ export default function OptimizerPage() {
               >
                 <div
                   className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedId(isExpanded ? null : item.id);
+                    }
+                  }}
                 >
                   {/* Model badge */}
                   <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border", modelStyle)}>
