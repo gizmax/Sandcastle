@@ -371,6 +371,10 @@ def _extract_data(response: httpx.Response) -> Any:
             message = response.text[:500] if response.text else "Unknown API error"
         raise SandcastleError(response.status_code, code, message)
 
+    # Handle 204 No Content
+    if response.status_code == 204:
+        return {}
+
     try:
         body = response.json()
     except Exception:
@@ -386,16 +390,24 @@ def _parse_sse_lines(raw: str) -> Iterator[dict[str, Any]]:
     """Parse raw SSE text into event dicts.
 
     Follows the SSE spec: multiple ``data:`` lines are concatenated with
-    newline characters before JSON parsing.
+    newline characters before JSON parsing.  Per the spec, only a single
+    leading space after the colon is removed (not arbitrary whitespace).
     """
     event_type = ""
     data_lines: list[str] = []
 
     for line in raw.split("\n"):
         if line.startswith("event:"):
-            event_type = line[len("event:"):].strip()
+            value = line[len("event:"):]
+            # Per SSE spec: strip exactly one leading space after colon
+            if value.startswith(" "):
+                value = value[1:]
+            event_type = value
         elif line.startswith("data:"):
-            data_lines.append(line[len("data:"):].strip())
+            value = line[len("data:"):]
+            if value.startswith(" "):
+                value = value[1:]
+            data_lines.append(value)
         elif line == "" and data_lines:
             data_buf = "\n".join(data_lines)
             try:
@@ -444,13 +456,14 @@ class SandcastleClient:
         api_key: Optional[str] = None,
         timeout: float = 30.0,
     ) -> None:
-        self._base_url = base_url
+        # Strip trailing slashes to avoid double-slash URLs when joining paths
+        self._base_url = base_url.rstrip("/")
         self._has_api_key = bool(api_key)
         headers: dict[str, str] = {}
         if api_key:
             headers["X-API-Key"] = api_key
         self._client = httpx.Client(
-            base_url=base_url,
+            base_url=self._base_url,
             headers=headers,
             timeout=timeout,
         )
@@ -1072,13 +1085,14 @@ class AsyncSandcastleClient:
         api_key: Optional[str] = None,
         timeout: float = 30.0,
     ) -> None:
-        self._base_url = base_url
+        # Strip trailing slashes to avoid double-slash URLs when joining paths
+        self._base_url = base_url.rstrip("/")
         self._has_api_key = bool(api_key)
         headers: dict[str, str] = {}
         if api_key:
             headers["X-API-Key"] = api_key
         self._client = httpx.AsyncClient(
-            base_url=base_url,
+            base_url=self._base_url,
             headers=headers,
             timeout=timeout,
         )

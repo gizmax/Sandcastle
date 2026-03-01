@@ -3847,7 +3847,13 @@ async def autopilot_stats(req: Request) -> ApiResponse:
             if baseline_quality > 0:
                 improvements.append((winner_quality - baseline_quality) / baseline_quality)
             if baseline_cost > 0:
-                total_cost_savings += (baseline_cost - winner_cost) * (total_samples or 0)
+                # Use per-experiment sample count, not global total_samples
+                exp_sample_count = sum(1 for r in rows for _ in [r])  # len(rows) counts variants, not samples
+                exp_sample_q = select(func.count(AutoPilotSample.id)).where(
+                    AutoPilotSample.experiment_id == exp.id
+                )
+                exp_sample_count = await session.scalar(exp_sample_q) or 0
+                total_cost_savings += (baseline_cost - winner_cost) * exp_sample_count
 
         if improvements:
             avg_quality_improvement = sum(improvements) / len(improvements)
@@ -5387,6 +5393,32 @@ async def rollback_workflow(req: Request, name: str, request: WorkflowRollbackRe
                 ).model_dump(),
             )
 
+        # Reject rollback to the currently active production version
+        target_status = target.status.value if hasattr(target.status, "value") else target.status
+        if target_status == "production":
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="ALREADY_PRODUCTION",
+                        message="Target version is already the production version",
+                    )
+                ).model_dump(),
+            )
+
+        # Only allow rollback to archived versions (not draft/staging)
+        if target_status not in ("archived", "production"):
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_ROLLBACK_TARGET",
+                        message=f"Cannot rollback to a '{target_status}' version. "
+                        "Only archived versions can be rollback targets.",
+                    )
+                ).model_dump(),
+            )
+
         # Archive current production
         prod_stmt = select(WorkflowVersion).where(
             WorkflowVersion.workflow_name == name,
@@ -6205,9 +6237,11 @@ async def eval_stats(req: Request) -> ApiResponse:
         trend_result = await session.execute(trend_stmt)
         trend_runs = trend_result.scalars().all()
 
-    # Group by date for trend
+    # Group by date for trend (skip runs with None pass_rate)
     trend_by_date: dict[str, list[float]] = {}
     for r in trend_runs:
+        if r.pass_rate is None:
+            continue
         date_str = r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
         if date_str not in trend_by_date:
             trend_by_date[date_str] = []

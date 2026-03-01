@@ -147,10 +147,28 @@ def _truncate_payload(
     }
     body = json.dumps(payload, default=str)
 
-    # Final safety check: if still over limit (e.g. huge error field), hard-truncate
+    # Final safety check: if still over limit (e.g. huge error field),
+    # build a minimal valid JSON payload so receivers can still parse it.
     body_bytes = body.encode("utf-8")
     if len(body_bytes) > MAX_PAYLOAD_BYTES:
-        body = body_bytes[:MAX_PAYLOAD_BYTES].decode("utf-8", errors="ignore")
+        logger.warning(
+            "Webhook payload for run %s still exceeds limit after output "
+            "truncation (%d bytes), replacing with minimal payload",
+            run_id,
+            len(body_bytes),
+        )
+        minimal = {
+            "event": payload.get("event", "unknown"),
+            "run_id": run_id,
+            "status": payload.get("status", "unknown"),
+            "timestamp": payload.get("timestamp", ""),
+            "outputs": {
+                "outputs_truncated": True,
+                "_reason": "payload_too_large",
+            },
+            "error": "(truncated - payload exceeded size limit)",
+        }
+        body = json.dumps(minimal, default=str)
 
     return body
 
@@ -208,6 +226,7 @@ async def dispatch_webhook(
 
     headers: dict[str, str] = {
         "Content-Type": "application/json",
+        "User-Agent": "Sandcastle-Webhook/1.0",
         "X-Sandcastle-Event": event,
     }
     if settings.webhook_secret:
@@ -251,6 +270,10 @@ async def dispatch_webhook(
                     f"for {url}"
                 )
 
+            except httpx.TimeoutException as e:
+                logger.warning(
+                    f"Webhook attempt {attempt} timed out for {url}: {e}"
+                )
             except httpx.HTTPError as e:
                 logger.warning(f"Webhook attempt {attempt} failed: {e}")
             except Exception as e:

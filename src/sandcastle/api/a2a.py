@@ -580,6 +580,13 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
         return _jsonrpc_error(None, -32700, "Parse error")
 
     # Validate JSON-RPC structure
+    if isinstance(body, list):
+        # JSON-RPC 2.0 batch requests are not supported
+        return _jsonrpc_error(
+            None, -32600,
+            "Batch requests are not supported"
+        )
+
     if not isinstance(body, dict):
         return _jsonrpc_error(None, -32600, "Invalid Request")
 

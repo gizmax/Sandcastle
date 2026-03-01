@@ -357,11 +357,52 @@ class Settings(BaseSettings):
             return 20
         return v
 
+    @field_validator("redis_url", mode="after")
+    @classmethod
+    def _validate_redis_url(cls, v: str) -> str:
+        """Validate redis_url scheme when set (empty = in-process queue)."""
+        v = v.strip()
+        if not v:
+            return ""
+        _valid_redis_schemes = ("redis://", "rediss://", "unix://")
+        if not any(v.startswith(s) for s in _valid_redis_schemes):
+            _logger.warning(
+                "REDIS_URL '%s' has invalid scheme. "
+                "Expected one of: %s. Falling back to empty (in-process queue).",
+                v[:30] + ("..." if len(v) > 30 else ""),
+                ", ".join(_valid_redis_schemes),
+            )
+            return ""
+        return v
+
+    @field_validator("dashboard_origin", mode="after")
+    @classmethod
+    def _validate_dashboard_origin(cls, v: str) -> str:
+        """Strip whitespace and trailing slashes from dashboard_origin."""
+        v = v.strip().rstrip("/")
+        return v
+
     @field_validator("data_dir", "workflows_dir", mode="after")
     @classmethod
-    def _expand_home(cls, v: str) -> str:
-        """Expand ~ to the user's home directory."""
-        return str(Path(v).expanduser())
+    def _expand_home(cls, v: str, info) -> str:
+        """Expand ~ and resolve empty/relative paths to absolute.
+
+        Empty string is treated as the field default to prevent the data
+        directory accidentally pointing at the process working directory.
+        """
+        if not v:
+            # Fall back to field default when empty string is provided.
+            default = cls.model_fields[info.field_name].default
+            if default:
+                v = default
+            else:
+                v = str(Path.home() / ".sandcastle")
+        p = Path(v).expanduser()
+        # Resolve relative paths to absolute so data does not silently
+        # land in whatever the current working directory happens to be.
+        if not p.is_absolute():
+            p = p.resolve()
+        return str(p)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

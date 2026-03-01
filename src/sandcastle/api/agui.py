@@ -46,6 +46,7 @@ EVENT_TOOL_RESULT = "tool_call_end"
 EVENT_STATE_DELTA = "state_delta"
 EVENT_RUN_FINISHED = "run_finished"
 EVENT_RUN_ERROR = "run_error"
+EVENT_RUN_AWAITING_INPUT = "run_awaiting_input"
 
 
 # -- Status mapping helpers --
@@ -141,6 +142,30 @@ def _map_event_bus_event(event: dict[str, Any], target_run_id: str) -> str | Non
     return None
 
 
+def _emit_terminal_event(run_id: str, status: str, run: Run):
+    """Yield the appropriate AG-UI event for a terminal run status.
+
+    Distinguishes between failed, awaiting_approval, and completed states
+    so that clients can show the correct UI (error, approval dialog, or
+    success).
+    """
+    if status in ("failed", "budget_exceeded"):
+        yield _agui_event(EVENT_RUN_ERROR, {
+            "run_id": run_id,
+            "error": run.error or "Run failed",
+        })
+    elif status == "awaiting_approval":
+        yield _agui_event(EVENT_RUN_AWAITING_INPUT, {
+            "run_id": run_id,
+            "message": "Run is awaiting approval",
+        })
+    else:
+        yield _agui_event(EVENT_RUN_FINISHED, {
+            "run_id": run_id,
+            "total_cost": run.total_cost_usd or 0,
+        })
+
+
 def _get_tenant_id_safe(request: Request) -> str | None:
     """Extract tenant_id from request state without raising.
 
@@ -217,16 +242,10 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
                     })
                 # If already terminal, emit the result immediately and return
                 elif status in _TERMINAL_STATUSES:
-                    if status in ("failed", "budget_exceeded"):
-                        yield _agui_event(EVENT_RUN_ERROR, {
-                            "run_id": run_id,
-                            "error": current_run.error or "Run failed",
-                        })
-                    else:
-                        yield _agui_event(EVENT_RUN_FINISHED, {
-                            "run_id": run_id,
-                            "total_cost": current_run.total_cost_usd or 0,
-                        })
+                    for ev in _emit_terminal_event(
+                        run_id, status, current_run
+                    ):
+                        yield ev
                     return
 
             # Stream events from the bus (with timeout)
@@ -246,16 +265,10 @@ async def agui_stream(run_id: str, request: Request) -> StreamingResponse:
                     if current_run:
                         status = _run_status_str(current_run)
                         if status in _TERMINAL_STATUSES:
-                            if status in ("failed", "budget_exceeded"):
-                                yield _agui_event(EVENT_RUN_ERROR, {
-                                    "run_id": run_id,
-                                    "error": current_run.error or "Run failed",
-                                })
-                            else:
-                                yield _agui_event(EVENT_RUN_FINISHED, {
-                                    "run_id": run_id,
-                                    "total_cost": current_run.total_cost_usd or 0,
-                                })
+                            for ev in _emit_terminal_event(
+                                run_id, status, current_run
+                            ):
+                                yield ev
                             return
                     continue
 
