@@ -51,6 +51,7 @@ import {
   Globe,
   Landmark,
   Briefcase,
+  ImagePlus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -93,6 +94,7 @@ export const TOOL_ICON_MAP: Record<string, LucideIcon> = {
   firecrawl: Flame,
   tavily: Search,
   elevenlabs: AudioLines,
+  image: ImagePlus,
   zapier: Zap,
   shopify: ShoppingCart,
   quickbooks: Receipt,
@@ -182,6 +184,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   elevenlabs: "ElevenLabs",
   "mcp-bridge": "MCP Bridge",
   "code-interpreter": "Code Interpreter",
+  "nano-banana": "Nano Banana",
   // ERP
   sap: "SAP",
   shopify: "Shopify",
@@ -305,6 +308,8 @@ export const CREDENTIAL_LABELS: Record<string, { label: string; hint?: string }>
   TOOL_TAVILY_API_KEY: { label: "API Key", hint: "tvly-..." },
   // ElevenLabs
   TOOL_ELEVENLABS_API_KEY: { label: "API Key" },
+  // Nano Banana
+  TOOL_NANO_BANANA_API_KEY: { label: "Gemini API Key" },
   // MCP Bridge
   TOOL_MCP_SERVER_URL: { label: "Server URL", hint: "http://localhost:3000" },
   // SAP
@@ -371,6 +376,7 @@ export const TOOL_SIGNUP_URLS: Record<string, { url: string; label: string }> = 
   linear: { url: "https://linear.app/settings/api", label: "Linear Settings" },
   discord: { url: "https://discord.com/developers/applications", label: "Discord Developer Portal" },
   elevenlabs: { url: "https://elevenlabs.io/app/settings/api-keys", label: "ElevenLabs Settings" },
+  "nano-banana": { url: "https://aistudio.google.com/apikey", label: "Google AI Studio" },
   firecrawl: { url: "https://firecrawl.dev/app/api-keys", label: "Firecrawl Dashboard" },
   tavily: { url: "https://tavily.com/#api", label: "Tavily API" },
   resend: { url: "https://resend.com/api-keys", label: "Resend Dashboard" },
