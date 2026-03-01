@@ -1,0 +1,191 @@
+# name: UGC Product Shoot
+# description: Generate a complete set of UGC-style product photos (portrait, flat-lay, action shot) for any product using AI image generation
+# tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce]
+# category: creative
+
+name: ugc-product-shoot
+description: "Generate a complete set of UGC-style product photos (portrait, flat-lay, action shot) for any product using AI image generation. Produces Instagram/TikTok-ready visuals with realistic lighting, styling, and brand-appropriate aesthetics."
+default_model: sonnet
+default_max_turns: 5
+default_timeout: 300
+default_tools: ["nano-banana"]
+
+input_schema:
+  required: ["product_name"]
+  properties:
+    product_name:
+      type: string
+      description: "Product name and brief description (e.g. 'minimalist white skincare cream jar', 'YSL Black Opium perfume bottle')"
+      example: "minimalist white skincare cream jar with gold cap"
+    brand_style:
+      type: string
+      description: "Brand aesthetic and mood (e.g. 'luxury minimalist', 'playful and colorful', 'dark and seductive')"
+      default: "modern and clean"
+    target_audience:
+      type: string
+      description: "Target demographic for the UGC content (e.g. 'women 25-35, skincare enthusiasts')"
+      default: "young adults 20-35, social media active"
+    reference_image:
+      type: string
+      description: "Optional path to a product reference image for accurate replication"
+      example: "/path/to/product-photo.png"
+    size:
+      type: string
+      description: "Image resolution: 512, 1K, 2K, or 4K"
+      default: "2K"
+    model:
+      type: string
+      description: "AI model: flash (faster, cheaper) or pro (higher quality)"
+      default: "pro"
+
+steps:
+  - id: "analyze-product"
+    prompt: |
+      You are a creative director specializing in UGC (User Generated Content) product photography.
+
+      Analyze this product and create a detailed creative brief:
+      Product: {input.product_name}
+      Brand style: {input.brand_style}
+      Target audience: {input.target_audience}
+
+      Return a JSON object with:
+      1. "product_description": Detailed physical description of the product (shape, colors, materials, size, textures)
+      2. "brand_colors": Array of 4-5 hex colors that match the product's brand aesthetic
+      3. "mood": Overall mood/feeling (e.g. "warm and inviting", "dark and seductive", "fresh and clean")
+      4. "props": Array of 8-10 lifestyle props that would appear alongside this product in UGC content (e.g. "white marble tray", "dried eucalyptus sprigs", "linen napkin")
+      5. "setting_indoor": Ideal indoor setting description
+      6. "setting_outdoor": Ideal outdoor setting description
+      7. "model_description": Description of the ideal UGC model/influencer (age range, style, vibe)
+      8. "lighting_style": Recommended lighting approach
+
+      Be specific and visual. Think like an Instagram creative director.
+    output_schema:
+      type: object
+      properties:
+        product_description: { type: string }
+        brand_colors: { type: array, items: { type: string } }
+        mood: { type: string }
+        props: { type: array, items: { type: string } }
+        setting_indoor: { type: string }
+        setting_outdoor: { type: string }
+        model_description: { type: string }
+        lighting_style: { type: string }
+
+  - id: "generate-prompts"
+    depends_on: ["analyze-product"]
+    prompt: |
+      You are an expert at crafting photorealistic AI image generation prompts for UGC product photography.
+
+      Using this creative brief:
+      {steps.analyze-product.output}
+
+      Product: {input.product_name}
+
+      Generate exactly 3 detailed image generation prompts following this EXACT structure for each prompt:
+      1. Type of photo (e.g. "Photorealistic UGC Instagram photo")
+      2. Subject description (person: age, appearance, natural skin texture with light imperfections, hair, outfit)
+      3. Product interaction (how they hold/display the product, exact product description)
+      4. Setting/environment (specific location details, background elements, props)
+      5. Lighting (type, direction, warmth, shadows)
+      6. Camera specs (lens mm, aperture f-stop, focus point, depth of field)
+      7. Skin/texture notes ("natural with realistic texture, visible pores, light freckles")
+      8. Color palette (4-5 specific colors from the brief)
+      9. Style note ("authentic influencer content, not overly polished")
+
+      The 3 shots MUST be:
+
+      **Shot 1 - Portrait (9:16)**
+      Model holding product near face/neck. 50mm lens, f/1.8-2.0, shallow DOF.
+      Perfect for Instagram Stories and TikTok.
+
+      **Shot 2 - Flat-lay (4:5)**
+      Overhead/top-down view. Product centered, surrounded by lifestyle props.
+      35mm lens, f/2.8, everything in focus. Perfect for Instagram Feed.
+
+      **Shot 3 - Action/Detail (9:16)**
+      Close-up of hands interacting with product (opening, applying, spraying).
+      85mm macro, f/1.4, extreme shallow DOF. Perfect for Reels/Stories.
+
+      Return a JSON object with:
+      {
+        "shots": [
+          {
+            "name": "portrait",
+            "aspect": "9:16",
+            "prompt": "the full detailed prompt...",
+            "platform": "Instagram Stories / TikTok"
+          },
+          {
+            "name": "flat-lay",
+            "aspect": "4:5",
+            "prompt": "the full detailed prompt...",
+            "platform": "Instagram Feed"
+          },
+          {
+            "name": "action-detail",
+            "aspect": "9:16",
+            "prompt": "the full detailed prompt...",
+            "platform": "Instagram Reels / Stories"
+          }
+        ]
+      }
+
+      IMPORTANT: Each prompt must be a single, dense paragraph (no line breaks). Include ALL 9 elements.
+      IMPORTANT: Always include "natural skin with realistic texture, visible pores" to avoid uncanny valley.
+      IMPORTANT: Always specify exact lens and f-stop for realistic depth of field.
+    output_schema:
+      type: object
+      properties:
+        shots:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              aspect: { type: string }
+              prompt: { type: string }
+              platform: { type: string }
+
+  - id: "generate-images"
+    depends_on: ["generate-prompts"]
+    parallel_over: "steps.generate-prompts.output.shots"
+    tools: ["nano-banana"]
+    prompt: |
+      Generate an image using the nano-banana tool.
+
+      Call the nano-banana generate function with:
+      - prompt: {input._item.prompt}
+      - options:
+        - size: {input.size}
+        - aspect: {input._item.aspect}
+        - model: {input.model}
+        - output: "ugc-{input._item.name}"
+        {% if input.reference_image %}- reference_images: ["{input.reference_image}"]{% endif %}
+
+      Return the result from the tool call.
+
+  - id: "compile-results"
+    depends_on: ["generate-images"]
+    model: haiku
+    prompt: |
+      Compile the UGC product shoot results into a final summary.
+
+      Product: {input.product_name}
+      Generation results: {steps.generate-images.output}
+      Creative brief: {steps.analyze-product.output}
+
+      Create a structured summary with:
+      1. **Overview**: Product name, number of images generated, total estimated cost
+      2. **Generated Images**: For each image - file path, shot type, aspect ratio, recommended platform
+      3. **Platform Recommendations**:
+         - Instagram Feed: which image(s) to use
+         - Instagram Stories: which image(s) to use
+         - TikTok: which image(s) to use
+         - Pinterest: which image(s) to use
+      4. **Cost Breakdown**: Per-image cost and total
+      5. **Next Steps**: Suggestions for post-processing (cropping, filters, text overlays)
+
+      Format as clean, readable markdown.
+
+on_complete:
+  storage_path: "ugc-shoots/{run_id}/results.json"
