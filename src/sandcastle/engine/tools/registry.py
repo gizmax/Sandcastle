@@ -2201,6 +2201,65 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="elevenlabs.mjs",
         icon="elevenlabs",
     ),
+    "nano-banana": ToolDefinition(
+        name="nano-banana",
+        description="AI image generation with Gemini - product photos, UGC shots, transparent assets",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="generate",
+                description="Generate a single image from a text prompt",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Image generation prompt",
+                        },
+                        "options": {
+                            "type": "object",
+                            "description": "Generation options: size (512/1K/2K/4K), aspect (1:1/16:9/9:16/4:5), model (flash/pro), output, output_dir, reference_images (string[]), transparent (bool)",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            ),
+            ToolFunction(
+                name="batch_generate",
+                description="Generate multiple images from an array of prompts",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "prompt": {"type": "string"},
+                                    "options": {"type": "object"},
+                                },
+                                "required": ["prompt"],
+                            },
+                            "description": "Array of {prompt, options?} objects",
+                        },
+                        "sharedOptions": {
+                            "type": "object",
+                            "description": "Shared options applied to all prompts",
+                        },
+                    },
+                    "required": ["prompts"],
+                },
+            ),
+            ToolFunction(
+                name="costs",
+                description="Show cost tracking summary for all generations",
+                parameters={"type": "object", "properties": {}},
+            ),
+        ],
+        credential_env_vars=["TOOL_NANO_BANANA_API_KEY"],
+        connector_file="nano-banana.mjs",
+        icon="image",
+    ),
     # --- Tier 3: Bold integrations ---
     "zapier": ToolDefinition(
         name="zapier",
