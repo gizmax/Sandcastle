@@ -239,115 +239,120 @@ steps:
   - id: "budget-router"
     depends_on: ["creative-director"]
     type: condition
-    condition: "{input.budget} == lean"
-    if_true:
-      - id: "generate-lean"
-        parallel_over: "steps.creative-director.output.shots"
-        tools: ["nano-banana"]
-        prompt: |
-          Generate a UGC product image using nano-banana.
+    condition_config:
+      expression: "{input.budget} == lean"
+      then: ["generate-lean"]
+      else: ["generate-transparent-product", "generate-scenes"]
 
-          Shot plan:
-          - Scene: {input._item.scene_description}
-          - Product placement: {input._item.product_placement}
-          - Model: {input._item.model_description}
-          - Lighting: {input._item.lighting}
-          - Camera: {input._item.camera}
-          - Mood: {input._item.mood}
-          - Props: {input._item.props}
+  - id: "generate-lean"
+    depends_on: ["budget-router"]
+    parallel_over: "steps.creative-director.output.shots"
+    tools: ["nano-banana"]
+    prompt: |
+      Generate a UGC product image using nano-banana.
 
-          Compose a single dense image generation prompt combining ALL the above elements.
-          Focus on photorealism, natural skin texture, authentic UGC feel.
+      Shot plan:
+      - Scene: {item.scene_description}
+      - Product placement: {item.product_placement}
+      - Model: {item.model_description}
+      - Lighting: {item.lighting}
+      - Camera: {item.camera}
+      - Mood: {item.mood}
+      - Props: {item.props}
 
-          Call nano-banana generate with:
-          - prompt: your composed prompt
-          - options:
-            - size: 1K
-            - aspect: {input._item.aspect}
-            - model: flash
-            - output: "ugc-{input._item.shot_id}"
-            - reference_images: ["{input.product_photo}"]
+      Compose a single dense image generation prompt combining ALL the above elements.
+      Focus on photorealism, natural skin texture, authentic UGC feel.
 
-          Return the result including the shot_id: {input._item.shot_id}
-        retry:
-          max_attempts: 2
-          backoff: exponential
-          on_failure: continue
-    if_false:
-      - id: "generate-transparent-product"
-        tools: ["nano-banana"]
-        prompt: |
-          Generate a transparent-background product cut using nano-banana.
+      Call nano-banana generate with:
+      - prompt: your composed prompt
+      - options:
+        - size: 1K
+        - aspect: {item.aspect}
+        - model: flash
+        - output: "ugc-{item.shot_id}"
+        - reference_images: ["{input.product_photo}"]
 
-          Product analysis: {steps.vision-analyze.output.product_description}
-          Key features: {steps.vision-analyze.output.distinctive_features}
+      Return the result including the shot_id: {item.shot_id}
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
 
-          Create a prompt for a clean, studio-quality product shot on transparent background.
-          The product must be perfectly isolated with no background elements.
-          Include every physical detail from the analysis to ensure accuracy.
+  - id: "generate-transparent-product"
+    depends_on: ["budget-router"]
+    tools: ["nano-banana"]
+    prompt: |
+      Generate a transparent-background product cut using nano-banana.
 
-          Call nano-banana generate with:
-          - prompt: your product isolation prompt
-          - options:
-            - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
-            - aspect: 1:1
-            - model: pro
-            - transparent: true
-            - output: "ugc-product-transparent"
-            - reference_images: ["{input.product_photo}"]
+      Product analysis: {steps.vision-analyze.output.product_description}
+      Key features: {steps.vision-analyze.output.distinctive_features}
 
-          Return the result.
-        retry:
-          max_attempts: 3
-          backoff: exponential
-          on_failure: abort
+      Create a prompt for a clean, studio-quality product shot on transparent background.
+      The product must be perfectly isolated with no background elements.
+      Include every physical detail from the analysis to ensure accuracy.
 
-      - id: "generate-scenes"
-        depends_on: ["generate-transparent-product"]
-        parallel_over: "steps.creative-director.output.shots"
-        tools: ["nano-banana"]
-        prompt: |
-          Generate a UGC product scene image using nano-banana.
+      Call nano-banana generate with:
+      - prompt: your product isolation prompt
+      - options:
+        - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
+        - aspect: 1:1
+        - model: pro
+        - transparent: true
+        - output: "ugc-product-transparent"
+        - reference_images: ["{input.product_photo}"]
 
-          A transparent product cut is available at: {steps.generate-transparent-product.output}
+      Return the result.
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
 
-          Shot plan:
-          - Shot ID: {input._item.shot_id}
-          - Platform: {input._item.platform}
-          - Style: {input._item.style}
-          - Scene: {input._item.scene_description}
-          - Product placement: {input._item.product_placement}
-          - Model: {input._item.model_description}
-          - Lighting: {input._item.lighting}
-          - Camera: {input._item.camera}
-          - Mood: {input._item.mood}
-          - Props: {input._item.props}
+  - id: "generate-scenes"
+    depends_on: ["generate-transparent-product"]
+    parallel_over: "steps.creative-director.output.shots"
+    tools: ["nano-banana"]
+    prompt: |
+      Generate a UGC product scene image using nano-banana.
 
-          Compose a single dense image generation prompt combining ALL the above elements.
-          Focus on photorealism, natural skin texture, authentic UGC feel.
-          The product must match the reference photo exactly.
+      A transparent product cut is available at: {steps.generate-transparent-product.output}
 
-          Call nano-banana generate with:
-          - prompt: your composed prompt
-          - options:
-            - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
-            - aspect: {input._item.aspect}
-            - model: pro
-            - output: "ugc-{input._item.shot_id}"
-            - reference_images: ["{input.product_photo}"]
+      Shot plan:
+      - Shot ID: {item.shot_id}
+      - Platform: {item.platform}
+      - Style: {item.style}
+      - Scene: {item.scene_description}
+      - Product placement: {item.product_placement}
+      - Model: {item.model_description}
+      - Lighting: {item.lighting}
+      - Camera: {item.camera}
+      - Mood: {item.mood}
+      - Props: {item.props}
 
-          Return the result including the shot_id: {input._item.shot_id}
-        retry:
-          max_attempts: 2
-          backoff: exponential
-          on_failure: continue
+      Compose a single dense image generation prompt combining ALL the above elements.
+      Focus on photorealism, natural skin texture, authentic UGC feel.
+      The product must match the reference photo exactly.
+
+      Call nano-banana generate with:
+      - prompt: your composed prompt
+      - options:
+        - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
+        - aspect: {item.aspect}
+        - model: pro
+        - output: "ugc-{item.shot_id}"
+        - reference_images: ["{input.product_photo}"]
+
+      Return the result including the shot_id: {item.shot_id}
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
 
   # ============================================================
   # PHASE 4: QUALITY + SELF-HEALING
   # ============================================================
 
   - id: "quality-judge"
-    depends_on: ["budget-router"]
+    depends_on: ["generate-lean", "generate-scenes"]
     prompt: |
       You are a senior art director and quality control specialist for UGC product photography.
 
@@ -359,12 +364,7 @@ steps:
       Shoot plan: {steps.creative-director.output}
 
       ## Generated images
-      {% if input.budget == "lean" %}
       Results: {steps.budget-router.output}
-      {% else %}
-      Transparent product: {steps.generate-transparent-product.output}
-      Scene results: {steps.generate-scenes.output}
-      {% endif %}
 
       ## Your Task
       Score EVERY generated image on 7 dimensions (1-10 each):
@@ -417,40 +417,43 @@ steps:
   - id: "quality-check"
     depends_on: ["quality-judge"]
     type: condition
-    condition: "{steps.quality-judge.output.failed} > 0"
-    if_true:
-      - id: "regenerate-failed"
-        tools: ["nano-banana"]
-        prompt: |
-          Some images failed quality control. Regenerate them with improved prompts.
+    condition_config:
+      expression: "{steps.quality-judge.output.failed} > 0"
+      then: ["regenerate-failed"]
+      else: []
 
-          ## Failed images and fix suggestions
-          {steps.quality-judge.output}
+  - id: "regenerate-failed"
+    depends_on: ["quality-check"]
+    tools: ["nano-banana"]
+    prompt: |
+      Some images failed quality control. Regenerate them with improved prompts.
 
-          ## Product reference
-          Reference photo: {input.product_photo}
-          Product analysis: {steps.vision-analyze.output}
+      ## Failed images and fix suggestions
+      {steps.quality-judge.output}
 
-          For each FAILED image (pass: false):
-          1. Read the fix_suggestions from the quality judge
-          2. Compose an improved prompt addressing every listed issue
-          3. Regenerate using nano-banana with the same settings but improved prompt
+      ## Product reference
+      Reference photo: {input.product_photo}
+      Product analysis: {steps.vision-analyze.output}
 
-          Call nano-banana generate for each failed image with:
-          - prompt: the improved prompt incorporating fix suggestions
-          - options:
-            - size: {% if input.budget == "full" %}4K{% elif input.budget == "standard" %}2K{% else %}1K{% endif %}
-            - aspect: (same as original shot)
-            - model: {% if input.budget == "lean" %}flash{% else %}pro{% endif %}
-            - output: "ugc-regen-{shot_id}"
-            - reference_images: ["{input.product_photo}"]
+      For each FAILED image (pass: false):
+      1. Read the fix_suggestions from the quality judge
+      2. Compose an improved prompt addressing every listed issue
+      3. Regenerate using nano-banana with the same settings but improved prompt
 
-          Return all regenerated results along with the original passing images from the quality judge.
-        retry:
-          max_attempts: 2
-          backoff: exponential
-          on_failure: continue
-    if_false: []
+      Call nano-banana generate for each failed image with:
+      - prompt: the improved prompt incorporating fix suggestions
+      - options:
+        - size: {% if input.budget == "full" %}4K{% elif input.budget == "standard" %}2K{% else %}1K{% endif %}
+        - aspect: (same as original shot)
+        - model: {% if input.budget == "lean" %}flash{% else %}pro{% endif %}
+        - output: "ugc-regen-{shot_id}"
+        - reference_images: ["{input.product_photo}"]
+
+      Return all regenerated results along with the original passing images from the quality judge.
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
 
   # ============================================================
   # PHASE 5: HUMAN APPROVAL
@@ -459,6 +462,12 @@ steps:
   - id: "creative-review"
     depends_on: ["quality-check"]
     type: approval
+    approval_config:
+      message: "Review your UGC Creative Studio output. Approve to finalize the delivery package, or edit to request changes."
+      show_data: steps.quality-judge.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
     prompt: |
       Prepare a creative review package for the client.
 
@@ -468,13 +477,6 @@ steps:
       ## Quality Report
       {steps.quality-judge.output}
 
-      ## Generated Images
-      {% if steps.quality-judge.output.failed > 0 %}
-      Original + regenerated images: {steps.quality-check.output}
-      {% else %}
-      All images passed quality control.
-      {% endif %}
-
       ## Creative Strategy
       {steps.creative-director.output.strategy_notes}
 
@@ -483,12 +485,6 @@ steps:
       2. Overall quality metrics
       3. Recommended posting order
       4. Any images that were regenerated (and why)
-    approval_config:
-      message: "Review your UGC Creative Studio output. Approve to finalize the delivery package, or edit to request changes."
-      show_data: steps.quality-judge.output
-      timeout_hours: 48
-      on_timeout: abort
-      allow_edit: true
 
   # ============================================================
   # PHASE 6: FINALIZE (parallel)
