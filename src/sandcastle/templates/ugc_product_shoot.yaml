@@ -252,13 +252,13 @@ steps:
       Generate a UGC product image using nano-banana.
 
       Shot plan:
-      - Scene: {item.scene_description}
-      - Product placement: {item.product_placement}
-      - Model: {item.model_description}
-      - Lighting: {item.lighting}
-      - Camera: {item.camera}
-      - Mood: {item.mood}
-      - Props: {item.props}
+      - Scene: {input._item.scene_description}
+      - Product placement: {input._item.product_placement}
+      - Model: {input._item.model_description}
+      - Lighting: {input._item.lighting}
+      - Camera: {input._item.camera}
+      - Mood: {input._item.mood}
+      - Props: {input._item.props}
 
       Compose a single dense image generation prompt combining ALL the above elements.
       Focus on photorealism, natural skin texture, authentic UGC feel.
@@ -267,12 +267,12 @@ steps:
       - prompt: your composed prompt
       - options:
         - size: 1K
-        - aspect: {item.aspect}
+        - aspect: {input._item.aspect}
         - model: flash
-        - output: "ugc-{item.shot_id}"
+        - output: "ugc-{input._item.shot_id}"
         - reference_images: ["{input.product_photo}"]
 
-      Return the result including the shot_id: {item.shot_id}
+      Return the result including the shot_id: {input._item.shot_id}
     retry:
       max_attempts: 2
       backoff: exponential
@@ -317,16 +317,16 @@ steps:
       A transparent product cut is available at: {steps.generate-transparent-product.output}
 
       Shot plan:
-      - Shot ID: {item.shot_id}
-      - Platform: {item.platform}
-      - Style: {item.style}
-      - Scene: {item.scene_description}
-      - Product placement: {item.product_placement}
-      - Model: {item.model_description}
-      - Lighting: {item.lighting}
-      - Camera: {item.camera}
-      - Mood: {item.mood}
-      - Props: {item.props}
+      - Shot ID: {input._item.shot_id}
+      - Platform: {input._item.platform}
+      - Style: {input._item.style}
+      - Scene: {input._item.scene_description}
+      - Product placement: {input._item.product_placement}
+      - Model: {input._item.model_description}
+      - Lighting: {input._item.lighting}
+      - Camera: {input._item.camera}
+      - Mood: {input._item.mood}
+      - Props: {input._item.props}
 
       Compose a single dense image generation prompt combining ALL the above elements.
       Focus on photorealism, natural skin texture, authentic UGC feel.
@@ -336,12 +336,12 @@ steps:
       - prompt: your composed prompt
       - options:
         - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
-        - aspect: {item.aspect}
+        - aspect: {input._item.aspect}
         - model: pro
-        - output: "ugc-{item.shot_id}"
+        - output: "ugc-{input._item.shot_id}"
         - reference_images: ["{input.product_photo}"]
 
-      Return the result including the shot_id: {item.shot_id}
+      Return the result including the shot_id: {input._item.shot_id}
     retry:
       max_attempts: 2
       backoff: exponential
