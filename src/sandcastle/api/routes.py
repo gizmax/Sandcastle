@@ -4355,6 +4355,13 @@ async def _resume_after_approval(
     # Steps already completed (including the approval step now)
     skip_steps = list(initial_context["step_outputs"].keys())
 
+    # Transition run to QUEUED so the worker accepts it
+    async with async_session() as session:
+        run = await session.get(Run, approval.run_id)
+        if run:
+            run.status = RunStatus.QUEUED
+            await session.commit()
+
     # Enqueue continuation
     try:
         await enqueue_workflow(
