@@ -240,7 +240,7 @@ steps:
     depends_on: ["creative-director"]
     type: condition
     condition_config:
-      expression: "{input.budget} == lean"
+      expression: "'{input.budget}' == 'lean'"
       then: ["generate-lean"]
       else: ["generate-transparent-product", "generate-scenes"]
 
