@@ -215,6 +215,14 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
     if var_path == "date":
         return datetime.now(timezone.utc).date().isoformat()
 
+    # env.VAR_NAME -> resolve from environment variables
+    if parts[0] == "env" and len(parts) == 2:
+        import os
+        value = os.environ.get(parts[1], "")
+        if value:
+            return value
+        return _UNRESOLVED
+
     return _UNRESOLVED
 
 
