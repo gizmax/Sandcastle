@@ -6,16 +6,16 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-1378%20passing-brightgreen?style=flat-square)]()
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax-group.gitlab.io/sandcastle/)
 
 <p align="center">
-  <a href="https://gizmax.github.io/Sandcastle/">
+  <a href="https://gizmax-group.gitlab.io/sandcastle/">
     <img src="docs/screenshots/overview.png" alt="Sandcastle Dashboard" width="720" />
   </a>
 </p>
 
 <p align="center">
-  <a href="https://gizmax.github.io/Sandcastle/"><strong>Try the Live Demo (no backend needed)</strong></a>
+  <a href="https://gizmax-group.gitlab.io/sandcastle/"><strong>Try the Live Demo (no backend needed)</strong></a>
 </p>
 
 ---
@@ -191,7 +191,7 @@ docker compose up -d   # PostgreSQL + Redis + API + Worker, all configured
 One command. PostgreSQL, Redis, API server, and background worker - all configured.
 
 ```bash
-git clone https://github.com/gizmax/Sandcastle.git
+git clone https://gitlab.com/gizmax-group/sandcastle.git
 cd Sandcastle
 
 # Add your API keys
@@ -218,7 +218,7 @@ docker compose down     # stop everything
 If you prefer running without Docker:
 
 ```bash
-git clone https://github.com/gizmax/Sandcastle.git
+git clone https://gitlab.com/gizmax-group/sandcastle.git
 cd Sandcastle
 
 cp .env.example .env   # configure all connection strings
@@ -1742,7 +1742,7 @@ docker compose up -d
 
 Sandcastle's architecture was originally inspired by [**Sandstorm**](https://github.com/tomascupr/sandstorm) by [**@tomascupr**](https://github.com/tomascupr) - one of the cleanest abstractions for sandboxed agent execution. While Sandcastle has since evolved its own runtime (Sandshore) with pluggable backends, the original design philosophy of "full system access, completely isolated" remains at the core.
 
-Created by [**Tomas Pflanzer**](https://github.com/gizmax) ([@gizmax](https://github.com/gizmax)).
+Created by [**Tomas Pflanzer**](https://gitlab.com/gizmax-group) ([@gizmax](https://gitlab.com/gizmax-group)).
 
 ---
 
