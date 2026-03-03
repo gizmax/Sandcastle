@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, Plus } from "lucide-react";
+import { GitBranch, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import { DagGraph } from "@/components/workflows/DagGraph";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -39,6 +40,9 @@ export default function Workflows() {
   const [error, setError] = useState<string | null>(null);
   const [runModal, setRunModal] = useState<WorkflowInfo | null>(null);
   const [dagWorkflow, setDagWorkflow] = useState<WorkflowInfo | null>(null);
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<"delete" | null>(null);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const fetchWorkflows = useCallback(async () => {
     try {
@@ -73,6 +77,38 @@ export default function Workflows() {
     },
     [runModal, navigate]
   );
+
+  const handleBulkDelete = useCallback(async () => {
+    setBulkProcessing(true);
+    const results = await Promise.allSettled(
+      Array.from(selectedNames).map((name) => api.delete(`/workflows/${name}`))
+    );
+    const errors: string[] = [];
+    let ok = 0;
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        const resp = r.value as { error?: { message?: string } | null };
+        if (resp.error) {
+          errors.push(resp.error.message || "Unknown error");
+        } else {
+          ok++;
+        }
+      } else {
+        errors.push(String(r.reason));
+      }
+    }
+    const fail = results.length - ok;
+    setBulkProcessing(false);
+    setBulkAction(null);
+    setSelectedNames(new Set());
+    if (ok > 0) toast.success(`Deleted ${ok} workflow${ok > 1 ? "s" : ""}`);
+    if (fail > 0) {
+      const detail = errors[0] ? `: ${errors[0]}` : "";
+      toast.error(`Failed to delete ${fail} workflow${fail > 1 ? "s" : ""}${detail}`);
+    }
+    setLoading(true);
+    void fetchWorkflows();
+  }, [selectedNames, fetchWorkflows]);
 
   if (loading) {
     return (
@@ -109,6 +145,34 @@ export default function Workflows() {
         </button>
       </div>
 
+      {/* Bulk actions bar */}
+      {selectedNames.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+          <span className="text-sm font-medium text-foreground">
+            {selectedNames.size} selected
+          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={() => setBulkAction("delete")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-error/30 px-3 py-1.5",
+                "text-xs font-medium text-error",
+                "hover:bg-error/10 transition-colors"
+              )}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete selected
+            </button>
+            <button
+              onClick={() => setSelectedNames(new Set())}
+              className="text-xs text-muted hover:text-foreground transition-colors ml-1"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {workflows.length === 0 ? (
         <EmptyState
           icon={GitBranch}
@@ -119,6 +183,8 @@ export default function Workflows() {
       ) : (
         <WorkflowList
           workflows={workflows}
+          selectedNames={selectedNames}
+          onSelectionChange={setSelectedNames}
           onRun={setRunModal}
           onEdit={(wf) => navigate("/workflows/builder", { state: { workflow: wf } })}
           onViewDag={setDagWorkflow}
@@ -158,6 +224,18 @@ export default function Workflows() {
           onRun={handleRun}
         />
       )}
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={bulkAction === "delete"}
+        title={`Delete ${selectedNames.size} workflow${selectedNames.size > 1 ? "s" : ""}?`}
+        description="YAML files will be permanently removed from disk and all version records will be deleted."
+        confirmLabel={bulkProcessing ? "Deleting..." : "Delete"}
+        variant="danger"
+        confirmDisabled={bulkProcessing}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkAction(null)}
+      />
     </div>
   );
 }

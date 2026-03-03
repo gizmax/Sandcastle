@@ -3,6 +3,7 @@ import { X, Play, FileText, FormInput, Braces } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { JsonEditor } from "@/components/shared/JsonEditor";
+import { FilePathInput } from "@/components/shared/FilePathInput";
 import type { InputSchema } from "@/types/inputSchema";
 
 interface RunWorkflowModalProps {
@@ -185,7 +186,13 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                       <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
                     )}
 
-                    {hasEnum ? (
+                    {prop.format === "file-path" ? (
+                      <FilePathInput
+                        value={fieldValues[key] || ""}
+                        onChange={(v) => setFieldValues((prev) => ({ ...prev, [key]: v }))}
+                        accept={prop.type === "image" ? "image/*" : undefined}
+                      />
+                    ) : hasEnum ? (
                       <select
                         value={fieldValues[key] || ""}
                         onChange={(e) => setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}

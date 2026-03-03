@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { GitBranch, Play, Pencil, Eye, History } from "lucide-react";
+import { GitBranch, Play, Pencil, Eye, History, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface WorkflowCardProps {
@@ -10,6 +10,8 @@ interface WorkflowCardProps {
   version?: number | null;
   versionStatus?: string | null;
   totalVersions?: number | null;
+  selected?: boolean;
+  onSelect?: () => void;
   onRun: () => void;
   onEdit: () => void;
   onViewDag: () => void;
@@ -23,6 +25,8 @@ export const WorkflowCard = memo(function WorkflowCard({
   version,
   versionStatus,
   totalVersions,
+  selected,
+  onSelect,
   onRun,
   onEdit,
   onViewDag,
@@ -31,10 +35,26 @@ export const WorkflowCard = memo(function WorkflowCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border bg-surface p-5 shadow-sm",
-        "transition-all duration-200 hover:shadow-md hover:border-accent/30"
+        "relative rounded-xl border border-border bg-surface p-5 shadow-sm",
+        "transition-all duration-200 hover:shadow-md hover:border-accent/30",
+        selected && "border-accent ring-2 ring-accent/20"
       )}
     >
+      {onSelect && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          aria-label={selected ? `Deselect ${name}` : `Select ${name}`}
+          className={cn(
+            "absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded border transition-colors",
+            selected
+              ? "border-accent bg-accent text-accent-foreground"
+              : "border-border bg-background text-transparent hover:border-muted"
+          )}
+        >
+          <Check className="h-3 w-3" />
+        </button>
+      )}
       <div className="mb-3 flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/10">
           <GitBranch className="h-5 w-5 text-accent" />

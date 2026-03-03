@@ -734,6 +734,17 @@ describe("WorkflowCard", () => {
 import { NotificationCenter, type Notification } from "@/components/layout/NotificationCenter";
 
 describe("NotificationCenter", () => {
+  const defaultAdvisorProps = {
+    score: 100,
+    previousScore: null as number | null,
+    deductions: [] as { category: "health" | "operations" | "quality" | "adoption"; label: string; points: number }[],
+    insights: [] as { id: string; severity: "critical" | "warning" | "optimize" | "discover"; title: string; description: string; link: string; icon: string }[],
+    advisorLoading: false,
+    lastChecked: null as Date | null,
+    onRefresh: vi.fn(),
+    onDismiss: vi.fn(),
+  };
+
   const makeNotification = (id: string, overrides?: Partial<Notification>): Notification => ({
     id,
     type: "info",
@@ -749,9 +760,10 @@ describe("NotificationCenter", () => {
         notifications={[]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    expect(screen.getByRole("button", { name: /Notifications/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Command center/ })).toBeInTheDocument();
   });
 
   it("shows unread count badge", () => {
@@ -760,6 +772,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1"), makeNotification("2")]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
     expect(screen.getByText("2")).toBeInTheDocument();
@@ -771,10 +784,11 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1", { read: true })]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
     // aria-label should not mention unread
-    expect(screen.getByLabelText("Notifications")).toBeInTheDocument();
+    expect(screen.getByLabelText("Command center")).toBeInTheDocument();
   });
 
   it("opens dropdown on click", () => {
@@ -783,9 +797,10 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1")]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
     expect(screen.getByText("Notification 1")).toBeInTheDocument();
   });
 
@@ -795,9 +810,10 @@ describe("NotificationCenter", () => {
         notifications={[]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
     expect(screen.getByText("No notifications")).toBeInTheDocument();
   });
 
@@ -807,9 +823,10 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1")]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
     expect(screen.getByText("Notification 1")).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
@@ -823,23 +840,26 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1")]}
         onMarkAllRead={onMarkAllRead}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
+
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
-    fireEvent.click(screen.getByText("Mark all as read"));
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
+    fireEvent.click(screen.getByText("Mark all read"));
     expect(onMarkAllRead).toHaveBeenCalledTimes(1);
   });
 
-  it("does not show Mark all as read when all are read", () => {
+  it("does not show Mark all read when all are read", () => {
     render(
       <NotificationCenter
         notifications={[makeNotification("1", { read: true })]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
-    expect(screen.queryByText("Mark all as read")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
+    expect(screen.queryByText("Mark all read")).toBeNull();
   });
 
   it("calls onClickNotification and closes dropdown", () => {
@@ -850,9 +870,10 @@ describe("NotificationCenter", () => {
         notifications={[notification]}
         onMarkAllRead={vi.fn()}
         onClickNotification={onClickNotification}
+        {...defaultAdvisorProps}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
     fireEvent.click(screen.getByText("Notification 1"));
     expect(onClickNotification).toHaveBeenCalledWith(notification);
     // Dropdown should close
@@ -871,9 +892,10 @@ describe("NotificationCenter", () => {
         notifications={notifications}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
     expect(screen.getByText("Success msg")).toBeInTheDocument();
     expect(screen.getByText("Error msg")).toBeInTheDocument();
     expect(screen.getByText("Warning msg")).toBeInTheDocument();
@@ -886,9 +908,10 @@ describe("NotificationCenter", () => {
         notifications={[]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
+        {...defaultAdvisorProps}
       />
     );
-    const btn = screen.getByRole("button", { name: /Notifications/ });
+    const btn = screen.getByRole("button", { name: /Command center/ });
     expect(btn).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(btn);
     expect(btn).toHaveAttribute("aria-expanded", "true");

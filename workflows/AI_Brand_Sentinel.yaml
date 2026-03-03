@@ -1,0 +1,672 @@
+name: "AI_Brand_Sentinel"
+description: "Monitor how AI platforms (ChatGPT, Claude, Gemini, Perplexity) represent your brand. Generates probe queries, simulates platform responses, maps source attribution, tracks sentiment, identifies visibility gaps, and produces a corrective strategy with a 90-day roadmap."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 300
+
+input_schema:
+  required:
+    - brand_name
+    - competitors
+    - ai_platforms
+    - product_category
+  properties:
+    brand_name:
+      type: string
+      description: "Brand or company name to monitor (e.g. 'Notion', 'Stripe', 'Sandcastle')"
+    competitors:
+      type: string
+      description: "Competing brands for comparative analysis (comma-separated, e.g. 'Asana, Monday.com, ClickUp')"
+    ai_platforms:
+      type: string
+      description: "AI platforms to probe (e.g. 'ChatGPT, Claude, Gemini, Perplexity')"
+      default: "ChatGPT, Claude, Gemini, Perplexity"
+    product_category:
+      type: string
+      description: "Product category or industry (e.g. 'project management software', 'workflow orchestrator', 'coffee makers')"
+    monitoring_queries:
+      type: string
+      description: "Optional seed queries you want included in the probe (one per line)"
+
+steps:
+  - id: "query-generation"
+    prompt: |
+      Generate a comprehensive set of AI platform probe queries to monitor how the brand
+      "{input.brand_name}" is represented in AI-generated answers across multiple platforms.
+      
+      Brand to monitor: {input.brand_name}
+      Competitors: {input.competitors}
+      AI platforms to probe: {input.ai_platforms}
+      User-provided seed queries: {input.monitoring_queries}
+      
+      Your task is to create a structured query matrix that will systematically reveal how
+      each AI platform perceives, ranks, and describes the brand relative to competitors.
+      This is critical for understanding AI-mediated brand visibility - the emerging channel
+      where customers form opinions before ever visiting a website.
+      
+      **QUERY CATEGORY FRAMEWORK**
+      
+      Generate 8-12 queries per category below. Each query should be natural language as
+      a real user would type into an AI assistant. Vary phrasing, specificity, and intent.
+      
+      **Category 1: Direct Brand Queries**
+      - "What is {input.brand_name}?"
+      - "Tell me about {input.brand_name}"
+      - "Is {input.brand_name} good?"
+      - "What do people think of {input.brand_name}?"
+      - "{input.brand_name} reviews"
+      - "Should I use {input.brand_name}?"
+      Generate variations that test: brand awareness, sentiment, feature knowledge,
+      pricing knowledge, reputation signals, and recent news awareness.
+      
+      **Category 2: Comparative Queries**
+      For each competitor in [{input.competitors}], generate queries like:
+      - "{input.brand_name} vs [competitor]"
+      - "Which is better, {input.brand_name} or [competitor]?"
+      - "[competitor] alternative" (should our brand appear?)
+      - "Difference between {input.brand_name} and [competitor]"
+      - "Switching from [competitor] to {input.brand_name}"
+      Track whether the AI recommends our brand, the competitor, or remains neutral.
+      
+      **Category 3: Category/Intent Queries**
+      Product category: {input.product_category}
+      These are queries where a user is looking for a solution but has not named a brand:
+      - "Best {input.product_category} for [use case]"
+      - "Top {input.product_category} in 2026"
+      - "{input.product_category} comparison"
+      - "What {input.product_category} should a startup use?"
+      - "Enterprise {input.product_category} recommendations"
+      - "Cheapest {input.product_category} that is still good"
+      The brand should ideally appear in these answers. If it does not, that is a
+      visibility gap.
+      
+      **Category 4: Problem/Pain-Point Queries**
+      Product category: {input.product_category}
+      - "How do I solve [problem that {input.product_category} solves]?"
+      - "[pain point] solutions for {input.product_category}"
+      - "Tools for [workflow that {input.product_category} supports]"
+      These queries test whether AI platforms associate our brand with the problems
+      it solves - a key indicator of topical authority.
+      
+      **Category 5: Reputation and Trust Queries**
+      - "Is {input.brand_name} safe to use?"
+      - "{input.brand_name} data privacy"
+      - "{input.brand_name} security"
+      - "{input.brand_name} complaints"
+      - "{input.brand_name} customer support quality"
+      These test for negative sentiment, outdated complaints, or trust issues
+      that AI platforms may surface.
+      
+      **Category 6: Purchase/Decision Queries**
+      - "{input.brand_name} pricing"
+      - "Is {input.brand_name} worth the price?"
+      - "{input.brand_name} free trial"
+      - "How to get started with {input.brand_name}"
+      These test bottom-of-funnel knowledge accuracy.
+      
+      **QUERY METADATA**
+      For each query, include:
+      - query_id: Unique identifier (e.g., "direct-01", "compare-competitor1-03")
+      - category: Which of the 6 categories
+      - intent: informational, navigational, transactional, or comparative
+      - expected_brand_mention: yes/no/maybe (should our brand appear?)
+      - priority: high/medium/low (based on estimated search volume and business impact)
+      - competitor_targeted: which competitor if applicable
+      
+      **OUTPUT FORMAT**
+      Return a structured JSON object with:
+      1. "query_matrix" - array of all queries with metadata
+      2. "platform_instructions" - specific prompt formatting notes for each AI platform
+         (e.g., ChatGPT tends to give longer answers, Perplexity cites sources,
+         Claude is more cautious with recommendations, Google AI integrates search)
+      3. "total_queries" - count per category
+      4. "monitoring_schedule" - recommended re-probe frequency per query category
+      
+      Generate at minimum 50 total queries across all categories. Prioritize queries
+      that real customers actually ask during their buying journey.
+      
+    model: haiku
+
+  - id: "platform-probing"
+    prompt: |
+      Execute the AI platform probing strategy by simulating queries across platforms
+      and recording detailed responses for brand monitoring analysis.
+      
+      Brand: {input.brand_name}
+      Competitors: {input.competitors}
+      AI platforms: {input.ai_platforms}
+      Query matrix: {steps.query-generation.output}
+      
+      You are now the AI Brand Intelligence Analyst. Your job is to simulate how each
+      AI platform in [{input.ai_platforms}] would respond to the generated queries,
+      based on your training knowledge of how these platforms behave, their known biases,
+      data sources, and response patterns.
+      
+      **PLATFORM BEHAVIOR PROFILES**
+      
+      For each platform, apply these known behavioral characteristics:
+      
+      **ChatGPT (OpenAI)**
+      - Tends to provide balanced comparisons but may favor well-known brands
+      - Often includes caveats like "it depends on your needs"
+      - Training data includes Reddit, forums, review sites heavily
+      - May reference outdated information if product changed recently
+      - Typically lists 3-5 options for category queries
+      - Citation behavior: does not cite sources by default (unless browsing mode)
+      
+      **Perplexity**
+      - Always cites sources with URLs - critical for source attribution tracking
+      - Pulls from recent web content more aggressively
+      - Tends to give more definitive recommendations
+      - Source selection bias toward authoritative domains (G2, Capterra, TechCrunch)
+      - Real-time data integration means answers change frequently
+      - Useful for tracking which URLs are influencing brand perception
+      
+      **Claude (Anthropic)**
+      - More cautious with definitive recommendations ("I'd suggest considering...")
+      - Strong at nuanced comparisons with trade-off analysis
+      - Less likely to rank or pick a "winner"
+      - Training data may not include most recent product updates
+      - Tends to acknowledge uncertainty explicitly
+      - Less likely to surface negative reviews unless directly asked
+      
+      **Google AI (Gemini / AI Overviews)**
+      - Deeply integrated with Google Search results and Knowledge Graph
+      - Heavily influenced by SEO signals and structured data
+      - AI Overviews appear directly in search results - massive visibility impact
+      - Tends to prioritize Google's own review aggregation
+      - May surface featured snippet content verbatim
+      - Most commercially impactful due to search integration
+      
+      **RESPONSE ANALYSIS FRAMEWORK**
+      
+      For each query-platform combination, record:
+      
+      1. **Brand Mention Status**
+         - PRESENT: Brand explicitly named and described
+         - ABSENT: Brand not mentioned at all
+         - INDIRECT: Brand referenced obliquely or as "others"
+         - NEGATIVE: Brand mentioned but in negative context
+      
+      2. **Position Ranking** (for list-based answers)
+         - Position 1-5 in the AI's recommendation list
+         - "Not listed" if brand omitted from category queries
+         - "Only mentioned" if named but not in the main list
+      
+      3. **Sentiment Classification**
+         - Score: -5 (very negative) to +5 (very positive)
+         - Tone descriptors: enthusiastic, neutral, cautious, critical, dismissive
+         - Key phrases used to describe the brand (exact quotes)
+      
+      4. **Accuracy Assessment**
+         - ACCURATE: Information presented is factually correct and current
+         - OUTDATED: Information was true but is no longer accurate
+         - INCORRECT: Factual errors in description, pricing, features
+         - MISLEADING: Technically true but gives wrong impression
+         - HALLUCINATED: Information that was never true
+      
+      5. **Competitive Framing**
+         - How is brand positioned relative to competitors?
+         - Which features/aspects are highlighted vs competitors?
+         - Any direct winner declarations?
+         - Price comparison accuracy
+      
+      6. **Source Signals** (especially for Perplexity and Google AI)
+         - What type of content seems to be influencing the answer?
+         - Review sites, official docs, blog posts, forums, news?
+         - Are competitor-authored comparison pages influencing results?
+      
+      **OUTPUT REQUIREMENTS**
+      
+      Produce a comprehensive response matrix:
+      - Platform x Query grid with all 6 analysis dimensions filled
+      - Summary statistics per platform (avg sentiment, mention rate, accuracy rate)
+      - Summary statistics per query category
+      - "Red flag" alerts for any INCORRECT, HALLUCINATED, or strongly NEGATIVE entries
+      - Notable discrepancies between platforms (where they disagree about the brand)
+      
+      Format as structured JSON with both the detailed matrix and summary dashboards.
+      Flag the top 10 most concerning findings that need immediate attention.
+      
+    depends_on:
+      - "query-generation"
+
+  - id: "source-attribution"
+    prompt: |
+      Analyze and map the source URLs and content types that are influencing how AI
+      platforms represent the brand "{input.brand_name}" in their generated answers.
+      
+      Brand: {input.brand_name}
+      Competitors: {input.competitors}
+      Platform probing results: {steps.platform-probing.output}
+      
+      You are a Source Attribution Analyst specializing in AI-mediated brand perception.
+      Your task is to trace HOW and WHY AI platforms form the opinions they express about
+      the brand, by reverse-engineering the likely training data and retrieval sources.
+      
+      **SOURCE TRACING METHODOLOGY**
+      
+      **Layer 1: Direct Citation Analysis (Retrieval-Augmented Platforms)**
+      For platforms that cite sources (Perplexity, Google AI Overviews):
+      - Catalog every cited URL from the probing results
+      - Classify each source by type:
+        * Official brand content (website, docs, blog)
+        * Third-party review sites (G2, Capterra, TrustRadius, Trustpilot)
+        * Comparison/listicle articles (often competitor-authored or affiliate)
+        * Forum discussions (Reddit, Quora, Stack Overflow, HackerNews)
+        * News articles (TechCrunch, VentureBeat, industry press)
+        * Social media posts (Twitter/X threads, LinkedIn articles)
+        * Developer documentation and GitHub repos
+        * YouTube videos and transcripts
+        * Competitor websites and competitor-authored comparisons
+      - Calculate source type distribution: what percentage of citations come from
+        each category?
+      - Identify which specific URLs appear most frequently across queries
+      
+      **Layer 2: Training Data Inference (Non-Citing Platforms)**
+      For ChatGPT and Claude which do not cite sources in standard mode:
+      - Analyze the language patterns, specific claims, and framing used
+      - Match these against known high-influence content types:
+        * If the AI quotes a specific statistic, trace where that stat originated
+        * If the AI uses particular phrasing, identify the likely source domain
+        * If the AI makes a comparison claim, determine what comparison content
+          is most likely in training data
+      - Estimate the "influence weight" of different source types based on
+        response pattern analysis
+      
+      **Layer 3: SERP Influence Mapping**
+      - For each key query, analyze what currently ranks on Google page 1
+      - These SERP results heavily influence AI Overviews AND are likely in
+        training data for all platforms
+      - Map: Query -> Top 10 SERP results -> Which are positive/negative/neutral
+        for brand -> How this correlates with AI platform responses
+      - Identify "SERP takeover" opportunities where competitor content dominates
+      
+      **Layer 4: Competitor Content Attribution**
+      - Identify cases where competitor-authored content is influencing AI answers
+        about YOUR brand (e.g., "Brand X vs {input.brand_name}" pages written by Brand X)
+      - Track competitor blog posts, comparison pages, and review site profiles
+        that appear as sources
+      - Assess competitor "AI SEO" strategies: Are competitors deliberately creating
+        content to influence AI platform answers?
+      - Map competitor content influence by query category
+      
+      **SOURCE INFLUENCE SCORING MODEL**
+      
+      For each identified source, calculate:
+      - Frequency Score (0-10): How often this source type appears across answers
+      - Sentiment Impact (-5 to +5): Does this source push brand sentiment up or down?
+      - Accuracy Impact (0-10): Does this source contribute accurate or inaccurate info?
+      - Reach Score (0-10): How many AI platforms seem influenced by this source?
+      - Recency Score (0-10): How current is the content?
+      - Combined Influence Score: Weighted average of all factors
+      
+      **OUTPUT DELIVERABLES**
+      
+      1. **Source Influence Map** - Visual hierarchy of all source types ranked by
+         influence on AI brand perception, with specific URLs where identifiable
+      2. **Competitor Content Threat Matrix** - Which competitor-authored content
+         is most influencing AI answers about our brand
+      3. **SERP-to-AI Pipeline Analysis** - How Google search rankings correlate
+         with AI platform answers for key queries
+      4. **Content Gap Inventory** - Source types where the brand has no presence
+         but competitors do (e.g., no brand presence on Reddit but competitor has
+         active community engagement influencing AI answers)
+      5. **Source Quality Assessment** - Which sources are feeding INCORRECT or
+         OUTDATED information to AI platforms
+      6. **Priority URL Watchlist** - Top 20 URLs that most influence AI brand
+         perception (to monitor for changes)
+      
+      Return structured JSON with all deliverables. Include confidence levels
+      for inferred sources vs directly cited sources.
+      
+    depends_on:
+      - "platform-probing"
+
+  - id: "sentiment-tracking"
+    prompt: |
+      Perform deep sentiment analysis on AI platform responses about the brand
+      "{input.brand_name}" to establish baseline metrics, detect trends, and
+      identify sentiment drivers.
+      
+      Brand: {input.brand_name}
+      Competitors: {input.competitors}
+      Platform probing results: {steps.platform-probing.output}
+      
+      You are a Sentiment Intelligence Analyst. Your task is to go beyond surface-level
+      positive/negative classification and build a multi-dimensional sentiment profile
+      of how AI platforms perceive and present the brand.
+      
+      **MULTI-DIMENSIONAL SENTIMENT FRAMEWORK**
+      
+      **Dimension 1: Overall Brand Sentiment Score**
+      Calculate a composite sentiment score (-100 to +100) for each AI platform:
+      - Aggregate all query responses per platform
+      - Weight by query importance (purchase-intent queries weighted 3x,
+        category queries 2x, informational queries 1x)
+      - Produce: per-platform score, cross-platform average, and variance
+      - Compare brand score to each competitor's score on the same queries
+      
+      **Dimension 2: Attribute-Level Sentiment**
+      Break sentiment down by brand attributes:
+      - Product quality / capability sentiment
+      - Pricing / value perception sentiment
+      - Customer support / service sentiment
+      - Innovation / technology leadership sentiment
+      - Reliability / uptime / trust sentiment
+      - Ease of use / UX sentiment
+      - Integration / ecosystem sentiment
+      - Company reputation / leadership sentiment
+      Score each attribute -10 to +10 per platform. This reveals WHERE sentiment
+      is strong vs weak, not just overall polarity.
+      
+      **Dimension 3: Comparative Sentiment Delta**
+      For each competitor in [{input.competitors}]:
+      - Calculate the sentiment gap: (our brand score) - (competitor score)
+      - Map which attributes we win on and which we lose on
+      - Identify "sentiment crossover points" - queries where sentiment flips
+        from positive to negative depending on context
+      - Track sentiment parity: are we perceived as equal, better, or worse?
+      
+      **Dimension 4: Sentiment Consistency Across Platforms**
+      - Do all platforms agree on sentiment? Where do they diverge?
+      - Platform-specific biases: Does one platform consistently score us higher
+        or lower than others?
+      - Identify "platform risk" - if one platform is negative while others are
+        positive, what is driving the discrepancy?
+      - Calculate inter-platform agreement score (correlation coefficient)
+      
+      **Dimension 5: Sentiment Vulnerability Analysis**
+      Identify sentiment risks and fragile areas:
+      - Topics where sentiment could easily flip negative (e.g., pricing perception
+        currently neutral but one price increase could tip it)
+      - Legacy issues still surfacing in AI answers (past incidents, old complaints)
+      - Competitor narrative threats: talking points competitors push that could
+        erode our sentiment over time
+      - Missing positive signals: areas where we should have strong sentiment but
+        AI platforms show no opinion (brand awareness gap, not sentiment problem)
+      
+      **SENTIMENT DRIVER ANALYSIS**
+      
+      For the top 5 positive sentiment drivers:
+      - What specific content/events created this positive perception?
+      - How stable is it? (based on source recency and diversity)
+      - Is it brand-created or organic/earned sentiment?
+      - Competitor comparison: do they benefit from the same driver?
+      
+      For the top 5 negative sentiment drivers:
+      - Root cause: product issue, PR incident, competitor narrative, or data gap?
+      - Is the negative sentiment JUSTIFIED (real problem) or UNFAIR (outdated/wrong)?
+      - Can it be corrected through content, or does it require product/business changes?
+      - How prominent is it? (appears in what % of queries)
+      
+      **TREND INDICATORS**
+      
+      While this is a point-in-time snapshot, estimate directional trends:
+      - Which sentiment dimensions are likely IMPROVING? (based on recent content
+        signals and product trajectory)
+      - Which are likely DECLINING? (emerging negative narratives, competitor gains)
+      - Which are STABLE but at risk?
+      
+      **OUTPUT FORMAT**
+      
+      Return structured JSON with:
+      1. "sentiment_dashboard" - all dimension scores in a grid format
+      2. "attribute_heatmap" - brand attributes x platforms sentiment matrix
+      3. "competitive_sentiment_gaps" - per-competitor delta analysis
+      4. "vulnerability_report" - top 10 sentiment risks ranked by severity
+      5. "driver_analysis" - positive and negative driver deep dives
+      6. "trend_forecast" - directional indicators with confidence levels
+      7. "kpi_baselines" - metrics to track in future monitoring cycles
+      
+    model: haiku
+    depends_on:
+      - "platform-probing"
+
+  - id: "gap-analysis"
+    prompt: |
+      Synthesize source attribution and sentiment data to identify critical gaps in AI
+      platform brand representation and map specific content opportunities.
+      
+      Brand: {input.brand_name}
+      Competitors: {input.competitors}
+      Source attribution: {steps.source-attribution.output}
+      Sentiment tracking: {steps.sentiment-tracking.output}
+      Platform probing: {steps.platform-probing.output}
+      
+      You are a Strategic AI Visibility Analyst. Your task is to identify WHERE and WHY
+      the brand is underrepresented, misrepresented, or outperformed in AI platform
+      answers, and to map these gaps to specific correctable content opportunities.
+      
+      **GAP IDENTIFICATION FRAMEWORK**
+      
+      **Gap Type 1: Visibility Gaps (Brand Not Mentioned)**
+      Analyze all queries where the brand SHOULD appear but DOES NOT:
+      - Category queries where competitors appear but we do not
+      - Problem/solution queries where our product is relevant but unlisted
+      - "Best of" and recommendation queries with incomplete brand coverage
+      For each visibility gap:
+      - Which platforms omit us? (all, or specific ones?)
+      - Which competitors appear instead?
+      - What content would need to exist for AI to include us?
+      - Estimated traffic/visibility impact of this gap
+      - Priority: P0 (purchase intent) / P1 (consideration) / P2 (awareness)
+      
+      **Gap Type 2: Accuracy Gaps (Incorrect Information)**
+      Catalog all instances of inaccurate brand information in AI responses:
+      - Wrong pricing (most common and most damaging)
+      - Outdated feature lists (missing recent launches)
+      - Incorrect comparisons (wrong competitor positioning)
+      - Hallucinated capabilities (features we do not have)
+      - Stale integration lists
+      For each accuracy gap:
+      - Which platforms propagate this error?
+      - What is the likely source of the incorrect information?
+      - Business impact: does this cost us leads/conversions?
+      - Corrective action: what content update would fix it?
+      
+      **Gap Type 3: Sentiment Gaps (Negative When Should Be Positive)**
+      Cross-reference sentiment scores with reality:
+      - Attributes scored negatively but objectively strong (perception vs reality gap)
+      - Competitor attributes scored higher than ours despite parity or advantage
+      - Legacy negative sentiment from resolved issues still being surfaced
+      - Missing social proof: no reviews/testimonials feeding AI perception
+      For each sentiment gap:
+      - Root cause: content gap, competitor narrative, or real product issue?
+      - Which content type would most effectively shift sentiment?
+      - Time-to-impact estimate for corrective content
+      
+      **Gap Type 4: Competitive Narrative Gaps**
+      Identify competitor talking points successfully embedded in AI answers:
+      - Competitor comparison pages ranking and influencing AI responses
+      - Competitor-defined category narratives that exclude or diminish our brand
+      - Feature framing that advantages competitors (e.g., they define the criteria)
+      - Price anchoring by competitors that makes us seem expensive
+      For each competitive gap:
+      - Which competitor drives this narrative?
+      - What specific content is the source?
+      - Counter-narrative opportunity: what story should we tell instead?
+      - Required content assets to counter
+      
+      **Gap Type 5: Platform-Specific Gaps**
+      Unique gaps per AI platform:
+      - Platform A shows us but Platform B does not (why?)
+      - Platform-specific data sources we are missing from
+      - Structured data or schema markup not being picked up by specific platforms
+      - API/integration gaps (e.g., not in a platform's tool/plugin ecosystem)
+      
+      **CONTENT OPPORTUNITY MATRIX**
+      
+      For each gap, map to a specific content opportunity:
+      | Gap ID | Type | Severity | Content Needed | Format | Target Platform | Est. Impact |
+      Rate severity: Critical (direct revenue loss), High (competitive disadvantage),
+      Medium (missed opportunity), Low (nice to have).
+      
+      **OUTPUT DELIVERABLES**
+      
+      1. "gap_inventory" - Complete catalog of all gaps by type with severity scores
+      2. "content_opportunity_matrix" - Prioritized content creation roadmap
+      3. "quick_wins" - Gaps fixable with minor content updates (within 1 week)
+      4. "strategic_initiatives" - Larger content projects needed (1-3 month timeline)
+      5. "competitive_counter_plays" - Specific responses to competitor narratives
+      6. "platform_specific_actions" - Per-platform tactical recommendations
+      7. "impact_forecast" - Expected visibility and sentiment improvement per action
+      
+      Return structured JSON with quantified impact estimates for each recommendation.
+      
+    depends_on:
+      - "source-attribution"
+      - "sentiment-tracking"
+
+  - id: "corrective-strategy"
+    prompt: |
+      Develop a comprehensive corrective content and AI visibility strategy based on
+      the gap analysis to improve brand representation across AI platforms.
+      
+      Brand: {input.brand_name}
+      Competitors: {input.competitors}
+      Gap analysis: {steps.gap-analysis.output}
+      Source attribution: {steps.source-attribution.output}
+      Sentiment tracking: {steps.sentiment-tracking.output}
+      
+      You are a Chief AI Visibility Strategist. Your task is to create an actionable,
+      prioritized plan to correct, improve, and defend brand representation across all
+      major AI platforms. This strategy should be executable by content, SEO, and
+      marketing teams within a 90-day sprint cycle.
+      
+      **STRATEGIC PILLARS**
+      
+      **Pillar 1: Foundation Content (AI-Optimized Brand Assets)**
+      Design content specifically to be consumed and cited by AI platforms:
+      
+      - **Brand Knowledge Base Page**: A single, comprehensive, factually dense page on the
+        brand website that AI platforms can use as authoritative source. Include:
+        current pricing, complete feature list, integration catalog, company facts,
+        recent milestones. Structure with schema.org markup.
+        Provide a detailed content brief with sections, word count, and key facts to include.
+      
+      - **Comparison Hub**: Create brand-authored comparison pages for each competitor
+        in [{input.competitors}]. These should be factual, balanced (to avoid being
+        filtered as marketing), but strategically framed.
+        Provide content briefs for each comparison page.
+      
+      - **FAQ / Knowledge Hub**: Address every question where AI platforms gave incorrect
+        or incomplete answers. Use exact question phrasing from the probe queries
+        as H2 headers (this signals relevance to AI retrieval systems).
+        Provide the full question list with recommended answers.
+      
+      - **Technical Documentation**: If accuracy gaps exist around features or
+        integrations, create or update technical docs that AI platforms can reference.
+      
+      **Pillar 2: Social Proof and Third-Party Presence**
+      Build the external signals that AI platforms rely on:
+      
+      - **Review Site Strategy**: Identify which review platforms (G2, Capterra,
+        TrustRadius, Trustpilot) most influence AI answers. Prioritize review
+        generation on those platforms. Set specific targets (e.g., "reach 200 G2
+        reviews with 4.5+ average within 60 days").
+      
+      - **Community Presence**: If Reddit, Quora, or Stack Overflow discussions are
+        influencing AI perception, develop an authentic community engagement strategy.
+        NOT astroturfing - genuine participation that builds brand expertise perception.
+        Specify which subreddits, Quora topics, and forum categories to target.
+      
+      - **Press and Analyst Coverage**: If news articles are a major source type for
+        AI platforms, plan PR activities to generate positive recent coverage.
+        Identify specific publications and storylines to pitch.
+      
+      - **YouTube and Video Content**: If AI platforms reference video content,
+        create video assets addressing key queries. Transcripts are especially
+        valuable as AI training data.
+      
+      **Pillar 3: Competitive Defense**
+      Counter competitor-authored content influencing AI answers:
+      
+      - For each competitor comparison page identified in source attribution:
+        * Create a higher-quality counter-page with more recent data
+        * Target the same queries with brand-authored content
+        * Address specific competitor claims with factual rebuttals
+      
+      - For each competitor narrative embedded in AI answers:
+        * Develop a counter-narrative with supporting evidence
+        * Create content that reframes the comparison criteria in our favor
+        * Publish in formats and on platforms that AI systems prioritize
+      
+      - Competitive content monitoring: Set up tracking for new competitor content
+        that could influence AI answers. Define trigger criteria for response.
+      
+      **Pillar 4: Platform-Specific Optimization**
+      Tailored actions for each AI platform:
+      
+      - **Google AI Overviews**: Focus on structured data, featured snippet optimization,
+        and Google Business Profile completeness. AI Overviews heavily pull from
+        these Google-native signals.
+        Provide specific schema markup recommendations and content structure guidelines.
+      
+      - **Perplexity**: Since it cites sources, ensure brand content ranks in Perplexity's
+        retrieval results. Focus on authoritative, well-structured content that
+        Perplexity's crawler can easily parse and cite.
+        List specific content format requirements.
+      
+      - **ChatGPT**: Optimize for inclusion in future training data by creating
+        high-engagement, widely-shared content. Focus on Reddit and forum presence
+        where ChatGPT heavily sources.
+        Provide community engagement playbook.
+      
+      - **Claude**: Focus on factual accuracy in published content. Claude tends to
+        be cautious - provide clear, unambiguous product information.
+        Outline documentation quality standards.
+      
+      **Pillar 5: Monitoring and Iteration**
+      Build an ongoing AI brand monitoring program:
+      
+      - **Monitoring cadence**: Weekly for critical queries, monthly for full sweep
+      - **KPIs to track**:
+        * AI Visibility Score: % of category queries where brand appears
+        * AI Sentiment Index: Cross-platform weighted sentiment score
+        * AI Accuracy Rate: % of responses with correct brand information
+        * Competitive Share of Voice: Brand mentions vs competitors in AI answers
+        * Source Health Score: % of influencing sources that are current and positive
+      - **Alert triggers**: Define thresholds for immediate response
+        (e.g., new negative source appearing, sentiment drop > 10 points,
+        competitor content overtaking on key query)
+      - **Quarterly reviews**: Full re-probe and strategy adjustment
+      
+      **90-DAY EXECUTION ROADMAP**
+      
+      **Days 1-14: Foundation Sprint**
+      - List every content asset to create/update with owner and deadline
+      - Prioritize by gap severity from the analysis
+      
+      **Days 15-45: Content Production Sprint**
+      - Publish foundation content assets
+      - Launch review generation campaigns
+      - Begin community engagement programs
+      
+      **Days 46-75: Amplification Sprint**
+      - PR and analyst outreach
+      - Competitive counter-content publication
+      - Platform-specific optimization implementation
+      
+      **Days 76-90: Measurement and Iteration**
+      - Re-probe all AI platforms with same query set
+      - Compare before/after metrics
+      - Identify what worked and what needs adjustment
+      - Plan next 90-day cycle
+      
+      **OUTPUT FORMAT**
+      
+      Return a comprehensive strategy document with:
+      1. "executive_summary" - 500-word overview of findings and recommended actions
+      2. "content_briefs" - Detailed briefs for each recommended content asset
+         (topic, format, target length, key messages, SEO keywords, target platform)
+      3. "competitive_playbook" - Per-competitor counter-strategy
+      4. "platform_playbook" - Per-platform optimization checklist
+      5. "monitoring_setup" - KPI definitions, tools, cadence, alert thresholds
+      6. "execution_roadmap" - Day-by-day task list with owners and dependencies
+      7. "budget_estimate" - Resource requirements by pillar
+      8. "success_metrics" - Expected improvement targets at 30/60/90 day milestones
+      
+    depends_on:
+      - "gap-analysis"
+

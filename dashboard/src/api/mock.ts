@@ -5673,6 +5673,18 @@ const routes: MockRoute[] = [
     method: "GET",
     handler: () => MOCK_WORKFLOWS,
   },
+  // DELETE /workflows/{name}
+  {
+    match: /^\/workflows\/([^/]+)$/,
+    method: "DELETE",
+    handler: (params) => {
+      const idx = MOCK_WORKFLOWS.findIndex(
+        (w) => w.file_name.replace(".yaml", "") === params._1
+      );
+      if (idx >= 0) MOCK_WORKFLOWS.splice(idx, 1);
+      return { deleted: true, workflow_name: params._1 };
+    },
+  },
   {
     match: /^\/runs$/,
     handler: (_params) => {

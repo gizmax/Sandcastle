@@ -2,12 +2,14 @@ import { cn } from "@/lib/utils";
 
 interface ScoreRingProps {
   score: number;
-  size?: "sm" | "lg";
+  size?: "xs" | "sm" | "md" | "lg";
   className?: string;
 }
 
 const SIZES = {
+  xs: { px: 16, stroke: 2, fontSize: "text-[7px]", radius: 6 },
   sm: { px: 56, stroke: 4, fontSize: "text-base", radius: 23 },
+  md: { px: 72, stroke: 5, fontSize: "text-xl", radius: 28 },
   lg: { px: 120, stroke: 6, fontSize: "text-3xl", radius: 50 },
 } as const;
 

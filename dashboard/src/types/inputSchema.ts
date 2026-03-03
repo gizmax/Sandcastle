@@ -5,6 +5,7 @@ export interface InputSchemaProperty {
   description?: string;
   default?: unknown;
   enum?: string[];
+  format?: string;
 }
 
 export interface InputSchema {

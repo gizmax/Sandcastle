@@ -354,6 +354,52 @@ export function filterDismissed(insights: Insight[]): Insight[] {
   return insights.filter((i) => !dismissed.has(i.id));
 }
 
+// ── Shared UI utilities ──────────────────────────────────────────────────────
+
+export const SEVERITY_ORDER: Severity[] = ["critical", "warning", "optimize", "discover"];
+
+export const SEVERITY_LABELS: Record<Severity, string> = {
+  critical: "Critical",
+  warning: "Warning",
+  optimize: "Optimize",
+  discover: "Discover",
+};
+
+export function groupBySeverity(insights: Insight[]): [Severity, Insight[]][] {
+  const groups: [Severity, Insight[]][] = [];
+  for (const sev of SEVERITY_ORDER) {
+    const items = insights.filter((i) => i.severity === sev);
+    if (items.length > 0) groups.push([sev, items]);
+  }
+  return groups;
+}
+
+export function scoreLabel(score: number): string {
+  if (score >= 80) return "Healthy";
+  if (score >= 50) return "Needs Attention";
+  return "Critical";
+}
+
+export function scoreLabelColor(score: number): string {
+  if (score >= 80) return "text-emerald-500";
+  if (score >= 50) return "text-amber-500";
+  return "text-error";
+}
+
+export const DEDUCTION_CATEGORY_COLORS: Record<Deduction["category"], string> = {
+  health: "bg-error",
+  operations: "bg-amber-500",
+  quality: "bg-violet-500",
+  adoption: "bg-muted-foreground",
+};
+
+export const DEDUCTION_CATEGORY_LABELS: Record<Deduction["category"], string> = {
+  health: "Health",
+  operations: "Operations",
+  quality: "Quality",
+  adoption: "Adoption",
+};
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function criticalViolationCount(data: AdvisorData): number {

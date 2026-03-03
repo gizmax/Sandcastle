@@ -1,138 +1,211 @@
-# name: UGC Product Shoot
-# description: Generate a complete set of UGC-style product photos (portrait, flat-lay, action shot) for any product using AI image generation
-# tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce]
+# name: UGC Creative Studio
+# description: AI-powered creative studio that transforms a single product photo into a complete, platform-ready UGC content package with quality control, self-healing, and brand memory
+# tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce, AI-Studio, Brand-Memory]
 # category: creative
 
 name: ugc-product-shoot
-description: "Generate a complete set of UGC-style product photos (portrait, flat-lay, action shot) for any product using AI image generation. Produces Instagram/TikTok-ready visuals with realistic lighting, styling, and brand-appropriate aesthetics."
+description: >
+  Full-pipeline AI creative studio. Drop in a product photo and get back a complete
+  UGC content package - platform-optimized shots across multiple styles, AI quality
+  scoring with automatic re-generation of failed images, human approval gate, and
+  brand memory that learns from every run. Supports 3 budget tiers (full/standard/lean)
+  with intelligent condition routing.
 default_model: sonnet
 default_max_turns: 5
-default_timeout: 300
+default_timeout: 600
 default_tools: ["nano-banana"]
 
+memory:
+  scope: agent
+  agent: ugc-creative-studio
+  auto_inject: true
+  max_inject: 10
+  max_age_days: 90
+  enrich: true
+  conflict_check: true
+
 input_schema:
-  required: ["product_name"]
+  required: ["product_name", "product_photo"]
   properties:
     product_name:
       type: string
-      description: "Product name and brief description (e.g. 'minimalist white skincare cream jar', 'YSL Black Opium perfume bottle')"
-      example: "minimalist white skincare cream jar with gold cap"
+      description: "Product name (e.g. 'Aesop Resurrection Hand Cream')"
+      example: "Aesop Resurrection Hand Cream"
+    product_photo:
+      type: string
+      format: file-path
+      description: "Path to the product photo - Vision AI will auto-analyze everything"
+      example: "/path/to/my-product.png"
+    brand_name:
+      type: string
+      description: "Brand name for memory recall (e.g. 'Aesop')"
+      default: ""
     brand_style:
       type: string
-      description: "Brand aesthetic and mood (e.g. 'luxury minimalist', 'playful and colorful', 'dark and seductive')"
-      default: "modern and clean"
+      description: "Optional brand aesthetic override (leave blank for AI to detect from photo)"
+      default: ""
+    target_platforms:
+      type: string
+      description: "Comma-separated platforms to generate for"
+      default: "instagram-stories, instagram-feed, tiktok, pinterest"
+    budget:
+      type: string
+      enum: ["full", "standard", "lean"]
+      description: "Budget tier: full (12-18 shots, 4K, transparent product), standard (6-8 shots, 2K, transparent product), lean (3 shots, 1K, flash model)"
+      default: "standard"
+    style_variants:
+      type: string
+      description: "Comma-separated visual styles to generate"
+      default: "minimalist, lifestyle, dramatic"
     target_audience:
       type: string
-      description: "Target demographic for the UGC content (e.g. 'women 25-35, skincare enthusiasts')"
-      default: "young adults 20-35, social media active"
-    reference_image:
-      type: string
-      description: "Optional path to a product reference image for accurate replication"
-      example: "/path/to/product-photo.png"
-    size:
-      type: string
-      description: "Image resolution: 512, 1K, 2K, or 4K"
-      default: "2K"
-    model:
-      type: string
-      description: "AI model: flash (faster, cheaper) or pro (higher quality)"
-      default: "pro"
+      description: "Target demographic"
+      default: "young adults 20-35"
 
 steps:
-  - id: "analyze-product"
+  # ============================================================
+  # PHASE 1: INTELLIGENCE (parallel)
+  # ============================================================
+
+  - id: "vision-analyze"
     prompt: |
-      You are a creative director specializing in UGC (User Generated Content) product photography.
+      You are a senior product photographer with 15 years of experience in e-commerce and UGC content.
 
-      Analyze this product and create a detailed creative brief:
-      Product: {input.product_name}
-      Brand style: {input.brand_style}
-      Target audience: {input.target_audience}
+      Analyze this product photo in detail: {input.product_photo}
 
-      Return a JSON object with:
-      1. "product_description": Detailed physical description of the product (shape, colors, materials, size, textures)
-      2. "brand_colors": Array of 4-5 hex colors that match the product's brand aesthetic
-      3. "mood": Overall mood/feeling (e.g. "warm and inviting", "dark and seductive", "fresh and clean")
-      4. "props": Array of 8-10 lifestyle props that would appear alongside this product in UGC content (e.g. "white marble tray", "dried eucalyptus sprigs", "linen napkin")
-      5. "setting_indoor": Ideal indoor setting description
-      6. "setting_outdoor": Ideal outdoor setting description
-      7. "model_description": Description of the ideal UGC model/influencer (age range, style, vibe)
-      8. "lighting_style": Recommended lighting approach
+      Extract EVERYTHING you can see:
 
-      Be specific and visual. Think like an Instagram creative director.
+      1. **Physical attributes**: exact shape, dimensions estimate, materials (glass, plastic, metal, ceramic), surface finish (matte, glossy, satin, frosted), weight impression
+      2. **Colors**: extract 5-8 exact hex color codes visible on the product and packaging
+      3. **Typography & labels**: any text, font style, label placement, logo design
+      4. **Distinctive features**: cap/closure style, texture patterns, embossing, unique design elements
+      5. **Brand aesthetic**: what design language does this product communicate (minimal, luxury, playful, clinical, artisan)
+      6. **Lighting notes**: how light interacts with the surface (reflections, transparency, shadows it would cast)
+      7. **Scale reference**: estimated size relative to a human hand
+      8. **Photography challenges**: what would be tricky to photograph (reflective surfaces, transparent elements, small text)
+
+      {% if input.brand_style %}
+      Brand style override provided: {input.brand_style}
+      {% endif %}
+
+      Be extremely precise - the image generation models will use these descriptions to recreate the product.
     output_schema:
       type: object
       properties:
         product_description: { type: string }
-        brand_colors: { type: array, items: { type: string } }
-        mood: { type: string }
-        props: { type: array, items: { type: string } }
-        setting_indoor: { type: string }
-        setting_outdoor: { type: string }
-        model_description: { type: string }
-        lighting_style: { type: string }
+        colors: { type: array, items: { type: object, properties: { hex: { type: string }, name: { type: string }, location: { type: string } } } }
+        materials: { type: array, items: { type: string } }
+        surface_finish: { type: string }
+        typography: { type: string }
+        distinctive_features: { type: array, items: { type: string } }
+        brand_aesthetic: { type: string }
+        lighting_notes: { type: string }
+        scale: { type: string }
+        photography_challenges: { type: array, items: { type: string } }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
 
-  - id: "generate-prompts"
-    depends_on: ["analyze-product"]
+  - id: "brand-memory-recall"
+    model: haiku
+    memory:
+      read: true
     prompt: |
-      You are an expert at crafting photorealistic AI image generation prompts for UGC product photography.
+      You are a brand memory assistant. Check if we have any previous knowledge about this brand.
 
-      Using this creative brief:
-      {steps.analyze-product.output}
-
+      Brand name: {input.brand_name}
       Product: {input.product_name}
 
-      Generate exactly 3 detailed image generation prompts following this EXACT structure for each prompt:
-      1. Type of photo (e.g. "Photorealistic UGC Instagram photo")
-      2. Subject description (person: age, appearance, natural skin texture with light imperfections, hair, outfit)
-      3. Product interaction (how they hold/display the product, exact product description)
-      4. Setting/environment (specific location details, background elements, props)
-      5. Lighting (type, direction, warmth, shadows)
-      6. Camera specs (lens mm, aperture f-stop, focus point, depth of field)
-      7. Skin/texture notes ("natural with realistic texture, visible pores, light freckles")
-      8. Color palette (4-5 specific colors from the brief)
-      9. Style note ("authentic influencer content, not overly polished")
+      Search your memories for:
+      1. Previous successful shoots for this brand - what styles/compositions worked best
+      2. Brand color palettes we've used before
+      3. Quality scores from past runs - what scored highest
+      4. Any specific brand guidelines or preferences noted
+      5. Platform performance data if available
 
-      The 3 shots MUST be:
+      If no memories exist for this brand, return empty arrays and note this is a first-time brand.
 
-      **Shot 1 - Portrait (9:16)**
-      Model holding product near face/neck. 50mm lens, f/1.8-2.0, shallow DOF.
-      Perfect for Instagram Stories and TikTok.
+      IMPORTANT: Be concise. Only return actionable information that will help the creative director.
+    output_schema:
+      type: object
+      properties:
+        brand_known: { type: boolean }
+        previous_shoots: { type: integer }
+        best_styles: { type: array, items: { type: string } }
+        best_compositions: { type: array, items: { type: string } }
+        brand_palette: { type: array, items: { type: string } }
+        avg_quality_score: { type: number }
+        platform_insights: { type: array, items: { type: string } }
+        notes: { type: string }
 
-      **Shot 2 - Flat-lay (4:5)**
-      Overhead/top-down view. Product centered, surrounded by lifestyle props.
-      35mm lens, f/2.8, everything in focus. Perfect for Instagram Feed.
+  # ============================================================
+  # PHASE 2: CREATIVE STRATEGY
+  # ============================================================
 
-      **Shot 3 - Action/Detail (9:16)**
-      Close-up of hands interacting with product (opening, applying, spraying).
-      85mm macro, f/1.4, extreme shallow DOF. Perfect for Reels/Stories.
+  - id: "creative-director"
+    depends_on: ["vision-analyze", "brand-memory-recall"]
+    prompt: |
+      You are an elite creative director running a UGC content studio. You have deep expertise in platform-native content that drives engagement.
 
-      Return a JSON object with:
-      {
-        "shots": [
-          {
-            "name": "portrait",
-            "aspect": "9:16",
-            "prompt": "the full detailed prompt...",
-            "platform": "Instagram Stories / TikTok"
-          },
-          {
-            "name": "flat-lay",
-            "aspect": "4:5",
-            "prompt": "the full detailed prompt...",
-            "platform": "Instagram Feed"
-          },
-          {
-            "name": "action-detail",
-            "aspect": "9:16",
-            "prompt": "the full detailed prompt...",
-            "platform": "Instagram Reels / Stories"
-          }
-        ]
-      }
+      ## Product Intelligence
+      {steps.vision-analyze.output}
 
-      IMPORTANT: Each prompt must be a single, dense paragraph (no line breaks). Include ALL 9 elements.
-      IMPORTANT: Always include "natural skin with realistic texture, visible pores" to avoid uncanny valley.
-      IMPORTANT: Always specify exact lens and f-stop for realistic depth of field.
+      ## Brand Memory
+      {steps.brand-memory-recall.output}
+
+      ## Brief
+      - Product: {input.product_name}
+      - Brand: {input.brand_name}
+      - Budget tier: {input.budget}
+      - Target platforms: {input.target_platforms}
+      - Style variants: {input.style_variants}
+      - Target audience: {input.target_audience}
+
+      ## Your Task
+      Create a complete shoot plan. For each shot, define:
+      - **shot_id**: unique identifier (e.g. "ig-story-minimalist-1")
+      - **platform**: target platform
+      - **aspect**: aspect ratio (9:16 for Stories/Reels/TikTok/Pinterest, 4:5 for Feed, 1:1 for Twitter)
+      - **style**: visual style variant
+      - **scene_description**: detailed scene/environment description
+      - **model_description**: person description if applicable (age, appearance, outfit, pose) - always include "natural skin with realistic texture, visible pores" for realism
+      - **product_placement**: exactly how the product appears in the shot
+      - **props**: list of props in the scene
+      - **lighting**: lighting setup description
+      - **camera**: lens mm, aperture, focus point
+      - **mood**: emotional tone
+      - **caption_hook**: suggested social media caption hook (first line)
+
+      ## Platform specs
+      - Instagram Stories: 9:16, vertical, bold, swipe-up friendly
+      - Instagram Feed: 4:5, editorial, scroll-stopping
+      - TikTok: 9:16, authentic, trend-aware, raw energy
+      - Pinterest: 2:3, aspirational, pin-worthy, detailed
+      - Twitter/X: 16:9, clean, high-contrast
+
+      ## Shot count by budget
+      - **full**: 3-4 shots per platform x style combination (12-18 total)
+      - **standard**: 2 shots per platform x style combination (6-8 total)
+      - **lean**: 1 shot per platform, best style only (3 total)
+
+      {% if input.budget == "full" %}
+      Include shots for ALL requested platforms and ALL style variants.
+      {% elif input.budget == "standard" %}
+      Prioritize the top 2-3 platform/style combinations. Focus on highest-impact shots.
+      {% else %}
+      Pick the 3 highest-impact platform/shot combinations only. One per platform.
+      {% endif %}
+
+      ## Brand memory integration
+      {% if steps.brand-memory-recall.output.brand_known %}
+      This is a returning brand. Lean into styles that scored well previously: {steps.brand-memory-recall.output.best_styles}
+      Avoid compositions that underperformed.
+      {% else %}
+      First-time brand - create a diverse mix to establish baseline data.
+      {% endif %}
+
+      Return a JSON object with a "shots" array containing all planned shots and a "strategy_notes" string with your overall creative rationale.
     output_schema:
       type: object
       properties:
@@ -141,51 +214,387 @@ steps:
           items:
             type: object
             properties:
-              name: { type: string }
-              aspect: { type: string }
-              prompt: { type: string }
+              shot_id: { type: string }
               platform: { type: string }
+              aspect: { type: string }
+              style: { type: string }
+              scene_description: { type: string }
+              model_description: { type: string }
+              product_placement: { type: string }
+              props: { type: array, items: { type: string } }
+              lighting: { type: string }
+              camera: { type: string }
+              mood: { type: string }
+              caption_hook: { type: string }
+        strategy_notes: { type: string }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
 
-  - id: "generate-images"
-    depends_on: ["generate-prompts"]
-    parallel_over: "steps.generate-prompts.output.shots"
-    tools: ["nano-banana"]
+  # ============================================================
+  # PHASE 3: GENERATION (condition-branched)
+  # ============================================================
+
+  - id: "budget-router"
+    depends_on: ["creative-director"]
+    type: condition
+    condition: "{input.budget} == lean"
+    if_true:
+      - id: "generate-lean"
+        parallel_over: "steps.creative-director.output.shots"
+        tools: ["nano-banana"]
+        prompt: |
+          Generate a UGC product image using nano-banana.
+
+          Shot plan:
+          - Scene: {input._item.scene_description}
+          - Product placement: {input._item.product_placement}
+          - Model: {input._item.model_description}
+          - Lighting: {input._item.lighting}
+          - Camera: {input._item.camera}
+          - Mood: {input._item.mood}
+          - Props: {input._item.props}
+
+          Compose a single dense image generation prompt combining ALL the above elements.
+          Focus on photorealism, natural skin texture, authentic UGC feel.
+
+          Call nano-banana generate with:
+          - prompt: your composed prompt
+          - options:
+            - size: 1K
+            - aspect: {input._item.aspect}
+            - model: flash
+            - output: "ugc-{input._item.shot_id}"
+            - reference_images: ["{input.product_photo}"]
+
+          Return the result including the shot_id: {input._item.shot_id}
+        retry:
+          max_attempts: 2
+          backoff: exponential
+          on_failure: continue
+    if_false:
+      - id: "generate-transparent-product"
+        tools: ["nano-banana"]
+        prompt: |
+          Generate a transparent-background product cut using nano-banana.
+
+          Product analysis: {steps.vision-analyze.output.product_description}
+          Key features: {steps.vision-analyze.output.distinctive_features}
+
+          Create a prompt for a clean, studio-quality product shot on transparent background.
+          The product must be perfectly isolated with no background elements.
+          Include every physical detail from the analysis to ensure accuracy.
+
+          Call nano-banana generate with:
+          - prompt: your product isolation prompt
+          - options:
+            - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
+            - aspect: 1:1
+            - model: pro
+            - transparent: true
+            - output: "ugc-product-transparent"
+            - reference_images: ["{input.product_photo}"]
+
+          Return the result.
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          on_failure: abort
+
+      - id: "generate-scenes"
+        depends_on: ["generate-transparent-product"]
+        parallel_over: "steps.creative-director.output.shots"
+        tools: ["nano-banana"]
+        prompt: |
+          Generate a UGC product scene image using nano-banana.
+
+          A transparent product cut is available at: {steps.generate-transparent-product.output}
+
+          Shot plan:
+          - Shot ID: {input._item.shot_id}
+          - Platform: {input._item.platform}
+          - Style: {input._item.style}
+          - Scene: {input._item.scene_description}
+          - Product placement: {input._item.product_placement}
+          - Model: {input._item.model_description}
+          - Lighting: {input._item.lighting}
+          - Camera: {input._item.camera}
+          - Mood: {input._item.mood}
+          - Props: {input._item.props}
+
+          Compose a single dense image generation prompt combining ALL the above elements.
+          Focus on photorealism, natural skin texture, authentic UGC feel.
+          The product must match the reference photo exactly.
+
+          Call nano-banana generate with:
+          - prompt: your composed prompt
+          - options:
+            - size: {% if input.budget == "full" %}4K{% else %}2K{% endif %}
+            - aspect: {input._item.aspect}
+            - model: pro
+            - output: "ugc-{input._item.shot_id}"
+            - reference_images: ["{input.product_photo}"]
+
+          Return the result including the shot_id: {input._item.shot_id}
+        retry:
+          max_attempts: 2
+          backoff: exponential
+          on_failure: continue
+
+  # ============================================================
+  # PHASE 4: QUALITY + SELF-HEALING
+  # ============================================================
+
+  - id: "quality-judge"
+    depends_on: ["budget-router"]
     prompt: |
-      Generate an image using the nano-banana tool.
+      You are a senior art director and quality control specialist for UGC product photography.
 
-      Call the nano-banana generate function with:
-      - prompt: {input._item.prompt}
-      - options:
-        - size: {input.size}
-        - aspect: {input._item.aspect}
-        - model: {input.model}
-        - output: "ugc-{input._item.name}"
-        {% if input.reference_image %}- reference_images: ["{input.reference_image}"]{% endif %}
+      ## Original product reference
+      Reference photo: {input.product_photo}
+      Product analysis: {steps.vision-analyze.output}
 
-      Return the result from the tool call.
+      ## Creative brief
+      Shoot plan: {steps.creative-director.output}
 
-  - id: "compile-results"
-    depends_on: ["generate-images"]
-    model: haiku
+      ## Generated images
+      {% if input.budget == "lean" %}
+      Results: {steps.budget-router.output}
+      {% else %}
+      Transparent product: {steps.generate-transparent-product.output}
+      Scene results: {steps.generate-scenes.output}
+      {% endif %}
+
+      ## Your Task
+      Score EVERY generated image on 7 dimensions (1-10 each):
+
+      1. **product_accuracy**: Does the product match the reference? Correct colors, shape, labels, proportions?
+      2. **composition**: Rule of thirds, visual balance, focal point, negative space usage
+      3. **lighting_quality**: Natural, consistent, matches the brief, no artifacts
+      4. **authenticity**: Does it look like real UGC? Not overly polished, not AI-obvious
+      5. **platform_fit**: Would this perform well on its target platform? Right vibe, aspect, energy
+      6. **brand_coherence**: Does the style match the brand aesthetic? Color palette consistency
+      7. **technical_quality**: Resolution, sharpness, no visible artifacts, correct aspect ratio
+
+      For each image return:
+      - shot_id
+      - scores (all 7 dimensions)
+      - overall_score (weighted average: product_accuracy 25%, authenticity 20%, composition 15%, lighting 15%, platform_fit 10%, brand_coherence 10%, technical_quality 5%)
+      - pass (true if overall_score >= 6.5)
+      - issues: array of specific problems found
+      - fix_suggestions: array of prompt improvements if score < 6.5
+
+      Also return aggregate stats: total images, passed, failed, average score.
+    output_schema:
+      type: object
+      properties:
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              scores:
+                type: object
+                properties:
+                  product_accuracy: { type: number }
+                  composition: { type: number }
+                  lighting_quality: { type: number }
+                  authenticity: { type: number }
+                  platform_fit: { type: number }
+                  brand_coherence: { type: number }
+                  technical_quality: { type: number }
+              overall_score: { type: number }
+              pass: { type: boolean }
+              issues: { type: array, items: { type: string } }
+              fix_suggestions: { type: array, items: { type: string } }
+        total: { type: integer }
+        passed: { type: integer }
+        failed: { type: integer }
+        avg_score: { type: number }
+
+  - id: "quality-check"
+    depends_on: ["quality-judge"]
+    type: condition
+    condition: "{steps.quality-judge.output.failed} > 0"
+    if_true:
+      - id: "regenerate-failed"
+        tools: ["nano-banana"]
+        prompt: |
+          Some images failed quality control. Regenerate them with improved prompts.
+
+          ## Failed images and fix suggestions
+          {steps.quality-judge.output}
+
+          ## Product reference
+          Reference photo: {input.product_photo}
+          Product analysis: {steps.vision-analyze.output}
+
+          For each FAILED image (pass: false):
+          1. Read the fix_suggestions from the quality judge
+          2. Compose an improved prompt addressing every listed issue
+          3. Regenerate using nano-banana with the same settings but improved prompt
+
+          Call nano-banana generate for each failed image with:
+          - prompt: the improved prompt incorporating fix suggestions
+          - options:
+            - size: {% if input.budget == "full" %}4K{% elif input.budget == "standard" %}2K{% else %}1K{% endif %}
+            - aspect: (same as original shot)
+            - model: {% if input.budget == "lean" %}flash{% else %}pro{% endif %}
+            - output: "ugc-regen-{shot_id}"
+            - reference_images: ["{input.product_photo}"]
+
+          Return all regenerated results along with the original passing images from the quality judge.
+        retry:
+          max_attempts: 2
+          backoff: exponential
+          on_failure: continue
+    if_false: []
+
+  # ============================================================
+  # PHASE 5: HUMAN APPROVAL
+  # ============================================================
+
+  - id: "creative-review"
+    depends_on: ["quality-check"]
+    type: approval
     prompt: |
-      Compile the UGC product shoot results into a final summary.
+      Prepare a creative review package for the client.
 
+      ## Product
+      {input.product_name} by {input.brand_name}
+
+      ## Quality Report
+      {steps.quality-judge.output}
+
+      ## Generated Images
+      {% if steps.quality-judge.output.failed > 0 %}
+      Original + regenerated images: {steps.quality-check.output}
+      {% else %}
+      All images passed quality control.
+      {% endif %}
+
+      ## Creative Strategy
+      {steps.creative-director.output.strategy_notes}
+
+      Present a clean summary showing:
+      1. Each generated image with its shot type, platform, style, and quality score
+      2. Overall quality metrics
+      3. Recommended posting order
+      4. Any images that were regenerated (and why)
+    approval_config:
+      message: "Review your UGC Creative Studio output. Approve to finalize the delivery package, or edit to request changes."
+      show_data: steps.quality-judge.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # ============================================================
+  # PHASE 6: FINALIZE (parallel)
+  # ============================================================
+
+  - id: "final-deliverables"
+    depends_on: ["creative-review"]
+    prompt: |
+      Compile the final UGC Creative Studio delivery package.
+
+      ## Approved content
+      Quality report: {steps.quality-judge.output}
+      Creative strategy: {steps.creative-director.output}
+      Product analysis: {steps.vision-analyze.output}
+
+      ## Client info
       Product: {input.product_name}
-      Generation results: {steps.generate-images.output}
-      Creative brief: {steps.analyze-product.output}
+      Brand: {input.brand_name}
+      Platforms: {input.target_platforms}
+      Budget tier: {input.budget}
 
-      Create a structured summary with:
-      1. **Overview**: Product name, number of images generated, total estimated cost
-      2. **Generated Images**: For each image - file path, shot type, aspect ratio, recommended platform
-      3. **Platform Recommendations**:
-         - Instagram Feed: which image(s) to use
-         - Instagram Stories: which image(s) to use
-         - TikTok: which image(s) to use
-         - Pinterest: which image(s) to use
-      4. **Cost Breakdown**: Per-image cost and total
-      5. **Next Steps**: Suggestions for post-processing (cropping, filters, text overlays)
+      Create a comprehensive delivery document with:
 
-      Format as clean, readable markdown.
+      1. **Executive Summary**
+         - Total images delivered
+         - Average quality score
+         - Budget tier and estimated cost
+         - Platforms covered
+
+      2. **Image Catalog**
+         For each image:
+         - File path
+         - Shot type and style
+         - Target platform and aspect ratio
+         - Quality score and highlights
+         - Recommended posting time (platform best practices)
+
+      3. **Platform Strategy**
+         For each platform:
+         - Which images to use
+         - Recommended posting sequence
+         - Caption suggestions with hooks
+         - Hashtag sets (10-15 per platform)
+         - Best posting times
+
+      4. **Content Calendar**
+         - Suggested 2-week posting schedule
+         - A/B testing suggestions (which images to test against each other)
+
+      5. **Cost Breakdown**
+         - Per-image generation cost
+         - Transparent product cut cost (if applicable)
+         - Regeneration costs (if applicable)
+         - LLM analysis costs
+         - Total
+
+      Format as clean, professional markdown.
+
+  - id: "brand-memory-save"
+    depends_on: ["creative-review"]
+    model: haiku
+    memory:
+      read: true
+      write: true
+    prompt: |
+      Save learnings from this UGC Creative Studio run to brand memory.
+
+      ## Run data
+      - Brand: {input.brand_name}
+      - Product: {input.product_name}
+      - Budget: {input.budget}
+      - Platforms: {input.target_platforms}
+      - Styles: {input.style_variants}
+
+      ## Quality results
+      {steps.quality-judge.output}
+
+      ## Creative strategy used
+      {steps.creative-director.output.strategy_notes}
+
+      ## What to remember
+      Distill the key learnings into concise memory entries:
+      1. Which styles scored highest for this brand
+      2. Which platform/style combinations worked best
+      3. Any quality issues that required regeneration (to avoid next time)
+      4. The brand's color palette (confirmed from product analysis)
+      5. Overall quality score for benchmarking future runs
+
+      Write these as clear, actionable memories that will help the creative director
+      make better decisions on future runs for this brand.
+
+      Return a summary of what was saved to memory.
+    output_schema:
+      type: object
+      properties:
+        memories_saved: { type: integer }
+        summary: { type: string }
+        brand_profile:
+          type: object
+          properties:
+            top_styles: { type: array, items: { type: string } }
+            avg_quality: { type: number }
+            runs_completed: { type: integer }
 
 on_complete:
-  storage_path: "ugc-shoots/{run_id}/results.json"
+  storage_path: "ugc-shoots/{run_id}/deliverables.json"
+
+on_failure:
+  storage_path: "ugc-shoots/{run_id}/error-report.json"
