@@ -1004,7 +1004,7 @@ describe("useToasts", () => {
     const { result } = renderHook(() => useToasts());
     act(() => {
       for (let i = 0; i < 7; i++) {
-        result.current.addToast("info", `Toast ${i}`);
+        result.current.addToast("warning", `Toast ${i}`);
       }
     });
     expect(result.current.toasts.length).toBeLessThanOrEqual(5);
