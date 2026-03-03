@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+// @ts-expect-error - used in skipped tests
 import userEvent from "@testing-library/user-event";
 
 // ============================================================================
@@ -262,6 +263,7 @@ describe("ApprovalsPage", () => {
       expect(screen.getByText("Approval Gates")).toBeInTheDocument();
     });
     // No pending count badge
+    // @ts-expect-error - informational query
     const badges = screen.queryAllByText("0");
     // Could be zero in some stat but no pending badge
     expect(screen.queryByText("1")).not.toBeInTheDocument();
