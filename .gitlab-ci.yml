@@ -1,0 +1,38 @@
+stages:
+  - build
+  - deploy
+
+build-dashboard:
+  stage: build
+  image: node:20-alpine
+  script:
+    - cd dashboard
+    - npm ci
+    - GITLAB_PAGES=true npm run build
+    - cp dist/index.html dist/404.html
+  artifacts:
+    paths:
+      - dashboard/dist
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - dashboard/**
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+pages:
+  stage: deploy
+  script:
+    - mkdir -p public
+    - cp -r dashboard/dist/* public/
+  artifacts:
+    paths:
+      - public
+  needs:
+    - build-dashboard
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - dashboard/**
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "web"

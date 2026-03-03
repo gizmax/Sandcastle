@@ -4,7 +4,11 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 export default defineConfig({
-  base: process.env.GITHUB_PAGES ? "/Sandcastle/" : "/",
+  base: process.env.GITHUB_PAGES
+    ? "/Sandcastle/"
+    : process.env.GITLAB_PAGES
+      ? "/sandcastle/"
+      : "/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
