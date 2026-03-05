@@ -1,5 +1,5 @@
-import { memo } from "react";
-import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle } from "lucide-react";
+import { memo, useState } from "react";
+import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // --- Mock workflow stats (deterministic, based on workflow name hash) ---
@@ -65,8 +65,10 @@ interface WorkflowCardProps {
   versionStatus?: string | null;
   totalVersions?: number | null;
   selected?: boolean;
+  pinned?: boolean;
   stats?: WorkflowStats;
   onSelect?: () => void;
+  onTogglePin?: () => void;
   onRun: () => void;
   onEdit: () => void;
   onViewDag: () => void;
@@ -81,8 +83,10 @@ export const WorkflowCard = memo(function WorkflowCard({
   versionStatus,
   totalVersions,
   selected,
+  pinned,
   stats,
   onSelect,
+  onTogglePin,
   onRun,
   onEdit,
   onViewDag,
@@ -90,16 +94,43 @@ export const WorkflowCard = memo(function WorkflowCard({
 }: WorkflowCardProps) {
   const health = stats ? deriveHealth(stats.successRate) : null;
   const hc = health ? healthConfig[health] : null;
+  const [pinBounce, setPinBounce] = useState(false);
+
+  const handlePinClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onTogglePin) return;
+    setPinBounce(true);
+    onTogglePin();
+    setTimeout(() => setPinBounce(false), 200);
+  };
 
   return (
     <div
       className={cn(
-        "relative rounded-xl border border-border bg-surface p-5 shadow-sm",
+        "group/card relative rounded-xl border border-border bg-surface p-5 shadow-sm",
         "transition-all duration-200",
         "hover:shadow-md hover:border-accent/40 hover:-translate-y-0.5",
         selected && "border-accent ring-2 ring-accent/20"
       )}
     >
+      {/* Pin / star button */}
+      {onTogglePin && (
+        <button
+          type="button"
+          onClick={handlePinClick}
+          aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
+          className={cn(
+            "absolute left-3 top-3 flex h-5 w-5 items-center justify-center rounded transition-all duration-200",
+            pinned
+              ? "text-accent"
+              : "text-muted opacity-0 group-hover/card:opacity-100 hover:opacity-100 hover:text-accent/70"
+          )}
+          style={{ transform: pinBounce ? "scale(1.2)" : "scale(1)", transition: "transform 200ms ease" }}
+        >
+          <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
+        </button>
+      )}
+
       {/* Selection checkbox */}
       {onSelect && (
         <button

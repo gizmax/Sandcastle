@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, RotateCcw, Upload, X, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, GitCompare, RotateCcw, Upload, X, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { VersionHistory } from "@/components/workflows/VersionHistory";
@@ -219,10 +219,26 @@ export default function WorkflowDetailPage() {
 
       {/* Version history */}
       <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
-        <div className="border-b border-border px-4 py-3">
+        <div className="border-b border-border px-4 py-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">
             Version History ({data.versions.length})
           </h2>
+          {data.versions.length >= 2 && (
+            <button
+              onClick={() => {
+                const sorted = [...data.versions].sort((a, b) => b.version - a.version);
+                setDiffModal({ a: sorted[1].version, b: sorted[0].version });
+              }}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5",
+                "text-xs font-medium text-muted",
+                "hover:text-accent hover:border-accent/40 hover:bg-accent/5 transition-colors"
+              )}
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              Compare Versions
+            </button>
+          )}
         </div>
         <VersionHistory
           versions={data.versions}
@@ -287,6 +303,7 @@ export default function WorkflowDetailPage() {
           workflowName={name}
           versionA={diffModal.a}
           versionB={diffModal.b}
+          availableVersions={data.versions.map((v) => v.version)}
         />
       )}
 

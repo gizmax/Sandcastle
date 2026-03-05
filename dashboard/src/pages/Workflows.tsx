@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, Plus, Trash2 } from "lucide-react";
+import { GitBranch, Plus, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
+import { WorkflowCard, mockWorkflowStats } from "@/components/workflows/WorkflowCard";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import { DagGraph } from "@/components/workflows/DagGraph";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { cn } from "@/lib/utils";
 import type { InputSchema } from "@/types/inputSchema";
 
@@ -43,6 +45,12 @@ export default function Workflows() {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<"delete" | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const { pinnedWorkflows, togglePin } = usePinnedWorkflows();
+
+  const pinnedWfs = useMemo(
+    () => workflows.filter((wf) => pinnedWorkflows.includes(wf.name)),
+    [workflows, pinnedWorkflows]
+  );
 
   const fetchWorkflows = useCallback(async () => {
     try {
@@ -170,6 +178,38 @@ export default function Workflows() {
               Clear
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Pinned workflows section */}
+      {pinnedWfs.length > 0 && workflows.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-muted-foreground">
+            <Star className="h-3 w-3 fill-current text-accent" />
+            Pinned
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {pinnedWfs.map((wf) => (
+              <WorkflowCard
+                key={`pinned-${wf.file_name}`}
+                name={wf.name}
+                description={wf.description}
+                stepsCount={wf.steps_count}
+                fileName={wf.file_name}
+                version={wf.version}
+                versionStatus={wf.version_status}
+                totalVersions={wf.total_versions}
+                pinned={true}
+                stats={mockWorkflowStats(wf.name)}
+                onTogglePin={() => togglePin(wf.name)}
+                onRun={() => setRunModal(wf)}
+                onEdit={() => navigate("/workflows/builder", { state: { workflow: wf } })}
+                onViewDag={() => setDagWorkflow(wf)}
+                onViewVersions={() => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
+              />
+            ))}
+          </div>
+          <div className="border-b border-border" />
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown } from "lucide-react";
+import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -10,9 +10,12 @@ import { LiveStream } from "@/components/runs/LiveStream";
 import { RunTree } from "@/components/runs/RunTree";
 import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
 import { PipelineViz } from "@/components/runs/PipelineViz";
+import { StepFlamegraph } from "@/components/runs/StepFlamegraph";
 import { BudgetBar } from "@/components/shared/BudgetBar";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { CelebrationModal } from "@/components/shared/CelebrationModal";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { fireConfetti, playCelebrationSound } from "@/lib/confetti";
 import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn } from "@/lib/utils";
 
 interface Step {
@@ -61,8 +64,13 @@ export default function RunDetailPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"replay" | "fork">("replay");
   const [modalStepId, setModalStepId] = useState("");
+  const [celebrationOpen, setCelebrationOpen] = useState(false);
+  const [celebrationMilestone, setCelebrationMilestone] = useState<number | null>(null);
+  const [vizMode, setVizMode] = useState<"pipeline" | "flamegraph">("pipeline");
+  const [flamegraphExpanded, setFlamegraphExpanded] = useState(true);
   const { notifyRunComplete } = useNotifications();
   const prevStatusRef = useRef<string | null>(null);
+  const celebratedRef = useRef(false);
 
   const fetchRun = useCallback(async (cancelled?: { current: boolean }) => {
     if (!id) return;
@@ -96,22 +104,56 @@ export default function RunDetailPage() {
 
   const runStatus = run?.status ?? null;
 
-  // Detect run completion and fire browser notification when page is hidden
+  // Detect run completion: browser notification + celebration
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = runStatus;
 
     if (!run || !runStatus) return;
-    if (!prev || !["running", "queued"].includes(prev)) return;
-    if (!["completed", "failed"].includes(runStatus)) return;
-    if (!document.hidden) return;
 
-    notifyRunComplete({
-      run_id: run.run_id,
-      workflow_name: run.workflow_name,
-      status: run.status,
-      total_cost_usd: run.total_cost_usd,
-    });
+    const wasActive = prev !== null && ["running", "queued"].includes(prev);
+    const justCompleted = runStatus === "completed";
+    const justFinished = ["completed", "failed"].includes(runStatus);
+
+    // Browser notification (when page is hidden)
+    if (wasActive && justFinished && document.hidden) {
+      notifyRunComplete({
+        run_id: run.run_id,
+        workflow_name: run.workflow_name,
+        status: run.status,
+        total_cost_usd: run.total_cost_usd,
+      });
+    }
+
+    // Celebration (only for "completed", not "failed")
+    if (wasActive && justCompleted && !celebratedRef.current) {
+      celebratedRef.current = true;
+
+      const COUNTER_KEY = "sandcastle-successful-run-count";
+      const FIRST_KEY = "sandcastle-first-run-celebrated";
+      const rawCount = localStorage.getItem(COUNTER_KEY);
+      const newCount = (rawCount ? parseInt(rawCount, 10) : 0) + 1;
+      localStorage.setItem(COUNTER_KEY, String(newCount));
+
+      const isFirstRun = !localStorage.getItem(FIRST_KEY);
+
+      if (isFirstRun) {
+        localStorage.setItem(FIRST_KEY, "true");
+        fireConfetti(100);
+        playCelebrationSound();
+        setTimeout(() => {
+          setCelebrationMilestone(null);
+          setCelebrationOpen(true);
+        }, 400);
+      } else if ([10, 50, 100].includes(newCount)) {
+        fireConfetti(40);
+        playCelebrationSound();
+        setTimeout(() => {
+          setCelebrationMilestone(newCount);
+          setCelebrationOpen(true);
+        }, 400);
+      }
+    }
   }, [runStatus, run, notifyRunComplete]);
 
   useEffect(() => {
@@ -427,9 +469,68 @@ export default function RunDetailPage() {
       {/* Live stream for running runs */}
       {isRunning && id && <LiveStream runId={id} />}
 
-      {/* Pipeline visualization */}
+      {/* Pipeline / Flamegraph visualization */}
       {run.steps && run.steps.length > 0 && (
-        <PipelineViz steps={run.steps} />
+        <div className="space-y-4">
+          {/* Pipeline or Flamegraph based on toggle */}
+          {vizMode === "pipeline" ? (
+            <PipelineViz steps={run.steps} />
+          ) : null}
+
+          {/* Execution Timeline (Flamegraph) - collapsible */}
+          <div className="rounded-xl border border-border bg-surface shadow-sm">
+            <div className="flex items-center justify-between px-4 py-3">
+              <button
+                onClick={() => setFlamegraphExpanded(!flamegraphExpanded)}
+                className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+              >
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 transition-transform duration-200",
+                    !flamegraphExpanded && "-rotate-90"
+                  )}
+                />
+                Execution Timeline
+              </button>
+
+              {/* Pipeline | Flamegraph toggle */}
+              <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
+                <button
+                  onClick={() => setVizMode("pipeline")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
+                    vizMode === "pipeline"
+                      ? "bg-accent text-accent-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  )}
+                >
+                  Pipeline
+                </button>
+                <button
+                  onClick={() => setVizMode("flamegraph")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
+                    vizMode === "flamegraph"
+                      ? "bg-accent text-accent-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  )}
+                >
+                  Flamegraph
+                </button>
+              </div>
+            </div>
+
+            {flamegraphExpanded && (
+              <div className="border-t border-border p-4 overflow-x-auto">
+                {vizMode === "flamegraph" ? (
+                  <StepFlamegraph steps={run.steps} />
+                ) : (
+                  <StepFlamegraph steps={run.steps} />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Step timeline */}
@@ -539,6 +640,17 @@ export default function RunDetailPage() {
         stepId={modalStepId}
         mode={modalMode}
         onSubmit={handleModalSubmit}
+      />
+
+      {/* Celebration Modal */}
+      <CelebrationModal
+        open={celebrationOpen}
+        onClose={() => setCelebrationOpen(false)}
+        workflowName={run.workflow_name}
+        runId={run.run_id}
+        costUsd={run.total_cost_usd}
+        durationSeconds={duration}
+        milestone={celebrationMilestone}
       />
     </div>
   );

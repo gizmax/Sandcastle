@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { PlayCircle, Trash2, XCircle, Search, AlertTriangle } from "lucide-react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { PlayCircle, Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
+import { useSavedFilters, type SavedFilterCriteria } from "@/hooks/useSavedFilters";
 import { RunsTable } from "@/components/runs/RunsTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -26,7 +27,14 @@ export default function Runs() {
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
   const [successRate, setSuccessRate] = useState<number | null>(null);
+  const [showSavePopover, setShowSavePopover] = useState(false);
+  const [filterName, setFilterName] = useState("");
+  const [activeFilterId, setActiveFilterId] = useState<string | null>(null);
+  const [filterToDelete, setFilterToDelete] = useState<string | null>(null);
+  const savePopoverRef = useRef<HTMLDivElement>(null);
   const limit = 20;
+
+  const { savedFilters, saveCurrentFilter, deleteFilter, getFilter } = useSavedFilters();
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +46,75 @@ export default function Runs() {
     });
     return () => { cancelled = true; };
   }, []);
+
+  const hasActiveFilter = statusFilter !== "all" || searchTerm !== "" || workflowFilter !== "";
+
+  const currentFilterCriteria: SavedFilterCriteria = useMemo(() => ({
+    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+    ...(searchTerm ? { search: searchTerm } : {}),
+    ...(workflowFilter ? { workflow: workflowFilter } : {}),
+  }), [statusFilter, searchTerm, workflowFilter]);
+
+  const applyFilter = useCallback((id: string) => {
+    const filter = getFilter(id);
+    if (!filter) return;
+    setStatusFilter(filter.filters.status ?? "all");
+    setSearchTerm(filter.filters.search ?? "");
+    setWorkflowFilter(filter.filters.workflow ?? "");
+    setActiveFilterId(id);
+    setOffset(0);
+    setSelectedIds(new Set());
+  }, [getFilter]);
+
+  const applyQuickFilter = useCallback((criteria: SavedFilterCriteria) => {
+    setStatusFilter(criteria.status ?? "all");
+    setSearchTerm(criteria.search ?? "");
+    setWorkflowFilter(criteria.workflow ?? "");
+    setActiveFilterId(null);
+    setOffset(0);
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleSaveFilter = useCallback(() => {
+    const result = saveCurrentFilter(filterName, currentFilterCriteria);
+    if (result) {
+      toast.success("Filter saved");
+      setActiveFilterId(result.id);
+      setShowSavePopover(false);
+      setFilterName("");
+    }
+  }, [filterName, currentFilterCriteria, saveCurrentFilter]);
+
+  const handleDeleteFilter = useCallback((id: string) => {
+    deleteFilter(id);
+    if (activeFilterId === id) setActiveFilterId(null);
+    setFilterToDelete(null);
+    toast.success("Filter deleted");
+  }, [deleteFilter, activeFilterId]);
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!showSavePopover) return;
+    function handleClick(e: MouseEvent) {
+      if (savePopoverRef.current && !savePopoverRef.current.contains(e.target as Node)) {
+        setShowSavePopover(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showSavePopover]);
+
+  // Clear active filter ID when filters change manually
+  useEffect(() => {
+    if (!activeFilterId) return;
+    const filter = getFilter(activeFilterId);
+    if (!filter) { setActiveFilterId(null); return; }
+    const matches =
+      (filter.filters.status ?? "all") === statusFilter &&
+      (filter.filters.search ?? "") === searchTerm &&
+      (filter.filters.workflow ?? "") === workflowFilter;
+    if (!matches) setActiveFilterId(null);
+  }, [statusFilter, searchTerm, workflowFilter, activeFilterId, getFilter]);
 
   const { runs, total, loading, error: runsError, refetch } = useRuns({
     status: statusFilter === "all" ? undefined : statusFilter,
@@ -155,7 +232,146 @@ export default function Runs() {
               </option>
             ))}
           </select>
+
+          {/* Save filter button */}
+          {hasActiveFilter && (
+            <div className="relative" ref={savePopoverRef}>
+              <button
+                onClick={() => setShowSavePopover((p) => !p)}
+                aria-label="Save current filter"
+                className={cn(
+                  "flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium",
+                  "text-muted hover:text-foreground hover:border-accent/40 transition-colors",
+                  showSavePopover && "border-accent/40 text-accent"
+                )}
+              >
+                <BookmarkPlus className="h-3.5 w-3.5" />
+                Save
+              </button>
+              {showSavePopover && (
+                <div
+                  className={cn(
+                    "absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-border",
+                    "bg-surface shadow-lg p-3 space-y-2"
+                  )}
+                >
+                  <label className="text-xs font-medium text-foreground">Filter name</label>
+                  <input
+                    type="text"
+                    value={filterName}
+                    onChange={(e) => setFilterName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && filterName.trim()) handleSaveFilter(); }}
+                    placeholder="e.g. Failed production runs"
+                    autoFocus
+                    className={cn(
+                      "h-8 w-full rounded-lg border border-border bg-background px-3 text-xs",
+                      "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                    )}
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSaveFilter}
+                      disabled={!filterName.trim()}
+                      className={cn(
+                        "flex-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
+                        "hover:bg-accent/90 transition-colors",
+                        "disabled:opacity-40 disabled:cursor-not-allowed"
+                      )}
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => { setShowSavePopover(false); setFilterName(""); }}
+                      className="text-xs text-muted hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {savedFilters.length >= 10 && (
+                    <p className="text-[10px] text-muted">Max 10 filters. Oldest will be removed.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Saved filters pills */}
+        {savedFilters.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Bookmark className="h-3.5 w-3.5 text-muted shrink-0" />
+            {savedFilters.map((sf) => {
+              const isActive = activeFilterId === sf.id;
+              const details = [
+                sf.filters.status && `status: ${sf.filters.status}`,
+                sf.filters.search && `search: "${sf.filters.search}"`,
+                sf.filters.workflow && `workflow: ${sf.filters.workflow}`,
+              ].filter(Boolean).join(", ");
+              return (
+                <span
+                  key={sf.id}
+                  className={cn(
+                    "group relative inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs",
+                    "border cursor-pointer transition-all duration-200",
+                    isActive
+                      ? "bg-accent/15 border-accent text-accent glow-accent"
+                      : "bg-surface border-border text-foreground hover:border-accent/30 hover:bg-accent/5"
+                  )}
+                  title={details}
+                  onClick={() => applyFilter(sf.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") applyFilter(sf.id); }}
+                >
+                  {sf.name}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setFilterToDelete(sf.id); }}
+                    aria-label={`Delete filter "${sf.name}"`}
+                    className={cn(
+                      "ml-0.5 rounded-full p-0.5 transition-colors",
+                      "text-muted hover:text-error hover:bg-error/10",
+                      "opacity-0 group-hover:opacity-100"
+                    )}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Zap className="h-3.5 w-3.5 text-muted shrink-0" />
+            <span className="text-xs text-muted mr-1">Quick filters:</span>
+            <button
+              onClick={() => applyQuickFilter({ status: "failed" })}
+              className={cn(
+                "rounded-full border border-border bg-surface px-3 py-1 text-xs",
+                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-all duration-200"
+              )}
+            >
+              Failed Today
+            </button>
+            <button
+              onClick={() => applyQuickFilter({ status: "running" })}
+              className={cn(
+                "rounded-full border border-border bg-surface px-3 py-1 text-xs",
+                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-all duration-200"
+              )}
+            >
+              Running Now
+            </button>
+            <button
+              onClick={() => applyQuickFilter({ status: "completed" })}
+              className={cn(
+                "rounded-full border border-border bg-surface px-3 py-1 text-xs",
+                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-all duration-200"
+              )}
+            >
+              Expensive Runs
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Bulk actions bar */}
@@ -265,6 +481,15 @@ export default function Runs() {
         variant="warning"
         onConfirm={handleBulkCancel}
         onCancel={() => setBulkAction(null)}
+      />
+      <ConfirmDialog
+        open={filterToDelete !== null}
+        title="Delete Saved Filter"
+        description="Remove this saved filter? This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => { if (filterToDelete) handleDeleteFilter(filterToDelete); }}
+        onCancel={() => setFilterToDelete(null)}
       />
     </div>
   );

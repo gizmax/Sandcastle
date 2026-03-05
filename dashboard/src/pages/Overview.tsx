@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Castle, Play, AlertTriangle, BarChart3 } from "lucide-react";
+import { Castle, Play, AlertTriangle, BarChart3, Star, CheckCircle, XCircle, Clock } from "lucide-react";
 import { api } from "@/api/client";
 import { StatsCards } from "@/components/overview/StatsCards";
 import { RunsChart } from "@/components/overview/RunsChart";
@@ -10,6 +10,8 @@ import { HealthHero } from "@/components/overview/HealthHero";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
+import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
+import { mockWorkflowStats } from "@/components/workflows/WorkflowCard";
 import { cn } from "@/lib/utils";
 
 interface Stats {
@@ -302,6 +304,76 @@ function QuickActions() {
 }
 
 // ---------------------------------------------------------------------------
+// Pinned Workflows Widget
+// ---------------------------------------------------------------------------
+
+function PinnedWorkflowsWidget() {
+  const navigate = useNavigate();
+  const { pinnedWorkflows } = usePinnedWorkflows();
+
+  if (pinnedWorkflows.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <Star className="h-4 w-4 fill-current text-accent" />
+        <h3 className="text-sm font-medium text-foreground">Pinned Workflows</h3>
+      </div>
+      <div className="space-y-2">
+        {pinnedWorkflows.map((wfName) => {
+          const stats = mockWorkflowStats(wfName);
+          const healthColor =
+            stats.successRate >= 90 ? "bg-success" :
+            stats.successRate >= 70 ? "bg-warning" :
+            "bg-error";
+          return (
+            <div
+              key={wfName}
+              className="flex items-center gap-3 rounded-lg border border-border/50 bg-background px-3 py-2.5"
+            >
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", healthColor)} />
+              <button
+                onClick={() => navigate(`/workflows/${encodeURIComponent(wfName)}`)}
+                className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:text-accent transition-colors"
+              >
+                {wfName}
+              </button>
+              <span className="flex items-center gap-1 text-xs text-muted shrink-0">
+                {stats.lastRunStatus === "completed" && (
+                  <CheckCircle className="h-3 w-3 text-success" />
+                )}
+                {stats.lastRunStatus === "failed" && (
+                  <XCircle className="h-3 w-3 text-error" />
+                )}
+                {stats.lastRunStatus === "running" && (
+                  <Clock className="h-3 w-3 text-running" />
+                )}
+                {!stats.lastRunStatus && (
+                  <Clock className="h-3 w-3" />
+                )}
+                <span className="hidden sm:inline">
+                  {stats.lastRunAgo ?? "Never"}
+                </span>
+              </span>
+              <button
+                onClick={() => navigate(`/workflows/${encodeURIComponent(wfName)}`)}
+                className={cn(
+                  "flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-xs font-medium text-accent-foreground",
+                  "hover:bg-accent-hover transition-all duration-200 shadow-sm shrink-0"
+                )}
+              >
+                <Play className="h-3 w-3" />
+                Run
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Overview page
 // ---------------------------------------------------------------------------
 
@@ -403,6 +475,8 @@ export default function Overview() {
       />
 
       <QuickActions />
+
+      <PinnedWorkflowsWidget />
 
       <ActivityHeatmap cells={mockHeatmap} />
 
