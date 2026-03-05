@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward, RefreshCw, MessageSquare } from "lucide-react";
+import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward, RefreshCw, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -250,7 +250,7 @@ export default function ApprovalsPage() {
                   tabIndex={0}
                   aria-expanded={isExpanded}
                   aria-label={`${item.message} - ${isExpanded ? "collapse" : "expand"} details`}
-                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
+                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 sm:py-4 cursor-pointer hover:bg-border/10 transition-colors focus-visible:outline-none focus-visible:bg-border/10"
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -323,7 +323,7 @@ export default function ApprovalsPage() {
                           "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        {actionLoading.has(item.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                         Approve
                       </button>
                       <button
@@ -338,7 +338,7 @@ export default function ApprovalsPage() {
                           "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
-                        <XCircle className="h-3.5 w-3.5" />
+                        {actionLoading.has(item.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
                         Reject
                       </button>
                       <button
@@ -353,7 +353,7 @@ export default function ApprovalsPage() {
                           "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
-                        <SkipForward className="h-3.5 w-3.5" />
+                        {actionLoading.has(item.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SkipForward className="h-3.5 w-3.5" />}
                         Skip
                       </button>
                     </div>
@@ -458,7 +458,7 @@ export default function ApprovalsPage() {
                                   setRegenFeedback((prev) => ({ ...prev, [item.id]: e.target.value }))
                                 }
                                 placeholder="Feedback for regeneration (e.g. 'too dark, wrong angle, product label not visible')"
-                                className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted resize-none focus:outline-none focus:ring-1 focus:ring-accent"
+                                className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                                 rows={2}
                               />
                             </div>

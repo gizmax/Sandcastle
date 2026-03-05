@@ -8,10 +8,10 @@ import { CostChart } from "@/components/overview/CostChart";
 import { RecentRuns } from "@/components/overview/RecentRuns";
 import { HealthHero } from "@/components/overview/HealthHero";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { mockWorkflowStats } from "@/components/workflows/WorkflowCard";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 
 interface Stats {
@@ -415,8 +415,25 @@ export default function Overview() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <LoadingSpinner size="lg" />
+      <div className="space-y-4 sm:space-y-6">
+        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
+        </div>
+        <div className="flex gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-9 w-32 rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
+          <Skeleton className="h-56 rounded-xl" />
+          <Skeleton className="h-56 rounded-xl" />
+        </div>
+        <Skeleton className="h-48 w-full rounded-xl" />
       </div>
     );
   }

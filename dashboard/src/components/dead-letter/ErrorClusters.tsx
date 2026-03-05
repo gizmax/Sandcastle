@@ -9,6 +9,7 @@ import {
   Layers,
   Clock,
   Hash,
+  Loader2,
 } from "lucide-react";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import type { DLQItem } from "./DeadLetterTable";
@@ -160,6 +161,7 @@ function SummaryStats({ items, clusters }: SummaryStatsProps) {
 
 interface ClusterCardProps {
   cluster: ErrorCluster;
+  actionLoading?: Set<string>;
   onRetry: (id: string) => void;
   onResolve: (id: string) => void;
   onBatchRetry: (ids: string[]) => void;
@@ -174,6 +176,7 @@ function severityColor(count: number): string {
 
 function ClusterCard({
   cluster,
+  actionLoading,
   onRetry,
   onResolve,
   onBatchRetry,
@@ -280,17 +283,25 @@ function ClusterCard({
                 ) : (
                   <div className="ml-auto flex items-center gap-2">
                     <button
+                      disabled={actionLoading?.has(item.id)}
                       onClick={() => onRetry(item.id)}
-                      className="flex items-center gap-1 text-running hover:text-running/80 transition-colors"
+                      className={cn(
+                        "flex items-center gap-1 text-running hover:text-running/80 transition-colors",
+                        "disabled:opacity-50 disabled:cursor-not-allowed"
+                      )}
                     >
-                      <RotateCcw className="h-3 w-3" />
+                      {actionLoading?.has(item.id) ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
                       Retry
                     </button>
                     <button
+                      disabled={actionLoading?.has(item.id)}
                       onClick={() => onResolve(item.id)}
-                      className="flex items-center gap-1 text-success hover:text-success/80 transition-colors"
+                      className={cn(
+                        "flex items-center gap-1 text-success hover:text-success/80 transition-colors",
+                        "disabled:opacity-50 disabled:cursor-not-allowed"
+                      )}
                     >
-                      <CheckCircle className="h-3 w-3" />
+                      {actionLoading?.has(item.id) ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
                       Resolve
                     </button>
                   </div>
@@ -310,6 +321,7 @@ function ClusterCard({
 
 interface ErrorClustersProps {
   items: DLQItem[];
+  actionLoading?: Set<string>;
   onRetry: (id: string) => void;
   onResolve: (id: string) => void;
   onBatchRetry: (ids: string[]) => void;
@@ -318,6 +330,7 @@ interface ErrorClustersProps {
 
 export function ErrorClusters({
   items,
+  actionLoading,
   onRetry,
   onResolve,
   onBatchRetry,
@@ -334,6 +347,7 @@ export function ErrorClusters({
           <ClusterCard
             key={cluster.pattern}
             cluster={cluster}
+            actionLoading={actionLoading}
             onRetry={onRetry}
             onResolve={onResolve}
             onBatchRetry={onBatchRetry}

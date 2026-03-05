@@ -118,7 +118,7 @@ function PipelineNode({
           "relative h-7 w-7 rounded-full border-2 border-surface",
           "transition-all duration-200 cursor-pointer",
           "hover:scale-125 hover:shadow-md",
-          "focus:outline-none focus:ring-2 focus:ring-ring/40",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           isRunning && "pipeline-node-pulse"
         )}
         style={{ backgroundColor: color }}

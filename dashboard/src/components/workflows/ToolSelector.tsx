@@ -140,7 +140,7 @@ export function ToolSelector({ selected, onChange, compact = false }: ToolSelect
                     type="checkbox"
                     checked={selected.includes(t.name)}
                     onChange={() => toggle(t.name)}
-                    className="rounded border-border text-accent focus:ring-accent"
+                    className="rounded border-border text-accent focus-visible:ring-accent"
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -169,7 +169,7 @@ export function ToolSelector({ selected, onChange, compact = false }: ToolSelect
                             type="checkbox"
                             checked={selected.includes(ref)}
                             onChange={() => toggle(ref)}
-                            className="rounded border-border text-accent focus:ring-accent"
+                            className="rounded border-border text-accent focus-visible:ring-accent"
                           />
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-mono text-accent">{ref}</span>

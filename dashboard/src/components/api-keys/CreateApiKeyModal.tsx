@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import { cn, inputClass as sharedInputClass } from "@/lib/utils";
 
 interface CreateApiKeyModalProps {
   open: boolean;
+  loading?: boolean;
   onClose: () => void;
   onSubmit: (data: { name: string; tenant_id: string; max_cost_per_run_usd?: number }) => void;
 }
 
-export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModalProps) {
+export function CreateApiKeyModal({ open, loading, onClose, onSubmit }: CreateApiKeyModalProps) {
   const [name, setName] = useState("");
   const [tenantId, setTenantId] = useState("");
   const [maxCost, setMaxCost] = useState("");
@@ -122,13 +123,16 @@ export function CreateApiKeyModal({ open, onClose, onSubmit }: CreateApiKeyModal
               </button>
               <button
                 type="submit"
+                disabled={loading}
                 className={cn(
-                  "rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
+                  "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
                   "hover:bg-accent-hover transition-all duration-200",
-                  "shadow-sm hover:shadow-md"
+                  "shadow-sm hover:shadow-md",
+                  "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
               >
-                Create Key
+                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {loading ? "Creating..." : "Create Key"}
               </button>
             </div>
           </form>

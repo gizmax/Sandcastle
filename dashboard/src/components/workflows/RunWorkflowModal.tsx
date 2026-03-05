@@ -176,7 +176,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
 
                 const inputClass = cn(
                   "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                  "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                  "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 );
 
                 return (
@@ -252,7 +252,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                         rows={3}
                         className={cn(
                           "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-y",
-                          "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                          "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                         )}
                       />
                     ) : isNumber ? (
@@ -295,7 +295,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                   rows={5}
                   className={cn(
                     "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-y",
-                    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
+                    "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
                     "placeholder:text-muted-foreground/50"
                   )}
                 />
@@ -321,7 +321,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                 placeholder="https://..."
                 className={cn(
                   "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                  "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                  "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 )}
               />
             </div>

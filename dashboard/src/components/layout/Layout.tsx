@@ -210,7 +210,7 @@ function LayoutInner() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:bg-accent focus:text-accent-foreground focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-medium">
+      <a href="#main-content" className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:z-[100] focus-visible:top-2 focus-visible:left-2 focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:px-4 focus-visible:py-2 focus-visible:rounded-lg focus-visible:text-sm focus-visible:font-medium">
         Skip to content
       </a>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} dlqCount={dlqCount} approvalsCount={approvalsCount} />

@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
+import { CopyButton } from "@/components/shared/CopyButton";
 
 export interface ApiKeyItem {
   id: string;
@@ -34,14 +35,17 @@ export function ApiKeyTable({ keys, onDeactivate }: ApiKeyTableProps) {
             {keys.map((key) => (
               <tr key={key.id}>
                 <td className="px-3 sm:px-5 py-3">
-                  <code className="rounded-md bg-background px-2 py-0.5 font-mono text-xs text-foreground">
-                    {key.key_prefix}...
-                  </code>
+                  <span className="inline-flex items-center gap-1">
+                    <code className="rounded-md bg-background px-2 py-0.5 font-mono text-xs text-foreground">
+                      {key.key_prefix}...
+                    </code>
+                    <CopyButton value={key.key_prefix} label="API key prefix" />
+                  </span>
                 </td>
-                <td className="px-3 sm:px-5 py-3 font-medium text-foreground">
+                <td className="px-3 sm:px-5 py-3 font-medium text-foreground max-w-[200px] truncate" title={key.name}>
                   {key.name}
                 </td>
-                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">
+                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted max-w-[200px] truncate" title={key.tenant_id}>
                   {key.tenant_id}
                 </td>
                 <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">

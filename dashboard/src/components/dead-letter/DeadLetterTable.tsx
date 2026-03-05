@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { RotateCcw, CheckCircle } from "lucide-react";
+import { RotateCcw, CheckCircle, Loader2 } from "lucide-react";
 import { formatRelativeTime, cn } from "@/lib/utils";
 
 export interface DLQItem {
@@ -15,11 +15,12 @@ export interface DLQItem {
 
 interface DeadLetterTableProps {
   items: DLQItem[];
+  actionLoading?: Set<string>;
   onRetry: (id: string) => void;
   onResolve: (id: string) => void;
 }
 
-export function DeadLetterTable({ items, onRetry, onResolve }: DeadLetterTableProps) {
+export function DeadLetterTable({ items, actionLoading, onRetry, onResolve }: DeadLetterTableProps) {
   const navigate = useNavigate();
 
   return (
@@ -58,23 +59,27 @@ export function DeadLetterTable({ items, onRetry, onResolve }: DeadLetterTablePr
                 <td className="px-3 sm:px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button
+                      disabled={actionLoading?.has(item.id)}
                       onClick={() => onRetry(item.id)}
                       className={cn(
                         "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium",
-                        "text-running hover:bg-running/10 transition-colors"
+                        "text-running hover:bg-running/10 transition-colors",
+                        "disabled:opacity-50 disabled:cursor-not-allowed"
                       )}
                     >
-                      <RotateCcw className="h-3 w-3" />
+                      {actionLoading?.has(item.id) ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
                       Retry
                     </button>
                     <button
+                      disabled={actionLoading?.has(item.id)}
                       onClick={() => onResolve(item.id)}
                       className={cn(
                         "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium",
-                        "text-success hover:bg-success/10 transition-colors"
+                        "text-success hover:bg-success/10 transition-colors",
+                        "disabled:opacity-50 disabled:cursor-not-allowed"
                       )}
                     >
-                      <CheckCircle className="h-3 w-3" />
+                      {actionLoading?.has(item.id) ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
                       Resolve
                     </button>
                   </div>

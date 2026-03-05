@@ -204,7 +204,7 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
                         className={cn(
                           "w-full rounded-lg border bg-background px-3 py-2 pr-10 text-sm text-foreground",
                           "placeholder:text-muted-foreground/50",
-                          "focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent",
                           "transition-colors",
                           isMissing ? "border-amber-500/40" : "border-border"
                         )}
@@ -402,7 +402,7 @@ function ConnectionsSection({ tool, onSaved }: { tool: Tool; onSaved: () => void
               className={cn(
                 "w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground",
                 "placeholder:text-muted-foreground/50",
-                "focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent"
               )}
             />
           </div>
@@ -421,7 +421,7 @@ function ConnectionsSection({ tool, onSaved }: { tool: Tool; onSaved: () => void
                 className={cn(
                   "w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground",
                   "placeholder:text-muted-foreground/50",
-                  "focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent"
                 )}
               />
             </div>

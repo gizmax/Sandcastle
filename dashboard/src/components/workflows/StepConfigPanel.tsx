@@ -261,7 +261,7 @@ function CollapsibleSection({
             onToggle();
             if (!enabled) setOpen(true);
           }}
-          className="rounded border-border text-accent focus:ring-accent"
+          className="rounded border-border text-accent focus-visible:ring-accent"
         />
         {enabled && (
           open
@@ -286,7 +286,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
 
   const inputClass = cn(
     "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+    "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
   );
 
   return (
@@ -1067,7 +1067,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               type="checkbox"
               checked={step.browserConfig.headless}
               onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, headless: e.target.checked } })}
-              className="rounded border-border text-accent focus:ring-accent"
+              className="rounded border-border text-accent focus-visible:ring-accent"
             />
             <span className="font-medium">Headless</span>
             <span className="text-muted-foreground">- Run browser without visible window</span>
@@ -1094,7 +1094,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               type="checkbox"
               checked={step.browserConfig.screenshotOnError}
               onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, screenshotOnError: e.target.checked } })}
-              className="rounded border-border text-accent focus:ring-accent"
+              className="rounded border-border text-accent focus-visible:ring-accent"
             />
             <span className="font-medium">Screenshot on Error</span>
             <span className="text-muted-foreground">- Capture screenshot when step fails</span>
@@ -1204,7 +1204,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                 directoryInput: { ...step.directoryInput, enabled: e.target.checked },
               });
             }}
-            className="rounded border-border text-accent focus:ring-accent"
+            className="rounded border-border text-accent focus-visible:ring-accent"
           />
         </button>
         {step.directoryInput.enabled && (
@@ -1331,7 +1331,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                       : step.dependsOn.filter((d) => d !== sid);
                     onChange({ ...step, dependsOn: deps });
                   }}
-                  className="rounded border-border text-accent focus:ring-accent"
+                  className="rounded border-border text-accent focus-visible:ring-accent"
                 />
                 {sid}
               </label>
@@ -1707,7 +1707,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                       autopilot: { ...step.autopilot, autoDeploy: e.target.checked },
                     })
                   }
-                  className="rounded border-border text-accent focus:ring-accent"
+                  className="rounded border-border text-accent focus-visible:ring-accent"
                 />
                 <span className="text-xs">Auto-deploy winner</span>
               </label>
@@ -1887,7 +1887,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                   approval: { ...step.approval, allowEdit: e.target.checked },
                 })
               }
-              className="rounded border-border text-accent focus:ring-accent"
+              className="rounded border-border text-accent focus-visible:ring-accent"
             />
             <span className="text-xs">Allow reviewer edits</span>
           </label>
@@ -1954,7 +1954,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                         : step.policies.filter((x) => x !== p.id);
                       onChange({ ...step, policies });
                     }}
-                    className="rounded border-border text-accent focus:ring-accent"
+                    className="rounded border-border text-accent focus-visible:ring-accent"
                   />
                   <span className="text-xs">{p.label}</span>
                 </label>

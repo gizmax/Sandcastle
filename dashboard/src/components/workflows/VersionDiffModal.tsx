@@ -221,7 +221,7 @@ function VersionSelector({
           className={cn(
             "appearance-none rounded-lg border border-border bg-background",
             "pl-3 pr-7 py-1.5 text-sm font-mono text-foreground",
-            "focus:outline-none focus:ring-2 focus:ring-ring/30",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
             "cursor-pointer transition-colors hover:border-accent/50",
           )}
         >

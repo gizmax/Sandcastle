@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, GitCompare, RotateCcw, Upload, X, Download, Loader2 } from "lucide-react";
+import { GitCompare, RotateCcw, Upload, X, Download, Loader2, Copy, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { VersionHistory } from "@/components/workflows/VersionHistory";
 import { VersionStatusBadge } from "@/components/workflows/VersionStatusBadge";
 import { VersionDiffModal } from "@/components/workflows/VersionDiffModal";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { CopyButton } from "@/components/shared/CopyButton";
 import { cn } from "@/lib/utils";
 
 interface WorkflowVersion {
@@ -143,20 +145,20 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Back button */}
-      <button
-        onClick={() => navigate("/workflows")}
-        className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Workflows
-      </button>
+      <Breadcrumb items={[
+        { label: "Overview", href: "/" },
+        { label: "Workflows", href: "/workflows" },
+        { label: data.workflow_name },
+      ]} />
 
       {/* Header */}
       <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">{data.workflow_name}</h1>
+            <h1 className="flex items-center gap-1 text-xl font-semibold tracking-tight text-foreground">
+              {data.workflow_name}
+              <CopyButton value={data.workflow_name} label="workflow name" />
+            </h1>
             <div className="mt-2 flex items-center gap-3 text-sm text-muted">
               {data.production_version !== null && (
                 <span className="flex items-center gap-1.5">
@@ -334,17 +336,35 @@ export default function WorkflowDetailPage() {
                     <pre className="font-data text-xs text-foreground whitespace-pre-wrap">{shareYaml}</pre>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <button
-                      onClick={handleShareDownload}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-lg border border-border px-4 py-2",
-                        "text-sm font-medium text-foreground",
-                        "hover:bg-border/40 transition-colors"
-                      )}
-                    >
-                      <Download className="h-4 w-4" />
-                      Download YAML
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          if (shareYaml) {
+                            void navigator.clipboard.writeText(shareYaml);
+                            toast.success("YAML copied to clipboard");
+                          }
+                        }}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-lg border border-border px-4 py-2",
+                          "text-sm font-medium text-foreground",
+                          "hover:bg-border/40 transition-colors"
+                        )}
+                      >
+                        <Copy className="h-4 w-4" />
+                        Copy YAML
+                      </button>
+                      <button
+                        onClick={handleShareDownload}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-lg border border-border px-4 py-2",
+                          "text-sm font-medium text-foreground",
+                          "hover:bg-border/40 transition-colors"
+                        )}
+                      >
+                        <Download className="h-4 w-4" />
+                        Download YAML
+                      </button>
+                    </div>
                     <a
                       href="https://github.com/gizmax/Sandcastle/tree/main/hub"
                       target="_blank"

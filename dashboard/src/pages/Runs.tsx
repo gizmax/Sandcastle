@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { PlayCircle, Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { PlayCircle, Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap, Download } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
@@ -7,9 +8,10 @@ import { useSavedFilters, type SavedFilterCriteria } from "@/hooks/useSavedFilte
 import { RunsTable } from "@/components/runs/RunsTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContextBanner } from "@/components/shared/ContextBanner";
-import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { cn, formatCost, formatDuration, parseUTC } from "@/lib/utils";
+import { exportToCsv } from "@/lib/exportCsv";
 
 const STATUS_OPTIONS = ["all", "queued", "running", "completed", "failed", "partial"];
 
@@ -18,9 +20,10 @@ interface WorkflowItem {
 }
 
 export default function Runs() {
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [workflowFilter, setWorkflowFilter] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") || "all");
+  const [workflowFilter, setWorkflowFilter] = useState(() => searchParams.get("workflow") || "");
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get("search") || "");
   const [offset, setOffset] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<"delete" | "cancel" | null>(null);
@@ -35,6 +38,14 @@ export default function Runs() {
   const limit = 20;
 
   const { savedFilters, saveCurrentFilter, deleteFilter, getFilter } = useSavedFilters();
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
+    if (searchTerm) params.set("search", searchTerm);
+    if (workflowFilter) params.set("workflow", workflowFilter);
+    setSearchParams(params, { replace: true });
+  }, [statusFilter, searchTerm, workflowFilter, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +174,28 @@ export default function Runs() {
     void refetch();
   }, [selectedIds, refetch]);
 
+  const handleExportCsv = useCallback(() => {
+    const headers = ["Run ID", "Workflow", "Status", "Started At", "Duration", "Cost"];
+    const rows = filteredRuns.map((r) => {
+      const startedAt = r.started_at ?? "";
+      let duration = "";
+      if (r.started_at) {
+        const start = parseUTC(r.started_at).getTime();
+        const end = r.completed_at ? parseUTC(r.completed_at).getTime() : Date.now();
+        duration = formatDuration((end - start) / 1000);
+      }
+      return [
+        r.run_id,
+        r.workflow_name,
+        r.status,
+        startedAt,
+        duration,
+        formatCost(r.total_cost_usd),
+      ];
+    });
+    exportToCsv("runs.csv", headers, rows);
+  }, [filteredRuns]);
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Runs</h1>
@@ -207,8 +240,8 @@ export default function Runs() {
               placeholder="Search by ID or name..."
               aria-label="Search runs by ID or name"
               className={cn(
-                "h-8 w-48 rounded-lg border border-border bg-background pl-8 pr-3 text-xs",
-                "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                "h-8 w-full sm:w-48 rounded-lg border border-border bg-background pl-8 pr-3 text-xs",
+                "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               )}
             />
           </div>
@@ -222,7 +255,7 @@ export default function Runs() {
             aria-label="Filter by workflow"
             className={cn(
               "h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground",
-              "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+              "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             )}
           >
             <option value="">All workflows</option>
@@ -232,6 +265,20 @@ export default function Runs() {
               </option>
             ))}
           </select>
+
+          <button
+            onClick={handleExportCsv}
+            disabled={filteredRuns.length === 0}
+            aria-label="Export runs to CSV"
+            className={cn(
+              "flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium",
+              "text-muted hover:text-foreground hover:border-accent/40 transition-colors",
+              "disabled:opacity-40 disabled:cursor-not-allowed"
+            )}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </button>
 
           {/* Save filter button */}
           {hasActiveFilter && (
@@ -265,7 +312,7 @@ export default function Runs() {
                     autoFocus
                     className={cn(
                       "h-8 w-full rounded-lg border border-border bg-background px-3 text-xs",
-                      "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                      "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                     )}
                   />
                   <div className="flex items-center gap-2">
@@ -376,11 +423,11 @@ export default function Runs() {
 
       {/* Bulk actions bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+        <div className="flex flex-col gap-2 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-sm font-medium text-foreground">
             {selectedIds.size} selected
           </span>
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             <button
               onClick={() => setBulkAction("cancel")}
               className={cn(
@@ -414,8 +461,21 @@ export default function Runs() {
       )}
 
       {loading ? (
-        <div className="flex h-40 items-center justify-center">
-          <LoadingSpinner />
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="ml-auto h-4 w-20" />
+          </div>
+          {Array.from({ length: 7 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3">
+              <Skeleton className="h-4 w-4 rounded" />
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-5 w-16 rounded-full" />
+              <Skeleton className="ml-auto h-4 w-20" />
+              <Skeleton className="h-4 w-16" />
+            </div>
+          ))}
         </div>
       ) : runsError ? (
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">

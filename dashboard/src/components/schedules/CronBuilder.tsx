@@ -103,7 +103,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
 
   const selectClass = cn(
     "h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground",
-    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
+    "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
     "transition-colors"
   );
 
