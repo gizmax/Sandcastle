@@ -46,7 +46,7 @@ export function FilePathInput({ value, onChange, accept }: FilePathInputProps) {
           placeholder="Select file or paste path..."
           className={cn(
             "h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm",
-            "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+            "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           )}
         />
         <input

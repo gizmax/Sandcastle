@@ -46,7 +46,7 @@ export function StepConfigureInputs({
 
   const inputClass = cn(
     "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
+    "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
     "transition-all duration-200"
   );
 
@@ -150,7 +150,7 @@ export function StepConfigureInputs({
                     rows={3}
                     className={cn(
                       "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-y",
-                      "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
+                      "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
                       "transition-all duration-200"
                     )}
                   />

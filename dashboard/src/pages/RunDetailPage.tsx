@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -12,9 +12,11 @@ import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
 import { PipelineViz } from "@/components/runs/PipelineViz";
 import { StepFlamegraph } from "@/components/runs/StepFlamegraph";
 import { BudgetBar } from "@/components/shared/BudgetBar";
+import { CopyButton } from "@/components/shared/CopyButton";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { CelebrationModal } from "@/components/shared/CelebrationModal";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { fireConfetti, playCelebrationSound } from "@/lib/confetti";
 import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn } from "@/lib/utils";
 
@@ -293,8 +295,46 @@ export default function RunDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <LoadingSpinner size="lg" />
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-4 rounded-full" />
+          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 w-4 rounded-full" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="space-y-2">
+              <Skeleton className="h-6 w-48" />
+              <Skeleton className="h-3 w-64" />
+            </div>
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-8 w-20 rounded-lg" />
+              <Skeleton className="h-6 w-16 rounded-full" />
+            </div>
+          </div>
+          <div className="flex gap-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="space-y-1">
+                <Skeleton className="h-3 w-12" />
+                <Skeleton className="h-4 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <Skeleton className="h-10 w-full rounded-xl" />
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-16" />
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+              <Skeleton className="h-6 w-6 rounded-full" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-5 w-16 rounded-full" />
+              <Skeleton className="ml-auto h-4 w-20" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -324,41 +364,43 @@ export default function RunDetailPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Back button */}
-      <button
-        onClick={() => navigate("/runs")}
-        className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Runs
-      </button>
+      <Breadcrumb items={[
+        { label: "Overview", href: "/" },
+        { label: "Runs", href: "/runs" },
+        { label: `${run.workflow_name} (${run.run_id.slice(0, 8)})` },
+      ]} />
 
       {/* Header */}
       <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-foreground">
               {run.workflow_name}
             </h1>
-            <p className="mt-1 font-mono text-xs text-muted">{run.run_id}</p>
+            <p className="mt-1 flex items-center gap-1 font-mono text-xs text-muted truncate">
+              <span className="hidden sm:inline">{run.run_id}</span>
+              <span className="sm:hidden">{run.run_id.slice(0, 16)}...</span>
+              <CopyButton value={run.run_id} label="run ID" />
+            </p>
             {run.replay_from_step && (
               <p className="mt-1 text-xs text-accent">
                 {run.fork_changes ? "Forked" : "Replayed"} from step: {run.replay_from_step}
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {run.parent_run_id && (
               <button
                 onClick={() => navigate(`/runs/compare?run_a=${run.parent_run_id}&run_b=${run.run_id}`)}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
-                  "text-sm font-medium text-accent",
+                  "text-xs sm:text-sm font-medium text-accent",
                   "hover:bg-accent/10 transition-colors"
                 )}
               >
                 <GitCompareArrows className="h-4 w-4" />
-                Compare with Parent
+                <span className="hidden sm:inline">Compare with Parent</span>
+                <span className="sm:hidden">Compare</span>
               </button>
             )}
             {isRunning && (
@@ -367,7 +409,7 @@ export default function RunDetailPage() {
                 disabled={cancelling}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg border border-error/30 px-3 py-1.5",
-                  "text-sm font-medium text-error",
+                  "text-xs sm:text-sm font-medium text-error",
                   "hover:bg-error/10 transition-colors",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
@@ -381,7 +423,7 @@ export default function RunDetailPage() {
                 onClick={() => setDeleteConfirmOpen(true)}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg border border-error/30 px-3 py-1.5",
-                  "text-sm font-medium text-error",
+                  "text-xs sm:text-sm font-medium text-error",
                   "hover:bg-error/10 transition-colors"
                 )}
               >
@@ -555,7 +597,7 @@ export default function RunDetailPage() {
         return (
           <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">
             <h2 className="mb-3 text-sm font-semibold text-foreground">Generated Images ({allImages.length})</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
               {allImages.map((img, i) => (
                 <div key={i} className="rounded-lg border border-border overflow-hidden bg-background">
                   {img.error ? (
@@ -576,9 +618,9 @@ export default function RunDetailPage() {
       {/* Output export */}
       {run.outputs && Object.keys(run.outputs).length > 0 && (
         <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-sm font-semibold text-foreground">Output</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handleCopyOutput}
                 className={cn(
@@ -599,7 +641,7 @@ export default function RunDetailPage() {
                 )}
               >
                 <Download className="h-3.5 w-3.5" />
-                Download JSON
+                <span className="hidden sm:inline">Download</span> JSON
               </button>
               <button
                 onClick={handleDownloadTxt}
@@ -610,7 +652,7 @@ export default function RunDetailPage() {
                 )}
               >
                 <FileDown className="h-3.5 w-3.5" />
-                Download TXT
+                <span className="hidden sm:inline">Download</span> TXT
               </button>
             </div>
           </div>

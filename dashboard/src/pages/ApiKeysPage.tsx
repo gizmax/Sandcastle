@@ -31,6 +31,8 @@ export default function ApiKeysPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [revealKey, setRevealKey] = useState<string | null>(null);
   const [deactivateId, setDeactivateId] = useState<string | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   // External services state
   const [anthropicKey, setAnthropicKey] = useState("");
@@ -84,18 +86,23 @@ export default function ApiKeysPage() {
 
   const handleCreate = useCallback(
     async (data: { name: string; tenant_id: string; max_cost_per_run_usd?: number }) => {
-      const res = await api.post<{ key: string; key_prefix: string; id: string }>(
-        "/api-keys",
-        data
-      );
-      setCreateModalOpen(false);
-      if (res.error) {
-        toast.error(`Failed to create key: ${res.error.message}`);
-        return;
-      }
-      if (res.data && "key" in res.data) {
-        setRevealKey(res.data.key);
-        void fetchKeys();
+      setCreating(true);
+      try {
+        const res = await api.post<{ key: string; key_prefix: string; id: string }>(
+          "/api-keys",
+          data
+        );
+        setCreateModalOpen(false);
+        if (res.error) {
+          toast.error(`Failed to create key: ${res.error.message}`);
+          return;
+        }
+        if (res.data && "key" in res.data) {
+          setRevealKey(res.data.key);
+          void fetchKeys();
+        }
+      } finally {
+        setCreating(false);
       }
     },
     [fetchKeys]
@@ -107,15 +114,20 @@ export default function ApiKeysPage() {
 
   const confirmDeactivate = useCallback(async () => {
     if (!deactivateId) return;
-    const res = await api.delete(`/api-keys/${deactivateId}`);
-    if (res.error) {
-      toast.error(`Failed to deactivate key: ${res.error.message}`);
+    setDeactivating(true);
+    try {
+      const res = await api.delete(`/api-keys/${deactivateId}`);
+      if (res.error) {
+        toast.error(`Failed to deactivate key: ${res.error.message}`);
+        setDeactivateId(null);
+        return;
+      }
+      toast.success("API key deactivated");
+      setKeys((prev) => prev.filter((k) => k.id !== deactivateId));
       setDeactivateId(null);
-      return;
+    } finally {
+      setDeactivating(false);
     }
-    toast.success("API key deactivated");
-    setKeys((prev) => prev.filter((k) => k.id !== deactivateId));
-    setDeactivateId(null);
   }, [deactivateId]);
 
   const credentialsDirty =
@@ -291,6 +303,7 @@ export default function ApiKeysPage() {
 
       <CreateApiKeyModal
         open={createModalOpen}
+        loading={creating}
         onClose={() => setCreateModalOpen(false)}
         onSubmit={handleCreate}
       />
@@ -306,7 +319,8 @@ export default function ApiKeysPage() {
         open={!!deactivateId}
         title="Deactivate API Key"
         description="Are you sure you want to deactivate this API key? Any services using this key will lose access immediately."
-        confirmLabel="Deactivate"
+        confirmLabel={deactivating ? <><Loader2 className="inline h-3.5 w-3.5 animate-spin mr-1.5" />Deactivating...</> : "Deactivate"}
+        confirmDisabled={deactivating}
         onConfirm={() => void confirmDeactivate()}
         onCancel={() => setDeactivateId(null)}
       />

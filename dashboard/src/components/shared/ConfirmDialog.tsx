@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -6,7 +6,7 @@ interface ConfirmDialogProps {
   open: boolean;
   title: string;
   description: string;
-  confirmLabel?: string;
+  confirmLabel?: ReactNode;
   variant?: "danger" | "warning";
   confirmDisabled?: boolean;
   onConfirm: () => void;

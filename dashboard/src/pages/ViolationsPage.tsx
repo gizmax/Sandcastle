@@ -181,7 +181,7 @@ export default function ViolationsPage() {
                   tabIndex={0}
                   aria-expanded={isExpanded}
                   aria-label={`${item.policy_id} violation - ${isExpanded ? "collapse" : "expand"} details`}
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
+                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors focus-visible:outline-none focus-visible:bg-border/10"
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {

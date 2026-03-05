@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { CopyButton } from "@/components/shared/CopyButton";
 import { formatRelativeTime, formatDuration, formatCost, parseUTC, cn } from "@/lib/utils";
 
 interface RunItem {
@@ -80,7 +81,7 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                 role="row"
                 aria-label={`Run ${run.workflow_name}, status ${run.status}`}
                 className={cn(
-                  "cursor-pointer transition-colors duration-150 hover:bg-border/20 focus:outline-none focus:bg-border/20",
+                  "cursor-pointer transition-colors duration-150 hover:bg-border/20 focus-visible:outline-none focus-visible:bg-border/20",
                   selectedIds?.has(run.run_id) && "bg-accent/5"
                 )}
               >
@@ -104,8 +105,9 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                   </td>
                 )}
                 <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-medium text-foreground">
-                  <span>{run.workflow_name}</span>
-                  <span className="ml-2 font-data text-[11px] text-muted-foreground">{run.run_id.slice(0, 8)}</span>
+                  <span title={run.workflow_name}>{run.workflow_name}</span>
+                  <span className="ml-2 font-data text-[11px] text-muted-foreground" title={run.run_id}>{run.run_id.slice(0, 8)}</span>
+                  <CopyButton value={run.run_id} label="run ID" />
                 </td>
                 <td className="px-3 sm:px-5 py-3">
                   <RunStatusBadge status={run.status} />

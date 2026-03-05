@@ -976,7 +976,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             onChange={(e) => setWorkflowName(e.target.value)}
             className={cn(
               "h-8 w-full rounded-md border border-border bg-surface px-2 text-xs",
-              "focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-ring/30"
+              "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30"
             )}
           />
         </div>
@@ -997,7 +997,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
               }}
               className={cn(
                 "h-8 w-full rounded-md border border-border bg-surface px-2 text-xs",
-                "focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-ring/30"
+                "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30"
               )}
             >
               <option value="" disabled>Select model...</option>

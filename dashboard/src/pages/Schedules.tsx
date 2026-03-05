@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Calendar, Plus } from "lucide-react";
+import { Calendar, Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ScheduleTable } from "@/components/schedules/ScheduleTable";
@@ -26,6 +26,8 @@ export default function Schedules() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editSchedule, setEditSchedule] = useState<ScheduleItem | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const fetchSchedules = useCallback(async () => {
     try {
@@ -44,15 +46,20 @@ export default function Schedules() {
   }, [fetchSchedules]);
 
   const handleToggle = useCallback(async (id: string, enabled: boolean) => {
-    const res = await api.patch(`/schedules/${id}`, { enabled });
-    if (res.error) {
-      toast.error(`Failed to toggle schedule: ${res.error.message}`);
-      return;
+    setTogglingId(id);
+    try {
+      const res = await api.patch(`/schedules/${id}`, { enabled });
+      if (res.error) {
+        toast.error(`Failed to toggle schedule: ${res.error.message}`);
+        return;
+      }
+      toast.success(`Schedule ${enabled ? "enabled" : "disabled"}`);
+      setSchedules((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, enabled } : s))
+      );
+    } finally {
+      setTogglingId(null);
     }
-    toast.success(`Schedule ${enabled ? "enabled" : "disabled"}`);
-    setSchedules((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, enabled } : s))
-    );
   }, []);
 
   const handleDelete = useCallback((id: string) => {
@@ -61,15 +68,20 @@ export default function Schedules() {
 
   const confirmDelete = useCallback(async () => {
     if (!deleteId) return;
-    const res = await api.delete(`/schedules/${deleteId}`);
-    if (res.error) {
-      toast.error(`Failed to delete schedule: ${res.error.message}`);
+    setDeleting(true);
+    try {
+      const res = await api.delete(`/schedules/${deleteId}`);
+      if (res.error) {
+        toast.error(`Failed to delete schedule: ${res.error.message}`);
+        setDeleteId(null);
+        return;
+      }
+      toast.success("Schedule deleted");
+      setSchedules((prev) => prev.filter((s) => s.id !== deleteId));
       setDeleteId(null);
-      return;
+    } finally {
+      setDeleting(false);
     }
-    toast.success("Schedule deleted");
-    setSchedules((prev) => prev.filter((s) => s.id !== deleteId));
-    setDeleteId(null);
   }, [deleteId]);
 
   const handleCreate = useCallback(
@@ -159,6 +171,7 @@ export default function Schedules() {
       ) : (
         <ScheduleTable
           schedules={schedules}
+          togglingId={togglingId}
           onToggle={handleToggle}
           onDelete={handleDelete}
           onEdit={setEditSchedule}
@@ -184,7 +197,8 @@ export default function Schedules() {
         open={!!deleteId}
         title="Delete Schedule"
         description="Are you sure you want to delete this schedule? This cannot be undone."
-        confirmLabel="Delete"
+        confirmLabel={deleting ? <><Loader2 className="inline h-3.5 w-3.5 animate-spin mr-1.5" />Deleting...</> : "Delete"}
+        confirmDisabled={deleting}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleteId(null)}
       />

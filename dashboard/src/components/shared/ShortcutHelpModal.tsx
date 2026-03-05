@@ -180,7 +180,7 @@ export function ShortcutHelpModal() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search shortcuts..."
-                className="h-9 w-full rounded-lg border border-border bg-background pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 transition-colors"
+                className="h-9 w-full rounded-lg border border-border bg-background pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 transition-colors"
               />
             </div>
           </div>

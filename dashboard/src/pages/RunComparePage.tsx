@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, ArrowDown, ArrowUp, Minus, GitCompareArrows } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus, GitCompareArrows } from "lucide-react";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { StepDiffCard } from "@/components/runs/StepDiffCard";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatCost, formatDuration, cn } from "@/lib/utils";
@@ -128,13 +129,11 @@ export default function RunComparePage() {
   if (error || !data) {
     return (
       <div className="space-y-4">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </button>
+        <Breadcrumb items={[
+          { label: "Overview", href: "/" },
+          { label: "Runs", href: "/runs" },
+          { label: "Compare" },
+        ]} />
         <div className="py-16">
           <EmptyState
             icon={GitCompareArrows}
@@ -148,14 +147,11 @@ export default function RunComparePage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Back button */}
-      <button
-        onClick={() => navigate(-1)}
-        className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back
-      </button>
+      <Breadcrumb items={[
+        { label: "Overview", href: "/" },
+        { label: "Runs", href: "/runs" },
+        { label: "Compare" },
+      ]} />
 
       {/* Header */}
       <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">

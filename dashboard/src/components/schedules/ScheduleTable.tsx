@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 
@@ -12,12 +13,13 @@ interface ScheduleItem {
 
 interface ScheduleTableProps {
   schedules: ScheduleItem[];
+  togglingId?: string | null;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onEdit: (schedule: ScheduleItem) => void;
 }
 
-export function ScheduleTable({ schedules, onToggle, onDelete, onEdit }: ScheduleTableProps) {
+export function ScheduleTable({ schedules, togglingId, onToggle, onDelete, onEdit }: ScheduleTableProps) {
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
@@ -49,23 +51,29 @@ export function ScheduleTable({ schedules, onToggle, onDelete, onEdit }: Schedul
                   {schedule.created_at ? formatRelativeTime(schedule.created_at) : "-"}
                 </td>
                 <td className="px-3 sm:px-5 py-3 text-center">
-                  <button
-                    role="switch"
-                    aria-checked={schedule.enabled}
-                    aria-label={`Toggle ${schedule.workflow_name} schedule`}
-                    onClick={() => onToggle(schedule.id, !schedule.enabled)}
-                    className={cn(
-                      "relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200",
-                      schedule.enabled ? "bg-success" : "bg-border"
-                    )}
-                  >
-                    <span
+                  {togglingId === schedule.id ? (
+                    <Loader2 className="inline h-4 w-4 animate-spin text-muted" />
+                  ) : (
+                    <button
+                      role="switch"
+                      aria-checked={schedule.enabled}
+                      aria-label={`Toggle ${schedule.workflow_name} schedule`}
+                      disabled={togglingId !== null && togglingId !== undefined}
+                      onClick={() => onToggle(schedule.id, !schedule.enabled)}
                       className={cn(
-                        "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200",
-                        schedule.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                        "relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200",
+                        schedule.enabled ? "bg-success" : "bg-border",
+                        "disabled:opacity-50 disabled:cursor-not-allowed"
                       )}
-                    />
-                  </button>
+                    >
+                      <span
+                        className={cn(
+                          "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          schedule.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
+                        )}
+                      />
+                    </button>
+                  )}
                 </td>
                 <td className="px-3 sm:px-5 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">

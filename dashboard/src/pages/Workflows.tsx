@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, Plus, Star, Trash2 } from "lucide-react";
+import { GitBranch, Plus, Search, Star, Trash2, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
@@ -10,7 +10,7 @@ import { DagGraph } from "@/components/workflows/DagGraph";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { cn } from "@/lib/utils";
 import type { InputSchema } from "@/types/inputSchema";
@@ -45,11 +45,25 @@ export default function Workflows() {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<"delete" | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const { pinnedWorkflows, togglePin } = usePinnedWorkflows();
 
+  const filteredWorkflows = useMemo(
+    () => {
+      if (!searchQuery) return workflows;
+      const q = searchQuery.toLowerCase();
+      return workflows.filter(
+        (wf) =>
+          wf.name.toLowerCase().includes(q) ||
+          wf.file_name?.toLowerCase().includes(q)
+      );
+    },
+    [workflows, searchQuery]
+  );
+
   const pinnedWfs = useMemo(
-    () => workflows.filter((wf) => pinnedWorkflows.includes(wf.name)),
-    [workflows, pinnedWorkflows]
+    () => filteredWorkflows.filter((wf) => pinnedWorkflows.includes(wf.name)),
+    [filteredWorkflows, pinnedWorkflows]
   );
 
   const fetchWorkflows = useCallback(async () => {
@@ -120,8 +134,24 @@ export default function Workflows() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <LoadingSpinner size="lg" />
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-9 w-36 rounded-lg" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-surface p-4 space-y-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-2/3" />
+              <div className="flex items-center gap-2 pt-2">
+                <Skeleton className="h-7 w-16 rounded-lg" />
+                <Skeleton className="h-7 w-16 rounded-lg" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -138,28 +168,61 @@ export default function Workflows() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Workflows</h1>
-        <button
-          onClick={() => navigate("/workflows/builder")}
-          aria-label="New workflow"
-          className={cn(
-            "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
-          )}
-        >
-          <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">New Workflow</span>
-        </button>
+        <div className="flex flex-1 items-center gap-2 sm:flex-none">
+          <div className="relative flex-1 sm:flex-none">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter workflows..."
+              aria-label="Filter workflows by name"
+              className={cn(
+                "h-8 w-full sm:w-48 rounded-lg border border-border bg-background pl-8 pr-8 text-xs",
+                "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              )}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => navigate("/workflows/builder")}
+            aria-label="New workflow"
+            className={cn(
+              "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
+              "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
+            )}
+          >
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">New Workflow</span>
+          </button>
+        </div>
       </div>
+      {workflows.length > 0 && (
+        <p className="text-xs text-muted">
+          {searchQuery
+            ? `${filteredWorkflows.length} of ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`
+            : `${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`}
+        </p>
+      )}
 
       {/* Bulk actions bar */}
       {selectedNames.size > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5">
+        <div className="flex flex-col gap-2 rounded-lg border border-accent/30 bg-accent/5 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-sm font-medium text-foreground">
             {selectedNames.size} selected
           </span>
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             <button
               onClick={() => setBulkAction("delete")}
               className={cn(
@@ -220,9 +283,16 @@ export default function Workflows() {
           description="No workflows found. Add YAML files to your workflows directory to get started."
           action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
         />
+      ) : filteredWorkflows.length === 0 ? (
+        <EmptyState
+          icon={Search}
+          title="No matching workflows"
+          description={`No workflows match "${searchQuery}".`}
+          action={{ label: "Clear search", onClick: () => setSearchQuery("") }}
+        />
       ) : (
         <WorkflowList
-          workflows={workflows}
+          workflows={filteredWorkflows}
           selectedNames={selectedNames}
           onSelectionChange={setSelectedNames}
           onRun={setRunModal}
@@ -270,7 +340,7 @@ export default function Workflows() {
         open={bulkAction === "delete"}
         title={`Delete ${selectedNames.size} workflow${selectedNames.size > 1 ? "s" : ""}?`}
         description="YAML files will be permanently removed from disk and all version records will be deleted."
-        confirmLabel={bulkProcessing ? "Deleting..." : "Delete"}
+        confirmLabel={bulkProcessing ? <><Loader2 className="inline h-3.5 w-3.5 animate-spin mr-1.5" />Deleting...</> : "Delete"}
         variant="danger"
         confirmDisabled={bulkProcessing}
         onConfirm={handleBulkDelete}

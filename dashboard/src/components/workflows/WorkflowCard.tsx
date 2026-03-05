@@ -164,8 +164,8 @@ export const WorkflowCard = memo(function WorkflowCard({
           <GitBranch className="h-5 w-5 text-accent" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-foreground">{name}</h3>
-          <p className="mt-0.5 line-clamp-2 text-xs text-muted">{description}</p>
+          <h3 className="truncate text-sm font-semibold text-foreground" title={name}>{name}</h3>
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted" title={description}>{description}</p>
         </div>
       </div>
 

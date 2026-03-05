@@ -41,7 +41,7 @@ export function JsonEditor({ value, onChange, placeholder, className, rows = 8 }
         className={cn(
           "w-full rounded-lg border bg-surface px-3 py-2 font-mono text-sm",
           "placeholder:text-muted-foreground/50",
-          "focus:outline-none focus:ring-2 focus:ring-ring/30",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
           "transition-all duration-200 resize-y",
           error ? "border-error" : "border-border"
         )}

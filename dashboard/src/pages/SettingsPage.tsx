@@ -287,7 +287,7 @@ export default function SettingsPage() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <code className="flex-1 rounded-lg bg-muted/50 border border-border px-3 py-2 text-sm font-mono text-foreground">
+                <code className="flex-1 overflow-x-auto rounded-lg bg-muted/50 border border-border px-3 py-2 text-xs sm:text-sm font-mono text-foreground">
                   {update.installCommand}
                 </code>
                 <button

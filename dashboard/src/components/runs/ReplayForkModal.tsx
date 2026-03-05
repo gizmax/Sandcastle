@@ -108,7 +108,7 @@ export function ReplayForkModal({
                 className={cn(
                   "w-full rounded-lg border border-border bg-background px-3 py-2",
                   "text-sm text-foreground placeholder:text-muted/50",
-                  "focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent",
+                  "focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
                   "transition-colors duration-200"
                 )}
               />
@@ -125,7 +125,7 @@ export function ReplayForkModal({
                   className={cn(
                     "w-full rounded-lg border border-border bg-background px-3 py-2",
                     "text-sm text-foreground",
-                    "focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent",
+                    "focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
                     "transition-colors duration-200"
                   )}
                 >
@@ -161,7 +161,7 @@ export function ReplayForkModal({
                   className={cn(
                     "w-full rounded-lg border border-border bg-background px-3 py-2",
                     "text-sm text-foreground placeholder:text-muted/50",
-                    "focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent",
+                    "focus-visible:border-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
                     "transition-colors duration-200"
                   )}
                 />

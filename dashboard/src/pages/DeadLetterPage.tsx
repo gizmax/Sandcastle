@@ -207,13 +207,14 @@ export default function DeadLetterPage() {
       ) : viewMode === "clustered" ? (
         <ErrorClusters
           items={items}
+          actionLoading={actionLoading}
           onRetry={handleRetry}
           onResolve={handleResolve}
           onBatchRetry={handleBatchRetry}
           onBatchResolve={handleBatchResolve}
         />
       ) : (
-        <DeadLetterTable items={items} onRetry={handleRetry} onResolve={handleResolve} />
+        <DeadLetterTable items={items} actionLoading={actionLoading} onRetry={handleRetry} onResolve={handleResolve} />
       )}
 
       {/* Batch action confirmation dialog */}

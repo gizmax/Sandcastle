@@ -278,7 +278,7 @@ export default function IntegrationsPage() {
                     "relative flex items-start gap-4 rounded-xl border border-border bg-surface p-4",
                     "text-left transition-all duration-200",
                     "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
-                    "focus:outline-none focus:ring-2 focus:ring-accent/40",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                   )}
                 >
                   {/* Left accent border */}
@@ -353,7 +353,7 @@ export default function IntegrationsPage() {
                       "flex flex-col items-center gap-2 rounded-xl border border-border bg-surface p-4",
                       "transition-all duration-200",
                       "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
-                      "focus:outline-none focus:ring-2 focus:ring-accent/40",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                     )}
                   >
                     <div
@@ -395,7 +395,7 @@ export default function IntegrationsPage() {
                 className={cn(
                   "w-full sm:w-56 rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground",
                   "placeholder:text-muted-foreground/50",
-                  "focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent",
                   "transition-colors",
                 )}
               />
@@ -438,7 +438,7 @@ export default function IntegrationsPage() {
                     "flex items-start gap-3 rounded-xl border border-border bg-surface p-3",
                     "text-left transition-all duration-200",
                     "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
-                    "focus:outline-none focus:ring-2 focus:ring-accent/40",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                   )}
                 >
                   <div

@@ -8,6 +8,7 @@ import {
   TrendingUp,
   DollarSign,
   Clock,
+  Download,
 } from "lucide-react";
 import {
   LineChart,
@@ -23,6 +24,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { formatCost, formatRelativeTime, cn } from "@/lib/utils";
+import { exportToCsv } from "@/lib/exportCsv";
 
 interface EvalAssertion {
   type: string;
@@ -123,6 +125,26 @@ export default function EvaluationsPage() {
     });
   };
 
+  const handleExportCsv = useCallback(() => {
+    const headers = [
+      "Suite", "Workflow", "Status", "Total Cases", "Passed",
+      "Failed", "Pass Rate", "Cost", "Duration (s)", "Created At",
+    ];
+    const rows = runs.map((r) => [
+      r.suite_name,
+      r.workflow_name,
+      r.status,
+      String(r.total_cases),
+      String(r.passed_cases),
+      String(r.failed_cases),
+      `${(r.pass_rate * 100).toFixed(1)}%`,
+      formatCost(r.total_cost_usd),
+      r.total_duration_seconds.toFixed(1),
+      r.created_at ?? "",
+    ]);
+    exportToCsv("evaluations.csv", headers, rows);
+  }, [runs]);
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -143,9 +165,24 @@ export default function EvaluationsPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
-        Evaluations
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+          Evaluations
+        </h1>
+        <button
+          onClick={handleExportCsv}
+          disabled={runs.length === 0}
+          aria-label="Export evaluations to CSV"
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm",
+            "text-muted hover:text-foreground hover:border-accent/40 transition-colors",
+            "disabled:opacity-40 disabled:cursor-not-allowed"
+          )}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export
+        </button>
+      </div>
 
       {/* Stats cards */}
       {stats && (
@@ -280,7 +317,7 @@ export default function EvaluationsPage() {
                   tabIndex={0}
                   aria-expanded={isExpanded}
                   aria-label={`${run.suite_name} - ${isExpanded ? "collapse" : "expand"} cases`}
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
+                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors focus-visible:outline-none focus-visible:bg-border/10"
                   onClick={() => setExpandedId(isExpanded ? null : run.id)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -295,11 +332,11 @@ export default function EvaluationsPage() {
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
+                      <p className="text-sm font-medium text-foreground truncate" title={run.suite_name}>
                         {run.suite_name}
                       </p>
                       <span className="text-xs text-muted">/</span>
-                      <p className="text-sm text-accent">{run.workflow_name}</p>
+                      <p className="text-sm text-accent" title={run.workflow_name}>{run.workflow_name}</p>
                     </div>
                     <div className="flex items-center gap-3 mt-1">
                       <span className="text-xs text-muted">
@@ -401,7 +438,7 @@ export default function EvaluationsPage() {
                           return (
                             <Fragment key={caseKey}>
                               <tr
-                                className="cursor-pointer hover:bg-border/10 transition-colors focus:outline-none focus:bg-border/10"
+                                className="cursor-pointer hover:bg-border/10 transition-colors focus-visible:outline-none focus-visible:bg-border/10"
                                 tabIndex={0}
                                 aria-expanded={isCaseExpanded}
                                 onClick={() =>
@@ -422,7 +459,7 @@ export default function EvaluationsPage() {
                                   )}
                                 </td>
                                 <td className="px-5 py-3">
-                                  <span className="font-medium text-foreground">
+                                  <span className="font-medium text-foreground" title={c.case_name}>
                                     {c.case_name}
                                   </span>
                                 </td>
@@ -475,7 +512,7 @@ export default function EvaluationsPage() {
                                             </span>
                                           )}
                                           {a.message && (
-                                            <span className="text-muted truncate">
+                                            <span className="text-muted truncate" title={a.message}>
                                               {a.message}
                                             </span>
                                           )}

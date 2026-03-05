@@ -88,7 +88,7 @@ export function RunModal({
                       required={template.input_schema?.required?.includes(key)}
                       className={cn(
                         "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                        "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                        "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                       )}
                     />
                   )}
@@ -105,7 +105,7 @@ export function RunModal({
                   rows={6}
                   className={cn(
                     "w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm",
-                    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                    "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                   )}
                 />
               </div>

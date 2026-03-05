@@ -46,7 +46,7 @@ export function AuthGate({ onLogin }: AuthGateProps) {
               autoComplete="current-password"
               aria-invalid={error}
               aria-describedby={error ? "api-key-error" : undefined}
-              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 transition-colors"
+              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 transition-colors"
             />
             {error && (
               <div id="api-key-error" className="mt-2 flex items-center gap-1.5 text-xs text-error" role="alert">

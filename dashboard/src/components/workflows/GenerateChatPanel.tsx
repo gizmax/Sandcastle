@@ -300,7 +300,7 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
             className={cn(
               "flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground",
               "placeholder:text-muted/50 resize-none",
-              "focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-ring/30",
+              "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30",
               "min-h-[38px] max-h-[100px]"
             )}
             onKeyDown={(e) => {
