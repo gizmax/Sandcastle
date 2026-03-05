@@ -193,6 +193,18 @@ def _get_client(backend: str = "local") -> Any:
             return _clients[backend]
         try:
             from mem0 import Memory
+            from pathlib import Path
+
+            # Use a persistent path for Qdrant so the collection survives
+            # server restarts. Without this, Qdrant defaults to /tmp/qdrant
+            # which is cleared on reboot, causing PointStruct validation
+            # errors when mem0 resets the index and encounters memories
+            # with None vectors.
+            qdrant_path = os.getenv(
+                "SANDCASTLE_QDRANT_PATH",
+                str(Path.home() / ".sandcastle" / "data" / "qdrant"),
+            )
+            Path(qdrant_path).mkdir(parents=True, exist_ok=True)
 
             # Use Anthropic LLM + fastembed local embeddings (no OpenAI needed)
             config = {
@@ -215,6 +227,7 @@ def _get_client(backend: str = "local") -> Any:
                     "config": {
                         "collection_name": "mem0_local",
                         "embedding_model_dims": 384,
+                        "path": qdrant_path,
                     },
                 },
             }

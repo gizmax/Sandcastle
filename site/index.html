@@ -514,6 +514,27 @@
       height: 24px;
     }
 
+    .highlight-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 20px;
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #10b981;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 100px;
+      letter-spacing: 0.02em;
+    }
+
+    .highlight-pill svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
     /* ---- SECTIONS ---- */
     section {
       padding: 100px 0;
@@ -1616,7 +1637,7 @@
   <header class="hero" id="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.18.0 - Hub Security Scanner + SHA-256 Checksums + 2861 Tests
+        v0.21.0 - Agent Memory with Local Embeddings - Zero OpenAI Dependency - 7161 Tests
       </div>
       <h1>
         Stop babysitting<br>
@@ -1663,7 +1684,7 @@
         <div class="terminal-step">
           <div class="terminal-step-num">3</div>
           <div class="terminal-step-title">Run</div>
-          <div class="terminal-step-desc">API + dashboard on one port. 28 templates included.</div>
+          <div class="terminal-step-desc">API + dashboard on one port. 236 templates included.</div>
         </div>
       </div>
 
@@ -1679,11 +1700,11 @@
     <div class="container fade-in">
       <div class="stats-row">
         <div class="stat-item">
-          <div class="stat-number">2861</div>
+          <div class="stat-number">7161</div>
           <div class="stat-label">Tests Passing</div>
         </div>
         <div class="stat-item">
-          <div class="stat-number">88</div>
+          <div class="stat-number">236</div>
           <div class="stat-label">Templates</div>
         </div>
         <div class="stat-item">
@@ -1700,6 +1721,12 @@
         <img src="https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=f59e0b&labelColor=171717" alt="PyPI Version">
         <img src="https://img.shields.io/pypi/pyversions/sandcastle-ai?style=flat-square&color=f59e0b&labelColor=171717" alt="Python Versions">
         <img src="https://img.shields.io/badge/license-BSL_1.1-f59e0b?style=flat-square&labelColor=171717" alt="License">
+      </div>
+      <div style="text-align:center;">
+        <span class="highlight-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          No OpenAI Required - Agent Memory runs on Anthropic Claude + local embeddings (fastembed/ONNX)
+        </span>
       </div>
     </div>
   </section>
@@ -1736,6 +1763,7 @@
             <li><span class="mark">&#10003;</span><strong>Cost tracking per step</strong> - budgets and alerts</li>
             <li><span class="mark">&#10003;</span><strong>One env var</strong> to switch backend or model provider</li>
             <li><span class="mark">&#10003;</span><strong>Policy engine</strong> - PII redaction, secret blocking, guardrails</li>
+            <li><span class="mark">&#10003;</span><strong>No OpenAI required</strong> - agent memory runs on local embeddings, zero vendor lock-in</li>
           </ul>
         </div>
       </div>
@@ -1859,8 +1887,8 @@
             </div>
             <div class="feature-card">
               <span class="feature-icon">🧠</span>
-              <h3>Agent Memory</h3>
-              <p>Persistent context across runs via Mem0. Semantic search auto-injects relevant memories into prompts.</p>
+              <h3>Agent Memory - No OpenAI Required</h3>
+              <p>Persistent context across runs powered by Anthropic Claude + local fastembed/ONNX embeddings. Semantic search auto-injects relevant memories into prompts. Zero OpenAI dependency.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🎯</span>
@@ -1911,8 +1939,8 @@
           <div class="tab-grid">
             <div class="feature-card">
               <span class="feature-icon">🔧</span>
-              <h3>53 Tool Connectors</h3>
-              <p>Slack, GitHub, OpenAI, Anthropic, AWS S3, Google Sheets, Airtable, Discord, Supabase, Pinecone, Stripe, Shopify, PagerDuty, Datadog, and 39 more. Add <code>tools: [slack]</code> to any step.</p>
+              <h3>58 Tool Connectors</h3>
+              <p>Slack, GitHub, OpenAI, Anthropic, AWS S3, Google Sheets, Airtable, Discord, Supabase, Pinecone, Stripe, Shopify, PagerDuty, Datadog, and 44 more. Add <code>tools: [slack]</code> to any step.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🤝</span>
@@ -1972,8 +2000,8 @@
             </div>
             <div class="feature-card">
               <span class="feature-icon">📋</span>
-              <h3>88 Templates</h3>
-              <p>Marketing, sales, engineering, support, HR, legal, and general AI templates. Full Community Hub with one-click install and uninstall.</p>
+              <h3>236 Templates</h3>
+              <p>118 built-in + 118 community templates. Marketing, sales, engineering, support, HR, legal, and general AI. Full Community Hub with one-click install and uninstall.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🧪</span>
@@ -2199,7 +2227,7 @@
   <section class="templates-section">
     <div class="container fade-in">
       <span class="section-label">Templates</span>
-      <h2 class="section-title">88 workflow templates, ready to deploy</h2>
+      <h2 class="section-title">236 workflow templates, ready to deploy</h2>
       <p class="section-subtitle">Skip the blank page. Pick a template, tweak the prompts, and ship. Browse the Community Hub or install via CLI.</p>
       <div class="templates-grid">
         <div class="template-category">

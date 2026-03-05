@@ -617,11 +617,125 @@ steps:
       4. Any images that were regenerated (and why)
 
   # ============================================================
+  # PHASE 5b: SELECTIVE REGENERATION (max 1 round)
+  # ============================================================
+
+  - id: "regenerate-router"
+    depends_on: ["creative-review"]
+    type: condition
+    condition_config:
+      expression: "'{steps.creative-review.output.action}' == 'regenerate'"
+      then: ["recompose-rejected", "regenerate-rejected-images", "creative-review-final"]
+      else: []
+
+  - id: "recompose-rejected"
+    depends_on: ["regenerate-router"]
+    type: llm
+    parallel_over: "steps.creative-review.output.rejected_shots"
+    prompt: |
+      You are an expert AI image prompt engineer for Imagen 4.0.
+
+      An image was rejected during creative review and needs to be regenerated with improvements.
+
+      ## Rejection context
+      - Rejected image index: {input._item}
+      - Reviewer feedback: {steps.creative-review.output.feedback}
+
+      ## Original shoot plan
+      {steps.creative-director.output}
+
+      ## Product details
+      {steps.vision-analyze.output}
+
+      ## Quality report for this image
+      {steps.quality-judge.output}
+
+      Find the shot from the creative director's plan that corresponds to index {input._item}.
+      Then compose an IMPROVED Imagen 4.0 prompt that:
+      1. Addresses the reviewer's feedback: "{steps.creative-review.output.feedback}"
+      2. Incorporates any quality judge suggestions for this shot
+      3. Maintains the original creative intent but fixes the noted issues
+      4. Is a single dense paragraph, 100-180 words, extremely detailed
+      5. Focuses on photorealism and authentic UGC feel
+
+      CRITICAL: The aspect_ratio field MUST be exactly one of: 1:1, 9:16, 16:9, 4:3, 3:4
+      These are the ONLY values Imagen 4.0 accepts.
+
+      Return a JSON object:
+      {
+        "original_index": {input._item},
+        "prompt": "your improved image generation prompt",
+        "aspect_ratio": "one of: 1:1, 9:16, 16:9, 4:3, 3:4",
+        "improvements": "brief description of what was changed from original"
+      }
+    output_schema:
+      type: object
+      properties:
+        original_index: { type: integer }
+        prompt: { type: string }
+        aspect_ratio:
+          type: string
+          enum: ["1:1", "9:16", "16:9", "4:3", "3:4"]
+        improvements: { type: string }
+
+  - id: "regenerate-rejected-images"
+    depends_on: ["recompose-rejected", "encode-product-photo"]
+    type: http
+    parallel_over: "steps.recompose-rejected.output"
+    http_config:
+      method: POST
+      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={env.TOOL_NANO_BANANA_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        contents:
+          - parts:
+              - text: "Generate a photorealistic UGC product photograph. The image MUST feature the EXACT same product as the reference photo - same shape, same label, same colors, same brand. Do NOT replace it.\n\nThis is a REGENERATED image based on reviewer feedback. Pay extra attention to quality.\n\nPrompt: {input._item.prompt}"
+              - inline_data:
+                  mime_type: "image/png"
+                  data: "{steps.encode-product-photo.output.b64_file}"
+        generationConfig:
+          responseModalities: ["IMAGE"]
+      cost_per_call: 0.04
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "creative-review-final"
+    depends_on: ["regenerate-rejected-images"]
+    type: approval
+    approval_config:
+      message: "Review the regenerated images. This is the final review - approve to finalize or reject to cancel the delivery."
+      show_data: steps.recompose-rejected.output
+      show_images:
+        - steps.regenerate-rejected-images.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+    prompt: |
+      Present the regenerated images for final review.
+
+      ## What was regenerated
+      {steps.recompose-rejected.output}
+
+      ## Reviewer's original feedback
+      {steps.creative-review.output.feedback}
+
+      ## Rejected image indices
+      {steps.creative-review.output.rejected_shots}
+
+      Show:
+      1. Each regenerated image with what was changed
+      2. The original feedback and how it was addressed
+      3. Note: This is the final review round. No further regeneration is available.
+
+  # ============================================================
   # PHASE 6: FINALIZE (parallel)
   # ============================================================
 
   - id: "final-deliverables"
-    depends_on: ["creative-review"]
+    depends_on: ["regenerate-router", "creative-review-final"]
     prompt: |
       Compile the final UGC Creative Studio delivery package.
 
@@ -674,7 +788,7 @@ steps:
       Format as clean, professional markdown.
 
   - id: "brand-memory-save"
-    depends_on: ["creative-review"]
+    depends_on: ["regenerate-router", "creative-review-final"]
     model: haiku
     memory:
       read: true
