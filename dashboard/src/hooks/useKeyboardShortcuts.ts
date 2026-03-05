@@ -1,11 +1,25 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-export function useKeyboardShortcuts() {
+interface KeyboardShortcutsOptions {
+  onCommandPalette?: () => void;
+}
+
+export function useKeyboardShortcuts(options?: KeyboardShortcutsOptions) {
   const navigate = useNavigate();
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Allow Cmd+K even when focused on an input (it opens the palette)
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === "k" || e.key === "K")
+      ) {
+        e.preventDefault();
+        options?.onCommandPalette?.();
+        return;
+      }
+
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -32,20 +46,11 @@ export function useKeyboardShortcuts() {
             e.preventDefault();
             navigate("/schedules");
             break;
-          case "k":
-          case "K": {
-            e.preventDefault();
-            const searchInput = document.querySelector<HTMLInputElement>(
-              'header input[type="text"][placeholder*="Search"]'
-            );
-            searchInput?.focus();
-            break;
-          }
         }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navigate]);
+  }, [navigate, options]);
 }

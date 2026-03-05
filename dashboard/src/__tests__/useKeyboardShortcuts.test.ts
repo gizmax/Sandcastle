@@ -96,41 +96,40 @@ describe("useKeyboardShortcuts", () => {
     document.body.removeChild(textarea);
   });
 
-  it("Cmd+K focuses the search input", () => {
-    renderHook(() => useKeyboardShortcuts());
-
-    // Create a mock search input matching the selector
-    const input = document.createElement("input");
-    input.type = "text";
-    input.placeholder = "Search workflows...";
-    const header = document.createElement("header");
-    header.appendChild(input);
-    document.body.appendChild(header);
-
-    const focusSpy = vi.spyOn(input, "focus");
+  it("Cmd+K calls onCommandPalette callback", () => {
+    const onCommandPalette = vi.fn();
+    renderHook(() => useKeyboardShortcuts({ onCommandPalette }));
 
     act(() => fireKey("k", { metaKey: true }));
-    expect(focusSpy).toHaveBeenCalled();
-
-    document.body.removeChild(header);
+    expect(onCommandPalette).toHaveBeenCalledTimes(1);
   });
 
-  it("Cmd+K (uppercase K) also focuses search", () => {
-    renderHook(() => useKeyboardShortcuts());
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.placeholder = "Search things";
-    const header = document.createElement("header");
-    header.appendChild(input);
-    document.body.appendChild(header);
-
-    const focusSpy = vi.spyOn(input, "focus");
+  it("Cmd+K (uppercase K) also calls onCommandPalette", () => {
+    const onCommandPalette = vi.fn();
+    renderHook(() => useKeyboardShortcuts({ onCommandPalette }));
 
     act(() => fireKey("K", { metaKey: true }));
-    expect(focusSpy).toHaveBeenCalled();
+    expect(onCommandPalette).toHaveBeenCalledTimes(1);
+  });
 
-    document.body.removeChild(header);
+  it("Cmd+K works even when target is an input", () => {
+    const onCommandPalette = vi.fn();
+    renderHook(() => useKeyboardShortcuts({ onCommandPalette }));
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      metaKey: true,
+      bubbles: true,
+    });
+    Object.defineProperty(event, "target", { value: input });
+    window.dispatchEvent(event);
+
+    expect(onCommandPalette).toHaveBeenCalledTimes(1);
+    document.body.removeChild(input);
   });
 
   it("cleans up listener on unmount", () => {

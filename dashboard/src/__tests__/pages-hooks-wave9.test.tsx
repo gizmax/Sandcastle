@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 // userEvent intentionally not imported - all tests use fireEvent instead
 
 // ============================================================================
@@ -1076,6 +1076,7 @@ import { Header } from "@/components/layout/Header";
 describe("Header", () => {
   const defaultHeaderProps = {
     onMenuToggle: vi.fn(),
+    onOpenPalette: vi.fn(),
     notifications: [] as { id: string; type: "success" | "error" | "warning" | "info"; message: string; timestamp: Date; read: boolean }[],
     onMarkAllRead: vi.fn(),
     onClickNotification: vi.fn(),
@@ -1093,10 +1094,16 @@ describe("Header", () => {
     expect(onMenuToggle).toHaveBeenCalled();
   });
 
-  it("renders search input with combobox role", () => {
+  it("renders command palette trigger button", () => {
     render(<Header {...defaultHeaderProps} />);
-    const searchInputs = screen.getAllByRole("combobox");
-    expect(searchInputs.length).toBeGreaterThan(0);
+    expect(screen.getByText(/Search or type/)).toBeInTheDocument();
+  });
+
+  it("calls onOpenPalette when search button is clicked", () => {
+    const onOpenPalette = vi.fn();
+    render(<Header {...defaultHeaderProps} onOpenPalette={onOpenPalette} />);
+    fireEvent.click(screen.getByText(/Search or type/));
+    expect(onOpenPalette).toHaveBeenCalled();
   });
 
   it("renders notification center", () => {
@@ -1135,178 +1142,12 @@ describe("Header", () => {
     mockLocation.pathname = "/";
   });
 
-  it("performs search and shows results on input", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/runs") return Promise.resolve({
-        data: [{ run_id: "run-123", workflow_name: "TestWorkflow", status: "completed" }],
-        error: null,
-      });
-      if (url === "/workflows") return Promise.resolve({
-        data: [{ name: "TestWorkflow", file_name: "test.yaml", steps_count: 3 }],
-        error: null,
-      });
-      if (url === "/tools") return Promise.resolve({
-        data: { tools: [{ name: "TestTool", description: "A tool", category: "General", configured: true }] },
-        error: null,
-      });
-      return Promise.resolve({ data: null, error: null });
-    });
-
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "test" } });
-
-    // Wait for debounced search (300ms)
-    act(() => { vi.advanceTimersByTime(350); });
-
-    await waitFor(() => {
-      // "TestWorkflow" appears for both run result and workflow result in the search dropdown
-      expect(screen.getAllByText("TestWorkflow").length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  it("shows no results message for unmatched query", async () => {
-    mockApi.get.mockResolvedValue({ data: [], error: null });
-
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "zzzzzzz" } });
-    act(() => { vi.advanceTimersByTime(350); });
-
-    await waitFor(() => {
-      expect(screen.getByText(/No results for/)).toBeInTheDocument();
-    });
-  });
-
-  it("does not search for queries shorter than 2 chars", async () => {
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "a" } });
-    act(() => { vi.advanceTimersByTime(350); });
-
-    // Should not have called API
-    await waitFor(() => {
-      expect(mockApi.get).not.toHaveBeenCalled();
-    });
-  });
-
-  it("navigates and clears search on result selection", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/runs") return Promise.resolve({
-        data: [{ run_id: "run-xyz", workflow_name: "MyFlow", status: "completed" }],
-        error: null,
-      });
-      if (url === "/workflows") return Promise.resolve({ data: [], error: null });
-      if (url === "/tools") return Promise.resolve({ data: { tools: [] }, error: null });
-      return Promise.resolve({ data: null, error: null });
-    });
-
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "myflow" } });
-    act(() => { vi.advanceTimersByTime(350); });
-
-    await waitFor(() => {
-      expect(screen.getByText("MyFlow")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("MyFlow"));
-    expect(mockNavigate).toHaveBeenCalledWith("/runs/run-xyz");
-  });
-
-  it("supports keyboard navigation in search results", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/runs") return Promise.resolve({
-        data: [
-          { run_id: "r1", workflow_name: "Alpha", status: "completed" },
-          { run_id: "r2", workflow_name: "AlphaBeta", status: "completed" },
-        ],
-        error: null,
-      });
-      if (url === "/workflows") return Promise.resolve({ data: [], error: null });
-      if (url === "/tools") return Promise.resolve({ data: { tools: [] }, error: null });
-      return Promise.resolve({ data: null, error: null });
-    });
-
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "alpha" } });
-    act(() => { vi.advanceTimersByTime(350); });
-
-    await waitFor(() => {
-      expect(screen.getByText("Alpha")).toBeInTheDocument();
-    });
-
-    // Arrow down to first result
-    fireEvent.keyDown(searchInput, { key: "ArrowDown" });
-    const firstOption = screen.getByText("Alpha").closest("[role='option']");
-    expect(firstOption?.getAttribute("aria-selected")).toBe("true");
-
-    // Arrow down to second result
-    fireEvent.keyDown(searchInput, { key: "ArrowDown" });
-    const secondOption = screen.getByText("AlphaBeta").closest("[role='option']");
-    expect(secondOption?.getAttribute("aria-selected")).toBe("true");
-
-    // Enter selects the result
-    fireEvent.keyDown(searchInput, { key: "Enter" });
-    expect(mockNavigate).toHaveBeenCalledWith("/runs/r2");
-  });
-
-  it("closes search results on Escape", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/runs") return Promise.resolve({
-        data: [{ run_id: "r1", workflow_name: "SearchResult", status: "completed" }],
-        error: null,
-      });
-      if (url === "/workflows") return Promise.resolve({ data: [], error: null });
-      if (url === "/tools") return Promise.resolve({ data: { tools: [] }, error: null });
-      return Promise.resolve({ data: null, error: null });
-    });
-
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "search" } });
-    act(() => { vi.advanceTimersByTime(350); });
-
-    await waitFor(() => {
-      expect(screen.getByText("SearchResult")).toBeInTheDocument();
-    });
-
-    // Press Escape
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => {
-      expect(screen.queryByText("SearchResult")).not.toBeInTheDocument();
-    });
-  });
-
-  it("handles API error gracefully during search", async () => {
-    mockApi.get.mockRejectedValue(new Error("fail"));
-
-    render(<Header {...defaultHeaderProps} />);
-    const searchInput = screen.getAllByRole("combobox")[0];
-
-    fireEvent.change(searchInput, { target: { value: "test" } });
-    act(() => { vi.advanceTimersByTime(350); });
-
-    // Should not crash - no results shown
-    await waitFor(() => {
-      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    });
-  });
-
-  it("toggles mobile search on button click", () => {
-    render(<Header {...defaultHeaderProps} />);
-    const toggleBtn = screen.getByLabelText("Toggle search");
+  it("opens palette on mobile search button click", () => {
+    const onOpenPalette = vi.fn();
+    render(<Header {...defaultHeaderProps} onOpenPalette={onOpenPalette} />);
+    const toggleBtn = screen.getByLabelText("Open search");
     fireEvent.click(toggleBtn);
-    // Mobile search is rendered - there should now be 2 combobox inputs (desktop + mobile)
-    const inputs = screen.getAllByRole("combobox");
-    expect(inputs.length).toBe(2);
+    expect(onOpenPalette).toHaveBeenCalled();
   });
 });
 
