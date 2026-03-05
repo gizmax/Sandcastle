@@ -14,6 +14,11 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  Bell,
+  Palette,
+  Check,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -22,6 +27,9 @@ import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard
 import { cn, inputClass } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useAccentColor, ACCENT_COLORS } from "@/hooks/useAccentColor";
+import { useTheme } from "@/hooks/useTheme";
 
 // -- Types ------------------------------------------------------------------
 
@@ -121,7 +129,15 @@ export default function SettingsPage() {
   const [savingSections, setSavingSections] = useState<Set<SectionName>>(new Set());
   const { info: runtimeInfo } = useRuntimeInfo();
   const update = useUpdateCheck();
+  const {
+    permission: notifPermission,
+    notificationsEnabled,
+    requestPermission,
+    toggleNotifications,
+  } = useNotifications();
   const [copied, setCopied] = useState(false);
+  const { accentColor, setAccentColor } = useAccentColor();
+  const { theme, toggleTheme } = useTheme();
 
   // Keep a snapshot of the original values for dirty checking
   const originalRef = useRef<SettingsData | null>(null);
@@ -309,6 +325,83 @@ export default function SettingsPage() {
         </SectionCard>
       )}
 
+      {/* Notifications */}
+      <SectionCard
+        icon={Bell}
+        title="Notifications"
+        description="Get notified when workflows complete or fail"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Browser notifications for run completion
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Permission:{" "}
+                <span
+                  className={cn(
+                    "font-medium",
+                    notifPermission === "granted"
+                      ? "text-success"
+                      : notifPermission === "denied"
+                        ? "text-error"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {notifPermission === "granted"
+                    ? "Allowed"
+                    : notifPermission === "denied"
+                      ? "Blocked"
+                      : "Not requested"}
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notificationsEnabled}
+              onClick={toggleNotifications}
+              disabled={notifPermission !== "granted"}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer",
+                notificationsEnabled && notifPermission === "granted"
+                  ? "bg-accent"
+                  : "bg-border",
+                notifPermission !== "granted" && "opacity-60 cursor-not-allowed",
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                  notificationsEnabled && notifPermission === "granted"
+                    ? "translate-x-5"
+                    : "translate-x-0",
+                )}
+              />
+            </button>
+          </div>
+          {notifPermission === "default" && (
+            <button
+              onClick={() => void requestPermission()}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border border-accent/30 px-3 py-1.5",
+                "text-sm font-medium text-accent",
+                "hover:bg-accent/10 transition-colors cursor-pointer",
+              )}
+            >
+              <Bell className="h-4 w-4" />
+              Request Permission
+            </button>
+          )}
+          {notifPermission === "denied" && (
+            <p className="text-xs text-muted-foreground">
+              Browser notifications are blocked. Update your browser settings to enable them.
+            </p>
+          )}
+        </div>
+      </SectionCard>
+
       {/* License */}
       <SectionCard
         icon={BadgeCheck}
@@ -369,6 +462,87 @@ export default function SettingsPage() {
         ) : (
           <p className="text-sm text-muted-foreground">Loading license info...</p>
         )}
+      </SectionCard>
+
+      {/* Appearance */}
+      <SectionCard
+        icon={Palette}
+        title="Appearance"
+        description="Theme and accent color preferences"
+      >
+        <div className="space-y-5">
+          {/* Theme toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Theme</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Switch between light and dark mode
+              </p>
+            </div>
+            <button
+              onClick={toggleTheme}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border border-border px-3 py-1.5",
+                "text-sm font-medium text-foreground hover:bg-border/40 transition-colors cursor-pointer",
+              )}
+            >
+              {theme === "dark" ? (
+                <><Moon className="h-4 w-4" /> Dark</>
+              ) : (
+                <><Sun className="h-4 w-4" /> Light</>
+              )}
+            </button>
+          </div>
+
+          {/* Accent color palette */}
+          <div>
+            <p className="text-sm font-medium text-foreground mb-3">Accent Color</p>
+            <div className="flex flex-wrap gap-3">
+              {ACCENT_COLORS.map((color) => {
+                const isSelected = accentColor === color.id;
+                return (
+                  <button
+                    key={color.id}
+                    onClick={() => setAccentColor(color.id)}
+                    className="group relative flex h-8 w-8 items-center justify-center rounded-full transition-transform duration-150 hover:scale-110 cursor-pointer"
+                    style={{
+                      backgroundColor: theme === "dark" ? color.darkAccent : color.accent,
+                      boxShadow: isSelected
+                        ? `0 0 0 2px var(--color-background), 0 0 0 4px ${theme === "dark" ? color.darkAccent : color.accent}`
+                        : undefined,
+                    }}
+                    title={color.label}
+                    aria-label={`Set accent color to ${color.label}`}
+                  >
+                    {isSelected && (
+                      <Check
+                        className="h-4 w-4"
+                        style={{
+                          color: theme === "dark" ? color.darkAccentForeground : color.accentForeground,
+                        }}
+                        strokeWidth={3}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <p className="text-xs text-muted-foreground">
+                {ACCENT_COLORS.find((c) => c.id === accentColor)?.label ?? "Amber"}
+                {accentColor === "amber" ? " (default)" : ""}
+              </p>
+              {accentColor !== "amber" && (
+                <button
+                  onClick={() => setAccentColor("amber")}
+                  className="text-xs text-accent hover:underline cursor-pointer"
+                >
+                  Reset to default
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </SectionCard>
 
       {/* Security */}

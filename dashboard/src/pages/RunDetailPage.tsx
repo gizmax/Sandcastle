@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown } from "lucide-react";
+import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -60,6 +61,8 @@ export default function RunDetailPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"replay" | "fork">("replay");
   const [modalStepId, setModalStepId] = useState("");
+  const { notifyRunComplete } = useNotifications();
+  const prevStatusRef = useRef<string | null>(null);
 
   const fetchRun = useCallback(async (cancelled?: { current: boolean }) => {
     if (!id) return;
@@ -92,6 +95,25 @@ export default function RunDetailPage() {
   }, [fetchRun]);
 
   const runStatus = run?.status ?? null;
+
+  // Detect run completion and fire browser notification when page is hidden
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = runStatus;
+
+    if (!run || !runStatus) return;
+    if (!prev || !["running", "queued"].includes(prev)) return;
+    if (!["completed", "failed"].includes(runStatus)) return;
+    if (!document.hidden) return;
+
+    notifyRunComplete({
+      run_id: run.run_id,
+      workflow_name: run.workflow_name,
+      status: run.status,
+      total_cost_usd: run.total_cost_usd,
+    });
+  }, [runStatus, run, notifyRunComplete]);
+
   useEffect(() => {
     if (!runStatus || !["running", "queued"].includes(runStatus)) return;
     const cancelled = { current: false };

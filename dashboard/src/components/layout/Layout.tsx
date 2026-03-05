@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { CommandPalette } from "@/components/layout/CommandPalette";
 import type { Notification } from "@/components/layout/NotificationCenter";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useRecentItems } from "@/hooks/useRecentItems";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { ToastContainer } from "@/components/shared/ToastContainer";
+import { ShortcutHelpModal } from "@/components/shared/ShortcutHelpModal";
 import { useToasts } from "@/hooks/useToasts";
 import type { StreamEvent } from "@/hooks/useEventStream";
 import { api } from "@/api/client";
@@ -73,17 +76,57 @@ export function Layout() {
   );
 }
 
+// Map pathname to label for recent items tracking
+const ROUTE_LABELS: Record<string, string> = {
+  "/": "Overview",
+  "/runs": "Runs",
+  "/workflows": "Workflows",
+  "/templates": "Template Hub",
+  "/integrations": "Integrations",
+  "/approvals": "Approvals",
+  "/evaluations": "Evaluations",
+  "/autopilot": "AutoPilot",
+  "/violations": "Violations",
+  "/optimizer": "Optimizer",
+  "/schedules": "Schedules",
+  "/dead-letter": "Dead Letter",
+  "/api-keys": "API Keys",
+  "/settings": "Settings",
+  "/system-health": "System Health",
+};
+
 function LayoutInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [dlqCount, setDlqCount] = useState(0);
   const [approvalsCount, setApprovalsCount] = useState(0);
   const [isDemo, setIsDemo] = useState(api.isMockMode);
   const navigate = useNavigate();
+  const location = useLocation();
   const { subscribe } = useEventStreamContext();
   const { toasts, addToast, dismissToast } = useToasts();
+  const { recentItems, addRecentItem } = useRecentItems();
 
-  useKeyboardShortcuts();
+  const shortcutOptions = useMemo(
+    () => ({ onCommandPalette: () => setPaletteOpen(true) }),
+    []
+  );
+  useKeyboardShortcuts(shortcutOptions);
+
+  // Track page visits for recent items
+  useEffect(() => {
+    const pathname = location.pathname;
+    if (pathname.startsWith("/runs/") && pathname !== "/runs/compare") {
+      const runId = pathname.split("/")[2];
+      addRecentItem({ type: "run", id: pathname, label: `Run ${runId.slice(0, 8)}` });
+    } else if (pathname.startsWith("/workflows/") && pathname !== "/workflows/builder") {
+      const name = decodeURIComponent(pathname.split("/")[2]);
+      addRecentItem({ type: "workflow", id: pathname, label: name });
+    } else if (ROUTE_LABELS[pathname]) {
+      addRecentItem({ type: "page", id: pathname, label: ROUTE_LABELS[pathname] });
+    }
+  }, [location.pathname, addRecentItem]);
 
   // Track mock mode changes
   useEffect(() => api.onMockChange(setIsDemo), []);
@@ -180,6 +223,7 @@ function LayoutInner() {
         )}
         <Header
           onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+          onOpenPalette={() => setPaletteOpen(true)}
           notifications={notifications}
           onMarkAllRead={handleMarkAllRead}
           onClickNotification={handleClickNotification}
@@ -188,7 +232,13 @@ function LayoutInner() {
           <Outlet />
         </main>
       </div>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        recentItems={recentItems}
+      />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ShortcutHelpModal />
     </div>
   );
 }
