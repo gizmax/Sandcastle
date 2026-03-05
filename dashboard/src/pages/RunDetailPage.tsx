@@ -8,6 +8,7 @@ import { StepTimeline } from "@/components/runs/StepTimeline";
 import { LiveStream } from "@/components/runs/LiveStream";
 import { RunTree } from "@/components/runs/RunTree";
 import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
+import { PipelineViz } from "@/components/runs/PipelineViz";
 import { BudgetBar } from "@/components/shared/BudgetBar";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -403,6 +404,11 @@ export default function RunDetailPage() {
 
       {/* Live stream for running runs */}
       {isRunning && id && <LiveStream runId={id} />}
+
+      {/* Pipeline visualization */}
+      {run.steps && run.steps.length > 0 && (
+        <PipelineViz steps={run.steps} />
+      )}
 
       {/* Step timeline */}
       <div>

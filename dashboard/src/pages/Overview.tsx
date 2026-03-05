@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Castle } from "lucide-react";
+import { Castle, Play, AlertTriangle, BarChart3 } from "lucide-react";
 import { api } from "@/api/client";
 import { StatsCards } from "@/components/overview/StatsCards";
 import { RunsChart } from "@/components/overview/RunsChart";
@@ -10,6 +10,7 @@ import { HealthHero } from "@/components/overview/HealthHero";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
+import { cn } from "@/lib/utils";
 
 interface Stats {
   total_runs_today: number;
@@ -28,6 +29,282 @@ interface RunItem {
   started_at: string | null;
 }
 
+interface SparklineData {
+  values: number[];
+  trendPercent: number;
+}
+
+// ---------------------------------------------------------------------------
+// MOCK DATA: Replace with real API calls when backend supports sparkline/
+// heatmap endpoints. Uses a deterministic seed based on current date so
+// values stay stable within a single day.
+// ---------------------------------------------------------------------------
+
+/** Simple deterministic pseudo-random number generator (mulberry32). */
+function seededRandom(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function generateMockSparklines(): Record<string, SparklineData> {
+  const today = new Date();
+  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const rng = seededRandom(seed);
+
+  const mkSeries = (base: number, variance: number): number[] =>
+    Array.from({ length: 7 }, () => Math.max(0, base + (rng() - 0.5) * 2 * variance));
+
+  const runsValues = mkSeries(24, 12);
+  const rateValues = mkSeries(0.92, 0.08);
+  const costValues = mkSeries(1.5, 0.8);
+  const durationValues = mkSeries(45, 15);
+
+  const trendPct = (vals: number[]) => {
+    const yesterday = vals[vals.length - 2];
+    const todayVal = vals[vals.length - 1];
+    if (yesterday === 0) return 0;
+    return ((todayVal - yesterday) / yesterday) * 100;
+  };
+
+  return {
+    runs: { values: runsValues, trendPercent: trendPct(runsValues) },
+    rate: { values: rateValues, trendPercent: trendPct(rateValues) },
+    cost: { values: costValues, trendPercent: trendPct(costValues) },
+    duration: { values: durationValues, trendPercent: trendPct(durationValues) },
+  };
+}
+
+interface HeatmapCell {
+  date: string; // YYYY-MM-DD
+  count: number;
+  dayOfWeek: number; // 0=Sun .. 6=Sat
+}
+
+function generateMockHeatmap(): HeatmapCell[] {
+  const today = new Date();
+  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 99;
+  const rng = seededRandom(seed);
+
+  const cells: HeatmapCell[] = [];
+  // Go back 12 weeks (84 days)
+  for (let i = 83; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dayOfWeek = d.getDay();
+    // Weekends have fewer runs
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const maxRuns = isWeekend ? 8 : 30;
+    const count = Math.floor(rng() * maxRuns);
+    cells.push({
+      date: d.toISOString().slice(0, 10),
+      count,
+      dayOfWeek,
+    });
+  }
+  return cells;
+}
+
+// ---------------------------------------------------------------------------
+// ActivityHeatmap - GitHub-style contribution graph
+// ---------------------------------------------------------------------------
+
+const DAY_LABELS = ["", "M", "", "W", "", "F", ""];
+
+function getIntensityClass(count: number, maxCount: number): string {
+  if (count === 0) return "bg-surface border border-border/50";
+  const ratio = count / maxCount;
+  if (ratio < 0.25) return "bg-accent/20";
+  if (ratio < 0.5) return "bg-accent/40";
+  if (ratio < 0.75) return "bg-accent/70";
+  return "bg-accent";
+}
+
+function ActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
+
+  // Organize into weeks (columns). Each column has 7 rows (Sun=0 .. Sat=6).
+  // We remap to Mon=0 .. Sun=6 for display: row = (dayOfWeek + 6) % 7
+  const weeks: (HeatmapCell | null)[][] = [];
+  let currentWeek: (HeatmapCell | null)[] = Array(7).fill(null);
+
+  for (const cell of cells) {
+    const row = (cell.dayOfWeek + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
+    if (row === 0 && currentWeek.some((c) => c !== null)) {
+      weeks.push(currentWeek);
+      currentWeek = Array(7).fill(null);
+    }
+    currentWeek[row] = cell;
+  }
+  if (currentWeek.some((c) => c !== null)) {
+    weeks.push(currentWeek);
+  }
+
+  const maxCount = Math.max(1, ...cells.map((c) => c.count));
+
+  // Month labels: find the first cell in each month transition
+  const monthLabels: { col: number; label: string }[] = [];
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  let prevMonth = -1;
+  for (let col = 0; col < weeks.length; col++) {
+    const firstCell = weeks[col].find((c) => c !== null);
+    if (firstCell) {
+      const month = parseInt(firstCell.date.slice(5, 7), 10) - 1;
+      if (month !== prevMonth) {
+        monthLabels.push({ col, label: monthNames[month] });
+        prevMonth = month;
+      }
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
+      <h3 className="mb-3 text-sm font-medium text-foreground">Activity</h3>
+      <div className="relative overflow-x-auto">
+        {/* Month labels row */}
+        <div className="flex" style={{ paddingLeft: "28px" }}>
+          {weeks.map((_, col) => {
+            const ml = monthLabels.find((m) => m.col === col);
+            return (
+              <div key={col} className="text-[10px] text-muted" style={{ width: "14px", minWidth: "14px" }}>
+                {ml ? ml.label : ""}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-0">
+          {/* Day labels */}
+          <div className="flex flex-col gap-[2px] pr-1 pt-[2px]" style={{ width: "24px", minWidth: "24px" }}>
+            {DAY_LABELS.map((label, i) => (
+              <div
+                key={i}
+                className="flex h-[12px] items-center text-[10px] leading-none text-muted"
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+
+          {/* Grid */}
+          <div className="flex gap-[2px]">
+            {weeks.map((week, col) => (
+              <div key={col} className="flex flex-col gap-[2px]">
+                {week.map((cell, row) => (
+                  <div
+                    key={row}
+                    className={cn(
+                      "h-[12px] w-[12px] rounded-[2px] transition-colors duration-100",
+                      cell ? getIntensityClass(cell.count, maxCount) : "bg-transparent"
+                    )}
+                    onMouseEnter={(e) => {
+                      if (!cell) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTooltip({
+                        x: rect.left + rect.width / 2,
+                        y: rect.top - 8,
+                        text: `${cell.date}: ${cell.count} run${cell.count !== 1 ? "s" : ""}`,
+                      });
+                    }}
+                    onMouseLeave={() => setTooltip(null)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="mt-3 flex items-center gap-1.5 text-[10px] text-muted">
+          <span>Less</span>
+          <div className="h-[10px] w-[10px] rounded-[2px] bg-surface border border-border/50" />
+          <div className="h-[10px] w-[10px] rounded-[2px] bg-accent/20" />
+          <div className="h-[10px] w-[10px] rounded-[2px] bg-accent/40" />
+          <div className="h-[10px] w-[10px] rounded-[2px] bg-accent/70" />
+          <div className="h-[10px] w-[10px] rounded-[2px] bg-accent" />
+          <span>More</span>
+        </div>
+      </div>
+
+      {/* Tooltip (portal-free, fixed position) */}
+      {tooltip && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background shadow-lg"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// QuickActions row
+// ---------------------------------------------------------------------------
+
+function QuickActions() {
+  const navigate = useNavigate();
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      <button
+        onClick={() => navigate("/workflows")}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium",
+          "bg-accent text-accent-foreground",
+          "shadow-sm transition-all duration-200",
+          "hover:bg-accent-hover hover:shadow-md",
+          "active:scale-[0.98]"
+        )}
+      >
+        <Play className="h-4 w-4" />
+        Run Workflow
+      </button>
+
+      <button
+        onClick={() => navigate("/runs?status=failed")}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium",
+          "border border-error/40 text-error bg-transparent",
+          "transition-all duration-200",
+          "hover:bg-error/10 hover:border-error/60",
+          "active:scale-[0.98]"
+        )}
+      >
+        <AlertTriangle className="h-4 w-4" />
+        View Failures
+      </button>
+
+      <button
+        onClick={() => navigate("/runs?sort=cost")}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium",
+          "border border-border text-foreground bg-transparent",
+          "transition-all duration-200",
+          "hover:bg-surface hover:border-border/80 hover:shadow-sm",
+          "active:scale-[0.98]"
+        )}
+      >
+        <BarChart3 className="h-4 w-4" />
+        Cost Report
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Overview page
+// ---------------------------------------------------------------------------
+
 export default function Overview() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -36,6 +313,10 @@ export default function Overview() {
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const advisor = useAdvisorContext();
+
+  // MOCK DATA: deterministic sparklines and heatmap based on current date
+  const mockSparklines = useMemo(() => generateMockSparklines(), []);
+  const mockHeatmap = useMemo(() => generateMockHeatmap(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +399,12 @@ export default function Overview() {
         successRate={stats.success_rate}
         totalCost={stats.total_cost_today}
         avgDuration={stats.avg_duration_seconds}
+        sparklines={mockSparklines}
       />
+
+      <QuickActions />
+
+      <ActivityHeatmap cells={mockHeatmap} />
 
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
         <RunsChart data={stats.runs_by_day} />

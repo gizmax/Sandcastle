@@ -1,6 +1,60 @@
 import { memo } from "react";
-import { GitBranch, Play, Pencil, Eye, History, Check } from "lucide-react";
+import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// --- Mock workflow stats (deterministic, based on workflow name hash) ---
+// TODO: Replace with real API data when per-workflow stats endpoint is available
+
+/** Simple deterministic hash from a string, returns 0..1 float. */
+function nameHash(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h % 10000) / 10000;
+}
+
+export interface WorkflowStats {
+  totalRuns: number;
+  successRate: number; // 0-100
+  avgCost: number;
+  lastRunStatus: "completed" | "failed" | "running" | null;
+  lastRunAgo: string | null; // e.g. "2h ago", "3d ago"
+}
+
+/** Generate deterministic mock stats from a workflow name. */
+export function mockWorkflowStats(name: string): WorkflowStats {
+  const h = nameHash(name);
+  const h2 = nameHash(name + "_salt");
+  const h3 = nameHash(name + "_cost");
+
+  const totalRuns = Math.floor(h * 180) + 1; // 1-180
+  const successRate = Math.floor(60 + h2 * 40); // 60-100
+  const avgCost = Math.round((0.01 + h3 * 0.45) * 100) / 100; // $0.01-$0.46
+
+  const statuses: Array<"completed" | "failed" | "running"> = ["completed", "completed", "completed", "failed", "running"];
+  const lastRunStatus = totalRuns > 0 ? statuses[Math.floor(h * statuses.length)] : null;
+
+  const timeUnits = ["1m ago", "12m ago", "1h ago", "2h ago", "5h ago", "1d ago", "3d ago", "1w ago"];
+  const lastRunAgo = totalRuns > 0 ? timeUnits[Math.floor(h2 * timeUnits.length)] : null;
+
+  return { totalRuns, successRate, avgCost, lastRunStatus, lastRunAgo };
+}
+
+type HealthLevel = "healthy" | "degraded" | "failing";
+
+function deriveHealth(successRate: number): HealthLevel {
+  if (successRate >= 90) return "healthy";
+  if (successRate >= 70) return "degraded";
+  return "failing";
+}
+
+const healthConfig: Record<HealthLevel, { dot: string; label: string; text: string }> = {
+  healthy:  { dot: "bg-success",  label: "Healthy",  text: "text-success" },
+  degraded: { dot: "bg-warning",  label: "Degraded", text: "text-warning" },
+  failing:  { dot: "bg-error",    label: "Failing",  text: "text-error" },
+};
+// --- End mock stats ---
 
 interface WorkflowCardProps {
   name: string;
@@ -11,6 +65,7 @@ interface WorkflowCardProps {
   versionStatus?: string | null;
   totalVersions?: number | null;
   selected?: boolean;
+  stats?: WorkflowStats;
   onSelect?: () => void;
   onRun: () => void;
   onEdit: () => void;
@@ -26,20 +81,26 @@ export const WorkflowCard = memo(function WorkflowCard({
   versionStatus,
   totalVersions,
   selected,
+  stats,
   onSelect,
   onRun,
   onEdit,
   onViewDag,
   onViewVersions,
 }: WorkflowCardProps) {
+  const health = stats ? deriveHealth(stats.successRate) : null;
+  const hc = health ? healthConfig[health] : null;
+
   return (
     <div
       className={cn(
         "relative rounded-xl border border-border bg-surface p-5 shadow-sm",
-        "transition-all duration-200 hover:shadow-md hover:border-accent/30",
+        "transition-all duration-200",
+        "hover:shadow-md hover:border-accent/40 hover:-translate-y-0.5",
         selected && "border-accent ring-2 ring-accent/20"
       )}
     >
+      {/* Selection checkbox */}
       {onSelect && (
         <button
           type="button"
@@ -55,7 +116,19 @@ export const WorkflowCard = memo(function WorkflowCard({
           <Check className="h-3 w-3" />
         </button>
       )}
-      <div className="mb-3 flex items-start gap-3">
+
+      {/* Health badge - top right, offset from checkbox */}
+      {hc && (
+        <div className={cn(
+          "absolute top-3 flex items-center gap-1.5",
+          onSelect ? "right-10" : "right-3"
+        )}>
+          <span className={cn("h-2 w-2 rounded-full", hc.dot)} />
+          <span className={cn("text-[10px] font-medium", hc.text)}>{hc.label}</span>
+        </div>
+      )}
+
+      <div className="mb-2 flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/10">
           <GitBranch className="h-5 w-5 text-accent" />
         </div>
@@ -65,7 +138,39 @@ export const WorkflowCard = memo(function WorkflowCard({
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+      {/* Last run status */}
+      <div className="mb-3 flex items-center gap-1.5 text-xs text-muted">
+        {stats && stats.lastRunStatus ? (
+          <>
+            {stats.lastRunStatus === "completed" && (
+              <CheckCircle className="h-3 w-3 text-success" />
+            )}
+            {stats.lastRunStatus === "failed" && (
+              <XCircle className="h-3 w-3 text-error" />
+            )}
+            {stats.lastRunStatus === "running" && (
+              <Clock className="h-3 w-3 text-running" />
+            )}
+            <span>
+              Last run: {stats.lastRunAgo} -{" "}
+              <span className={cn(
+                stats.lastRunStatus === "completed" && "text-success",
+                stats.lastRunStatus === "failed" && "text-error",
+                stats.lastRunStatus === "running" && "text-running",
+              )}>
+                {stats.lastRunStatus}
+              </span>
+            </span>
+          </>
+        ) : (
+          <>
+            <Clock className="h-3 w-3" />
+            <span>Never run</span>
+          </>
+        )}
+      </div>
+
+      <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
         <span>{stepsCount} step{stepsCount !== 1 ? "s" : ""}</span>
         {version != null && (
           <>
@@ -90,6 +195,23 @@ export const WorkflowCard = memo(function WorkflowCard({
           </>
         )}
       </div>
+
+      {/* Mini stats row */}
+      {stats && (
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-0 text-xs text-muted font-data">
+          <span>Runs: {stats.totalRuns}</span>
+          <span className="hidden sm:inline mx-2 text-border">|</span>
+          <span>Avg cost: ${stats.avgCost.toFixed(2)}</span>
+          <span className="hidden sm:inline mx-2 text-border">|</span>
+          <span className={cn(
+            stats.successRate >= 90 ? "text-success" :
+            stats.successRate >= 70 ? "text-warning" :
+            "text-error"
+          )}>
+            Success: {stats.successRate}%
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-1.5">
         <button
