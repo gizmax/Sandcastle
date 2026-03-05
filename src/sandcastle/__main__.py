@@ -751,6 +751,29 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             print("  Aborted.")
             sys.exit(0)
 
+    # Check memory backend health
+    try:
+        import asyncio
+
+        from sandcastle.engine.memory import memory_health_check
+
+        health = asyncio.run(memory_health_check())
+        if health.get("status") == "ok":
+            print(
+                f"  {_color('Agent Memory', _C.DIM)} .......... "
+                f"{_color('OK', _C.GREEN)} {_color(str(health.get('latency_ms', '?')) + 'ms', _C.DIM)}"
+            )
+        else:
+            print(
+                f"  {_color('Agent Memory', _C.DIM)} .......... "
+                f"{_color('UNAVAILABLE', _C.YELLOW)} - {health.get('error', 'unknown')}"
+            )
+    except Exception as e:
+        print(
+            f"  {_color('Agent Memory', _C.DIM)} .......... "
+            f"{_color('UNAVAILABLE', _C.YELLOW)} - {e}"
+        )
+
     uvicorn.run(
         "sandcastle.main:app",
         host=args.host,

@@ -4,6 +4,24 @@ import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { API_BASE_URL } from "@/lib/constants";
 import { cn, formatDuration, formatCost, parseUTC } from "@/lib/utils";
 
+interface ImageInfo {
+  index: number;
+  url?: string;
+  filename?: string;
+  error?: string;
+  mime_type?: string;
+}
+
+function extractImages(value: unknown): ImageInfo[] | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    if (Array.isArray(obj._images) && obj._images.length > 0) {
+      return obj._images as ImageInfo[];
+    }
+  }
+  return null;
+}
+
 function ElapsedTimer({ since }: { since: string }) {
   const [elapsed, setElapsed] = useState(() =>
     Math.max(0, Math.floor((Date.now() - parseUTC(since).getTime()) / 1000))
@@ -167,6 +185,33 @@ export function StepCard({
             <div className="mb-3 rounded-md bg-error/10 px-3 py-2">
               <p className="text-xs font-medium text-error">Error</p>
               <p className="mt-0.5 font-mono text-xs text-error/80">{error}</p>
+            </div>
+          )}
+          {/* Image gallery for approval steps */}
+          {output != null && extractImages(output) && (
+            <div className="mb-3">
+              <p className="mb-2 text-xs font-medium text-muted">Generated Images</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {extractImages(output)!.map((img) => (
+                  <div key={img.index} className="rounded-lg border border-border overflow-hidden bg-background">
+                    {img.error ? (
+                      <div className="flex items-center justify-center h-32 text-xs text-error px-2 text-center">
+                        {img.error}
+                      </div>
+                    ) : img.url ? (
+                      <img
+                        src={img.url}
+                        alt={`Generated image ${img.index + 1}`}
+                        className="w-full h-auto object-contain max-h-56"
+                        loading="lazy"
+                      />
+                    ) : null}
+                    <div className="px-2 py-1 text-[10px] text-muted border-t border-border">
+                      {img.filename || `Image ${img.index + 1}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {output != null && (

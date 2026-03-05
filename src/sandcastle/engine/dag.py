@@ -49,6 +49,7 @@ class ApprovalConfig:
 
     message: str = ""
     show_data: str | None = None  # Variable path to resolve and show reviewer
+    show_images: list[str] | None = None  # Variable paths to image data (Imagen API responses)
     timeout_hours: float | None = None
     on_timeout: str = "abort"  # "abort" | "skip"
     allow_edit: bool = False
@@ -132,6 +133,8 @@ class HttpConfig:
     headers: dict[str, str] = field(default_factory=dict)
     body: str | dict | None = None
     auth: str | None = None  # "bearer:{token}" or env var ref
+    value_map: dict[str, dict[str, str]] | None = None  # Post-resolution value mapping
+    cost_per_call: float = 0.0  # Declared cost per API call (e.g. $0.02 for Imagen)
 
 
 @dataclass
@@ -475,9 +478,13 @@ def _parse_approval_config(data: dict | None) -> ApprovalConfig | None:
     """Parse approval configuration from YAML data."""
     if data is None:
         return None
+    show_images = data.get("show_images")
+    if isinstance(show_images, str):
+        show_images = [show_images]
     return ApprovalConfig(
         message=data.get("message", ""),
         show_data=data.get("show_data"),
+        show_images=show_images,
         timeout_hours=data.get("timeout_hours"),
         on_timeout=data.get("on_timeout", "abort"),
         allow_edit=data.get("allow_edit", False),
@@ -703,6 +710,8 @@ def _parse_http_config(data: dict | None) -> HttpConfig | None:
         headers=data.get("headers", {}),
         body=data.get("body"),
         auth=data.get("auth"),
+        value_map=data.get("value_map"),
+        cost_per_call=float(data.get("cost_per_call", 0.0)),
     )
 
 

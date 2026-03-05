@@ -288,6 +288,33 @@ export default function ApprovalsPage() {
                 {/* Expanded detail */}
                 {isExpanded && item.request_data && (
                   <div className="border-t border-border px-5 py-4 bg-background/50">
+                    {/* Image gallery */}
+                    {Array.isArray((item.request_data as Record<string, unknown>)._images) && (
+                      <div className="mb-4">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">Generated Images</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {((item.request_data as Record<string, unknown>)._images as Array<{ index: number; url?: string; filename?: string; error?: string; mime_type?: string }>).map((img) => (
+                            <div key={img.index} className="rounded-lg border border-border overflow-hidden bg-surface">
+                              {img.error ? (
+                                <div className="flex items-center justify-center h-40 text-xs text-error px-2 text-center">
+                                  {img.error}
+                                </div>
+                              ) : img.url ? (
+                                <img
+                                  src={img.url}
+                                  alt={`Generated image ${img.index + 1}`}
+                                  className="w-full h-auto object-contain max-h-64"
+                                  loading="lazy"
+                                />
+                              ) : null}
+                              <div className="px-2 py-1 text-[10px] text-muted border-t border-border">
+                                {img.filename || `Image ${img.index + 1}`}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <p className="text-xs font-medium text-muted-foreground mb-2">Request Data</p>
                     <pre className="max-h-48 overflow-auto rounded-lg bg-surface border border-border p-3 font-mono text-xs text-muted">
                       {JSON.stringify(item.request_data, null, 2)}

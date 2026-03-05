@@ -415,6 +415,35 @@ export default function RunDetailPage() {
         />
       </div>
 
+      {/* Generated images gallery */}
+      {(() => {
+        const allImages = (run.steps || []).flatMap((s) => {
+          const out = s.output as Record<string, unknown> | null;
+          if (out && Array.isArray(out._images)) return out._images as Array<{ index: number; url?: string; filename?: string; error?: string }>;
+          return [];
+        });
+        if (allImages.length === 0) return null;
+        return (
+          <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">
+            <h2 className="mb-3 text-sm font-semibold text-foreground">Generated Images ({allImages.length})</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {allImages.map((img, i) => (
+                <div key={i} className="rounded-lg border border-border overflow-hidden bg-background">
+                  {img.error ? (
+                    <div className="flex items-center justify-center h-40 text-xs text-error px-2 text-center">{img.error}</div>
+                  ) : img.url ? (
+                    <a href={img.url} target="_blank" rel="noopener noreferrer">
+                      <img src={img.url} alt={img.filename || `Image ${i + 1}`} className="w-full h-auto object-contain max-h-72" loading="lazy" />
+                    </a>
+                  ) : null}
+                  <div className="px-2 py-1.5 text-xs text-muted border-t border-border">{img.filename || `Image ${i + 1}`}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Output export */}
       {run.outputs && Object.keys(run.outputs).length > 0 && (
         <div className="rounded-xl border border-border bg-surface p-3 sm:p-5 shadow-sm">

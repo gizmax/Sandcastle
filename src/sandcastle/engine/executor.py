@@ -35,7 +35,7 @@ from sandcastle.engine.storage import StorageBackend
 logger = logging.getLogger(__name__)
 
 # Pre-compiled regex patterns for template and storage reference resolution.
-_TEMPLATE_RE = re.compile(r"\{((?:input|steps)\.[^}]+|run_id|date|memory)\}")
+_TEMPLATE_RE = re.compile(r"\{((?:input|steps|env)\.[^}]+|run_id|date|memory)\}")
 _STORAGE_RE = re.compile(r"\{storage\.([^}]+)\}")
 
 # Default instructions prepended to every step prompt to keep agent output clean.
@@ -214,6 +214,14 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
 
     if var_path == "date":
         return datetime.now(timezone.utc).date().isoformat()
+
+    # env.VAR_NAME -> resolve from environment variables
+    if parts[0] == "env" and len(parts) == 2:
+        import os
+        value = os.environ.get(parts[1], "").strip()
+        if value:
+            return value
+        return _UNRESOLVED
 
     return _UNRESOLVED
 
@@ -1492,6 +1500,25 @@ async def _execute_step_once(
                 pass
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
 
+        # Guard: if output_schema is defined but output is empty, treat as failure
+        # so that retry logic kicks in instead of silently propagating empty data.
+        if step.output_schema and (
+            output is None or output == "" or output == {} or output == []
+        ):
+            raise ValueError(
+                f"Step '{step.id}' returned empty output but output_schema requires data"
+            )
+
+        # Guard: if step type is 'llm' or 'agent' and output is empty, treat as failure
+        # LLM/agent steps should never return empty output - that always means
+        # something went wrong (API error, empty response, etc.)
+        if step.type in ("llm", "agent") and (
+            output is None or output == "" or output == {} or output == []
+        ):
+            raise ValueError(
+                f"Step '{step.id}' returned empty output"
+            )
+
         # Auto-inject credential redaction policy when tools are used
         if effective_tools:
             try:
@@ -1739,6 +1766,84 @@ async def _execute_approval_step(
             else:
                 request_data = {"value": request_data_val}
 
+    # Resolve and save images for preview (from Imagen API responses)
+    if step.approval_config and step.approval_config.show_images:
+        import base64 as _b64
+
+        artifacts_dir = Path(f"data/artifacts/{context.run_id}")
+        image_urls: list[dict] = []
+        img_counter = 0
+
+        for img_path in step.approval_config.show_images:
+            img_data = resolve_variable(img_path, context)
+            if img_data is _UNRESOLVED or img_data is None:
+                continue
+            items_list = img_data if isinstance(img_data, list) else [img_data]
+            for item in items_list:
+                if not isinstance(item, dict):
+                    continue
+
+                # Collect (b64_data, mime) tuples from either format
+                b64_pairs: list[tuple[str, str]] = []
+                error_msg: str | None = None
+
+                # Format 1: Imagen predict -> {predictions: [{bytesBase64Encoded, mimeType}]}
+                preds = item.get("predictions", [])
+                if preds:
+                    for pred in preds:
+                        b64 = pred.get("bytesBase64Encoded")
+                        if b64:
+                            b64_pairs.append((b64, pred.get("mimeType", "image/png")))
+
+                # Format 2: Gemini generateContent -> {candidates: [{content: {parts: [{inlineData: {data, mimeType}}]}}]}
+                candidates = item.get("candidates", [])
+                if candidates:
+                    for cand in candidates:
+                        parts = (cand.get("content") or {}).get("parts", [])
+                        for part in parts:
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if inline and inline.get("data"):
+                                b64_pairs.append((inline["data"], inline.get("mimeType", "image/png")))
+
+                if not b64_pairs:
+                    # Record failed generations
+                    err = item.get("error")
+                    if err:
+                        error_msg = str(err.get("message", "Generation failed")) if isinstance(err, dict) else str(err)
+                    elif not preds and not candidates:
+                        # Unknown format - skip silently
+                        continue
+                    if error_msg:
+                        image_urls.append({"index": img_counter, "error": error_msg})
+                        img_counter += 1
+                    continue
+
+                for b64_data, mime in b64_pairs:
+                    ext = "png" if "png" in mime else "jpg"
+                    filename = f"image_{img_counter}.{ext}"
+                    try:
+                        artifacts_dir.mkdir(parents=True, exist_ok=True)
+                        (artifacts_dir / filename).write_bytes(_b64.b64decode(b64_data))
+                        image_urls.append({
+                            "index": img_counter,
+                            "filename": filename,
+                            "url": f"/api/runs/{context.run_id}/artifacts/{filename}",
+                            "mime_type": mime,
+                        })
+                        logger.info(
+                            "Approval '%s': saved image %s (%d bytes)",
+                            step.id, filename, len(b64_data) * 3 // 4,
+                        )
+                    except Exception as e:
+                        logger.warning("Approval '%s': failed to save image: %s", step.id, e)
+                    img_counter += 1
+
+        if image_urls:
+            if request_data is None:
+                request_data = {}
+            request_data["_images"] = image_urls
+            logger.info("Approval '%s': %d images saved for preview", step.id, len(image_urls))
+
     # Calculate timeout
     timeout_at = None
     if step.approval_config and step.approval_config.timeout_hours:
@@ -1755,11 +1860,13 @@ async def _execute_approval_step(
     # Save checkpoint before pausing
     await _save_checkpoint(context.run_id, step.id, stage_index, context)
 
-    # Record step as awaiting approval
+    # Record step as awaiting approval (include images for dashboard preview)
+    step_output = {"_images": request_data["_images"]} if request_data and "_images" in request_data else None
     await _save_run_step(
         run_id=context.run_id,
         step_id=step.id,
         status="awaiting_approval",
+        output=step_output,
     )
 
     # Create approval request
@@ -2007,15 +2114,28 @@ async def _execute_llm_step(
     model_info = resolve_model(step.model)
     api_key = get_api_key(model_info)
 
-    prompt = resolve_templates(step.prompt, context, step.depends_on)
+    # Don't pass depends_on - auto-inject can append huge outputs (e.g. base64
+    # images from HTTP steps) that blow up prompt size.  LLM prompts should
+    # explicitly reference what they need via {steps.X.output} templates.
+    prompt = resolve_templates(step.prompt, context)
     prompt = await resolve_storage_refs(prompt, storage)
 
     system_prompt = _STEP_SYSTEM_PREFIX
     if step.llm_config and step.llm_config.system_prompt:
         system_prompt += step.llm_config.system_prompt
 
+    # Map short aliases to real Anthropic model IDs for direct API calls
+    _CLAUDE_MODEL_ALIASES = {
+        "sonnet": "claude-sonnet-4-20250514",
+        "haiku": "claude-haiku-4-5-20251001",
+        "opus": "claude-opus-4-20250115",
+    }
+
     try:
         if model_info.provider == "claude":
+            api_model = _CLAUDE_MODEL_ALIASES.get(
+                model_info.api_model_id, model_info.api_model_id
+            )
             async with httpx.AsyncClient(timeout=step.timeout) as client:
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
@@ -2025,12 +2145,18 @@ async def _execute_llm_step(
                         "content-type": "application/json",
                     },
                     json={
-                        "model": model_info.api_model_id,
+                        "model": api_model,
                         "max_tokens": 4096,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": prompt}],
                     },
                 )
+                if resp.status_code >= 400:
+                    err_body = resp.text[:500]
+                    logger.error(
+                        "LLM step '%s': API error %d: %s (prompt %d chars)",
+                        step.id, resp.status_code, err_body, len(prompt),
+                    )
                 resp.raise_for_status()
                 data = resp.json()
                 text = data["content"][0]["text"]
@@ -2107,7 +2233,7 @@ async def _execute_http_step(
     step: StepDefinition,
     context: RunContext,
 ) -> StepResult:
-    """Execute an HTTP request step - $0 cost."""
+    """Execute an HTTP request step with optional declared cost."""
     import time
 
     import httpx
@@ -2118,7 +2244,8 @@ async def _execute_http_step(
         return StepResult(step_id=step.id, status="failed", error="Missing http_config")
 
     try:
-        url = resolve_templates(cfg.url, context, step.depends_on)
+        # Don't pass depends_on for URL - auto-inject is for prompts, not URLs
+        url = resolve_templates(cfg.url, context).strip()
 
         # SSRF prevention for HTTP steps - block private/internal networks
         try:
@@ -2154,12 +2281,12 @@ async def _execute_http_step(
             pass
 
         headers = {
-            k: resolve_templates(v, context, step.depends_on) for k, v in cfg.headers.items()
+            k: resolve_templates(v, context) for k, v in cfg.headers.items()
         }
 
         # Auth handling
         if cfg.auth:
-            auth_resolved = resolve_templates(cfg.auth, context, step.depends_on)
+            auth_resolved = resolve_templates(cfg.auth, context)
             if auth_resolved.startswith("bearer:"):
                 headers["Authorization"] = f"Bearer {auth_resolved[7:]}"
             else:
@@ -2171,14 +2298,84 @@ async def _execute_http_step(
         body = None
         if cfg.body is not None:
             if isinstance(cfg.body, str):
-                body = resolve_templates(cfg.body, context, step.depends_on)
+                body = resolve_templates(cfg.body, context)
             else:
                 # Serialize dict body then resolve templates in the JSON string
                 # so that {input.X} / {steps.Y.output} inside dict values work.
-                body = resolve_templates(json.dumps(cfg.body), context, step.depends_on)
+                # Don't pass depends_on: auto-inject appends raw text which
+                # would corrupt the structured JSON payload.
+                body = resolve_templates(json.dumps(cfg.body), context)
                 # Ensure Content-Type is set for JSON bodies
                 if not any(k.lower() == "content-type" for k in headers):
                     headers["Content-Type"] = "application/json"
+
+        # Resolve @file:/path references - lazy file loading for large content
+        # (e.g. base64-encoded images saved by save_file_b64 in code steps)
+        # Uses @file: prefix instead of {file:} because resolve_templates
+        # consumes all {…} tokens before we get here.
+        # Supports both unquoted paths and quoted paths (for spaces):
+        #   @file:/path/to/file.txt
+        #   @file:"/path/with spaces/file.txt"
+        if body and "@file:" in body:
+            import re as _re_file
+
+            def _load_file_ref(match: _re_file.Match) -> str:
+                # group(1) is quoted path, group(2) is unquoted path
+                fpath = (match.group(1) or match.group(2)).strip()
+                try:
+                    content = Path(fpath).read_text()
+                    logger.debug("HTTP step: loaded file ref %s (%d chars)", fpath, len(content))
+                    return content
+                except FileNotFoundError:
+                    raise ValueError(f"HTTP step: file ref not found: {fpath}")
+                except Exception as e:
+                    raise ValueError(f"HTTP step: failed to load file ref {fpath}: {e}")
+
+            body = _re_file.sub(
+                r'@file:(?:"([^"]+)"|([^\s"\\]+))', _load_file_ref, body
+            )
+
+        # Apply value_map: post-resolution value transformations in body
+        if cfg.value_map and body:
+            try:
+                body_dict = json.loads(body)
+                for path, mapping in cfg.value_map.items():
+                    parts = path.split(".")
+                    obj = body_dict
+                    for part in parts[:-1]:
+                        if isinstance(obj, dict) and part in obj:
+                            obj = obj[part]
+                        elif isinstance(obj, list):
+                            # Walk into list items (e.g. instances[0])
+                            try:
+                                obj = obj[int(part)]
+                            except (ValueError, IndexError):
+                                break
+                        else:
+                            break
+                    else:
+                        key = parts[-1]
+                        if isinstance(obj, dict) and key in obj:
+                            current = str(obj[key])
+                            if current in mapping:
+                                logger.info(
+                                    "HTTP step '%s': value_map %s: '%s' -> '%s'",
+                                    step.id, path, current, mapping[current],
+                                )
+                                obj[key] = mapping[current]
+                body = json.dumps(body_dict)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Debug: check for non-printable chars
+        _bad_chars = [(i, repr(c)) for i, c in enumerate(url) if ord(c) < 32 or ord(c) > 126]
+        if _bad_chars:
+            logger.warning("HTTP step '%s': URL has bad chars: %s", step.id, _bad_chars[:5])
+        logger.info(
+            "HTTP step '%s': %s %s (body=%s chars, url_len=%d)",
+            step.id, cfg.method.upper(), url[:100],
+            len(body) if body else 0, len(url),
+        )
 
         async with httpx.AsyncClient(timeout=step.timeout) as client:
             resp = await client.request(
@@ -2187,6 +2384,11 @@ async def _execute_http_step(
                 headers=headers,
                 content=body if body else None,
             )
+
+        logger.info(
+            "HTTP step '%s': response %d (%s chars)",
+            step.id, resp.status_code, len(resp.text),
+        )
 
         # Try to parse as JSON
         try:
@@ -2205,15 +2407,17 @@ async def _execute_http_step(
             }
 
         duration = time.monotonic() - started_at
+        call_cost = cfg.cost_per_call if cfg.cost_per_call else 0.0
         return StepResult(
             step_id=step.id,
             output=output,
-            cost_usd=0.0,
+            cost_usd=call_cost,
             duration_seconds=duration,
             status="completed",
         )
     except Exception as e:
         duration = time.monotonic() - started_at
+        logger.warning("HTTP step '%s' failed: %s", step.id, e)
         return StepResult(
             step_id=step.id,
             status="failed",
@@ -2277,6 +2481,40 @@ async def _execute_code_step(
         # Inject context: _input and _steps
         # NOTE: 'type' is intentionally excluded - it provides access to
         # __subclasses__() which can be used for sandbox escape.
+        import base64 as _b64_mod
+
+        # Safe file reader: only allows reading from uploads / data directory
+        from sandcastle.config import settings as _code_settings
+
+        _code_data_dir = Path(_code_settings.data_dir).resolve()
+
+        def _read_file_b64(file_path: str) -> str:
+            """Read a file from disk and return its base64-encoded content."""
+            p = Path(file_path).resolve()
+            if not p.is_relative_to(_code_data_dir):
+                raise PermissionError(f"Access denied: {file_path} is outside data directory")
+            if not p.exists():
+                raise FileNotFoundError(f"File not found: {file_path}")
+            return _b64_mod.b64encode(p.read_bytes()).decode("ascii")
+
+        def _save_file_b64(file_path: str, dest_name: str) -> str:
+            """Read a file, base64-encode it, save to a temp file, return the temp path.
+
+            Use this instead of read_file_b64 when the base64 would be too large
+            to store in the workflow context (>5MB). The returned path can be used
+            with {file:/path} syntax in HTTP step bodies for lazy loading.
+            """
+            p = Path(file_path).resolve()
+            if not p.is_relative_to(_code_data_dir):
+                raise PermissionError(f"Access denied: {file_path} is outside data directory")
+            if not p.exists():
+                raise FileNotFoundError(f"File not found: {file_path}")
+            b64_data = _b64_mod.b64encode(p.read_bytes()).decode("ascii")
+            dest = _code_data_dir / "tmp" / dest_name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(b64_data)
+            return f"@file:{dest}"
+
         exec_globals: dict[str, Any] = {
             "__builtins__": {
                 "len": len,
@@ -2308,6 +2546,9 @@ async def _execute_code_step(
             "_input": context.input,
             "_steps": context.step_outputs,
             "json": json,
+            "base64": _b64_mod,
+            "read_file_b64": _read_file_b64,
+            "save_file_b64": _save_file_b64,
             "result": None,
         }
 
@@ -4507,87 +4748,55 @@ async def _prepare_and_run_step(
             else:
                 context.step_outputs[step_id] = None
 
-    # --- Hybrid step types ---
-    if step.type == "llm":
-        result = await _execute_llm_step(step, context, storage)
-        await _handle_step_result(result, model=step.model)
-        return
+    # --- Helper to dispatch hybrid step types ---
+    _HYBRID_TYPES = {
+        "llm", "http", "code", "condition", "classify", "loop",
+        "race", "sensor", "gate", "transform", "notify", "delegate",
+        "browser", "sub_workflow",
+    }
 
-    if step.type == "http":
-        result = await _execute_http_step(step, context)
-        await _handle_step_result(result)
-        return
+    async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
+        """Dispatch a single hybrid step type and return its result."""
+        if s.type == "llm":
+            return await _execute_llm_step(s, ctx, storage)
+        if s.type == "http":
+            return await _execute_http_step(s, ctx)
+        if s.type == "code":
+            return await _execute_code_step(s, ctx)
+        if s.type == "condition":
+            return await _execute_condition_step(s, ctx)
+        if s.type == "classify":
+            return await _execute_classify_step(s, ctx, storage)
+        if s.type == "loop":
+            return await _execute_loop_step(
+                s, ctx, sandbox, storage, workflow, depth,
+            )
+        if s.type == "race":
+            return await _execute_race_step(
+                s, ctx, sandbox, storage, workflow, depth,
+            )
+        if s.type == "sensor":
+            return await _execute_sensor_step(s, ctx)
+        if s.type == "gate":
+            return await _execute_gate_step(s, ctx, storage)
+        if s.type == "transform":
+            return await _execute_transform_step(s, ctx)
+        if s.type == "notify":
+            return await _execute_notify_step(s, ctx)
+        if s.type == "delegate":
+            return await _execute_delegate_step(
+                s, ctx, storage, depth=depth,
+            )
+        if s.type == "browser":
+            return await _execute_browser_step(s, ctx, sandbox, storage)
+        if s.type == "sub_workflow":
+            return await _execute_sub_workflow_step(
+                s, ctx, storage, depth=depth,
+            )
+        raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
-    if step.type == "code":
-        result = await _execute_code_step(step, context)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "condition":
-        result = await _execute_condition_step(step, context)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "classify":
-        result = await _execute_classify_step(step, context, storage)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "loop":
-        result = await _execute_loop_step(
-            step, context, sandbox, storage, workflow, depth,
-        )
-        await _handle_step_result(result)
-        return
-
-    if step.type == "race":
-        result = await _execute_race_step(
-            step, context, sandbox, storage, workflow, depth,
-        )
-        await _handle_step_result(result)
-        return
-
-    if step.type == "sensor":
-        result = await _execute_sensor_step(step, context)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "gate":
-        result = await _execute_gate_step(step, context, storage)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "transform":
-        result = await _execute_transform_step(step, context)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "notify":
-        result = await _execute_notify_step(step, context)
-        await _handle_step_result(result)
-        return
-
-    if step.type == "delegate":
-        result = await _execute_delegate_step(
-            step, context, storage, depth=depth,
-        )
-        await _handle_step_result(result)
-        return
-
-    if step.type == "browser":
-        result = await _execute_browser_step(step, context, sandbox, storage)
-        await _handle_step_result(result, model=step.model)
-        return
-
-    # Sub-workflow
-    if step.type == "sub_workflow":
-        sub_result = await _execute_sub_workflow_step(
-            step, context, storage, depth=depth,
-        )
-        await _handle_step_result(sub_result)
-        return
-
-    # Fan-out
+    # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
+    # so that hybrid types (llm, http, etc.) also get per-item contexts.
     if step.parallel_over:
         # Strip {braces} - parallel_over may come from YAML as "{steps.x.output.y}"
         fan_out_path = step.parallel_over.strip("{}")
@@ -4597,28 +4806,51 @@ async def _prepare_and_run_step(
         elif not isinstance(items, list):
             items = [items]
 
-        tasks = [
-            asyncio.create_task(
-                execute_step_with_retry(
-                    step,
-                    context.with_item(item, i),
-                    sandbox,
-                    storage,
-                    parallel_index=i,
-                    step_overrides=overrides,
+        is_hybrid = step.type in _HYBRID_TYPES
+        logger.info(
+            "Fan-out step '%s' (type=%s, hybrid=%s): %d items",
+            step_id, step.type, is_hybrid, len(items),
+        )
+        if is_hybrid:
+            tasks = [
+                asyncio.create_task(
+                    _run_hybrid(step, context.with_item(item, i))
                 )
-            )
-            for i, item in enumerate(items)
-        ]
+                for i, item in enumerate(items)
+            ]
+        else:
+            tasks = [
+                asyncio.create_task(
+                    execute_step_with_retry(
+                        step,
+                        context.with_item(item, i),
+                        sandbox,
+                        storage,
+                        parallel_index=i,
+                        step_overrides=overrides,
+                    )
+                )
+                for i, item in enumerate(items)
+            ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         fan_out_items: list = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
+                logger.warning(
+                    "Fan-out step '%s' item %d: exception %s",
+                    step_id, i, result,
+                )
                 result = StepResult(
                     step_id=step_id,
                     status="failed",
                     error=str(result),
+                )
+            else:
+                logger.info(
+                    "Fan-out step '%s' item %d: status=%s output_type=%s",
+                    step_id, i, result.status,
+                    type(result.output).__name__ if result.output else "None",
                 )
             context.costs.append(result.cost_usd)
             if result.status == "failed":
@@ -4644,7 +4876,14 @@ async def _prepare_and_run_step(
         context.step_outputs[step_id] = fan_out_items
         return
 
-    # Regular step
+    # --- Hybrid step types (single execution, no parallel_over) ---
+    if step.type in _HYBRID_TYPES:
+        result = await _run_hybrid(step, context)
+        model = step.model if step.type in ("llm", "browser") else None
+        await _handle_step_result(result, model=model)
+        return
+
+    # Regular (standard/sandbox) step
     result = await execute_step_with_retry(
         step,
         context,
