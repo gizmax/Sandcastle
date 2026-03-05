@@ -1145,7 +1145,7 @@ async def install_hub_template(req: Request, slug: str) -> ApiResponse:
             "slug": slug,
             "name": template_meta.get("name", ""),
             "filename": filename,
-            "path": str(target_path),
+            "path": filename,
             "updated": already_existed,
             "security_warnings": scan_warnings,
         }
@@ -5280,39 +5280,6 @@ async def update_api_key_allowlist(
 
 
 # --- Settings ---
-
-_SENSITIVE_KEYS = frozenset(
-    {
-        "anthropic_api_key",
-        "e2b_api_key",
-        "openai_api_key",
-        "minimax_api_key",
-        "openrouter_api_key",
-        "database_url",
-        "redis_url",
-        "webhook_secret",
-        "aws_access_key_id",
-        "aws_secret_access_key",
-        "credential_encryption_key",
-        "admin_api_key",
-        "license_key",
-        "sentry_dsn",
-        "tool_slack_bot_token",
-        "tool_jira_api_token",
-        "tool_github_token",
-        "tool_notion_api_key",
-        "tool_hubspot_api_key",
-        "tool_salesforce_client_id",
-        "tool_salesforce_client_secret",
-        "tool_salesforce_refresh_token",
-        "tool_zendesk_api_token",
-        "tool_smtp_password",
-        "tool_google_service_account",
-        "tool_teams_webhook_url",
-        "tool_postgresql_url",
-    }
-)
-
 
 def _mask(value: str) -> str:
     """Mask a sensitive value, showing only the last 4 characters."""

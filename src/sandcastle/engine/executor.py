@@ -1036,6 +1036,9 @@ async def execute_step_with_retry(
                         duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
                         attempt=attempt,
                     )
+                    # Combine costs from all attempts + fallback
+                    fallback_result.cost_usd += result.cost_usd
+                    fallback_result.duration_seconds += result.duration_seconds
                     return fallback_result
 
             logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
@@ -2827,6 +2830,10 @@ async def _execute_classify_step(
                         best_cat = cat
             matched = best_cat
         if not matched:
+            if not cfg.categories:
+                raise ValueError(
+                    f"Classify step '{step.id}': no categories defined"
+                )
             logger.warning(
                 f"Classify step '{step.id}': LLM response '{raw_category}'"
                 f" didn't match any category, defaulting to '{cfg.categories[0]}'"

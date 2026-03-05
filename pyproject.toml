@@ -18,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
@@ -74,11 +75,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gizmax/Sandcastle"
-Repository = "https://github.com/gizmax/Sandcastle"
-Documentation = "https://github.com/gizmax/Sandcastle#readme"
-Issues = "https://github.com/gizmax/Sandcastle/issues"
-Dashboard = "https://gizmax.github.io/Sandcastle/"
+Homepage = "https://gitlab.com/gizmax-group/sandcastle"
+Repository = "https://gitlab.com/gizmax-group/sandcastle"
+Documentation = "https://gitlab.com/gizmax-group/sandcastle/-/blob/main/README.md"
+Issues = "https://gitlab.com/gizmax-group/sandcastle/-/issues"
+Dashboard = "https://gizmax-group.gitlab.io/sandcastle/"
 
 [project.scripts]
 sandcastle = "sandcastle.__main__:main"
