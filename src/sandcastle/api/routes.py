@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
@@ -679,6 +679,105 @@ async def browse_directory(
             "current": str(target),
             "parent": str(target.parent) if target != target.parent else None,
             "entries": entries,
+        }
+    )
+
+
+# --- Upload (file system) ---
+
+_UPLOAD_ALLOWED_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg",
+    ".pdf", ".txt", ".csv", ".json", ".yaml", ".yml",
+}
+_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+
+
+@router.post("/upload")
+async def upload_file(file: UploadFile) -> ApiResponse:
+    """Upload a file to the server and return its absolute disk path.
+
+    Only available in local mode. The file is saved under
+    ``{data_dir}/uploads/{uuid8}_{filename}`` so that workflow steps
+    (e.g. nano-banana) can read it directly from disk.
+    """
+    if not settings.is_local_mode:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message="File upload is only available in local mode",
+                )
+            ).model_dump(),
+        )
+
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="BAD_REQUEST", message="No filename provided")
+            ).model_dump(),
+        )
+
+    # Sanitize filename - take only the basename to prevent path traversal
+    safe_name = Path(file.filename).name
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="BAD_REQUEST", message="Invalid filename")
+            ).model_dump(),
+        )
+
+    # Extension allowlist
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="BAD_REQUEST",
+                    message=f"File type not allowed: {suffix}",
+                )
+            ).model_dump(),
+        )
+
+    # Read file into memory and enforce size limit
+    contents = await file.read()
+    if len(contents) > _UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="BAD_REQUEST",
+                    message=f"File too large ({len(contents)} bytes). Maximum is {_UPLOAD_MAX_BYTES} bytes.",
+                )
+            ).model_dump(),
+        )
+
+    # Save to {data_dir}/uploads/{uuid8}_{filename}
+    uploads_dir = Path(settings.data_dir).expanduser().resolve() / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    dest_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    dest_path = (uploads_dir / dest_name).resolve()
+
+    # Defense-in-depth: ensure final path is within uploads dir
+    if not dest_path.is_relative_to(uploads_dir):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="BAD_REQUEST", message="Invalid filename")
+            ).model_dump(),
+        )
+
+    dest_path.write_bytes(contents)
+
+    return ApiResponse(
+        data={
+            "path": str(dest_path),
+            "filename": safe_name,
+            "size": len(contents),
         }
     )
 
@@ -1517,6 +1616,74 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
     )
 
 
+@router.delete("/workflows/{name}")
+async def delete_workflow(name: str) -> ApiResponse:
+    """Delete a workflow YAML file and all its version records."""
+    from sqlalchemy import delete as sa_delete
+
+    # Validate name
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    if not safe_name or safe_name.strip("_") == "" or safe_name != name:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
+
+    # Path traversal check
+    workflows_dir = Path(settings.workflows_dir)
+    file_path = workflows_dir / f"{safe_name}.yaml"
+    resolved_path = file_path.resolve()
+    if not resolved_path.is_relative_to(workflows_dir.resolve()):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
+
+    # Check for active runs
+    async with async_session() as session:
+        active_stmt = select(func.count(Run.id)).where(
+            Run.workflow_name == safe_name,
+            Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]),
+        )
+        active_count = (await session.execute(active_stmt)).scalar() or 0
+        if active_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="ACTIVE_RUNS",
+                        message=f"Cannot delete workflow with {active_count} active run(s). Cancel them first.",
+                    )
+                ).model_dump(),
+            )
+
+        # Delete all WorkflowVersion records
+        await session.execute(
+            sa_delete(WorkflowVersion).where(WorkflowVersion.workflow_name == safe_name)
+        )
+        await session.commit()
+
+    # Delete YAML file from disk
+    if file_path.exists():
+        file_path.unlink()
+    elif not resolved_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Workflow '{name}' not found",
+                )
+            ).model_dump(),
+        )
+
+    return ApiResponse(data={"deleted": True, "workflow_name": name})
+
+
 # --- Workflow Execution ---
 
 
@@ -2211,6 +2378,72 @@ async def download_step_pdf(run_id: str, step_id: str, req: Request):
         media_type="application/pdf",
         filename=file_path.name,
     )
+
+
+@router.get("/runs/{run_id}/artifacts/{filename}")
+async def download_run_artifact(run_id: str, filename: str, req: Request):
+    """Download an artifact file (image, etc.) saved during a run."""
+    from fastapi.responses import FileResponse as _FileResp
+
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    # Verify run exists and belongs to tenant
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
+
+    # Path traversal protection: only allow simple filenames
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="Invalid filename")
+            ).model_dump(),
+        )
+
+    artifact_path = Path(f"data/artifacts/{run_id}/{filename}").resolve()
+    data_dir = Path("data").resolve()
+    if not artifact_path.is_relative_to(data_dir):
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(code="FORBIDDEN", message="Path outside data directory")
+            ).model_dump(),
+        )
+
+    if not artifact_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Artifact not found")
+            ).model_dump(),
+        )
+
+    # Determine media type from extension
+    _MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+    media_type = _MEDIA_TYPES.get(artifact_path.suffix.lower(), "application/octet-stream")
+
+    return _FileResp(path=str(artifact_path), media_type=media_type, filename=filename)
 
 
 @router.get("/runs/{run_id}/stream")
@@ -4187,6 +4420,28 @@ async def _resume_after_approval(
 
     # Steps already completed (including the approval step now)
     skip_steps = list(initial_context["step_outputs"].keys())
+
+    # Update the approval step's RunStep record to "completed"
+    from sandcastle.models.db import RunStep, StepStatus
+
+    async with async_session() as session:
+        step_stmt = (
+            select(RunStep)
+            .where(RunStep.run_id == approval.run_id, RunStep.step_id == step_id)
+        )
+        result = await session.execute(step_stmt)
+        run_step = result.scalar_one_or_none()
+        if run_step:
+            run_step.status = StepStatus.COMPLETED
+            run_step.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+    # Transition run to QUEUED so the worker accepts it
+    async with async_session() as session:
+        run = await session.get(Run, approval.run_id)
+        if run:
+            run.status = RunStatus.QUEUED
+            await session.commit()
 
     # Enqueue continuation
     try:

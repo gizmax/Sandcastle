@@ -66,6 +66,58 @@ class MemoryBackendError(MemoryError):
 
 
 # ---------------------------------------------------------------------------
+# Anthropic LLM adapter (removes top_p for Claude 4.5 compatibility)
+# ---------------------------------------------------------------------------
+
+
+class _SandcastleAnthropicLLM:
+    """Anthropic LLM adapter that removes top_p.
+
+    Claude 4.5 models reject requests that include both temperature and
+    top_p. mem0's base LLM config sends both by default, so we override
+    _get_common_params to strip top_p before the Anthropic API call.
+
+    This replaces a fragile monkey-patch on the client instance with a
+    proper subclass that survives upstream mem0 refactors.
+    """
+
+    _base_cls = None  # resolved lazily to avoid import at module level
+
+    @classmethod
+    def _resolve_base(cls):
+        """Import and cache the real AnthropicLLM class from mem0."""
+        if cls._base_cls is None:
+            from mem0.llms.anthropic import AnthropicLLM
+            cls._base_cls = AnthropicLLM
+        return cls._base_cls
+
+    def __new__(cls, config):
+        """Dynamically create a subclass of AnthropicLLM with the override.
+
+        We use __new__ + dynamic subclass because AnthropicLLM is only
+        available when mem0 is installed, and we don't want a top-level
+        import dependency.
+        """
+        base = cls._resolve_base()
+
+        # Build the subclass once and cache it
+        if not hasattr(cls, "_built_subclass"):
+            class _Patched(base):
+                """AnthropicLLM that strips top_p from common params."""
+
+                def _get_common_params(self, **kwargs):
+                    params = super()._get_common_params(**kwargs)
+                    params.pop("top_p", None)
+                    return params
+
+            _Patched.__name__ = "_SandcastleAnthropicLLM"
+            _Patched.__qualname__ = "_SandcastleAnthropicLLM"
+            cls._built_subclass = _Patched
+
+        return cls._built_subclass(config)
+
+
+# ---------------------------------------------------------------------------
 # Client management - lazy singletons per backend
 # ---------------------------------------------------------------------------
 
@@ -112,7 +164,7 @@ def _get_client(backend: str = "local") -> Any:
     """Get or create a Mem0 client for the given backend.
 
     Supported backends:
-      - "local" (default): SQLite + sentence-transformers via Memory()
+      - "local" (default): Anthropic LLM + fastembed local embeddings via Memory()
       - "cloud": Mem0 cloud platform (not yet implemented)
 
     Thread-safe: a lock prevents duplicate initialization under concurrent calls.
@@ -141,7 +193,53 @@ def _get_client(backend: str = "local") -> Any:
             return _clients[backend]
         try:
             from mem0 import Memory
-            client = Memory()
+
+            # Use Anthropic LLM + fastembed local embeddings (no OpenAI needed)
+            config = {
+                "llm": {
+                    "provider": "anthropic",
+                    "config": {
+                        "model": "claude-haiku-4-5-20251001",
+                        "temperature": 0.1,
+                        "max_tokens": 2000,
+                    },
+                },
+                "embedder": {
+                    "provider": "fastembed",
+                    "config": {
+                        "model": "BAAI/bge-small-en-v1.5",
+                    },
+                },
+                "vector_store": {
+                    "provider": "qdrant",
+                    "config": {
+                        "collection_name": "mem0_local",
+                        "embedding_model_dims": 384,
+                    },
+                },
+            }
+            client = Memory.from_config(config)
+
+            # Claude 4.5 models reject temperature+top_p together.
+            # Replace the default AnthropicLLM with our patched subclass
+            # that strips top_p from API params.
+            try:
+                client.llm = _SandcastleAnthropicLLM(client.llm.config)
+            except Exception as llm_exc:
+                logger.warning(
+                    "Could not replace LLM with _SandcastleAnthropicLLM, "
+                    "falling back to monkey-patch: %s", llm_exc,
+                )
+                # Fallback: monkey-patch if subclass creation fails
+                _orig = client.llm._get_common_params
+
+                def _patched(**kwargs):
+                    params = _orig(**kwargs)
+                    params.pop("top_p", None)
+                    return params
+
+                client.llm._get_common_params = _patched
+
             _clients[backend] = client
             return client
         except Exception as exc:
@@ -625,7 +723,23 @@ async def save_memory(
             client.add, content,
             user_id=scope_id, metadata=meta,
         )
-        return result if isinstance(result, list) else [result]
+        records = result if isinstance(result, list) else [result]
+
+        # Validate and log what the backend actually confirmed
+        confirmed = len(records)
+        if confirmed == 0:
+            logger.warning(
+                "Memory save for %s: backend returned 0 records "
+                "(content length=%d chars) - possible silent failure",
+                scope_id, len(content),
+            )
+        else:
+            logger.info(
+                "Memory save for %s: %d record(s) confirmed by backend",
+                scope_id, confirmed,
+            )
+
+        return records
 
     except MemoryBackendError:
         raise

@@ -126,38 +126,41 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
     <>
       <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div role="dialog" aria-modal="true" aria-label={`Run ${workflowName}`} className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Run {workflowName}</h2>
-            <button onClick={onClose} className="rounded-lg p-1 text-muted hover:text-foreground">
-              <X className="h-5 w-5" />
-            </button>
+        <div role="dialog" aria-modal="true" aria-label={`Run ${workflowName}`} className="w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-surface shadow-xl">
+          <div className="shrink-0 px-6 pt-6 pb-4">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Run {workflowName}</h2>
+              <button onClick={onClose} className="rounded-lg p-1 text-muted hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Mode selector */}
+            <div className="flex gap-1 rounded-lg border border-border bg-background p-1">
+              {availableModes.map((opt) => {
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setMode(opt.value)}
+                    className={cn(
+                      "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                      mode === opt.value
+                        ? "bg-accent text-accent-foreground shadow-sm"
+                        : "text-muted hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Mode selector */}
-          <div className="mb-4 flex gap-1 rounded-lg border border-border bg-background p-1">
-            {availableModes.map((opt) => {
-              const Icon = opt.icon;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setMode(opt.value)}
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
-                    mode === opt.value
-                      ? "bg-accent text-accent-foreground shadow-sm"
-                      : "text-muted hover:text-foreground"
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+          <div className="flex-1 overflow-y-auto px-6 space-y-4">
             {/* Form mode */}
             {mode === "form" && hasSchema && (
               fields.map(([key, prop]) => {
@@ -316,7 +319,9 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+          </div>
+
+            <div className="shrink-0 flex justify-end gap-2 px-6 py-4 border-t border-border">
               <button
                 type="button"
                 onClick={onClose}

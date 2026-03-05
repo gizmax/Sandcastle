@@ -48,6 +48,8 @@ dependencies = [
 [project.optional-dependencies]
 memory = [
     "mem0ai>=0.1.0",
+    "fastembed>=0.3.6,<0.4",
+    "anthropic>=0.50",
 ]
 docker = [
     "aiodocker>=0.22",
