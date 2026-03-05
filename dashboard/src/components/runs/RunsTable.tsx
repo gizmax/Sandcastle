@@ -1,7 +1,9 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { AnomalyBadge } from "@/components/shared/AnomalyBadge";
 import { CopyButton } from "@/components/shared/CopyButton";
+import { detectAnomalies } from "@/lib/anomalyDetection";
 import { formatRelativeTime, formatDuration, formatCost, parseUTC, cn } from "@/lib/utils";
 
 interface RunItem {
@@ -15,6 +17,7 @@ interface RunItem {
 
 interface RunsTableProps {
   runs: RunItem[];
+  allRuns?: RunItem[];
   total: number;
   limit: number;
   offset: number;
@@ -23,7 +26,7 @@ interface RunsTableProps {
   onSelectionChange?: (ids: Set<string>) => void;
 }
 
-export function RunsTable({ runs, total, limit, offset, onPageChange, selectedIds, onSelectionChange }: RunsTableProps) {
+export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, selectedIds, onSelectionChange }: RunsTableProps) {
   const navigate = useNavigate();
   const selectable = !!onSelectionChange;
   const allSelected = selectable && runs.length > 0 && runs.every((r) => selectedIds?.has(r.run_id));
@@ -35,6 +38,15 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
     const end = run.completed_at ? parseUTC(run.completed_at).getTime() : Date.now();
     return formatDuration((end - start) / 1000);
   }, []);
+
+  const pool = allRuns ?? runs;
+  const anomalyMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof detectAnomalies>>();
+    for (const run of runs) {
+      map.set(run.run_id, detectAnomalies(run, pool));
+    }
+    return map;
+  }, [runs, pool]);
 
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
@@ -110,7 +122,10 @@ export function RunsTable({ runs, total, limit, offset, onPageChange, selectedId
                   <CopyButton value={run.run_id} label="run ID" />
                 </td>
                 <td className="px-3 sm:px-5 py-3">
-                  <RunStatusBadge status={run.status} />
+                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                    <RunStatusBadge status={run.status} />
+                    <AnomalyBadge anomalies={anomalyMap.get(run.run_id) ?? []} />
+                  </span>
                 </td>
                 <td className="px-3 sm:px-5 py-3 text-muted">
                   {run.started_at ? formatRelativeTime(run.started_at) : "queued"}

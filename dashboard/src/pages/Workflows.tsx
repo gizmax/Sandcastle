@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, Plus, Search, Star, Trash2, X, Loader2 } from "lucide-react";
+import { GitBranch, LayoutGrid, Network, Plus, Search, Star, Trash2, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
 import { WorkflowCard, mockWorkflowStats } from "@/components/workflows/WorkflowCard";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import { DagGraph } from "@/components/workflows/DagGraph";
+import { DependencyGraph } from "@/components/workflows/DependencyGraph";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -46,6 +47,7 @@ export default function Workflows() {
   const [bulkAction, setBulkAction] = useState<"delete" | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "graph">("grid");
   const { pinnedWorkflows, togglePin } = usePinnedWorkflows();
 
   const filteredWorkflows = useMemo(
@@ -195,6 +197,34 @@ export default function Workflows() {
               </button>
             )}
           </div>
+          <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              aria-label="Grid view"
+              className={cn(
+                "flex items-center justify-center rounded-md px-2 py-1.5 text-xs transition-colors",
+                viewMode === "grid"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("graph")}
+              aria-label="Graph view"
+              className={cn(
+                "flex items-center justify-center rounded-md px-2 py-1.5 text-xs transition-colors",
+                viewMode === "graph"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              <Network className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <button
             onClick={() => navigate("/workflows/builder")}
             aria-label="New workflow"
@@ -244,62 +274,84 @@ export default function Workflows() {
         </div>
       )}
 
-      {/* Pinned workflows section */}
-      {pinnedWfs.length > 0 && workflows.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            <Star className="h-3 w-3 fill-current text-accent" />
-            Pinned
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {pinnedWfs.map((wf) => (
-              <WorkflowCard
-                key={`pinned-${wf.file_name}`}
-                name={wf.name}
-                description={wf.description}
-                stepsCount={wf.steps_count}
-                fileName={wf.file_name}
-                version={wf.version}
-                versionStatus={wf.version_status}
-                totalVersions={wf.total_versions}
-                pinned={true}
-                stats={mockWorkflowStats(wf.name)}
-                onTogglePin={() => togglePin(wf.name)}
-                onRun={() => setRunModal(wf)}
-                onEdit={() => navigate("/workflows/builder", { state: { workflow: wf } })}
-                onViewDag={() => setDagWorkflow(wf)}
-                onViewVersions={() => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
-              />
-            ))}
-          </div>
-          <div className="border-b border-border" />
-        </div>
-      )}
-
-      {workflows.length === 0 ? (
-        <EmptyState
-          icon={GitBranch}
-          title="No workflows found"
-          description="No workflows found. Add YAML files to your workflows directory to get started."
-          action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
-        />
-      ) : filteredWorkflows.length === 0 ? (
-        <EmptyState
-          icon={Search}
-          title="No matching workflows"
-          description={`No workflows match "${searchQuery}".`}
-          action={{ label: "Clear search", onClick: () => setSearchQuery("") }}
-        />
+      {viewMode === "graph" ? (
+        workflows.length === 0 ? (
+          <EmptyState
+            icon={GitBranch}
+            title="No workflows found"
+            description="No workflows found. Add YAML files to your workflows directory to get started."
+            action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
+          />
+        ) : (
+          <DependencyGraph
+            workflows={filteredWorkflows.map((wf) => ({
+              name: wf.name,
+              file_name: wf.file_name,
+              steps_count: wf.steps_count,
+              last_run_status: mockWorkflowStats(wf.name).lastRunStatus,
+            }))}
+          />
+        )
       ) : (
-        <WorkflowList
-          workflows={filteredWorkflows}
-          selectedNames={selectedNames}
-          onSelectionChange={setSelectedNames}
-          onRun={setRunModal}
-          onEdit={(wf) => navigate("/workflows/builder", { state: { workflow: wf } })}
-          onViewDag={setDagWorkflow}
-          onViewVersions={(wf) => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
-        />
+        <>
+          {/* Pinned workflows section */}
+          {pinnedWfs.length > 0 && workflows.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                <Star className="h-3 w-3 fill-current text-accent" />
+                Pinned
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {pinnedWfs.map((wf) => (
+                  <WorkflowCard
+                    key={`pinned-${wf.file_name}`}
+                    name={wf.name}
+                    description={wf.description}
+                    stepsCount={wf.steps_count}
+                    fileName={wf.file_name}
+                    version={wf.version}
+                    versionStatus={wf.version_status}
+                    totalVersions={wf.total_versions}
+                    pinned={true}
+                    stats={mockWorkflowStats(wf.name)}
+                    onTogglePin={() => togglePin(wf.name)}
+                    onRun={() => setRunModal(wf)}
+                    onEdit={() => navigate("/workflows/builder", { state: { workflow: wf } })}
+                    onViewDag={() => setDagWorkflow(wf)}
+                    onViewVersions={() => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
+                  />
+                ))}
+              </div>
+              <div className="border-b border-border" />
+            </div>
+          )}
+
+          {workflows.length === 0 ? (
+            <EmptyState
+              icon={GitBranch}
+              title="No workflows found"
+              description="No workflows found. Add YAML files to your workflows directory to get started."
+              action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
+            />
+          ) : filteredWorkflows.length === 0 ? (
+            <EmptyState
+              icon={Search}
+              title="No matching workflows"
+              description={`No workflows match "${searchQuery}".`}
+              action={{ label: "Clear search", onClick: () => setSearchQuery("") }}
+            />
+          ) : (
+            <WorkflowList
+              workflows={filteredWorkflows}
+              selectedNames={selectedNames}
+              onSelectionChange={setSelectedNames}
+              onRun={setRunModal}
+              onEdit={(wf) => navigate("/workflows/builder", { state: { workflow: wf } })}
+              onViewDag={setDagWorkflow}
+              onViewVersions={(wf) => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
+            />
+          )}
+        </>
       )}
 
       {/* DAG Viewer */}

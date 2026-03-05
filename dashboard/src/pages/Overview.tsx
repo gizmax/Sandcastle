@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Castle, Play, AlertTriangle, BarChart3, Star, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Castle, Play, AlertTriangle, BarChart3, Star, CheckCircle, XCircle, Clock, Settings2, GripVertical } from "lucide-react";
 import { api } from "@/api/client";
 import { StatsCards } from "@/components/overview/StatsCards";
 import { RunsChart } from "@/components/overview/RunsChart";
 import { CostChart } from "@/components/overview/CostChart";
 import { RecentRuns } from "@/components/overview/RecentRuns";
 import { HealthHero } from "@/components/overview/HealthHero";
+import { DashboardCustomizer } from "@/components/overview/DashboardCustomizer";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { CostForecast } from "@/components/overview/CostForecast";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
+import { useDashboardLayout, WIDGET_LABELS } from "@/hooks/useDashboardLayout";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { mockWorkflowStats } from "@/components/workflows/WorkflowCard";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -377,6 +380,65 @@ function PinnedWorkflowsWidget() {
 // Overview page
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// WidgetWrapper - draggable container for each widget in customize mode
+// ---------------------------------------------------------------------------
+
+function WidgetWrapper({
+  id,
+  customizing,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDragging,
+  isOver,
+  overEdge,
+  children,
+}: {
+  id: string;
+  customizing: boolean;
+  onDragStart: (e: React.DragEvent, id: string) => void;
+  onDragOver: (e: React.DragEvent, id: string) => void;
+  onDrop: (e: React.DragEvent, id: string) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
+  isOver: boolean;
+  overEdge: "top" | "bottom" | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      data-widget-id={id}
+      draggable={customizing}
+      onDragStart={(e) => onDragStart(e, id)}
+      onDragOver={(e) => onDragOver(e, id)}
+      onDrop={(e) => onDrop(e, id)}
+      onDragEnd={onDragEnd}
+      className={cn(
+        "relative transition-all",
+        customizing && "rounded-xl ring-1 ring-border/60 ring-dashed",
+        customizing && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-40",
+        isOver && overEdge === "top" && "ring-t-2 border-t-2 border-t-accent",
+        isOver && overEdge === "bottom" && "ring-b-2 border-b-2 border-b-accent",
+      )}
+    >
+      {customizing && (
+        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 rounded-md bg-surface border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted shadow-sm">
+          <GripVertical className="h-3 w-3" />
+          {WIDGET_LABELS[id] ?? id}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Overview page
+// ---------------------------------------------------------------------------
+
 export default function Overview() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -385,10 +447,37 @@ export default function Overview() {
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const advisor = useAdvisorContext();
+  const { widgets, moveWidget, toggleWidget, resetLayout } = useDashboardLayout();
+  const [customizing, setCustomizing] = useState(false);
+  const [showPanel, setShowPanel] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
-  // MOCK DATA: deterministic sparklines and heatmap based on current date
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const [overEdge, setOverEdge] = useState<"top" | "bottom" | null>(null);
+
   const mockSparklines = useMemo(() => generateMockSparklines(), []);
   const mockHeatmap = useMemo(() => generateMockHeatmap(), []);
+  const costForecastRng = useMemo(() => {
+    const today = new Date();
+    const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 777;
+    return seededRandom(seed);
+  }, []);
+
+  useEffect(() => {
+    if (!showPanel) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        panelRef.current && !panelRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) {
+        setShowPanel(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showPanel]);
 
   useEffect(() => {
     let cancelled = false;
@@ -412,6 +501,33 @@ export default function Overview() {
     void fetchData();
     return () => { cancelled = true; };
   }, [retryCount]);
+
+  function handleDragStart(e: React.DragEvent, id: string) {
+    setDragId(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  }
+
+  function handleDragOver(e: React.DragEvent, id: string) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (id === dragId) { setOverId(null); setOverEdge(null); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    setOverId(id);
+    setOverEdge(e.clientY < midY ? "top" : "bottom");
+  }
+
+  function handleDrop(e: React.DragEvent, id: string) {
+    e.preventDefault();
+    const srcId = e.dataTransfer.getData("text/plain");
+    if (srcId && srcId !== id) moveWidget(srcId, id);
+    setDragId(null); setOverId(null); setOverEdge(null);
+  }
+
+  function handleDragEnd() {
+    setDragId(null); setOverId(null); setOverEdge(null);
+  }
 
   if (loading) {
     return (
@@ -477,12 +593,13 @@ export default function Overview() {
     );
   }
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
+  const sorted = [...widgets].sort((a, b) => a.order - b.order);
 
+  const widgetRenderers: Record<string, () => React.ReactNode> = {
+    "health-hero": () => (
       <HealthHero score={advisor.score} activeInsights={advisor.activeInsights} loading={advisor.loading} />
-
+    ),
+    stats: () => (
       <StatsCards
         totalRuns={stats.total_runs_today}
         successRate={stats.success_rate}
@@ -490,19 +607,78 @@ export default function Overview() {
         avgDuration={stats.avg_duration_seconds}
         sparklines={mockSparklines}
       />
-
-      <QuickActions />
-
-      <PinnedWorkflowsWidget />
-
-      <ActivityHeatmap cells={mockHeatmap} />
-
+    ),
+    "quick-actions": () => <QuickActions />,
+    pinned: () => <PinnedWorkflowsWidget />,
+    heatmap: () => <ActivityHeatmap cells={mockHeatmap} />,
+    "cost-forecast": () => <CostForecast rng={costForecastRng} />,
+    charts: () => (
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
         <RunsChart data={stats.runs_by_day} />
         <CostChart data={stats.cost_by_workflow} />
       </div>
+    ),
+    "recent-runs": () => <RecentRuns runs={recentRuns} />,
+  };
 
-      <RecentRuns runs={recentRuns} />
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
+        <div className="relative">
+          <button
+            ref={btnRef}
+            onClick={() => {
+              const next = !showPanel;
+              setShowPanel(next);
+              if (next) setCustomizing(true);
+              else setCustomizing(false);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
+              customizing
+                ? "bg-accent text-accent-foreground shadow-sm"
+                : "text-muted hover:text-foreground hover:bg-surface border border-transparent hover:border-border",
+            )}
+            aria-label="Customize dashboard"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{customizing ? "Done" : "Customize"}</span>
+          </button>
+          {showPanel && (
+            <div ref={panelRef} className="absolute right-0 top-full z-40 mt-2">
+              <DashboardCustomizer
+                widgets={widgets}
+                onMove={moveWidget}
+                onToggle={toggleWidget}
+                onReset={resetLayout}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {sorted.map((w) => {
+        if (!w.visible) return null;
+        const render = widgetRenderers[w.id];
+        if (!render) return null;
+        return (
+          <WidgetWrapper
+            key={w.id}
+            id={w.id}
+            customizing={customizing}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            isDragging={dragId === w.id}
+            isOver={overId === w.id}
+            overEdge={overId === w.id ? overEdge : null}
+          >
+            {render()}
+          </WidgetWrapper>
+        );
+      })}
     </div>
   );
 }

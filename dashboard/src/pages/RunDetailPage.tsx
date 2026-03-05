@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useRuns } from "@/hooks/useRuns";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { AnomalyBadge } from "@/components/shared/AnomalyBadge";
 import { StepTimeline } from "@/components/runs/StepTimeline";
 import { LiveStream } from "@/components/runs/LiveStream";
 import { RunTree } from "@/components/runs/RunTree";
@@ -17,7 +19,9 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { CelebrationModal } from "@/components/shared/CelebrationModal";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { AiChatSidebar } from "@/components/runs/AiChatSidebar";
 import { fireConfetti, playCelebrationSound } from "@/lib/confetti";
+import { detectAnomalies, detectRetryHeavy, type Anomaly } from "@/lib/anomalyDetection";
 import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn } from "@/lib/utils";
 
 interface Step {
@@ -68,6 +72,7 @@ export default function RunDetailPage() {
   const [modalStepId, setModalStepId] = useState("");
   const [celebrationOpen, setCelebrationOpen] = useState(false);
   const [celebrationMilestone, setCelebrationMilestone] = useState<number | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const [vizMode, setVizMode] = useState<"pipeline" | "flamegraph">("pipeline");
   const [flamegraphExpanded, setFlamegraphExpanded] = useState(true);
   const { notifyRunComplete } = useNotifications();
@@ -362,6 +367,23 @@ export default function RunDetailPage() {
         ? (Date.now() - parseUTC(run.started_at).getTime()) / 1000
         : null;
 
+  const { runs: siblingRuns } = useRuns({
+    workflow: run.workflow_name,
+    limit: 50,
+    autoPoll: false,
+  });
+
+  const anomalies = useMemo<Anomaly[]>(() => {
+    const result = detectAnomalies(run, siblingRuns);
+    if (run.steps) {
+      const retryAnomaly = detectRetryHeavy(run.steps);
+      if (retryAnomaly) result.push(retryAnomaly);
+    }
+    return result;
+  }, [run, siblingRuns]);
+
+  const [anomaliesExpanded, setAnomaliesExpanded] = useState(false);
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <Breadcrumb items={[
@@ -431,7 +453,19 @@ export default function RunDetailPage() {
                 Delete
               </button>
             )}
+            <button
+              onClick={() => setChatOpen(true)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
+                "text-xs sm:text-sm font-medium text-accent",
+                "hover:bg-accent/10 transition-colors"
+              )}
+            >
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">Ask AI</span>
+            </button>
             <RunStatusBadge status={run.status} size="md" />
+            <AnomalyBadge anomalies={anomalies} />
           </div>
         </div>
 
@@ -468,6 +502,45 @@ export default function RunDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Anomalies detail */}
+      {anomalies.length > 0 && (
+        <div className="rounded-xl border border-warning/30 bg-warning/5 shadow-sm">
+          <button
+            onClick={() => setAnomaliesExpanded(!anomaliesExpanded)}
+            aria-expanded={anomaliesExpanded}
+            aria-controls="anomalies-detail"
+            className="w-full px-5 py-3 text-left text-sm font-medium text-foreground hover:bg-warning/10 transition-colors flex items-center gap-2"
+          >
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            Anomalies Detected ({anomalies.length}) {anomaliesExpanded ? "[-]" : "[+]"}
+          </button>
+          {anomaliesExpanded && (
+            <div id="anomalies-detail" className="border-t border-warning/20 px-5 py-3">
+              <ul className="space-y-2">
+                {anomalies.map((a, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    {a.severity === "critical" ? (
+                      <AlertOctagon className="mt-0.5 h-4 w-4 shrink-0 text-error" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                    )}
+                    <div>
+                      <span className={cn(
+                        "inline-block rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase mr-2",
+                        a.severity === "critical" ? "bg-error/15 text-error" : "bg-warning/15 text-warning"
+                      )}>
+                        {a.severity}
+                      </span>
+                      <span className="text-muted">{a.message}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Run Tree (parent/children lineage) */}
       {run.parent_run_id && (
@@ -693,6 +766,13 @@ export default function RunDetailPage() {
         costUsd={run.total_cost_usd}
         durationSeconds={duration}
         milestone={celebrationMilestone}
+      />
+
+      {/* AI Chat Sidebar */}
+      <AiChatSidebar
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        run={run}
       />
     </div>
   );

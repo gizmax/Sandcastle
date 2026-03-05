@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { ChevronDown, ChevronRight, RotateCcw, GitFork, Copy, Check, FileText } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { TerminalLog } from "@/components/runs/TerminalLog";
 import { API_BASE_URL } from "@/lib/constants";
 import { cn, formatDuration, formatCost, parseUTC } from "@/lib/utils";
 
@@ -62,6 +63,22 @@ function extractText(value: unknown): string | null {
 
 function looksLikeMarkdown(text: string): boolean {
   return /(?:^|\n)#\s|(\*\*|__).+?\1|- |\* |```|`[^`]+`/.test(text);
+}
+
+function looksLikeLogs(text: string): boolean {
+  if (text.split("\n").length < 3) return false;
+  const logPatterns = [
+    /^(ERROR|WARN(ING)?|INFO|DEBUG)\b/im,
+    /\[\d{2}:\d{2}:\d{2}\]/,
+    /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/,
+    /\berror:/i,
+    /^(>>>|\.{3}|\$|#)\s/m,
+  ];
+  let hits = 0;
+  for (const p of logPatterns) {
+    if (p.test(text)) hits++;
+  }
+  return hits >= 1 || text.split("\n").length >= 10;
 }
 
 function OutputBlock({ value }: { value: unknown }) {
@@ -214,37 +231,53 @@ export function StepCard({
               </div>
             </div>
           )}
-          {output != null && (
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <p className="text-xs font-medium text-muted">Output</p>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleCopyOutput();
-                  }}
-                  className={cn(
-                    "flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium",
-                    "border border-border text-muted",
-                    "hover:bg-border/40 hover:text-foreground transition-colors"
-                  )}
-                >
-                  {copied ? (
-                    <>
-                      <Check className="h-3 w-3 text-success" />
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3 w-3" />
-                      Copy
-                    </>
-                  )}
-                </button>
+          {output != null && (() => {
+            const outputText = typeof displayOutput === "string"
+              ? displayOutput
+              : JSON.stringify(displayOutput, null, 2);
+            const isLog = typeof outputText === "string" && looksLikeLogs(outputText);
+            if (isLog) {
+              return (
+                <TerminalLog
+                  logs={outputText}
+                  stepName={stepId}
+                  status={status}
+                  isLive={status === "running"}
+                />
+              );
+            }
+            return (
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-xs font-medium text-muted">Output</p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleCopyOutput();
+                    }}
+                    className={cn(
+                      "flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium",
+                      "border border-border text-muted",
+                      "hover:bg-border/40 hover:text-foreground transition-colors"
+                    )}
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3 w-3 text-success" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3" />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <OutputBlock value={displayOutput} />
               </div>
-              <OutputBlock value={displayOutput} />
-            </div>
-          )}
+            );
+          })()}
 
           {/* PDF download */}
           {pdfArtifact && runId && (
