@@ -9,6 +9,7 @@ import {
   NotificationCenter,
   type Notification,
 } from "@/components/layout/NotificationCenter";
+import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 
 interface SearchResult {
   type: "run" | "workflow" | "tool";
@@ -61,6 +62,7 @@ export function Header({
 }: HeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const advisor = useAdvisorContext();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
@@ -307,6 +309,14 @@ export function Header({
           notifications={notifications}
           onMarkAllRead={onMarkAllRead}
           onClickNotification={onClickNotification}
+          score={advisor.score}
+          previousScore={advisor.previousScore}
+          deductions={advisor.deductions}
+          insights={advisor.activeInsights}
+          advisorLoading={advisor.loading}
+          lastChecked={advisor.lastChecked}
+          onRefresh={advisor.refresh}
+          onDismiss={advisor.dismiss}
         />
       </div>
 

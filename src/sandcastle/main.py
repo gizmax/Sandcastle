@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -135,6 +136,25 @@ async def lifespan(app: FastAPI):
 
         if saved:
             logger.info(f"Loaded {len(saved)} saved settings from database")
+
+        # Restore tool credentials (TOOL_* keys) into os.environ so connectors work
+        tool_cred_count = 0
+        for key, value in saved.items():
+            if key.startswith("TOOL_") and value:
+                # Decrypt if encrypted
+                if isinstance(value, str) and value.startswith("gAAAAA"):
+                    try:
+                        from sandcastle.engine.crypto import decrypt_credentials
+                        decrypted = decrypt_credentials(value)
+                        if isinstance(decrypted, dict) and "v" in decrypted:
+                            value = decrypted["v"]
+                    except Exception:
+                        logger.warning("Could not decrypt tool credential '%s', skipping", key)
+                        continue
+                os.environ[key] = value
+                tool_cred_count += 1
+        if tool_cred_count:
+            logger.info(f"Restored {tool_cred_count} tool credential(s) from database")
 
     # Clean up stale runs (queued/running) left from previous crash/restart
     from datetime import datetime, timezone

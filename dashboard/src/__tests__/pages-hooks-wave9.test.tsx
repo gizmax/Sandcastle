@@ -87,6 +87,19 @@ vi.mock("@/components/layout/NotificationCenter", () => ({
   ),
 }));
 
+vi.mock("@/hooks/useAdvisorContext", () => ({
+  useAdvisorContext: () => ({
+    score: 100,
+    previousScore: null,
+    deductions: [],
+    activeInsights: [],
+    loading: false,
+    lastChecked: null,
+    refresh: vi.fn(),
+    dismiss: vi.fn(),
+  }),
+}));
+
 // Mock sub-components used by Workflows page
 vi.mock("@/components/workflows/WorkflowList", () => ({
   WorkflowList: ({ workflows }: { workflows: unknown[] }) => (
@@ -1050,193 +1063,8 @@ describe("ViolationsPage", () => {
 
 
 // ============================================================================
-// 5. AdvisorPanel
+// 5. AdvisorPanel - REMOVED (merged into NotificationCenter)
 // ============================================================================
-
-import { AdvisorPanel } from "@/components/advisor/AdvisorPanel";
-import type { Insight, Deduction } from "@/lib/insights";
-
-describe("AdvisorPanel", () => {
-  const defaultProps = {
-    open: true,
-    onClose: vi.fn(),
-    score: 85,
-    previousScore: 80,
-    deductions: [
-      { category: "health" as const, label: "API unhealthy", points: 10 },
-      { category: "operations" as const, label: "High failure rate", points: 5 },
-    ] satisfies Deduction[],
-    insights: [
-      {
-        id: "ins-1",
-        severity: "critical" as const,
-        title: "Database is unhealthy",
-        description: "The database health check is failing",
-        link: "/system-health",
-        icon: "Database",
-      },
-      {
-        id: "ins-2",
-        severity: "warning" as const,
-        title: "High cost trend",
-        description: "Cost has been increasing",
-        link: "/optimizer",
-        icon: "TrendingDown",
-      },
-    ] satisfies Insight[],
-    loading: false,
-    lastChecked: new Date("2026-02-28T10:00:00Z"),
-    onRefresh: vi.fn(),
-    onDismiss: vi.fn(),
-  };
-
-  it("renders nothing when open is false", () => {
-    const { container } = render(<AdvisorPanel {...defaultProps} open={false} />);
-    expect(container.innerHTML).toBe("");
-  });
-
-  it("renders the panel dialog when open", () => {
-    render(<AdvisorPanel {...defaultProps} />);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Lighthouse")).toBeInTheDocument();
-    expect(screen.getByText("System health advisor")).toBeInTheDocument();
-  });
-
-  it("displays score via ScoreRing", () => {
-    render(<AdvisorPanel {...defaultProps} />);
-    // ScoreRing renders SVG with aria-label
-    expect(screen.getByRole("img", { name: /Health score: 85/ })).toBeInTheDocument();
-  });
-
-  it("shows positive trend when score > previousScore", () => {
-    render(<AdvisorPanel {...defaultProps} score={85} previousScore={80} />);
-    expect(screen.getByText("+5")).toBeInTheDocument();
-    expect(screen.getByText("Healthy")).toBeInTheDocument();
-  });
-
-  it("shows negative trend when score < previousScore", () => {
-    render(<AdvisorPanel {...defaultProps} score={70} previousScore={80} />);
-    // "-10" appears in the trend indicator; deductions also show "-10" and "-5"
-    // Verify trend is shown via the TrendingDown icon wrapper
-    expect(screen.getAllByText("-10").length).toBeGreaterThanOrEqual(1);
-    // Also verify the TrendingDown icon is present (negative trend indicator)
-    expect(screen.getByText("Needs Attention")).toBeInTheDocument();
-  });
-
-  it("shows No change when trend is zero", () => {
-    render(<AdvisorPanel {...defaultProps} score={80} previousScore={80} />);
-    expect(screen.getByText("No change")).toBeInTheDocument();
-  });
-
-  it("does not show trend when previousScore is null", () => {
-    render(<AdvisorPanel {...defaultProps} previousScore={null} />);
-    expect(screen.queryByText("No change")).not.toBeInTheDocument();
-    expect(screen.queryByText("+")).not.toBeInTheDocument();
-  });
-
-  it("displays score breakdown bar when deductions exist", () => {
-    render(<AdvisorPanel {...defaultProps} />);
-    expect(screen.getByText("Score breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Health")).toBeInTheDocument();
-    expect(screen.getByText("Operations")).toBeInTheDocument();
-  });
-
-  it("does not show score breakdown when no deductions", () => {
-    render(<AdvisorPanel {...defaultProps} deductions={[]} />);
-    expect(screen.queryByText("Score breakdown")).not.toBeInTheDocument();
-  });
-
-  it("groups insights by severity", () => {
-    render(<AdvisorPanel {...defaultProps} />);
-    expect(screen.getByText("Critical (1)")).toBeInTheDocument();
-    expect(screen.getByText("Warning (1)")).toBeInTheDocument();
-    expect(screen.getByText("Database is unhealthy")).toBeInTheDocument();
-    expect(screen.getByText("High cost trend")).toBeInTheDocument();
-  });
-
-  it("shows all-clear message when no insights", () => {
-    render(<AdvisorPanel {...defaultProps} insights={[]} />);
-    expect(screen.getByText("All clear")).toBeInTheDocument();
-    expect(screen.getByText("No issues found. Your system is running smoothly.")).toBeInTheDocument();
-  });
-
-  it("shows loading spinner when loading is true", () => {
-    render(<AdvisorPanel {...defaultProps} loading={true} />);
-    // The loading spinner in AdvisorPanel is an animated div, not the LoadingSpinner component
-    expect(screen.queryByText("All clear")).not.toBeInTheDocument();
-    expect(screen.queryByText("Database is unhealthy")).not.toBeInTheDocument();
-  });
-
-  it("calls onClose when close button is clicked", () => {
-    const onClose = vi.fn();
-    render(<AdvisorPanel {...defaultProps} onClose={onClose} />);
-    fireEvent.click(screen.getByLabelText("Close advisor panel"));
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("calls onClose when overlay is clicked", () => {
-    const onClose = vi.fn();
-    render(<AdvisorPanel {...defaultProps} onClose={onClose} />);
-    // The overlay has aria-hidden="true"
-    const overlay = document.querySelector('[aria-hidden="true"]');
-    expect(overlay).not.toBeNull();
-    fireEvent.click(overlay!);
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("calls onClose on Escape key", () => {
-    const onClose = vi.fn();
-    render(<AdvisorPanel {...defaultProps} onClose={onClose} />);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("calls onRefresh when Refresh button is clicked", () => {
-    const onRefresh = vi.fn();
-    render(<AdvisorPanel {...defaultProps} onRefresh={onRefresh} />);
-    fireEvent.click(screen.getByText("Refresh"));
-    expect(onRefresh).toHaveBeenCalled();
-  });
-
-  it("disables Refresh button when loading", () => {
-    render(<AdvisorPanel {...defaultProps} loading={true} />);
-    const refreshBtn = screen.getByText("Refresh");
-    expect(refreshBtn).toBeDisabled();
-  });
-
-  it("shows last checked time", () => {
-    render(<AdvisorPanel {...defaultProps} />);
-    expect(screen.getByText(/Last checked/)).toBeInTheDocument();
-  });
-
-  it("shows Checking... when lastChecked is null", () => {
-    render(<AdvisorPanel {...defaultProps} lastChecked={null} />);
-    expect(screen.getByText("Checking...")).toBeInTheDocument();
-  });
-
-  it("calls onDismiss for insight dismiss via InsightCard", () => {
-    const onDismiss = vi.fn();
-    render(<AdvisorPanel {...defaultProps} onDismiss={onDismiss} />);
-    // InsightCard has a dismiss button with title="Dismiss"
-    const dismissBtns = screen.getAllByTitle("Dismiss");
-    fireEvent.click(dismissBtns[0]);
-    expect(onDismiss).toHaveBeenCalledWith("ins-1");
-  });
-
-  it("shows correct score label for different scores", () => {
-    // score >= 80 -> Healthy
-    const { rerender } = render(<AdvisorPanel {...defaultProps} score={80} />);
-    expect(screen.getByText("Healthy")).toBeInTheDocument();
-
-    // score >= 50 -> Needs Attention
-    rerender(<AdvisorPanel {...defaultProps} score={55} />);
-    expect(screen.getByText("Needs Attention")).toBeInTheDocument();
-
-    // score < 50 -> Critical
-    rerender(<AdvisorPanel {...defaultProps} score={30} />);
-    expect(screen.getByText("Critical")).toBeInTheDocument();
-  });
-});
 
 
 // ============================================================================
@@ -1579,6 +1407,7 @@ describe("Workflows Page", () => {
 
 import { ScoreRing } from "@/components/advisor/ScoreRing";
 import { InsightCard } from "@/components/advisor/InsightCard";
+import type { Insight } from "@/lib/insights";
 
 describe("ScoreRing", () => {
   it("renders score value", () => {

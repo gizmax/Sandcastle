@@ -9,10 +9,7 @@ import { ToastContainer } from "@/components/shared/ToastContainer";
 import { useToasts } from "@/hooks/useToasts";
 import type { StreamEvent } from "@/hooks/useEventStream";
 import { api } from "@/api/client";
-import { Beacon } from "@/components/advisor/Beacon";
-import { AdvisorPanel } from "@/components/advisor/AdvisorPanel";
 import { AdvisorProvider } from "@/components/providers/AdvisorProvider";
-import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 
 const INITIAL_NOTIFICATIONS: Notification[] = [];
 
@@ -82,11 +79,9 @@ function LayoutInner() {
   const [dlqCount, setDlqCount] = useState(0);
   const [approvalsCount, setApprovalsCount] = useState(0);
   const [isDemo, setIsDemo] = useState(api.isMockMode);
-  const [advisorOpen, setAdvisorOpen] = useState(false);
   const navigate = useNavigate();
   const { subscribe } = useEventStreamContext();
   const { toasts, addToast, dismissToast } = useToasts();
-  const advisor = useAdvisorContext();
 
   useKeyboardShortcuts();
 
@@ -194,24 +189,6 @@ function LayoutInner() {
         </main>
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      <Beacon
-        score={advisor.score}
-        insights={advisor.activeInsights}
-        loading={advisor.loading}
-        onClick={() => setAdvisorOpen(true)}
-      />
-      <AdvisorPanel
-        open={advisorOpen}
-        onClose={() => setAdvisorOpen(false)}
-        score={advisor.score}
-        previousScore={advisor.previousScore}
-        deductions={advisor.deductions}
-        insights={advisor.activeInsights}
-        loading={advisor.loading}
-        lastChecked={advisor.lastChecked}
-        onRefresh={advisor.refresh}
-        onDismiss={advisor.dismiss}
-      />
     </div>
   );
 }

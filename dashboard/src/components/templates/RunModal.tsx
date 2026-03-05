@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Loader2, Play, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FilePathInput } from "@/components/shared/FilePathInput";
 import type { InputSchema } from "@/types/inputSchema";
 
 interface RunModalTemplate {
@@ -72,17 +73,25 @@ export function RunModal({
                   {prop.description && (
                     <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
                   )}
-                  <input
-                    type="text"
-                    value={fieldValues[key] || ""}
-                    onChange={(e) => onFieldChange(key, e.target.value)}
-                    placeholder={prop.default != null ? String(prop.default) : key}
-                    required={template.input_schema?.required?.includes(key)}
-                    className={cn(
-                      "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
-                      "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
-                    )}
-                  />
+                  {prop.format === "file-path" ? (
+                    <FilePathInput
+                      value={fieldValues[key] || ""}
+                      onChange={(v) => onFieldChange(key, v)}
+                      accept={prop.type === "image" ? "image/*" : undefined}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={fieldValues[key] || ""}
+                      onChange={(e) => onFieldChange(key, e.target.value)}
+                      placeholder={prop.default != null ? String(prop.default) : key}
+                      required={template.input_schema?.required?.includes(key)}
+                      className={cn(
+                        "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
+                        "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                      )}
+                    />
+                  )}
                 </div>
               ))
             ) : (

@@ -357,6 +357,33 @@ class ApiClient {
     }
   }
 
+  async uploadFile(file: File): Promise<ApiResponse<{ path: string; filename: string; size: number }>> {
+    await this.ensureInit();
+    if (this.useMock) {
+      return {
+        data: { path: `/tmp/mock-uploads/${file.name}`, filename: file.name, size: file.size },
+        error: null,
+      };
+    }
+
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const headers: HeadersInit = {};
+      if (this.apiKey) headers["X-API-Key"] = this.apiKey;
+      // Do NOT set Content-Type - browser sets multipart boundary automatically
+      const res = await fetch(`${this.baseUrl}/upload`, {
+        method: "POST",
+        headers,
+        body: form,
+        signal: AbortSignal.timeout(60_000),
+      });
+      return this.handleResponse(res);
+    } catch {
+      return { data: null, error: { code: "NETWORK_ERROR", message: "Upload failed" } };
+    }
+  }
+
   /**
    * Build an SSE URL with token query parameter for auth.
    * Only needed for native EventSource API which cannot send headers.

@@ -241,21 +241,8 @@ steps:
     type: condition
     condition_config:
       expression: "'{input.budget}' == 'lean'"
-      then: ["encode-product-photo", "compose-lean-prompts", "generate-lean"]
-      else: ["encode-product-photo", "compose-transparent-prompt", "generate-transparent-product", "compose-scene-prompts", "generate-scenes"]
-
-  # --- Encode product photo as base64 for Imagen subject reference ---
-  - id: "encode-product-photo"
-    depends_on: ["budget-router"]
-    type: code
-    code_config:
-      code: |
-        photo_path = _input.get("product_photo", "")
-        if photo_path:
-            b64_path = save_file_b64(photo_path, "product_photo_b64.txt")
-            result = {"b64_file": b64_path}
-        else:
-            result = {"b64_file": ""}
+      then: ["compose-lean-prompts"]
+      else: ["compose-transparent-prompt"]
 
   # --- LEAN path: LLM composes prompt, then direct Imagen API call ---
   - id: "compose-lean-prompts"
@@ -282,44 +269,34 @@ steps:
       - Specify camera lens, depth of field, color grading
       - Do NOT mention "AI generated" or "Imagen"
 
-      CRITICAL: The aspect_ratio field MUST be exactly one of: 1:1, 9:16, 16:9, 4:3, 3:4
-      These are the ONLY values Imagen 4.0 accepts. DO NOT return 4:5 - use 3:4 instead.
-      The shot requests "{input._item.aspect}" but map it: 4:5->3:4, 1:1->1:1, 9:16->9:16, 16:9->16:9.
-
       Return a JSON object:
       {
         "shot_id": "{input._item.shot_id}",
         "prompt": "your composed image generation prompt",
-        "aspect_ratio": "one of: 1:1, 9:16, 16:9, 4:3, 3:4"
+        "aspect_ratio": "{input._item.aspect}"
       }
     output_schema:
       type: object
       properties:
         shot_id: { type: string }
         prompt: { type: string }
-        aspect_ratio:
-          type: string
-          enum: ["1:1", "9:16", "16:9", "4:3", "3:4"]
+        aspect_ratio: { type: string }
 
   - id: "generate-lean"
-    depends_on: ["compose-lean-prompts", "encode-product-photo"]
+    depends_on: ["compose-lean-prompts"]
     type: http
     parallel_over: "steps.compose-lean-prompts.output"
     http_config:
       method: POST
-      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={env.TOOL_NANO_BANANA_API_KEY}"
+      url: "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict?key={env.TOOL_NANO_BANANA_API_KEY}"
       headers:
         Content-Type: "application/json"
       body:
-        contents:
-          - parts:
-              - text: "Generate a photorealistic UGC product photograph. The image MUST feature the EXACT same product as the reference photo - same shape, same label, same colors, same brand. Do NOT replace it.\n\nPrompt: {input._item.prompt}"
-              - inline_data:
-                  mime_type: "image/png"
-                  data: "{steps.encode-product-photo.output.b64_file}"
-        generationConfig:
-          responseModalities: ["IMAGE"]
-      cost_per_call: 0.02
+        instances:
+          - prompt: "{input._item.prompt}"
+        parameters:
+          sampleCount: 1
+          aspectRatio: "{input._item.aspect_ratio}"
     retry:
       max_attempts: 2
       backoff: exponential
@@ -358,23 +335,19 @@ steps:
         prompt: { type: string }
 
   - id: "generate-transparent-product"
-    depends_on: ["compose-transparent-prompt", "encode-product-photo"]
+    depends_on: ["compose-transparent-prompt"]
     type: http
     http_config:
       method: POST
-      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={env.TOOL_NANO_BANANA_API_KEY}"
+      url: "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={env.TOOL_NANO_BANANA_API_KEY}"
       headers:
         Content-Type: "application/json"
       body:
-        contents:
-          - parts:
-              - text: "Generate a clean, studio-quality product photograph based on the following prompt. The generated image must show the EXACT same product as the reference photo [1] - same shape, same label, same colors, same brand identity. Do NOT invent a different product.\n\nPrompt: {steps.compose-transparent-prompt.output.prompt}"
-              - inline_data:
-                  mime_type: "image/png"
-                  data: "{steps.encode-product-photo.output.b64_file}"
-        generationConfig:
-          responseModalities: ["IMAGE"]
-      cost_per_call: 0.04
+        instances:
+          - prompt: "{steps.compose-transparent-prompt.output.prompt}"
+        parameters:
+          sampleCount: 1
+          aspectRatio: "1:1"
     retry:
       max_attempts: 3
       backoff: exponential
@@ -409,44 +382,34 @@ steps:
       - Specify camera lens, depth of field, color grading, time of day
       - Do NOT mention "AI generated" or "Imagen"
 
-      CRITICAL: The aspect_ratio field MUST be exactly one of: 1:1, 9:16, 16:9, 4:3, 3:4
-      These are the ONLY values Imagen 4.0 accepts. DO NOT return 4:5 - use 3:4 instead.
-      The shot requests "{input._item.aspect}" but map it: 4:5->3:4, 1:1->1:1, 9:16->9:16, 16:9->16:9.
-
       Return a JSON object:
       {
         "shot_id": "{input._item.shot_id}",
         "prompt": "your composed image generation prompt",
-        "aspect_ratio": "one of: 1:1, 9:16, 16:9, 4:3, 3:4"
+        "aspect_ratio": "{input._item.aspect}"
       }
     output_schema:
       type: object
       properties:
         shot_id: { type: string }
         prompt: { type: string }
-        aspect_ratio:
-          type: string
-          enum: ["1:1", "9:16", "16:9", "4:3", "3:4"]
+        aspect_ratio: { type: string }
 
   - id: "generate-scenes"
-    depends_on: ["compose-scene-prompts", "encode-product-photo"]
+    depends_on: ["compose-scene-prompts"]
     type: http
     parallel_over: "steps.compose-scene-prompts.output"
     http_config:
       method: POST
-      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={env.TOOL_NANO_BANANA_API_KEY}"
+      url: "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={env.TOOL_NANO_BANANA_API_KEY}"
       headers:
         Content-Type: "application/json"
       body:
-        contents:
-          - parts:
-              - text: "Generate a photorealistic UGC product photograph based on the following prompt. The generated image MUST feature the EXACT same product as shown in the reference photo - same shape, same label, same colors, same brand. Do NOT replace it with a different product.\n\nPrompt: {input._item.prompt}"
-              - inline_data:
-                  mime_type: "image/png"
-                  data: "{steps.encode-product-photo.output.b64_file}"
-        generationConfig:
-          responseModalities: ["IMAGE"]
-      cost_per_call: 0.04
+        instances:
+          - prompt: "{input._item.prompt}"
+        parameters:
+          sampleCount: 1
+          aspectRatio: "{input._item.aspect_ratio}"
     retry:
       max_attempts: 2
       backoff: exponential
@@ -458,29 +421,22 @@ steps:
 
   - id: "quality-judge"
     depends_on: ["generate-lean", "generate-scenes"]
-    type: llm
     prompt: |
       You are a senior art director and quality control specialist for UGC product photography.
 
       ## Original product reference
-      Reference photo URL: {input.product_photo}
+      Reference photo: {input.product_photo}
       Product analysis: {steps.vision-analyze.output}
 
       ## Creative brief
       Shoot plan: {steps.creative-director.output}
 
-      ## Generation prompts used
-      Lean prompts: {steps.compose-lean-prompts.output}
-      Scene prompts: {steps.compose-scene-prompts.output}
-      Transparent product prompt: {steps.compose-transparent-prompt.output}
-
-      NOTE: Images were generated by Imagen 4.0. You cannot see the actual images.
-      Score based on how well the prompts match the creative brief, platform requirements,
-      and brand guidelines. Assume successful API calls produced acceptable results.
-      Flag any prompts that seem weak, off-brand, or missing key details.
+      ## Generated images (Imagen API responses)
+      Lean results: {steps.generate-lean.output}
+      Scene results: {steps.generate-scenes.output}
 
       ## Your Task
-      Score EVERY generated prompt/image on 7 dimensions (1-10 each):
+      Score EVERY generated image on 7 dimensions (1-10 each):
 
       1. **product_accuracy**: Does the product match the reference? Correct colors, shape, labels, proportions?
       2. **composition**: Rule of thirds, visual balance, focal point, negative space usage
@@ -490,17 +446,15 @@ steps:
       6. **brand_coherence**: Does the style match the brand aesthetic? Color palette consistency
       7. **technical_quality**: Resolution, sharpness, no visible artifacts, correct aspect ratio
 
-      IMPORTANT: Return your response as a raw JSON object (no markdown, no code fences).
-
-      For each image include in the JSON:
+      For each image return:
       - shot_id
-      - scores (all 7 dimensions as numbers)
+      - scores (all 7 dimensions)
       - overall_score (weighted average: product_accuracy 25%, authenticity 20%, composition 15%, lighting 15%, platform_fit 10%, brand_coherence 10%, technical_quality 5%)
       - pass (true if overall_score >= 6.5)
       - issues: array of specific problems found
       - fix_suggestions: array of prompt improvements if score < 6.5
 
-      Also include aggregate stats: total, passed, failed, avg_score.
+      Also return aggregate stats: total images, passed, failed, average score.
     output_schema:
       type: object
       properties:
@@ -533,9 +487,7 @@ steps:
     depends_on: ["quality-judge"]
     type: condition
     condition_config:
-      # V1: skip regeneration (quality-judge scores prompts, not images)
-      # TODO: enable when quality-judge can analyze actual generated images
-      expression: "0 > 0"
+      expression: "{steps.quality-judge.output.failed} > 0"
       then: ["regenerate-failed"]
       else: []
 
@@ -591,10 +543,6 @@ steps:
     approval_config:
       message: "Review your UGC Creative Studio output. Approve to finalize the delivery package, or edit to request changes."
       show_data: steps.quality-judge.output
-      show_images:
-        - steps.generate-lean.output
-        - steps.generate-transparent-product.output
-        - steps.generate-scenes.output
       timeout_hours: 48
       on_timeout: abort
       allow_edit: true
@@ -617,125 +565,11 @@ steps:
       4. Any images that were regenerated (and why)
 
   # ============================================================
-  # PHASE 5b: SELECTIVE REGENERATION (max 1 round)
-  # ============================================================
-
-  - id: "regenerate-router"
-    depends_on: ["creative-review"]
-    type: condition
-    condition_config:
-      expression: "'{steps.creative-review.output.action}' == 'regenerate'"
-      then: ["recompose-rejected", "regenerate-rejected-images", "creative-review-final"]
-      else: []
-
-  - id: "recompose-rejected"
-    depends_on: ["regenerate-router"]
-    type: llm
-    parallel_over: "steps.creative-review.output.rejected_shots"
-    prompt: |
-      You are an expert AI image prompt engineer for Imagen 4.0.
-
-      An image was rejected during creative review and needs to be regenerated with improvements.
-
-      ## Rejection context
-      - Rejected image index: {input._item}
-      - Reviewer feedback: {steps.creative-review.output.feedback}
-
-      ## Original shoot plan
-      {steps.creative-director.output}
-
-      ## Product details
-      {steps.vision-analyze.output}
-
-      ## Quality report for this image
-      {steps.quality-judge.output}
-
-      Find the shot from the creative director's plan that corresponds to index {input._item}.
-      Then compose an IMPROVED Imagen 4.0 prompt that:
-      1. Addresses the reviewer's feedback: "{steps.creative-review.output.feedback}"
-      2. Incorporates any quality judge suggestions for this shot
-      3. Maintains the original creative intent but fixes the noted issues
-      4. Is a single dense paragraph, 100-180 words, extremely detailed
-      5. Focuses on photorealism and authentic UGC feel
-
-      CRITICAL: The aspect_ratio field MUST be exactly one of: 1:1, 9:16, 16:9, 4:3, 3:4
-      These are the ONLY values Imagen 4.0 accepts.
-
-      Return a JSON object:
-      {
-        "original_index": {input._item},
-        "prompt": "your improved image generation prompt",
-        "aspect_ratio": "one of: 1:1, 9:16, 16:9, 4:3, 3:4",
-        "improvements": "brief description of what was changed from original"
-      }
-    output_schema:
-      type: object
-      properties:
-        original_index: { type: integer }
-        prompt: { type: string }
-        aspect_ratio:
-          type: string
-          enum: ["1:1", "9:16", "16:9", "4:3", "3:4"]
-        improvements: { type: string }
-
-  - id: "regenerate-rejected-images"
-    depends_on: ["recompose-rejected", "encode-product-photo"]
-    type: http
-    parallel_over: "steps.recompose-rejected.output"
-    http_config:
-      method: POST
-      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={env.TOOL_NANO_BANANA_API_KEY}"
-      headers:
-        Content-Type: "application/json"
-      body:
-        contents:
-          - parts:
-              - text: "Generate a photorealistic UGC product photograph. The image MUST feature the EXACT same product as the reference photo - same shape, same label, same colors, same brand. Do NOT replace it.\n\nThis is a REGENERATED image based on reviewer feedback. Pay extra attention to quality.\n\nPrompt: {input._item.prompt}"
-              - inline_data:
-                  mime_type: "image/png"
-                  data: "{steps.encode-product-photo.output.b64_file}"
-        generationConfig:
-          responseModalities: ["IMAGE"]
-      cost_per_call: 0.04
-    retry:
-      max_attempts: 2
-      backoff: exponential
-      on_failure: skip
-
-  - id: "creative-review-final"
-    depends_on: ["regenerate-rejected-images"]
-    type: approval
-    approval_config:
-      message: "Review the regenerated images. This is the final review - approve to finalize or reject to cancel the delivery."
-      show_data: steps.recompose-rejected.output
-      show_images:
-        - steps.regenerate-rejected-images.output
-      timeout_hours: 48
-      on_timeout: abort
-      allow_edit: false
-    prompt: |
-      Present the regenerated images for final review.
-
-      ## What was regenerated
-      {steps.recompose-rejected.output}
-
-      ## Reviewer's original feedback
-      {steps.creative-review.output.feedback}
-
-      ## Rejected image indices
-      {steps.creative-review.output.rejected_shots}
-
-      Show:
-      1. Each regenerated image with what was changed
-      2. The original feedback and how it was addressed
-      3. Note: This is the final review round. No further regeneration is available.
-
-  # ============================================================
   # PHASE 6: FINALIZE (parallel)
   # ============================================================
 
   - id: "final-deliverables"
-    depends_on: ["regenerate-router", "creative-review-final"]
+    depends_on: ["creative-review"]
     prompt: |
       Compile the final UGC Creative Studio delivery package.
 
@@ -788,7 +622,7 @@ steps:
       Format as clean, professional markdown.
 
   - id: "brand-memory-save"
-    depends_on: ["regenerate-router", "creative-review-final"]
+    depends_on: ["creative-review"]
     model: haiku
     memory:
       read: true
