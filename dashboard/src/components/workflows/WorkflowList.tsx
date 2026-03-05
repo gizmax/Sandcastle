@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkflowCard, mockWorkflowStats } from "@/components/workflows/WorkflowCard";
 import type { WorkflowStats } from "@/components/workflows/WorkflowCard";
+import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 
 interface WorkflowInfo {
   name: string;
@@ -26,6 +27,7 @@ interface WorkflowListProps {
 
 export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRun, onEdit, onViewDag, onViewVersions }: WorkflowListProps) {
   const allSelected = selectedNames != null && workflows.length > 0 && workflows.every((wf) => selectedNames.has(wf.file_name.replace(".yaml", "")));
+  const { isPinned, togglePin } = usePinnedWorkflows();
 
   // TODO: Replace with real per-workflow stats from API when available
   const statsMap = useMemo(() => {
@@ -91,8 +93,10 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
               versionStatus={wf.version_status}
               totalVersions={wf.total_versions}
               selected={selectedNames?.has(wfKey)}
+              pinned={isPinned(wf.name)}
               stats={statsMap.get(wf.file_name)}
               onSelect={onSelectionChange ? () => handleToggle(wfKey) : undefined}
+              onTogglePin={() => togglePin(wf.name)}
               onRun={() => onRun(wf)}
               onEdit={() => onEdit(wf)}
               onViewDag={() => onViewDag(wf)}
