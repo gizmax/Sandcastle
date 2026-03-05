@@ -512,6 +512,7 @@ export default function Runs() {
       ) : (
         <RunsTable
           runs={filteredRuns}
+          allRuns={runs}
           total={searchTerm ? filteredRuns.length : total}
           limit={limit}
           offset={searchTerm ? 0 : offset}

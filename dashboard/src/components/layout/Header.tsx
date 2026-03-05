@@ -7,6 +7,7 @@ import {
   NotificationCenter,
   type Notification,
 } from "@/components/layout/NotificationCenter";
+import { ActivityFeed } from "@/components/layout/ActivityFeed";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 
 interface HeaderProps {
@@ -104,6 +105,7 @@ export function Header({
 
       <div className={cn("flex items-center gap-1", "sm:ml-0 ml-auto")}>
         <LiveIndicator />
+        <ActivityFeed />
         <ThemeToggle />
         <NotificationCenter
           notifications={notifications}
