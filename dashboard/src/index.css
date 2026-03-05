@@ -57,6 +57,9 @@ body {
 .glow-accent {
   box-shadow: 0 0 20px rgba(245, 158, 11, 0.15), 0 0 40px rgba(245, 158, 11, 0.05);
 }
+.dark .glow-accent {
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), 0 0 40px rgba(251, 191, 36, 0.08);
+}
 
 /* Utility: grid dot pattern background */
 .bg-grid {
@@ -105,6 +108,62 @@ body {
   fill: inherit !important;
 }
 
+/* ──── Skeleton shimmer ──── */
+
+@keyframes skeleton-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+/* ──── Page transitions ──── */
+
+.page-enter {
+  animation: fadeIn 200ms ease-out both;
+}
+
+/* ──── Card hover effects ──── */
+
+.card-hover-glow {
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+.card-hover-glow:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.12);
+}
+.dark .card-hover-glow:hover {
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.15);
+}
+
+/* ──── Button micro-interactions ──── */
+
+button, [role="button"], .btn {
+  transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease,
+              border-color 150ms ease, opacity 150ms ease;
+}
+button:active:not(:disabled), [role="button"]:active:not(:disabled), .btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* ──── Status dot animations ──── */
+
+@keyframes status-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.5; transform: scale(0.85); }
+}
+
+@keyframes status-dot-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+
+.status-dot-running {
+  animation: status-dot-pulse 1.5s ease-in-out infinite;
+}
+
+.status-dot-queued {
+  animation: status-dot-bounce 1.2s ease-in-out infinite;
+}
+
 /* Pulse glow animation for loading spinner */
 @keyframes pulse-glow {
   0%, 100% {
@@ -143,8 +202,8 @@ body {
 /* ──── Onboarding wizard animations ──── */
 
 @keyframes wizard-step-enter {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes scale-in-bounce {
@@ -221,20 +280,22 @@ body {
 
 /* Step entrance */
 .wizard-step-enter {
-  animation: wizard-step-enter 0.35s ease-out both;
+  animation: wizard-step-enter 300ms ease-out both;
 }
 
 /* Stagger children (top-to-bottom) */
-.stagger-children > *:nth-child(1) { animation-delay: 60ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 120ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 180ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 240ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 300ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 360ms; }
-.stagger-children > *:nth-child(7) { animation-delay: 420ms; }
-.stagger-children > *:nth-child(8) { animation-delay: 480ms; }
+.stagger-children > *:nth-child(1)  { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2)  { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3)  { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4)  { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5)  { animation-delay: 200ms; }
+.stagger-children > *:nth-child(6)  { animation-delay: 250ms; }
+.stagger-children > *:nth-child(7)  { animation-delay: 300ms; }
+.stagger-children > *:nth-child(8)  { animation-delay: 350ms; }
+.stagger-children > *:nth-child(9)  { animation-delay: 400ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 450ms; }
 .stagger-children > * {
-  animation: fade-in-up 0.35s ease-out both;
+  animation: fade-in-up 250ms ease-out both;
 }
 
 /* Stagger children (left-to-right) */
@@ -297,17 +358,35 @@ body {
 
 /* Card hover lift */
 .card-hover-lift {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 200ms ease, box-shadow 200ms ease;
 }
 .card-hover-lift:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.dark .card-hover-lift:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 /* Card selected ring */
 .card-selected {
-  animation: ring-appear 0.3s ease-out both;
-  transform: scale(1.02);
+  animation: ring-appear 200ms ease-out both;
+  border-color: var(--color-accent);
+  background-color: rgba(245, 158, 11, 0.04);
+}
+.dark .card-selected {
+  background-color: rgba(251, 191, 36, 0.06);
+}
+
+/* ──── Pipeline node running pulse ──── */
+
+@keyframes pipeline-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50%      { box-shadow: 0 0 10px 3px rgba(59, 130, 246, 0.3); }
+}
+
+.pipeline-node-pulse {
+  animation: pipeline-node-pulse 2s ease-in-out infinite;
 }
 
 /* ──── Bell pulse animation (critical insights) ──── */
@@ -323,6 +402,11 @@ body {
 
 /* Accessibility: disable animations for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
   .wizard-step-enter,
   .stagger-children > *,
   .stagger-left > *,
@@ -334,14 +418,23 @@ body {
   .terminal-running,
   .terminal-success,
   .terminal-error,
-  .bell-pulse-critical {
+  .bell-pulse-critical,
+  .page-enter,
+  .status-dot-running,
+  .status-dot-queued,
+  .step-running-glow,
+  .pipeline-node-pulse {
     animation: none !important;
   }
   .btn-shimmer::after {
     animation: none !important;
   }
-  .card-hover-lift:hover {
+  .card-hover-lift:hover,
+  .card-hover-glow:hover {
     transform: none;
+  }
+  button:active, [role="button"]:active, .btn:active {
+    transform: none !important;
   }
 }
 

@@ -1,6 +1,8 @@
+import { useMemo } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { WorkflowCard } from "@/components/workflows/WorkflowCard";
+import { WorkflowCard, mockWorkflowStats } from "@/components/workflows/WorkflowCard";
+import type { WorkflowStats } from "@/components/workflows/WorkflowCard";
 
 interface WorkflowInfo {
   name: string;
@@ -24,6 +26,15 @@ interface WorkflowListProps {
 
 export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRun, onEdit, onViewDag, onViewVersions }: WorkflowListProps) {
   const allSelected = selectedNames != null && workflows.length > 0 && workflows.every((wf) => selectedNames.has(wf.file_name.replace(".yaml", "")));
+
+  // TODO: Replace with real per-workflow stats from API when available
+  const statsMap = useMemo(() => {
+    const m = new Map<string, WorkflowStats>();
+    for (const wf of workflows) {
+      m.set(wf.file_name, mockWorkflowStats(wf.name));
+    }
+    return m;
+  }, [workflows]);
 
   const handleSelectAll = () => {
     if (!onSelectionChange) return;
@@ -80,6 +91,7 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
               versionStatus={wf.version_status}
               totalVersions={wf.total_versions}
               selected={selectedNames?.has(wfKey)}
+              stats={statsMap.get(wf.file_name)}
               onSelect={onSelectionChange ? () => handleToggle(wfKey) : undefined}
               onRun={() => onRun(wf)}
               onEdit={() => onEdit(wf)}

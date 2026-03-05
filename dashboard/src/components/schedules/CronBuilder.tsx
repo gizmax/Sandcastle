@@ -1,8 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp, Clock, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { cronToHuman } from "@/lib/cron";
+import { cronToHuman, getNextRuns, parseCron } from "@/lib/cron";
+import type { ParsedCron } from "@/lib/cron";
 
-type Frequency = "hourly" | "every_x_hours" | "daily" | "weekly" | "monthly" | "custom";
+type Frequency = ParsedCron["frequency"];
+
+const FREQUENCIES: { value: Frequency; label: string }[] = [
+  { value: "every_minute", label: "Every Minute" },
+  { value: "hourly", label: "Hourly" },
+  { value: "every_x_hours", label: "Every X Hours" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "custom", label: "Custom" },
+];
 
 const WEEKDAYS = [
   { label: "Mon", value: 1 },
@@ -19,94 +31,21 @@ interface CronBuilderProps {
   onChange: (cron: string) => void;
 }
 
-function parseCron(cron: string): {
-  frequency: Frequency;
-  hour: number;
-  minute: number;
-  interval: number;
-  weekdays: number[];
-  monthDay: number;
-} {
-  const defaults = {
-    frequency: "daily" as Frequency,
-    hour: 9,
-    minute: 0,
-    interval: 6,
-    weekdays: [1, 2, 3, 4, 5],
-    monthDay: 1,
-  };
-
-  if (!cron) return defaults;
-
-  const parts = cron.trim().split(/\s+/);
-  if (parts.length !== 5) return { ...defaults, frequency: "custom" };
-
-  const [min, hr, dom, , dow] = parts;
-
-  // Every hour: 0 * * * *
-  if (hr === "*" && dom === "*" && dow === "*") {
-    return { ...defaults, frequency: "hourly", minute: parseInt(min) || 0 };
-  }
-
-  // Every X hours: 0 */X * * *
-  if (hr.startsWith("*/") && dom === "*" && dow === "*") {
-    return {
-      ...defaults,
-      frequency: "every_x_hours",
-      minute: parseInt(min) || 0,
-      interval: parseInt(hr.slice(2)) || 6,
-    };
-  }
-
-  // Weekly: M H * * 1,3,5
-  if (dom === "*" && dow !== "*" && !hr.includes("*") && !hr.includes("/")) {
-    const days = dow.split(",").map(Number).filter((n) => !isNaN(n));
-    return {
-      ...defaults,
-      frequency: "weekly",
-      minute: parseInt(min) || 0,
-      hour: parseInt(hr) || 9,
-      weekdays: days.length > 0 ? days : [1, 2, 3, 4, 5],
-    };
-  }
-
-  // Monthly: M H D * *
-  if (dom !== "*" && !dom.includes("*") && dow === "*" && !hr.includes("*")) {
-    return {
-      ...defaults,
-      frequency: "monthly",
-      minute: parseInt(min) || 0,
-      hour: parseInt(hr) || 9,
-      monthDay: parseInt(dom) || 1,
-    };
-  }
-
-  // Daily: M H * * *
-  if (dom === "*" && dow === "*" && !hr.includes("*") && !hr.includes("/")) {
-    return {
-      ...defaults,
-      frequency: "daily",
-      minute: parseInt(min) || 0,
-      hour: parseInt(hr) || 9,
-    };
-  }
-
-  return { ...defaults, frequency: "custom" };
-}
-
 function buildCron(state: {
   frequency: Frequency;
   hour: number;
   minute: number;
   interval: number;
   weekdays: number[];
-  monthDay: number;
+  monthDays: number[];
   custom: string;
 }): string {
   const m = state.minute;
   const h = state.hour;
 
   switch (state.frequency) {
+    case "every_minute":
+      return "* * * * *";
     case "hourly":
       return `${m} * * * *`;
     case "every_x_hours":
@@ -116,7 +55,7 @@ function buildCron(state: {
     case "weekly":
       return `${m} ${h} * * ${state.weekdays.sort((a, b) => a - b).join(",")}`;
     case "monthly":
-      return `${m} ${h} ${state.monthDay} * *`;
+      return `${m} ${h} ${[...state.monthDays].sort((a, b) => a - b).join(",")} * *`;
     case "custom":
       return state.custom;
   }
@@ -129,8 +68,9 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
   const [minute, setMinute] = useState(initial.minute);
   const [interval, setInterval] = useState(initial.interval);
   const [weekdays, setWeekdays] = useState<number[]>(initial.weekdays);
-  const [monthDay, setMonthDay] = useState(initial.monthDay);
+  const [monthDays, setMonthDays] = useState<number[]>(initial.monthDays);
   const [custom, setCustom] = useState(value || "0 9 * * *");
+  const [showRawCron, setShowRawCron] = useState(false);
 
   // Re-sync internal state when parent changes the value prop
   useEffect(() => {
@@ -140,60 +80,108 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
     setMinute(parsed.minute);
     setInterval(parsed.interval);
     setWeekdays(parsed.weekdays);
-    setMonthDay(parsed.monthDay);
+    setMonthDays(parsed.monthDays);
     if (parsed.frequency === "custom") {
       setCustom(value);
     }
   }, [value]);
 
   useEffect(() => {
-    const cron = buildCron({ frequency, hour, minute, interval, weekdays, monthDay, custom });
+    const cron = buildCron({ frequency, hour, minute, interval, weekdays, monthDays, custom });
     onChange(cron);
-  }, [frequency, hour, minute, interval, weekdays, monthDay, custom, onChange]);
+  }, [frequency, hour, minute, interval, weekdays, monthDays, custom, onChange]);
 
-  const inputClass = cn(
-    "h-9 rounded-lg border border-border bg-background px-3 text-sm",
-    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30"
+  const currentCron = buildCron({ frequency, hour, minute, interval, weekdays, monthDays, custom });
+
+  const nextRuns = useMemo(() => {
+    return getNextRuns(currentCron, 3);
+  }, [currentCron]);
+
+  const humanDescription = useMemo(() => {
+    return cronToHuman(currentCron);
+  }, [currentCron]);
+
+  const selectClass = cn(
+    "h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground",
+    "focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/30",
+    "transition-colors"
   );
-
-  const currentCron = buildCron({ frequency, hour, minute, interval, weekdays, monthDay, custom });
 
   return (
     <div className="space-y-3">
-      {/* Frequency selector */}
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted">Frequency</label>
-        <select
-          value={frequency}
-          onChange={(e) => setFrequency(e.target.value as Frequency)}
-          className={cn(inputClass, "w-full")}
-        >
-          <option value="hourly">Every hour</option>
-          <option value="every_x_hours">Every X hours</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-          <option value="custom">Custom (cron)</option>
-        </select>
+      {/* Label */}
+      <label className="block text-xs font-medium text-muted">Schedule</label>
+
+      {/* Frequency tabs */}
+      <div className="flex flex-wrap gap-1.5">
+        {FREQUENCIES.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            onClick={() => setFrequency(f.value)}
+            className={cn(
+              "rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200",
+              frequency === f.value
+                ? "bg-accent text-accent-foreground shadow-sm"
+                : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
-      {/* Every X hours */}
-      {frequency === "every_x_hours" && (
+      {/* Hourly: minute picker */}
+      {frequency === "hourly" && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Every</label>
-          <div className="flex items-center gap-2">
+          <label className="mb-1.5 block text-xs font-medium text-muted">At minute</label>
+          <select
+            value={minute}
+            onChange={(e) => setMinute(Number(e.target.value))}
+            className={cn(selectClass, "w-24")}
+          >
+            {Array.from({ length: 60 }, (_, i) => (
+              <option key={i} value={i}>
+                :{String(i).padStart(2, "0")}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Every X hours: interval + minute */}
+      {frequency === "every_x_hours" && (
+        <div className="space-y-2.5">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted">Every</label>
+            <div className="flex items-center gap-2">
+              <select
+                value={interval}
+                onChange={(e) => setInterval(Number(e.target.value))}
+                className={cn(selectClass, "w-24")}
+              >
+                {[2, 3, 4, 6, 8, 12].map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+              <span className="text-sm text-muted">hours</span>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted">At minute</label>
             <select
-              value={interval}
-              onChange={(e) => setInterval(Number(e.target.value))}
-              className={cn(inputClass, "w-24")}
+              value={minute}
+              onChange={(e) => setMinute(Number(e.target.value))}
+              className={cn(selectClass, "w-24")}
             >
-              {[2, 3, 4, 6, 8, 12].map((h) => (
-                <option key={h} value={h}>
-                  {h}
+              {[0, 5, 10, 15, 20, 30, 45].map((m) => (
+                <option key={m} value={m}>
+                  :{String(m).padStart(2, "0")}
                 </option>
               ))}
             </select>
-            <span className="text-sm text-muted">hours</span>
           </div>
         </div>
       )}
@@ -201,12 +189,12 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {/* Time picker for daily/weekly/monthly */}
       {(frequency === "daily" || frequency === "weekly" || frequency === "monthly") && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Time</label>
+          <label className="mb-1.5 block text-xs font-medium text-muted">Time (UTC)</label>
           <div className="flex items-center gap-2">
             <select
               value={hour}
               onChange={(e) => setHour(Number(e.target.value))}
-              className={cn(inputClass, "w-20")}
+              className={cn(selectClass, "w-20")}
             >
               {Array.from({ length: 24 }, (_, i) => (
                 <option key={i} value={i}>
@@ -214,13 +202,13 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 </option>
               ))}
             </select>
-            <span className="text-sm font-medium text-muted">:</span>
+            <span className="text-sm font-bold text-muted">:</span>
             <select
               value={minute}
               onChange={(e) => setMinute(Number(e.target.value))}
-              className={cn(inputClass, "w-20")}
+              className={cn(selectClass, "w-20")}
             >
-              {[0, 15, 30, 45].map((m) => (
+              {[0, 5, 10, 15, 20, 30, 45].map((m) => (
                 <option key={m} value={m}>
                   {String(m).padStart(2, "0")}
                 </option>
@@ -233,7 +221,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {/* Weekday picker */}
       {frequency === "weekly" && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Days</label>
+          <label className="mb-1.5 block text-xs font-medium text-muted">Days of week</label>
           <div className="flex flex-wrap gap-1.5">
             {WEEKDAYS.map((day) => {
               const active = weekdays.includes(day.value);
@@ -251,10 +239,10 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                     }
                   }}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    "rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200",
                     active
-                      ? "bg-accent text-accent-foreground"
-                      : "bg-background border border-border text-muted hover:text-foreground"
+                      ? "bg-accent text-accent-foreground shadow-sm"
+                      : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
                   )}
                 >
                   {day.label}
@@ -262,13 +250,20 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               );
             })}
           </div>
-          <div className="flex gap-2 mt-1.5">
+          <div className="flex gap-3 mt-2">
             <button
               type="button"
               onClick={() => setWeekdays([1, 2, 3, 4, 5])}
               className="text-[11px] text-accent/70 hover:text-accent transition-colors"
             >
               Weekdays
+            </button>
+            <button
+              type="button"
+              onClick={() => setWeekdays([0, 6])}
+              className="text-[11px] text-accent/70 hover:text-accent transition-colors"
+            >
+              Weekends
             </button>
             <button
               type="button"
@@ -281,52 +276,145 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
         </div>
       )}
 
-      {/* Month day picker */}
+      {/* Month day grid picker */}
       {frequency === "monthly" && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Day of month</label>
-          <select
-            value={monthDay}
-            onChange={(e) => setMonthDay(Number(e.target.value))}
-            className={cn(inputClass, "w-24")}
-          >
-            {Array.from({ length: 28 }, (_, i) => (
-              <option key={i + 1} value={i + 1}>
-                {i + 1}
-              </option>
-            ))}
-          </select>
+          <label className="mb-1.5 block text-xs font-medium text-muted">Days of month</label>
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: 31 }, (_, i) => {
+              const day = i + 1;
+              const active = monthDays.includes(day);
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => {
+                    if (active) {
+                      if (monthDays.length > 1) {
+                        setMonthDays(monthDays.filter((d) => d !== day));
+                      }
+                    } else {
+                      setMonthDays([...monthDays, day]);
+                    }
+                  }}
+                  className={cn(
+                    "rounded-lg py-1.5 text-xs font-medium transition-all duration-200",
+                    active
+                      ? "bg-accent text-accent-foreground shadow-sm"
+                      : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
+                  )}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-3 mt-2">
+            <button
+              type="button"
+              onClick={() => setMonthDays([1])}
+              className="text-[11px] text-accent/70 hover:text-accent transition-colors"
+            >
+              1st only
+            </button>
+            <button
+              type="button"
+              onClick={() => setMonthDays([1, 15])}
+              className="text-[11px] text-accent/70 hover:text-accent transition-colors"
+            >
+              1st &amp; 15th
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Custom cron */}
+      {/* Custom cron input */}
       {frequency === "custom" && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Cron Expression</label>
+          <label className="mb-1.5 block text-xs font-medium text-muted">Cron Expression</label>
           <input
             type="text"
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
             placeholder="0 */6 * * *"
-            className={cn(inputClass, "w-full font-mono")}
+            className={cn(selectClass, "w-full font-mono")}
           />
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            Format: minute hour day month weekday
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Format: minute hour day-of-month month day-of-week
           </p>
         </div>
       )}
 
-      {/* Preview */}
-      <div className="rounded-md bg-background border border-border px-3 py-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted">Schedule:</span>
-          <span className="text-xs font-medium text-foreground">{cronToHuman(currentCron)}</span>
+      {/* Preview card */}
+      <div className="rounded-lg bg-background border border-border overflow-hidden">
+        {/* Human-readable description */}
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          <Clock className="h-3.5 w-3.5 text-accent shrink-0" />
+          <span className="text-sm font-medium text-foreground">{humanDescription}</span>
         </div>
-        <div className="flex items-center justify-between mt-0.5">
-          <span className="text-[11px] text-muted-foreground">Cron:</span>
-          <code className="text-[11px] font-mono text-muted-foreground">{currentCron}</code>
-        </div>
+
+        {/* Next 3 runs */}
+        {nextRuns.length > 0 && (
+          <div className="border-t border-border px-3 py-2">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Calendar className="h-3 w-3 text-muted" />
+              <span className="text-[11px] font-medium text-muted">Next runs</span>
+            </div>
+            <div className="space-y-0.5">
+              {nextRuns.map((run, i) => (
+                <div key={i} className="text-xs text-muted-foreground font-mono">
+                  {formatRunDate(run)}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Expandable raw cron (for non-custom modes) */}
+        {frequency !== "custom" && (
+          <div className="border-t border-border">
+            <button
+              type="button"
+              onClick={() => setShowRawCron(!showRawCron)}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] text-muted-foreground hover:text-muted transition-colors"
+            >
+              <code className="font-mono">{currentCron}</code>
+              {showRawCron ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+            </button>
+            {showRawCron && (
+              <div className="px-3 pb-2">
+                <input
+                  type="text"
+                  value={currentCron}
+                  readOnly
+                  className={cn(
+                    selectClass,
+                    "w-full font-mono text-xs bg-surface cursor-default"
+                  )}
+                />
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Read-only - switch to Custom mode to edit directly
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function formatRunDate(date: Date): string {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const dow = days[date.getUTCDay()];
+  const mon = months[date.getUTCMonth()];
+  const d = date.getUTCDate();
+  const h = String(date.getUTCHours()).padStart(2, "0");
+  const m = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${dow}, ${mon} ${d} at ${h}:${m} UTC`;
 }
