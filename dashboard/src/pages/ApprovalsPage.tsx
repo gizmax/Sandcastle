@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward } from "lucide-react";
+import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward, RefreshCw, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -24,6 +24,14 @@ interface ApprovalItem {
   resolved_at: string | null;
 }
 
+interface ImageEntry {
+  index: number;
+  url?: string;
+  filename?: string;
+  error?: string;
+  mime_type?: string;
+}
+
 const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string; label: string }> = {
   pending: { bg: "bg-warning/15 border-warning/30", text: "text-warning", dot: "bg-warning animate-pulse", label: "Pending" },
   approved: { bg: "bg-success/15 border-success/30", text: "text-success", dot: "bg-success", label: "Approved" },
@@ -40,6 +48,10 @@ export default function ApprovalsPage() {
   const [filter, setFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
+
+  // Selective regeneration state - keyed by approval id
+  const [rejectedShots, setRejectedShots] = useState<Record<string, Set<number>>>({});
+  const [regenFeedback, setRegenFeedback] = useState<Record<string, string>>({});
 
   const fetchItems = useCallback(async (cancelled?: { current: boolean }) => {
     try {
@@ -85,6 +97,63 @@ export default function ApprovalsPage() {
       }
     },
     [fetchItems, actionLoading]
+  );
+
+  const toggleRejectedShot = useCallback((approvalId: string, shotIndex: number) => {
+    setRejectedShots((prev) => {
+      const current = new Set(prev[approvalId] ?? []);
+      if (current.has(shotIndex)) {
+        current.delete(shotIndex);
+      } else {
+        current.add(shotIndex);
+      }
+      return { ...prev, [approvalId]: current };
+    });
+  }, []);
+
+  const handleRegenerate = useCallback(
+    async (id: string) => {
+      const selected = rejectedShots[id];
+      if (!selected || selected.size === 0) {
+        toast.error("Select at least one image to regenerate");
+        return;
+      }
+      if (actionLoading.has(id)) return;
+      setActionLoading((prev) => new Set(prev).add(id));
+      try {
+        const res = await api.post(`/approvals/${id}/regenerate`, {
+          comment: regenFeedback[id] || null,
+          edited_data: {
+            rejected_shots: Array.from(selected).sort((a, b) => a - b),
+            feedback: regenFeedback[id] || "",
+          },
+        });
+        if (res.error) {
+          toast.error(`Failed to regenerate: ${res.error.message}`);
+          return;
+        }
+        toast.success(`Regenerating ${selected.size} image${selected.size > 1 ? "s" : ""}...`);
+        // Clear selection state for this approval
+        setRejectedShots((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        setRegenFeedback((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        void fetchItems();
+      } finally {
+        setActionLoading((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [fetchItems, actionLoading, rejectedShots, regenFeedback]
   );
 
   const filters = [
@@ -164,6 +233,12 @@ export default function ApprovalsPage() {
           {items.map((item) => {
             const style = STATUS_STYLES[item.status] || STATUS_STYLES.pending;
             const isExpanded = expandedId === item.id;
+            const images = Array.isArray((item.request_data as Record<string, unknown>)?._images)
+              ? ((item.request_data as Record<string, unknown>)._images as ImageEntry[])
+              : null;
+            const selectedForRegen = rejectedShots[item.id] ?? new Set<number>();
+            const hasImages = images !== null && images.length > 0;
+            const isPending = item.status === "pending";
 
             return (
               <div
@@ -234,7 +309,7 @@ export default function ApprovalsPage() {
                   </span>
 
                   {/* Action buttons (only for pending) */}
-                  {item.status === "pending" && (
+                  {isPending && (
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         disabled={actionLoading.has(item.id)}
@@ -288,31 +363,145 @@ export default function ApprovalsPage() {
                 {/* Expanded detail */}
                 {isExpanded && item.request_data && (
                   <div className="border-t border-border px-5 py-4 bg-background/50">
-                    {/* Image gallery */}
-                    {Array.isArray((item.request_data as Record<string, unknown>)._images) && (
+                    {/* Image gallery with selection checkboxes */}
+                    {hasImages && (
                       <div className="mb-4">
-                        <p className="text-xs font-medium text-muted-foreground mb-2">Generated Images</p>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {((item.request_data as Record<string, unknown>)._images as Array<{ index: number; url?: string; filename?: string; error?: string; mime_type?: string }>).map((img) => (
-                            <div key={img.index} className="rounded-lg border border-border overflow-hidden bg-surface">
-                              {img.error ? (
-                                <div className="flex items-center justify-center h-40 text-xs text-error px-2 text-center">
-                                  {img.error}
-                                </div>
-                              ) : img.url ? (
-                                <img
-                                  src={img.url}
-                                  alt={`Generated image ${img.index + 1}`}
-                                  className="w-full h-auto object-contain max-h-64"
-                                  loading="lazy"
-                                />
-                              ) : null}
-                              <div className="px-2 py-1 text-[10px] text-muted border-t border-border">
-                                {img.filename || `Image ${img.index + 1}`}
-                              </div>
-                            </div>
-                          ))}
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-medium text-muted-foreground">Generated Images</p>
+                          {isPending && selectedForRegen.size > 0 && (
+                            <span className="text-xs text-accent font-medium">
+                              {selectedForRegen.size} selected for regeneration
+                            </span>
+                          )}
                         </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {images!.map((img) => {
+                            const isSelected = selectedForRegen.has(img.index);
+                            return (
+                              <div
+                                key={img.index}
+                                className={cn(
+                                  "rounded-lg border overflow-hidden bg-surface relative group",
+                                  isSelected
+                                    ? "border-accent ring-2 ring-accent/30"
+                                    : "border-border",
+                                  isPending && "cursor-pointer"
+                                )}
+                                onClick={isPending ? () => toggleRejectedShot(item.id, img.index) : undefined}
+                              >
+                                {/* Selection checkbox overlay for pending approvals */}
+                                {isPending && (
+                                  <div className="absolute top-2 left-2 z-10">
+                                    <div
+                                      className={cn(
+                                        "flex h-5 w-5 items-center justify-center rounded border-2 transition-all",
+                                        isSelected
+                                          ? "bg-accent border-accent text-white"
+                                          : "bg-black/30 border-white/70 text-transparent group-hover:border-white"
+                                      )}
+                                    >
+                                      {isSelected && (
+                                        <XCircle className="h-3 w-3" />
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Rejection overlay */}
+                                {isSelected && (
+                                  <div className="absolute inset-0 bg-error/10 z-[5] pointer-events-none" />
+                                )}
+
+                                {img.error ? (
+                                  <div className="flex items-center justify-center h-40 text-xs text-error px-2 text-center">
+                                    {img.error}
+                                  </div>
+                                ) : img.url ? (
+                                  <img
+                                    src={img.url}
+                                    alt={`Generated image ${img.index + 1}`}
+                                    className={cn(
+                                      "w-full h-auto object-contain max-h-64 transition-opacity",
+                                      isSelected && "opacity-60"
+                                    )}
+                                    loading="lazy"
+                                  />
+                                ) : null}
+                                <div className={cn(
+                                  "px-2 py-1 text-[10px] border-t flex items-center justify-between",
+                                  isSelected
+                                    ? "text-accent border-accent/30 bg-accent/5"
+                                    : "text-muted border-border"
+                                )}>
+                                  <span>{img.filename || `Image ${img.index + 1}`}</span>
+                                  {isSelected && (
+                                    <span className="font-medium">Regenerate</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Regeneration controls - visible when images are selected */}
+                        {isPending && selectedForRegen.size > 0 && (
+                          <div className="mt-3 space-y-2 rounded-lg border border-accent/30 bg-accent/5 p-3">
+                            <div className="flex items-center gap-2 text-sm font-medium text-accent">
+                              <RefreshCw className="h-4 w-4" />
+                              Regenerate {selectedForRegen.size} image{selectedForRegen.size > 1 ? "s" : ""}
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <MessageSquare className="h-4 w-4 text-muted mt-2 shrink-0" />
+                              <textarea
+                                value={regenFeedback[item.id] || ""}
+                                onChange={(e) =>
+                                  setRegenFeedback((prev) => ({ ...prev, [item.id]: e.target.value }))
+                                }
+                                placeholder="Feedback for regeneration (e.g. 'too dark, wrong angle, product label not visible')"
+                                className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted resize-none focus:outline-none focus:ring-1 focus:ring-accent"
+                                rows={2}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <button
+                                onClick={() => {
+                                  setRejectedShots((prev) => {
+                                    const next = { ...prev };
+                                    delete next[item.id];
+                                    return next;
+                                  });
+                                  setRegenFeedback((prev) => {
+                                    const next = { ...prev };
+                                    delete next[item.id];
+                                    return next;
+                                  });
+                                }}
+                                className="text-xs text-muted hover:text-foreground transition-colors"
+                              >
+                                Clear selection
+                              </button>
+                              <button
+                                disabled={actionLoading.has(item.id)}
+                                onClick={() => handleRegenerate(item.id)}
+                                className={cn(
+                                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium",
+                                  "bg-accent text-white hover:bg-accent/90 transition-colors",
+                                  "disabled:opacity-50 disabled:cursor-not-allowed"
+                                )}
+                              >
+                                <RefreshCw className={cn("h-3.5 w-3.5", actionLoading.has(item.id) && "animate-spin")} />
+                                Regenerate selected ({selectedForRegen.size})
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Hint text when no images are selected */}
+                        {isPending && hasImages && selectedForRegen.size === 0 && (
+                          <p className="mt-2 text-xs text-muted">
+                            Click on images you want to regenerate, or use the buttons above to approve/reject all.
+                          </p>
+                        )}
                       </div>
                     )}
                     <p className="text-xs font-medium text-muted-foreground mb-2">Request Data</p>

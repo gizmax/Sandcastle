@@ -22,3 +22,11 @@ node_modules/
 test-results/
 output/
 data/
+
+# Agent artifacts
+AGENT_SUMMARY_*.md
+PHASE*_CLAUDE_CODE.md
+SANDSTORM_ANALYSIS.md
+CLAUDE_CODE_COMMAND.md
+build_template.py
+:memory:*

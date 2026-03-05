@@ -4370,6 +4370,81 @@ async def skip_approval(
     )
 
 
+@router.post("/approvals/{approval_id}/regenerate")
+async def regenerate_approval(
+    approval_id: str,
+    req: Request,
+    request: ApprovalRespondRequest | None = None,
+) -> ApiResponse:
+    """Request selective image regeneration and resume the workflow.
+
+    The caller sends ``edited_data`` with ``rejected_shots`` (list of
+    zero-based image indices) and an optional ``feedback`` string.  The
+    approval is marked *approved* so the workflow continues, but the
+    output data carries an ``action`` of ``"regenerate"`` that downstream
+    condition steps can route on.
+    """
+    tenant_id = get_tenant_id(req)
+
+    # Validate that we have the regeneration payload
+    if not request or not request.edited_data:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="MISSING_DATA",
+                    message="edited_data with rejected_shots is required for regeneration",
+                )
+            ).model_dump(),
+        )
+
+    edit_data = request.edited_data
+    rejected = edit_data.get("rejected_shots")
+    if not isinstance(rejected, list) or len(rejected) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_DATA",
+                    message="rejected_shots must be a non-empty list of image indices",
+                )
+            ).model_dump(),
+        )
+
+    # Resolve as APPROVED so the workflow can continue (the condition
+    # step will decide whether to route into the regeneration branch)
+    approval = await _resolve_and_update_approval(
+        approval_id, tenant_id, ApprovalStatus.APPROVED, request,
+        response_data=edit_data,
+    )
+
+    # Build output data that downstream steps can inspect
+    output_data = {
+        "action": "regenerate",
+        "rejected_shots": rejected,
+        "feedback": edit_data.get("feedback", ""),
+        **(approval.request_data or {}),
+    }
+
+    # Persist the response_data on the approval record
+    async with async_session() as session:
+        ap = await session.get(ApprovalRequest, approval.id)
+        if ap:
+            ap.response_data = output_data
+            await session.commit()
+
+    await _resume_after_approval(approval, output_data=output_data)
+
+    return ApiResponse(
+        data={
+            "regenerating": True,
+            "approval_id": approval_id,
+            "run_id": str(approval.run_id),
+            "rejected_shots": rejected,
+        },
+    )
+
+
 async def _resume_after_approval(
     approval: ApprovalRequest,
     output_data: dict | None,
