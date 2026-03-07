@@ -169,7 +169,8 @@ async def _list_available_workflows() -> list[dict[str, Any]]:
         return []
 
     items: list[dict[str, Any]] = []
-    for yaml_file in sorted(workflows_dir.glob("*.yaml")):
+    yaml_files = sorted([*workflows_dir.glob("*.yaml"), *workflows_dir.glob("*.yml")])
+    for yaml_file in yaml_files:
         try:
             content = yaml_file.read_text()
             workflow = parse_yaml_string(content)

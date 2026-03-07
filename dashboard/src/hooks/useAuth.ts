@@ -7,7 +7,7 @@ type AuthState = "loading" | "authenticated" | "unauthenticated";
 export function useAuth() {
   const [state, setState] = useState<AuthState>("loading");
 
-  const tryConnect = useCallback(async (key: string | null, signal?: AbortSignal): Promise<boolean> => {
+  const tryConnect = useCallback(async (key: string | null, signal?: AbortSignal): Promise<boolean | "unreachable"> => {
     api.setApiKey(key);
     try {
       // Validate against a protected endpoint (/api/runtime) instead of the
@@ -18,13 +18,15 @@ export function useAuth() {
         signal: signal ?? AbortSignal.timeout(3000),
       });
       if (res.status === 401) return false;
-      // 200 = key valid (or auth disabled), 404/502 = no backend (demo mode)
+      // 200 = key valid (or auth disabled), 404/502 = backend up but
+      // endpoint missing - still means auth is not blocking us
       return true;
     } catch (e: unknown) {
       // Abort errors should propagate so the caller knows the request was cancelled
       if (e instanceof DOMException && e.name === "AbortError") throw e;
-      // Network error - backend unreachable, let the app handle it (mock mode)
-      return true;
+      // Network error - backend unreachable. Return distinct value so
+      // callers can differentiate "auth OK" from "can't tell".
+      return "unreachable";
     }
   }, []);
 
@@ -35,8 +37,15 @@ export function useAuth() {
         const savedKey = api.getStoredKey();
 
         // First try without any key (auth might be disabled)
-        const noAuthOk = await tryConnect(null, controller.signal);
-        if (noAuthOk && !savedKey) {
+        const noAuthResult = await tryConnect(null, controller.signal);
+
+        // Backend unreachable - allow access in demo/mock mode
+        if (noAuthResult === "unreachable") {
+          setState("authenticated");
+          return;
+        }
+
+        if (noAuthResult === true && !savedKey) {
           setState("authenticated");
           return;
         }
@@ -44,7 +53,11 @@ export function useAuth() {
         // If we have a saved key, try it
         if (savedKey) {
           const ok = await tryConnect(savedKey, controller.signal);
-          if (ok) {
+          if (ok === true) {
+            setState("authenticated");
+            return;
+          }
+          if (ok === "unreachable") {
             setState("authenticated");
             return;
           }
@@ -54,7 +67,7 @@ export function useAuth() {
         }
 
         // No auth needed if first probe succeeded
-        if (noAuthOk) {
+        if (noAuthResult === true) {
           setState("authenticated");
           return;
         }
@@ -72,12 +85,13 @@ export function useAuth() {
   }, [tryConnect]);
 
   const login = useCallback(async (key: string): Promise<boolean> => {
-    const ok = await tryConnect(key);
-    if (ok) {
+    const result = await tryConnect(key);
+    if (result === true) {
       api.storeApiKey(key);
       setState("authenticated");
       return true;
     }
+    // "unreachable" during login = can't validate, reject
     api.setApiKey(null);
     return false;
   }, [tryConnect]);

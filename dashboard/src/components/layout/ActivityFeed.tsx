@@ -77,7 +77,7 @@ function EventItem({
 }
 
 export function ActivityFeed() {
-  const { unreadCount, markAsRead, markAllRead, filterEvents, newEventFlag } = useActivityFeed();
+  const { unreadCount, markAsRead, markAllRead, filterEvents, newEventFlag, isDemo } = useActivityFeed();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -154,7 +154,14 @@ export function ActivityFeed() {
           )}
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h3 className="text-sm font-semibold text-foreground">Activity</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Activity</h3>
+              {isDemo && (
+                <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-warning">
+                  Demo
+                </span>
+              )}
+            </div>
             {unreadCount > 0 && (
               <button
                 onClick={markAllRead}

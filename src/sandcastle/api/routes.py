@@ -888,14 +888,15 @@ async def get_hub_registry() -> ApiResponse:
             _set_hub_cache("registry", data)
             return ApiResponse(data=data)
     except Exception:
-        # Fallback: return empty registry
-        return ApiResponse(
-            data={
-                "version": 1,
-                "templates": [],
-                "categories": [],
-                "stats": {"total_templates": 0},
-            }
+        logger.error("Failed to fetch hub registry", exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="HUB_UNAVAILABLE",
+                    message="Could not reach the template hub. Try again later.",
+                )
+            ).model_dump(),
         )
 
 
@@ -1195,7 +1196,7 @@ async def list_installed_hub_templates() -> ApiResponse:
         return ApiResponse(data=[])
 
     installed = []
-    for yaml_file in sorted(community_dir.glob("*.yaml")):
+    for yaml_file in sorted([*community_dir.glob("*.yaml"), *community_dir.glob("*.yml")]):
         installed.append(
             {
                 "filename": yaml_file.name,
@@ -1492,7 +1493,8 @@ async def list_workflows() -> ApiResponse:
         pass
 
     items = []
-    for yaml_file in sorted(workflows_dir.glob("*.yaml")):
+    yaml_files = sorted([*workflows_dir.glob("*.yaml"), *workflows_dir.glob("*.yml")])
+    for yaml_file in yaml_files:
         try:
             content = yaml_file.read_text()
             workflow = parse_yaml_string(content)
@@ -1776,7 +1778,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
 
     storage = create_storage()
 
-    # Create DB record
+    # Create DB record (mandatory - run_id must be in history)
     try:
         async with async_session() as session:
             db_run = Run(
@@ -1794,7 +1796,20 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             session.add(db_run)
             await session.commit()
     except Exception:
-        logger.warning("Could not save run to database (DB may not be available)")
+        logger.error(
+            "Failed to create run record in database for %s",
+            run_id,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="DB_UNAVAILABLE",
+                    message="Database is unavailable, cannot persist run",
+                )
+            ).model_dump(),
+        )
 
     result = await execute_workflow(
         workflow=workflow,
@@ -1814,7 +1829,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         "awaiting_approval": RunStatus.AWAITING_APPROVAL,
     }
 
-    # Update DB record
+    # Update DB record with results
     try:
         async with async_session() as session:
             db_run = await session.get(Run, uuid.UUID(run_id))
@@ -1827,7 +1842,11 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 db_run.error = result.error
                 await session.commit()
     except Exception:
-        logger.warning("Could not update run in database")
+        logger.error(
+            "Failed to update run %s result in database",
+            run_id,
+            exc_info=True,
+        )
 
     # Dispatch webhooks (same as async path in worker)
     try:

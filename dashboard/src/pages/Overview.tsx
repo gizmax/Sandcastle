@@ -167,7 +167,12 @@ function ActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
-      <h3 className="mb-3 text-sm font-medium text-foreground">Activity</h3>
+      <div className="mb-3 flex items-center gap-2">
+        <h3 className="text-sm font-medium text-foreground">Activity</h3>
+        <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-warning">
+          Demo
+        </span>
+      </div>
       <div className="relative overflow-x-auto">
         {/* Month labels row */}
         <div className="flex" style={{ paddingLeft: "28px" }}>

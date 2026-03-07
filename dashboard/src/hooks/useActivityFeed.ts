@@ -251,5 +251,10 @@ export function useActivityFeed() {
     [events],
   );
 
-  return { events, unreadCount, markAsRead, markAllRead, filterEvents, newEventFlag };
+  // Activity feed is currently demo-only (mock data). Flag it so the
+  // UI can show a "Demo" badge. When a real /events API is available,
+  // this hook should fetch from it and set isDemo=false.
+  const isDemo = true;
+
+  return { events, unreadCount, markAsRead, markAllRead, filterEvents, newEventFlag, isDemo };
 }

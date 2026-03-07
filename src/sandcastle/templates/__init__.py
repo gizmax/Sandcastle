@@ -112,13 +112,13 @@ def list_templates() -> list[TemplateInfo]:
     templates: list[TemplateInfo] = []
 
     # Built-in templates
-    for path in sorted(_TEMPLATES_DIR.glob("*.yaml")):
+    for path in sorted([*_TEMPLATES_DIR.glob("*.yaml"), *_TEMPLATES_DIR.glob("*.yml")]):
         templates.append(_parse_template(path, source="built-in"))
 
     # Community templates (user-installed)
     community_dir = _TEMPLATES_DIR / "community"
     if community_dir.is_dir():
-        for path in sorted(community_dir.glob("*.yaml")):
+        for path in sorted([*community_dir.glob("*.yaml"), *community_dir.glob("*.yml")]):
             templates.append(_parse_template(path, source="community"))
 
     return templates
@@ -138,8 +138,8 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
     Raises:
         FileNotFoundError: If no template matches the given name.
     """
-    # Normalize: strip .yaml suffix if present
-    stem = name.removesuffix(".yaml")
+    # Normalize: strip .yaml/.yml suffix if present
+    stem = name.removesuffix(".yaml").removesuffix(".yml")
 
     # Collect all search directories
     search_dirs: list[tuple[Path, str]] = [(_TEMPLATES_DIR, "built-in")]
@@ -148,7 +148,7 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
         search_dirs.append((community_dir, "community"))
 
     for dir_path, source in search_dirs:
-        for path in dir_path.glob("*.yaml"):
+        for path in sorted([*dir_path.glob("*.yaml"), *dir_path.glob("*.yml")]):
             content = path.read_text()
             meta = _parse_comment_metadata(content)
             display_name = str(meta.get("name", path.stem))
@@ -160,5 +160,5 @@ def get_template(name: str) -> tuple[str, TemplateInfo]:
             info = _parse_template(path, source=source)
             return content, info
 
-    available = [p.stem for d, _ in search_dirs for p in d.glob("*.yaml")]
+    available = [p.stem for d, _ in search_dirs for ext in ("*.yaml", "*.yml") for p in d.glob(ext)]
     raise FileNotFoundError(f"Template '{name}' not found. Available: {', '.join(available)}")

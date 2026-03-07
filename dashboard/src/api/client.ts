@@ -81,11 +81,31 @@ class ApiClient {
       const data = await res.json();
       const s = data?.data?.status;
       if (s !== "ok" && s !== "degraded") throw new Error("unhealthy");
+      this.setMock(false);
       console.info("[Sandcastle] Backend connected");
     } catch {
       console.info("[Sandcastle] Backend unavailable, using demo data");
       this.setMock(true);
     }
+  }
+
+  /** Re-probe the backend and exit mock mode if it's back. */
+  async reprobeBackend(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      const s = data?.data?.status;
+      if (s === "ok" || s === "degraded") {
+        this.setMock(false);
+        console.info("[Sandcastle] Backend reconnected, exiting demo mode");
+        return true;
+      }
+    } catch { /* still down */ }
+    return false;
   }
 
   private async ensureInit(): Promise<void> {
@@ -226,10 +246,9 @@ class ApiClient {
         });
         return this.handleResponse<T>(res);
       } catch {
-        // Only fall back to mock on actual network errors (backend unreachable)
-        console.info(`[Sandcastle] Backend unavailable, using demo data`);
-        this.setMock(true);
-        return this.mock<T>(path, params);
+        // Return error instead of permanently switching to mock mode.
+        // Mock mode is only entered via the initial probe or explicit reprobeBackend().
+        return { data: null, error: { code: "NETWORK_ERROR", message: "Backend unreachable" } };
       } finally {
         this._inflightRequests.delete(dedupeKey);
       }

@@ -159,6 +159,9 @@ export function CostForecast({ rng }: CostForecastProps) {
           <TrendingUp className="h-3.5 w-3.5 text-accent" />
         </div>
         <h3 className="text-sm font-medium text-foreground">Cost Forecast</h3>
+        <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-warning">
+          Demo
+        </span>
       </div>
 
       <div className="relative overflow-x-auto">

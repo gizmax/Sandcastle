@@ -176,7 +176,7 @@ def _get_client(backend: str = "local") -> Any:
     if backend == "cloud":
         raise NotImplementedError(
             "Cloud memory backend is not yet implemented. "
-            "Set SANDBOX_MEMORY_BACKEND=local or install mem0ai "
+            "Set MEMORY_BACKEND=local or install mem0ai "
             "and use local mode. Cloud support requires a Mem0 "
             "Platform API key - coming in a future release."
         )
