@@ -4,7 +4,7 @@ import { GitBranch, LayoutGrid, Network, Plus, Search, Star, Trash2, X, Loader2 
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
-import { WorkflowCard, mockWorkflowStats } from "@/components/workflows/WorkflowCard";
+import { WorkflowCard } from "@/components/workflows/WorkflowCard";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
 import { DagGraph } from "@/components/workflows/DagGraph";
 import { DependencyGraph } from "@/components/workflows/DependencyGraph";
@@ -288,7 +288,7 @@ export default function Workflows() {
               name: wf.name,
               file_name: wf.file_name,
               steps_count: wf.steps_count,
-              last_run_status: mockWorkflowStats(wf.name).lastRunStatus,
+              last_run_status: undefined,
             }))}
           />
         )
@@ -313,7 +313,7 @@ export default function Workflows() {
                     versionStatus={wf.version_status}
                     totalVersions={wf.total_versions}
                     pinned={true}
-                    stats={mockWorkflowStats(wf.name)}
+                    stats={undefined}
                     onTogglePin={() => togglePin(wf.name)}
                     onRun={() => setRunModal(wf)}
                     onEdit={() => navigate("/workflows/builder", { state: { workflow: wf } })}

@@ -1571,9 +1571,7 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
                 error=ErrorResponse(code="INVALID_NAME", message="Invalid workflow name")
             ).model_dump(),
         )
-    file_path.write_text(request.content)
-
-    # Create a draft version in the registry
+    # Create a draft version in the registry FIRST, then write disk
     new_version = None
     try:
         async with async_session() as session:
@@ -1592,7 +1590,14 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
             await session.commit()
             new_version = next_ver
     except Exception:
-        logger.warning("Could not create workflow version in registry")
+        logger.warning(
+            "Could not create workflow version in registry for %s",
+            safe_name,
+            exc_info=True,
+        )
+
+    # Write YAML to disk (after DB so both stay consistent)
+    file_path.write_text(request.content)
 
     return ApiResponse(
         data=WorkflowInfoResponse(
@@ -5616,10 +5621,18 @@ async def promote_workflow(req: Request, name: str, request: WorkflowPromoteRequ
             try:
                 workflows_dir = Path(settings.workflows_dir)
                 workflows_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
-                (workflows_dir / f"{safe_name}.yaml").write_text(wv.yaml_content)
+                safe_name = "".join(
+                    c if c.isalnum() or c in "-_" else "_"
+                    for c in name
+                )
+                disk_path = workflows_dir / f"{safe_name}.yaml"
+                disk_path.write_text(wv.yaml_content)
             except Exception:
-                pass
+                logger.error(
+                    "Failed to write promoted workflow %s to disk",
+                    name,
+                    exc_info=True,
+                )
         elif current_status == "production":
             raise HTTPException(
                 status_code=400,
@@ -5733,10 +5746,18 @@ async def rollback_workflow(req: Request, name: str, request: WorkflowRollbackRe
         # Update disk file
         try:
             workflows_dir = Path(settings.workflows_dir)
-            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
-            (workflows_dir / f"{safe_name}.yaml").write_text(target.yaml_content)
+            safe_name = "".join(
+                c if c.isalnum() or c in "-_" else "_"
+                for c in name
+            )
+            disk_path = workflows_dir / f"{safe_name}.yaml"
+            disk_path.write_text(target.yaml_content)
         except Exception:
-            pass
+            logger.error(
+                "Failed to write rolled-back workflow %s to disk",
+                name,
+                exc_info=True,
+            )
 
     return ApiResponse(
         data={
@@ -6568,7 +6589,7 @@ async def eval_stats(req: Request) -> ApiResponse:
 # Memory endpoints
 # ---------------------------------------------------------------------------
 
-import re as _re
+import re as _re  # noqa: E402
 
 _SCOPE_ID_RE = _re.compile(
     r"^(workflow:[a-zA-Z0-9_. -]{1,200}"

@@ -66,12 +66,16 @@ interface TooltipData {
 /**
  * Calculate start times and row assignments for steps.
  *
- * TODO: Replace with real timing data from API (started_at per step).
- * Currently calculates start times by summing durations sequentially.
- * Steps with the same parallel_index that are adjacent start at the same time.
+ * Uses real started_at timestamps when available (relative to first step).
+ * Falls back to summing durations sequentially when timestamps are missing.
  */
 function computeBars(steps: Step[]): { bars: BarData[]; totalDuration: number } {
   if (steps.length === 0) return { bars: [], totalDuration: 0 };
+
+  // Determine if we can use real timestamps
+  const firstStarted = steps.find((s) => s.started_at)?.started_at;
+  const hasRealTimestamps = firstStarted != null && steps.filter((s) => s.started_at).length > steps.length / 2;
+  const runStartMs = firstStarted ? new Date(firstStarted).getTime() : 0;
 
   const bars: BarData[] = [];
   let cursor = 0; // current time offset in seconds
@@ -81,26 +85,35 @@ function computeBars(steps: Step[]): { bars: BarData[]; totalDuration: number } 
   while (i < steps.length) {
     const step = steps[i];
 
+    // Use real timestamp if available, otherwise fallback to cursor
+    const stepStart = hasRealTimestamps && step.started_at
+      ? (new Date(step.started_at).getTime() - runStartMs) / 1000
+      : cursor;
+
     // Check if this step starts a parallel group
     if (step.parallel_index !== null) {
-      // Collect all consecutive steps with the same parallel_index value
-      const groupStart = cursor;
+      // Collect consecutive steps with the SAME parallel_index value
       const group: Step[] = [step];
+      const groupIndex = step.parallel_index;
       let j = i + 1;
-      while (j < steps.length && steps[j].parallel_index !== null) {
+      while (j < steps.length && steps[j].parallel_index === groupIndex) {
         group.push(steps[j]);
         j++;
       }
 
       // All parallel steps start at the same time, each on its own row
       const baseRow = bars.length > 0 ? bars[bars.length - 1].row + 1 : 0;
-      let maxEnd = groupStart;
+      let maxEnd = stepStart;
 
       for (let k = 0; k < group.length; k++) {
-        const dur = Math.max(group[k].duration_seconds, 0.1); // min width
+        const s = group[k];
+        const dur = Math.max(s.duration_seconds, 0.1);
+        const sStart = hasRealTimestamps && s.started_at
+          ? (new Date(s.started_at).getTime() - runStartMs) / 1000
+          : stepStart;
         bars.push({
-          step: group[k],
-          startOffset: groupStart,
+          step: s,
+          startOffset: sStart,
           duration: dur,
           row: baseRow + k,
           parallelGroupLabel:
@@ -108,7 +121,7 @@ function computeBars(steps: Step[]): { bars: BarData[]; totalDuration: number } 
               ? `Parallel group (${group.length} steps)`
               : null,
         });
-        maxEnd = Math.max(maxEnd, groupStart + dur);
+        maxEnd = Math.max(maxEnd, sStart + dur);
       }
 
       cursor = maxEnd;
@@ -119,12 +132,12 @@ function computeBars(steps: Step[]): { bars: BarData[]; totalDuration: number } 
       const row = bars.length > 0 ? bars[bars.length - 1].row + 1 : 0;
       bars.push({
         step,
-        startOffset: cursor,
+        startOffset: stepStart,
         duration: dur,
         row,
         parallelGroupLabel: null,
       });
-      cursor += dur;
+      cursor = stepStart + dur;
       i++;
     }
   }

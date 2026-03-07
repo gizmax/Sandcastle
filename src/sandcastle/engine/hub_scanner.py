@@ -179,11 +179,38 @@ def scan_template(yaml_content: str) -> ScanResult:
             message="Template contains zero-width or invisible Unicode characters (stripped for scanning)",
         ))
 
+    # NFC normalization to collapse compatibility characters and homoglyphs
+    # (e.g. fullwidth latin "ｅｖａｌ" → "eval", accented look-alikes)
+    normalized = unicodedata.normalize("NFKC", cleaned)
+    if normalized != cleaned:
+        warnings.append(ScanIssue(
+            code="UNICODE_NORMALIZATION",
+            message="Template contains non-canonical Unicode forms (normalized for scanning)",
+        ))
+        cleaned = normalized
+
+    # Pre-parse anchor/alias density check to mitigate YAML bomb CPU spike.
+    # safe_load handles billion-laughs but nested aliases can still be slow.
+    anchor_count = cleaned.count("&")
+    alias_count = cleaned.count("*")
+    if anchor_count > 50 or alias_count > 200:
+        errors.append(ScanIssue(
+            code="YAML_BOMB",
+            message=(
+                f"Suspicious YAML anchor/alias density "
+                f"({anchor_count} anchors, {alias_count} aliases)"
+            ),
+        ))
+        return ScanResult(safe=False, warnings=warnings, errors=errors)
+
     # Parse YAML (gracefully handle malformed content)
     try:
         data = yaml.safe_load(cleaned)
     except yaml.YAMLError:
-        errors.append(ScanIssue(code="INVALID_YAML", message="Template YAML could not be parsed"))
+        errors.append(ScanIssue(
+            code="INVALID_YAML",
+            message="Template YAML could not be parsed",
+        ))
         return ScanResult(safe=False, warnings=warnings, errors=errors)
 
     if not isinstance(data, dict):

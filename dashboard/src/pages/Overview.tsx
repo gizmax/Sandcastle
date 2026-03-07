@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Castle, Play, AlertTriangle, BarChart3, Star, CheckCircle, XCircle, Clock, Settings2, GripVertical } from "lucide-react";
+import { Castle, Play, AlertTriangle, BarChart3, Star, GitBranch, Settings2, GripVertical } from "lucide-react";
 import { api } from "@/api/client";
 import { StatsCards } from "@/components/overview/StatsCards";
 import { RunsChart } from "@/components/overview/RunsChart";
@@ -13,7 +13,6 @@ import { CostForecast } from "@/components/overview/CostForecast";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 import { useDashboardLayout, WIDGET_LABELS } from "@/hooks/useDashboardLayout";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
-import { mockWorkflowStats } from "@/components/workflows/WorkflowCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 
@@ -323,41 +322,18 @@ function PinnedWorkflowsWidget() {
         <h3 className="text-sm font-medium text-foreground">Pinned Workflows</h3>
       </div>
       <div className="space-y-2">
-        {pinnedWorkflows.map((wfName) => {
-          const stats = mockWorkflowStats(wfName);
-          const healthColor =
-            stats.successRate >= 90 ? "bg-success" :
-            stats.successRate >= 70 ? "bg-warning" :
-            "bg-error";
-          return (
+        {pinnedWorkflows.map((wfName) => (
             <div
               key={wfName}
               className="flex items-center gap-3 rounded-lg border border-border/50 bg-background px-3 py-2.5"
             >
-              <span className={cn("h-2 w-2 shrink-0 rounded-full", healthColor)} />
+              <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted" />
               <button
                 onClick={() => navigate(`/workflows/${encodeURIComponent(wfName)}`)}
                 className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:text-accent transition-colors"
               >
                 {wfName}
               </button>
-              <span className="flex items-center gap-1 text-xs text-muted shrink-0">
-                {stats.lastRunStatus === "completed" && (
-                  <CheckCircle className="h-3 w-3 text-success" />
-                )}
-                {stats.lastRunStatus === "failed" && (
-                  <XCircle className="h-3 w-3 text-error" />
-                )}
-                {stats.lastRunStatus === "running" && (
-                  <Clock className="h-3 w-3 text-running" />
-                )}
-                {!stats.lastRunStatus && (
-                  <Clock className="h-3 w-3" />
-                )}
-                <span className="hidden sm:inline">
-                  {stats.lastRunAgo ?? "Never"}
-                </span>
-              </span>
               <button
                 onClick={() => navigate(`/workflows/${encodeURIComponent(wfName)}`)}
                 className={cn(
@@ -369,8 +345,7 @@ function PinnedWorkflowsWidget() {
                 Run
               </button>
             </div>
-          );
-        })}
+        ))}
       </div>
     </div>
   );
