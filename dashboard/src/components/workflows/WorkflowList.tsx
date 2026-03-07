@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { WorkflowCard, mockWorkflowStats } from "@/components/workflows/WorkflowCard";
+import { WorkflowCard } from "@/components/workflows/WorkflowCard";
 import type { WorkflowStats } from "@/components/workflows/WorkflowCard";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 
@@ -29,14 +29,12 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
   const allSelected = selectedNames != null && workflows.length > 0 && workflows.every((wf) => selectedNames.has(wf.file_name.replace(".yaml", "")));
   const { isPinned, togglePin } = usePinnedWorkflows();
 
-  // TODO: Replace with real per-workflow stats from API when available
-  const statsMap = useMemo(() => {
-    const m = new Map<string, WorkflowStats>();
-    for (const wf of workflows) {
-      m.set(wf.file_name, mockWorkflowStats(wf.name));
-    }
-    return m;
-  }, [workflows]);
+  // Stats are only shown when a real per-workflow stats API endpoint
+  // is available. Until then, cards render without the metrics row.
+  const statsMap = useMemo(
+    () => new Map<string, WorkflowStats>(),
+    [],
+  );
 
   const handleSelectAll = () => {
     if (!onSelectionChange) return;

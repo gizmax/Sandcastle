@@ -520,8 +520,6 @@ def _print_banner() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> None:
     """Interactive setup wizard - create .env and workflows directory."""
-    from pathlib import Path
-
     if not sys.stdin.isatty():
         print(
             "Error: 'sandcastle init' requires an interactive terminal.",
@@ -1255,7 +1253,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
             # SQLite requires no connectivity check
             _pass(f"Database: {db_label}")
         elif db_url.startswith("postgresql"):
-            _pass(f"Database: PostgreSQL configured")
+            _pass("Database: PostgreSQL configured")
             try:
                 import sqlalchemy  # noqa: F401
                 _pass("SQLAlchemy installed")

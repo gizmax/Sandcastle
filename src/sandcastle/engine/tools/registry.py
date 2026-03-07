@@ -3189,7 +3189,7 @@ VALID_CATEGORIES = frozenset(
 )
 
 # Connection name validation: alphanumeric, hyphens, underscores only
-import re as _re
+import re as _re  # noqa: E402
 
 _CONN_NAME_RE = _re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$")
 
