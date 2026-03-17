@@ -28,13 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cost estimator: classify and gate steps now estimate as single LLM call (turns=1) matching runtime behavior. sub_workflow parent no longer gets a fake LLM charge. Gate model resolution reads from `strategies[].config.model` matching runtime.
 
 ### Fixed
+- **Secret scrubber hardened** - `_scrub_secrets()` now catches credential URLs (`postgres://user:pass@host`, `redis://:pass@host`, etc.), PEM private key blocks (RSA, EC, DSA, ENCRYPTED), Azure `AccountKey=`, compound keywords (`aws_secret_access_key=`), and JSON-quoted secrets (`"password": "value"`). Two-layer defense: PEM regex runs first, then token regex. Idempotent (double-scrub produces same output).
+- **Eval regression detection IEEE 754-safe** - switched from fragile float comparison (`drop > 0.105`) to integer basis points (`Math.round(drop * 10000) > 1000`). Eliminates false negatives for 10.1-10.5pp drops and false positives for exactly-10pp drops caused by floating-point imprecision.
+- **`/runs/estimate` now returns `valid` field** - response includes `valid: true/false` based on `validate()` result. Invalid workflows get "unreliable" disclaimer. Clients no longer need to manually check `validation_errors` array.
+- **`useAdvisor` now surfaces API errors** - hook collects errors from all 13 API endpoints into `errors: string[]`. Overview page shows warning banner ("Advisor data incomplete - X endpoints failed") instead of silently displaying empty/default data.
+- **DLQ test mocks use sync `session.add()`** - fixed `AsyncMock` for SQLAlchemy async session's synchronous `.add()` method, eliminating unawaited-coroutine warnings. Audited entire test codebase.
 - CostForecast widget no longer shows inflated projections - inactive days are zero-filled in the 30-day historical series instead of being omitted, fixing daily_average, trend, and projected_monthly calculations.
-- Eval regression insight now correctly uses 0..1 scale from backend (raw from DB), not 0..100. Drop threshold >0.1 = >10pp.
+- Eval regression insight now correctly uses 0..1 scale from backend (raw from DB), not 0..100.
 - `/advisor/explain` now has `execution_limiter` rate limiting and proper upstream error wrapping (502), matching `/generate` and `/generate/chat` endpoints.
-- `/advisor/explain` now scrubs secrets (bearer tokens, API keys, AWS keys, long hex strings) from error and prompt content before sending to external LLM.
 - `/runs/estimate` uses proper Pydantic `RunEstimateRequest` schema - malformed JSON now returns 422 instead of 500.
 - Cost estimator no longer reports $0.00 for unknown models - falls back to sonnet pricing with a note.
 - Composio step validation: `validate()` now rejects composio steps without `composio_config.action`.
+- Dashboard eval regression test suites made consistent (removed stale bug-expectation tests).
 
 ## [0.21.0] - 2026-03-05
 
