@@ -199,27 +199,33 @@ def tmp_storage():
 class TestBackoffDelay:
     """Přesné ověření backoff logiky – executor.py:194"""
 
-    def test_attempt_1_returns_2(self):
-        """attempt=1 → 2^1=2s. Dokumentuje aktuální chování."""
-        assert _backoff_delay(1) == 2.0
+    def test_attempt_1_in_range(self):
+        """attempt=1 → uniform(0, min(2**1, 60)) = [0, 2]."""
+        result = _backoff_delay(1)
+        assert 0 <= result <= 2.0
 
-    def test_attempt_2_returns_4(self):
-        assert _backoff_delay(2) == 4.0
+    def test_attempt_2_in_range(self):
+        result = _backoff_delay(2)
+        assert 0 <= result <= 4.0
 
-    def test_attempt_3_returns_8(self):
-        assert _backoff_delay(3) == 8.0
+    def test_attempt_3_in_range(self):
+        result = _backoff_delay(3)
+        assert 0 <= result <= 8.0
 
-    def test_attempt_6_returns_60_capped(self):
+    def test_attempt_6_capped_at_60(self):
         """2^6=64 ale cappováno na 60."""
-        assert _backoff_delay(6) == 60.0
+        result = _backoff_delay(6)
+        assert 0 <= result <= 60.0
 
-    def test_attempt_10_still_60(self):
-        """Velké attempt číslo zůstane na 60."""
-        assert _backoff_delay(10) == 60.0
+    def test_attempt_10_still_capped(self):
+        """Velké attempt číslo zůstane cappováno na 60."""
+        result = _backoff_delay(10)
+        assert 0 <= result <= 60.0
 
-    def test_fixed_always_2(self):
+    def test_fixed_in_range(self):
         for attempt in [1, 2, 5, 10]:
-            assert _backoff_delay(attempt, "fixed") == 2.0
+            result = _backoff_delay(attempt, "fixed")
+            assert 1.0 <= result <= 3.0
 
     @pytest.mark.asyncio
     async def test_actual_sleep_calls_with_exponential(self):
@@ -236,15 +242,10 @@ class TestBackoffDelay:
 
         assert result.status == "completed"
         assert len(sleep_vals) == 3, f"Čekal jsem 3 sleep volání, dostal {sleep_vals}"
-        # Ověří že každý sleep je větší než předchozí (exponential growth)
-        for i in range(1, len(sleep_vals)):
-            assert sleep_vals[i] >= sleep_vals[i-1], (
-                f"Backoff neroste: {sleep_vals}"
-            )
-        # Dokumentuje konkrétní hodnoty (attempt 1→2s, 2→4s, 3→8s)
-        assert sleep_vals == [2.0, 4.0, 8.0], (
-            f"Backoff hodnoty: {sleep_vals} (attempt=1→2, 2→4, 3→8)"
-        )
+        # With jitter, values are in ranges: attempt 1→[0,2], 2→[0,4], 3→[0,8]
+        assert 0 <= sleep_vals[0] <= 2.0, f"Backoff attempt 1: {sleep_vals[0]}"
+        assert 0 <= sleep_vals[1] <= 4.0, f"Backoff attempt 2: {sleep_vals[1]}"
+        assert 0 <= sleep_vals[2] <= 8.0, f"Backoff attempt 3: {sleep_vals[2]}"
 
     @given(st.integers(min_value=1, max_value=100))
     @h_settings(max_examples=50)

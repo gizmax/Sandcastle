@@ -606,21 +606,25 @@ class TestCheckBudgetEdgeCases:
 class TestBackoffDelay:
 
     def test_exponential_attempt_1(self):
-        assert _backoff_delay(1, "exponential") == 2.0
+        result = _backoff_delay(1, "exponential")
+        assert 0 <= result <= 2.0
 
     def test_exponential_attempt_2(self):
-        assert _backoff_delay(2, "exponential") == 4.0
+        result = _backoff_delay(2, "exponential")
+        assert 0 <= result <= 4.0
 
     def test_exponential_capped_at_60(self):
-        assert _backoff_delay(10, "exponential") == 60.0
+        result = _backoff_delay(10, "exponential")
+        assert 0 <= result <= 60.0
 
-    def test_fixed_always_2(self):
-        assert _backoff_delay(1, "fixed") == 2.0
-        assert _backoff_delay(5, "fixed") == 2.0
-        assert _backoff_delay(100, "fixed") == 2.0
+    def test_fixed_in_range(self):
+        assert 1.0 <= _backoff_delay(1, "fixed") <= 3.0
+        assert 1.0 <= _backoff_delay(5, "fixed") <= 3.0
+        assert 1.0 <= _backoff_delay(100, "fixed") <= 3.0
 
     def test_unknown_backoff_treated_as_fixed(self):
-        assert _backoff_delay(3, "unknown") == 2.0
+        result = _backoff_delay(3, "unknown")
+        assert 1.0 <= result <= 3.0
 
 
 # =============================================================================

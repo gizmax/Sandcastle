@@ -8,6 +8,7 @@ export interface AdvisorContextValue {
   activeInsights: Insight[];
   loading: boolean;
   lastChecked: Date | null;
+  errors: string[];
   refresh: () => Promise<void>;
   dismiss: (id: string) => void;
 }

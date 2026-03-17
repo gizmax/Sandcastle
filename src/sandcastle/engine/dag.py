@@ -249,6 +249,16 @@ class BrowserConfig:
 
 
 @dataclass
+class ComposioConfig:
+    """Configuration for a Composio integration step (500+ tools)."""
+
+    action: str = ""  # Composio action ID, e.g. "gmail_send_email"
+    params: dict = field(default_factory=dict)  # Dynamic params for the action
+    connected_account_id: str = ""  # Composio connected account (optional)
+    app: str = ""  # Composio app name, e.g. "github" (optional, for discovery)
+
+
+@dataclass
 class SLOConfig:
     """Service Level Objective for optimizer-driven model selection."""
 
@@ -349,17 +359,18 @@ VALID_STEP_TYPES = frozenset(
         "notify",
         "delegate",
         "browser",
+        "composio",
     }
 )
 
 # Types that don't need a prompt
 NON_PROMPT_TYPES = frozenset(
-    {"http", "code", "condition", "loop", "race", "sensor", "transform", "notify"}
+    {"http", "code", "condition", "loop", "race", "sensor", "gate", "transform", "notify", "composio"}
 )
 
 # Types that don't use an LLM model (skip model validation)
 NON_LLM_TYPES = frozenset(
-    {"http", "code", "condition", "loop", "race", "sensor", "transform", "notify"}
+    {"http", "code", "condition", "loop", "race", "sensor", "transform", "notify", "composio"}
 )
 
 
@@ -381,6 +392,7 @@ class StepDefinition:
     # "standard" | "approval" | "sub_workflow" | "llm" | "http"
     # | "code" | "condition" | "classify" | "loop" | "race"
     # | "sensor" | "gate" | "transform" | "notify" | "delegate"
+    # | "browser" | "composio"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -404,6 +416,7 @@ class StepDefinition:
     notify_config: NotifyConfig | None = None
     delegate_config: DelegateConfig | None = None
     browser_config: BrowserConfig | None = None
+    composio_config: ComposioConfig | None = None
 
 
 @dataclass
@@ -845,6 +858,18 @@ def _parse_browser_config(data: dict | None) -> BrowserConfig | None:
     )
 
 
+def _parse_composio_config(data: dict | None) -> ComposioConfig | None:
+    """Parse Composio configuration from YAML data."""
+    if data is None:
+        return None
+    return ComposioConfig(
+        action=data.get("action", ""),
+        params=data.get("params", {}),
+        connected_account_id=data.get("connected_account_id", ""),
+        app=data.get("app", ""),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     if "id" not in data or not data["id"]:
@@ -908,6 +933,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         notify_config=_parse_notify_config(data.get("notify_config")),
         delegate_config=_parse_delegate_config(data.get("delegate_config")),
         browser_config=_parse_browser_config(data.get("browser_config")),
+        composio_config=_parse_composio_config(data.get("composio_config")),
     )
 
 
@@ -1166,6 +1192,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
                 )
+        elif step.type == "composio":
+            if not step.composio_config or not step.composio_config.action:
+                errors.append(
+                    f"Composio step '{step.id}' must have composio_config with an action"
+                )
 
     # Validate sub_workflow configuration
     for step in workflow.steps:
@@ -1367,6 +1398,15 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         fields.append(step.sensor_config.condition)
     if step.race_config and step.race_config.validator:
         fields.append(step.race_config.validator)
+    if step.composio_config:
+        fields.append(step.composio_config.action)
+        if step.composio_config.connected_account_id:
+            fields.append(step.composio_config.connected_account_id)
+        if step.composio_config.app:
+            fields.append(step.composio_config.app)
+        if isinstance(step.composio_config.params, dict):
+            import json as _json
+            fields.append(_json.dumps(step.composio_config.params))
     return fields
 
 

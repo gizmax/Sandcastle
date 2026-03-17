@@ -336,22 +336,24 @@ class TestCheckBudget:
 # ══════════════════════════════════════════════════════════════
 
 class TestBackoffDelay:
-    def test_exponential_grows(self):
-        delays = [_backoff_delay(i) for i in range(1, 8)]
-        for i in range(1, len(delays)):
-            assert delays[i] >= delays[i - 1] or delays[i] == 60
+    def test_exponential_in_expected_ranges(self):
+        for i in range(1, 8):
+            result = _backoff_delay(i)
+            upper = min(2 ** i, 60)
+            assert 0 <= result <= upper, f"attempt={i}: {result} not in [0, {upper}]"
 
     def test_exponential_capped_at_60(self):
         for attempt in range(10, 20):
-            assert _backoff_delay(attempt) <= 60
+            assert 0 <= _backoff_delay(attempt) <= 60
 
-    def test_fixed_always_2s(self):
+    def test_fixed_in_range(self):
         for attempt in range(1, 10):
-            assert _backoff_delay(attempt, "fixed") == 2.0
+            result = _backoff_delay(attempt, "fixed")
+            assert 1.0 <= result <= 3.0
 
     def test_first_attempt_positive(self):
-        assert _backoff_delay(1) > 0
-        assert _backoff_delay(1, "fixed") > 0
+        assert _backoff_delay(1) >= 0
+        assert _backoff_delay(1, "fixed") >= 1.0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1122,7 +1124,7 @@ steps:
 
 class TestTiming:
     @pytest.mark.asyncio
-    async def test_exponential_backoff_monotonically_increases(self):
+    async def test_exponential_backoff_within_expected_ranges(self):
         delays = []
         async def track_sleep(d):
             delays.append(d)
@@ -1132,10 +1134,11 @@ class TestTiming:
             result = await execute_step_with_retry(s, ctx(), sb, storage())
         assert result.status == "completed"
         assert len(delays) == 3
-        for i in range(1, len(delays)):
-            assert delays[i] >= delays[i - 1] or delays[i] == 60, (
-                f"BUG-009: backoff not growing: {delays}"
-            )
+        # With jitter, each delay is in [0, 2^attempt] capped at 60
+        # Attempts start at 1: delay(1)=[0,2], delay(2)=[0,4], delay(3)=[0,8]
+        assert 0 <= delays[0] <= 2, f"BUG-009: delay[0] out of range: {delays[0]}"
+        assert 0 <= delays[1] <= 4, f"BUG-009: delay[1] out of range: {delays[1]}"
+        assert 0 <= delays[2] <= 8, f"BUG-009: delay[2] out of range: {delays[2]}"
 
     @pytest.mark.asyncio
     async def test_parallel_steps_faster_than_sequential(self):

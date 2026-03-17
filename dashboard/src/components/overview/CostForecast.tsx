@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { TrendingUp, TrendingDown, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/api/client";
 
 interface DayData {
   date: string;
@@ -8,63 +9,12 @@ interface DayData {
   projected: boolean;
 }
 
-interface CostForecastProps {
-  rng: () => number;
-}
-
-function linearRegression(values: number[]): { slope: number; intercept: number } {
-  const n = values.length;
-  let sumX = 0;
-  let sumY = 0;
-  let sumXY = 0;
-  let sumXX = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += i;
-    sumY += values[i];
-    sumXY += i * values[i];
-    sumXX += i * i;
-  }
-  const denom = n * sumXX - sumX * sumX;
-  if (denom === 0) return { slope: 0, intercept: sumY / n };
-  const slope = (n * sumXY - sumX * sumY) / denom;
-  const intercept = (sumY - slope * sumX) / n;
-  return { slope, intercept };
-}
-
-function generateCostData(rng: () => number): DayData[] {
-  const today = new Date();
-  const days: DayData[] = [];
-
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-    const base = isWeekend ? 1.0 : 2.5;
-    const variance = isWeekend ? 0.5 : 2.0;
-    const cost = Math.max(0.1, base + (rng() - 0.4) * variance);
-    days.push({
-      date: d.toISOString().slice(0, 10),
-      cost: Math.round(cost * 100) / 100,
-      projected: false,
-    });
-  }
-
-  const last14 = days.slice(-14).map((d) => d.cost);
-  const { slope, intercept } = linearRegression(last14);
-
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() + i);
-    const predicted = intercept + slope * (13 + i);
-    const cost = Math.max(0.05, predicted + (rng() - 0.5) * 0.3);
-    days.push({
-      date: d.toISOString().slice(0, 10),
-      cost: Math.round(cost * 100) / 100,
-      projected: true,
-    });
-  }
-
-  return days;
+interface ForecastResponse {
+  historical: { date: string; cost: number; runs: number }[];
+  projected: { date: string; cost: number }[];
+  daily_average: number;
+  trend_percent: number;
+  projected_monthly: number;
 }
 
 function movingAverage(values: number[], window: number): (number | null)[] {
@@ -76,22 +26,92 @@ function movingAverage(values: number[], window: number): (number | null)[] {
   });
 }
 
-export function CostForecast({ rng }: CostForecastProps) {
+export function CostForecast() {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [forecast, setForecast] = useState<ForecastResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const data = generateCostData(rng);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await api.get<ForecastResponse>("/stats/forecast");
+        if (!cancelled) {
+          if (resp.error) {
+            setError(resp.error.message || "Failed to load forecast");
+          } else {
+            setForecast(resp.data ?? null);
+          }
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load forecast");
+          setLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/10">
+            <TrendingUp className="h-3.5 w-3.5 text-accent" />
+          </div>
+          <h3 className="text-sm font-medium text-foreground">Cost Forecast</h3>
+        </div>
+        <div className="flex items-center justify-center h-[200px]">
+          <Loader2 className="h-5 w-5 animate-spin text-muted" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !forecast) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/10">
+            <TrendingUp className="h-3.5 w-3.5 text-accent" />
+          </div>
+          <h3 className="text-sm font-medium text-foreground">Cost Forecast</h3>
+        </div>
+        <p className="text-xs text-muted text-center py-8">{error || "No data"}</p>
+      </div>
+    );
+  }
+
+  // Build unified data array
+  const data: DayData[] = [
+    ...forecast.historical.map((h) => ({ date: h.date, cost: h.cost, projected: false })),
+    ...forecast.projected.map((p) => ({ date: p.date, cost: p.cost, projected: true })),
+  ];
+
+  if (data.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/10">
+            <TrendingUp className="h-3.5 w-3.5 text-accent" />
+          </div>
+          <h3 className="text-sm font-medium text-foreground">Cost Forecast</h3>
+        </div>
+        <p className="text-xs text-muted text-center py-8">No cost data yet. Run some workflows to see forecasts.</p>
+      </div>
+    );
+  }
+
   const allCosts = data.map((d) => d.cost);
   const historicalCosts = data.filter((d) => !d.projected).map((d) => d.cost);
-
   const ma7 = movingAverage(historicalCosts, 7);
 
   const thisMonthTotal = historicalCosts.reduce((s, c) => s + c, 0);
-  const dailyAvg = thisMonthTotal / historicalCosts.length;
-  const projectedMonthly = dailyAvg * 30;
-
-  const first14Avg = historicalCosts.slice(0, 14).reduce((s, c) => s + c, 0) / 14;
-  const last14Avg = historicalCosts.slice(-14).reduce((s, c) => s + c, 0) / 14;
-  const trendPct = first14Avg > 0 ? ((last14Avg - first14Avg) / first14Avg) * 100 : 0;
+  const projectedMonthly = forecast.projected_monthly;
+  const trendPct = forecast.trend_percent;
 
   const BUDGET_THRESHOLD = 100;
   const overBudget = projectedMonthly > BUDGET_THRESHOLD;
@@ -109,7 +129,7 @@ export function CostForecast({ rng }: CostForecastProps) {
   const maxCost = Math.max(...allCosts) * 1.2;
   const costRange = maxCost - minCost || 1;
 
-  const xStep = chartW / (data.length - 1);
+  const xStep = data.length > 1 ? chartW / (data.length - 1) : chartW;
 
   const toX = (i: number) => PAD_L + i * xStep;
   const toY = (v: number) => PAD_T + chartH - ((v - minCost) / costRange) * chartH;
@@ -142,9 +162,7 @@ export function CostForecast({ rng }: CostForecastProps) {
   }
 
   const gridLines = yTicks.map((v) => toY(v));
-
   const xLabelInterval = Math.max(1, Math.floor(data.length / 6));
-
   const splitIdx = data.findIndex((d) => d.projected);
 
   const ma7Points = ma7
@@ -159,9 +177,6 @@ export function CostForecast({ rng }: CostForecastProps) {
           <TrendingUp className="h-3.5 w-3.5 text-accent" />
         </div>
         <h3 className="text-sm font-medium text-foreground">Cost Forecast</h3>
-        <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-warning">
-          Demo
-        </span>
       </div>
 
       <div className="relative overflow-x-auto">
@@ -332,7 +347,7 @@ export function CostForecast({ rng }: CostForecastProps) {
 
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div className="rounded-lg border border-border/50 bg-background px-3 py-2">
-          <p className="text-[10px] font-medium text-muted">This Month</p>
+          <p className="text-[10px] font-medium text-muted">Last 30 Days</p>
           <p className="font-data text-base font-semibold text-foreground">${thisMonthTotal.toFixed(2)}</p>
         </div>
         <div className="rounded-lg border border-border/50 bg-background px-3 py-2">

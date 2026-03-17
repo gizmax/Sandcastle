@@ -3178,6 +3178,76 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="code-interpreter.mjs",
         icon="code",
     ),
+    "composio": ToolDefinition(
+        name="composio",
+        description="Composio - unified API for 500+ business app integrations (Gmail, Slack, GitHub, Salesforce, etc.)",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="execute_action",
+                description="Execute a Composio action (e.g. gmail_send_email, slack_send_message)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "actionName": {
+                            "type": "string",
+                            "description": "Composio action ID (e.g. 'gmail_send_email')",
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Action-specific parameters",
+                        },
+                        "connectedAccountId": {
+                            "type": "string",
+                            "description": "Composio connected account ID (optional)",
+                        },
+                    },
+                    "required": ["actionName"],
+                },
+            ),
+            ToolFunction(
+                name="list_actions",
+                description="List available Composio actions, optionally filtered by app",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "appName": {
+                            "type": "string",
+                            "description": "Filter by app name (e.g. 'github', 'gmail')",
+                        },
+                        "limit": {"type": "integer", "description": "Max results (default 20)"},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="list_apps",
+                description="List all available Composio apps",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "description": "Max results (default 50)"},
+                    },
+                },
+            ),
+            ToolFunction(
+                name="get_action_schema",
+                description="Get the input/output schema for a specific Composio action",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "actionName": {
+                            "type": "string",
+                            "description": "Composio action ID",
+                        },
+                    },
+                    "required": ["actionName"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_COMPOSIO_API_KEY"],
+        connector_file="composio.mjs",
+        icon="composio",
+    ),
 }
 
 # All known tool names (for YAML validation)

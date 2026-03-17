@@ -22,6 +22,7 @@ export function AdvisorProvider({ children }: AdvisorProviderProps) {
       activeInsights: advisor.activeInsights,
       loading: advisor.loading,
       lastChecked: advisor.lastChecked,
+      errors: advisor.errors,
       refresh: advisor.refresh,
       dismiss: advisor.dismiss,
     }),
@@ -32,6 +33,7 @@ export function AdvisorProvider({ children }: AdvisorProviderProps) {
       advisor.activeInsights,
       advisor.loading,
       advisor.lastChecked,
+      advisor.errors,
       advisor.refresh,
       advisor.dismiss,
     ]

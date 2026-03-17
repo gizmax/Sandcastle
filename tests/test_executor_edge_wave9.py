@@ -176,29 +176,37 @@ class TestBackoffDelay:
     """Verify exponential and fixed backoff strategies."""
 
     def test_exponential_attempt_1(self):
-        assert _backoff_delay(1, "exponential") == 2
+        result = _backoff_delay(1, "exponential")
+        assert 0 <= result <= 2  # uniform(0, min(2**1, 60))
 
     def test_exponential_attempt_2(self):
-        assert _backoff_delay(2, "exponential") == 4
+        result = _backoff_delay(2, "exponential")
+        assert 0 <= result <= 4  # uniform(0, min(2**2, 60))
 
     def test_exponential_attempt_5(self):
-        assert _backoff_delay(5, "exponential") == 32
+        result = _backoff_delay(5, "exponential")
+        assert 0 <= result <= 32  # uniform(0, min(2**5, 60))
 
     def test_exponential_capped_at_60(self):
         # 2**7 = 128, but capped at 60
-        assert _backoff_delay(7, "exponential") == 60
+        result = _backoff_delay(7, "exponential")
+        assert 0 <= result <= 60
 
     def test_exponential_large_attempt_still_capped(self):
-        assert _backoff_delay(20, "exponential") == 60
+        result = _backoff_delay(20, "exponential")
+        assert 0 <= result <= 60
 
-    def test_fixed_always_returns_2(self):
+    def test_fixed_always_returns_in_range(self):
         for attempt in range(1, 10):
-            assert _backoff_delay(attempt, "fixed") == 2.0
+            result = _backoff_delay(attempt, "fixed")
+            assert 1.0 <= result <= 3.0
 
     def test_unknown_strategy_falls_through_to_fixed(self):
         # Any non-"exponential" string returns fixed delay
-        assert _backoff_delay(1, "linear") == 2.0
-        assert _backoff_delay(5, "random") == 2.0
+        result1 = _backoff_delay(1, "linear")
+        assert 1.0 <= result1 <= 3.0
+        result2 = _backoff_delay(5, "random")
+        assert 1.0 <= result2 <= 3.0
 
 
 class TestRetryWithBackoff:

@@ -95,6 +95,7 @@ vi.mock("@/hooks/useAdvisorContext", () => ({
     activeInsights: [],
     loading: false,
     lastChecked: null,
+    errors: [],
     refresh: vi.fn(),
     dismiss: vi.fn(),
   }),

@@ -1329,25 +1329,28 @@ class TestBudgetChecking:
 
 
 class TestBackoffDelay:
-    """Backoff delay correctness."""
+    """Backoff delay with jitter correctness."""
 
-    def test_exponential_backoff(self):
-        """Exponential backoff doubles each attempt, capped at 60."""
-        assert _backoff_delay(1, "exponential") == 2
-        assert _backoff_delay(2, "exponential") == 4
-        assert _backoff_delay(3, "exponential") == 8
-        assert _backoff_delay(6, "exponential") == 60  # 2^6=64, capped at 60
-        assert _backoff_delay(10, "exponential") == 60  # Still capped
+    def test_exponential_backoff_range(self):
+        """Exponential backoff with jitter stays in [0, 2^attempt], capped at 60."""
+        for _ in range(20):
+            assert 0 <= _backoff_delay(1, "exponential") <= 2
+            assert 0 <= _backoff_delay(2, "exponential") <= 4
+            assert 0 <= _backoff_delay(3, "exponential") <= 8
+            assert 0 <= _backoff_delay(6, "exponential") <= 60  # 2^6=64, capped at 60
+            assert 0 <= _backoff_delay(10, "exponential") <= 60  # Still capped
 
-    def test_fixed_backoff(self):
-        """Fixed backoff always returns 2.0."""
-        assert _backoff_delay(1, "fixed") == 2.0
-        assert _backoff_delay(5, "fixed") == 2.0
-        assert _backoff_delay(100, "fixed") == 2.0
+    def test_fixed_backoff_range(self):
+        """Fixed backoff with jitter stays in [1.0, 3.0]."""
+        for _ in range(20):
+            assert 1.0 <= _backoff_delay(1, "fixed") <= 3.0
+            assert 1.0 <= _backoff_delay(5, "fixed") <= 3.0
+            assert 1.0 <= _backoff_delay(100, "fixed") <= 3.0
 
     def test_unknown_backoff_defaults_to_fixed(self):
-        """Unknown backoff type defaults to fixed 2s."""
-        assert _backoff_delay(1, "unknown") == 2.0
+        """Unknown backoff type defaults to fixed with jitter."""
+        for _ in range(20):
+            assert 1.0 <= _backoff_delay(1, "unknown") <= 3.0
 
 
 # =========================================================================

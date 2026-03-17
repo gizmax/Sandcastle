@@ -50,13 +50,13 @@ def _load_example_templates() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step types documentation (all 16 types)
+# Step types documentation (all 17 types)
 # ---------------------------------------------------------------------------
 
 _STEP_TYPES_DOC = """\
 ## Step Types
 
-Each step has a `type` field (default: "standard"). Here are all 16 supported types:
+Each step has a `type` field (default: "standard"). Here are all 17 supported types:
 
 ### standard (default)
 Default LLM agent step - runs an agent in a sandbox with tools.
@@ -127,14 +127,26 @@ Fields: approval_config: {message, show_data, timeout_hours, on_timeout, allow_e
 ### browser
 Browser automation step - runs a headless browser in the sandbox
 for web scraping, form filling, or UI testing.
-Supports two modes: "playwright" (agent writes Playwright scripts)
-and "computer_use" (Claude controls the browser via screenshots).
+Supports three modes: "playwright" (agent writes Playwright scripts),
+"computer_use" (Claude controls the browser via screenshots),
+and "dom" (lightweight DOM-only extraction).
 Fields: prompt (task description), browser_config:
 {mode, start_url, viewport_width, viewport_height,
 timeout_seconds, wait_after_action, screenshot_on_error,
-headless, credentials_env}
+headless, credentials_env, max_actions, capture_screenshots,
+output_schema, captcha_strategy}
 mode defaults to "playwright". Requires a prompt describing
 the browser task.
+
+### composio
+Execute any of 500+ business app actions via Composio API.
+Supports Gmail, Slack, GitHub, Salesforce, HubSpot, Jira, and hundreds more.
+Fields: composio_config: {action, params, connected_account_id, app}
+action is a Composio action ID (e.g. "gmail_send_email", "github_create_issue").
+params is a dict of action-specific parameters.
+connected_account_id links to a pre-authenticated Composio connection.
+app is an optional filter (e.g. "github").
+No prompt required. Requires TOOL_COMPOSIO_API_KEY env var.
 
 ### sub_workflow (legacy)
 Run another workflow as a sub-step with input/output mapping.
@@ -142,7 +154,7 @@ Fields: sub_workflow: {workflow, input_mapping, output_mapping,
 parallel_over, max_concurrent, timeout}
 
 IMPORTANT: Types that do NOT need a prompt: http, code, condition,
-loop, race, sensor, transform, notify.
+loop, race, sensor, gate, transform, notify, composio.
 All other types require a prompt field.
 """
 
@@ -312,6 +324,139 @@ Output ONLY the YAML content, nothing else."""
 # Core generation
 # ---------------------------------------------------------------------------
 
+# Provider configuration - configurable via env vars
+_PROVIDER_CONFIGS = {
+    "anthropic": {
+        "api_url": "https://api.anthropic.com/v1/messages",
+        "model": "claude-sonnet-4-20250514",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "headers_fn": lambda key: {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    },
+    "openai": {
+        "api_url": "https://api.openai.com/v1/chat/completions",
+        "model": "gpt-4o",
+        "api_key_env": "OPENAI_API_KEY",
+        "headers_fn": lambda key: {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+    },
+    "ollama": {
+        "api_url": "http://localhost:11434/v1/chat/completions",
+        "model": "llama3.2",
+        "api_key_env": "",  # Ollama doesn't need a key
+        "headers_fn": lambda _: {"Content-Type": "application/json"},
+    },
+}
+
+
+def _get_advisor_config() -> dict:
+    """Resolve advisor provider from environment variables.
+
+    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | ollama
+    SANDCASTLE_ADVISOR_MODEL: override model name
+    """
+    import os
+
+    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
+    if provider not in _PROVIDER_CONFIGS:
+        provider = "anthropic"
+
+    config = dict(_PROVIDER_CONFIGS[provider])
+    model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
+    if model_override:
+        config["model"] = model_override
+
+    return config
+
+
+def _resolve_api_key() -> str:
+    """Resolve API key from env or settings, respecting provider config."""
+    import os
+
+    cfg = _get_advisor_config()
+    key_env = cfg.get("api_key_env", "ANTHROPIC_API_KEY")
+
+    # Ollama doesn't need a key
+    if not key_env:
+        return "ollama-no-key"
+
+    api_key = os.environ.get(key_env, "")
+    if not api_key:
+        from sandcastle.config import settings
+
+        # Try provider-specific settings first
+        if key_env == "OPENAI_API_KEY":
+            api_key = getattr(settings, "openai_api_key", "") or ""
+        if not api_key:
+            api_key = settings.anthropic_api_key
+    return api_key
+
+
+def _is_anthropic_provider() -> bool:
+    """Check if the current provider uses Anthropic-format API."""
+    cfg = _get_advisor_config()
+    return cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
+
+
+def _build_request_body(
+    model: str,
+    system: str,
+    messages: list[dict],
+    max_tokens: int = 4096,
+) -> dict:
+    """Build provider-specific request body."""
+    if _is_anthropic_provider():
+        return {
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": messages,
+        }
+    # OpenAI/Ollama-compatible format
+    return {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "system", "content": system}] + messages,
+    }
+
+
+def _parse_response_text(data: dict) -> str:
+    """Extract text from provider-specific response format."""
+    if _is_anthropic_provider():
+        return data["content"][0]["text"]
+    # OpenAI/Ollama format
+    return data["choices"][0]["message"]["content"]
+
+
+def _get_api_url() -> str:
+    """Get API URL from advisor config."""
+    return _get_advisor_config().get("api_url", _API_URL)
+
+
+def _get_model() -> str:
+    """Get model from advisor config."""
+    return _get_advisor_config().get("model", _MODEL)
+
+
+def _get_headers(api_key: str) -> dict:
+    """Get request headers from advisor config."""
+    cfg = _get_advisor_config()
+    headers_fn = cfg.get("headers_fn")
+    if headers_fn:
+        return headers_fn(api_key)
+    return {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+
+# Defaults (used when no env override)
 _API_URL = "https://api.anthropic.com/v1/messages"
 _MODEL = "claude-sonnet-4-20250514"
 _MAX_TOKENS = 4096
@@ -338,17 +483,11 @@ async def generate_workflow(
         ValueError: If ANTHROPIC_API_KEY is not set.
         httpx.HTTPStatusError: If the Anthropic API returns an error.
     """
-    import os
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        from sandcastle.config import settings
-
-        api_key = settings.anthropic_api_key
+    api_key = _resolve_api_key()
     if not api_key:
         raise ValueError(
-            "ANTHROPIC_API_KEY is required for workflow generation. "
-            "Set it in your .env file or environment."
+            "API key is required for workflow generation. "
+            "Set ANTHROPIC_API_KEY (or provider key) in your .env file or environment."
         )
 
     system_prompt = _build_system_prompt()
@@ -365,23 +504,19 @@ async def generate_workflow(
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         resp = await client.post(
-            _API_URL,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": _MODEL,
-                "max_tokens": _MAX_TOKENS,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": user_msg}],
-            },
+            _get_api_url(),
+            headers=_get_headers(api_key),
+            json=_build_request_body(
+                model=_get_model(),
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_msg}],
+                max_tokens=_MAX_TOKENS,
+            ),
         )
         resp.raise_for_status()
 
     data = resp.json()
-    raw_text = data["content"][0]["text"]
+    raw_text = _parse_response_text(data)
 
     # Strip markdown fencing if present
     yaml_content = _strip_fencing(raw_text)
@@ -593,17 +728,12 @@ async def generate_chat(
         validation_errors?, input_schema?
     """
     import json
-    import os
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        from sandcastle.config import settings
-
-        api_key = settings.anthropic_api_key
+    api_key = _resolve_api_key()
     if not api_key:
         raise ValueError(
-            "ANTHROPIC_API_KEY is required for workflow generation. "
-            "Set it in your .env file or environment."
+            "API key is required for workflow generation. "
+            "Set ANTHROPIC_API_KEY (or provider key) in your .env file or environment."
         )
 
     system_prompt = _build_chat_system_prompt()
@@ -637,23 +767,19 @@ async def generate_chat(
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         resp = await client.post(
-            _API_URL,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": _MODEL,
-                "max_tokens": _MAX_TOKENS,
-                "system": system_prompt,
-                "messages": api_messages,
-            },
+            _get_api_url(),
+            headers=_get_headers(api_key),
+            json=_build_request_body(
+                model=_get_model(),
+                system=system_prompt,
+                messages=api_messages,
+                max_tokens=_MAX_TOKENS,
+            ),
         )
         resp.raise_for_status()
 
     data = resp.json()
-    raw_text = data["content"][0]["text"]
+    raw_text = _parse_response_text(data)
 
     # Parse JSON response
     try:
@@ -716,3 +842,130 @@ def generate_workflow_sync(
             refine_instruction=refine_instruction,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Error Explainer - AI-powered step failure explanation
+# ---------------------------------------------------------------------------
+
+_SECRET_PATTERNS = re.compile(
+    r"(?i)"
+    r"(?:bearer|basic)\s+[a-zA-Z0-9_\-\.=+/]{10,}"  # Bearer/Basic auth tokens
+    r"|[\"']?(?:api[_-]?key|token|secret[_a-z]*|password|authorization|account_?key)[\"']?\s*[:=]\s*[\"']?(?!\[REDACTED\])\S{8,}"  # key=value, quoted or not
+    r"|(?:sk|pk|ghp|gho|glpat|xox[bpsa]|eyJ)[a-zA-Z0-9_\-]{10,}"  # Known prefixes
+    r"|(?:AKIA|ASIA)[A-Z0-9]{16}"  # AWS access keys
+    r"|[a-zA-Z0-9+_.-]+://[^\s:]*:[^\s@]+@[^\s]+"  # Credential URLs (postgres://user:pass@host, redis://:pass@host)
+    r"|[a-fA-F0-9]{32,64}(?=['\"\s,}:;\].]|$)"  # Long hex strings (case-insensitive, more delimiters + EOL)
+)
+
+_PEM_PATTERN = re.compile(
+    r"-----BEGIN[A-Z \n]*PRIVATE KEY-----"
+    r"[\s\S]*?"
+    r"-----END[A-Z \n]*PRIVATE KEY-----",
+)
+
+
+def _scrub_secrets(text: str) -> str:
+    """Redact potential secrets/tokens from text before sending to external LLM."""
+    text = _PEM_PATTERN.sub("[REDACTED-PEM-KEY]", text)
+    return _SECRET_PATTERNS.sub("[REDACTED]", text)
+
+
+_EXPLAIN_SYSTEM = """You are a workflow debugging assistant for Sandcastle,
+an AI workflow orchestration platform. A user's workflow step has failed.
+Your job is to explain the error in plain language and suggest a fix.
+
+Respond ONLY with a valid JSON object (no markdown fencing):
+{
+  "summary": "One sentence plain-English explanation of what went wrong",
+  "cause": "Technical root cause in 1-2 sentences",
+  "fix": "Actionable fix suggestion in 1-3 sentences",
+  "severity": "low|medium|high|critical"
+}
+
+Guidelines:
+- Be concise and actionable
+- If the error is a rate limit (429), suggest retry config or model routing
+- If the error is auth-related, suggest checking credentials
+- If the error is a timeout, suggest increasing timeout or simplifying the prompt
+- If the error is a budget exceeded, suggest cheaper model or shorter prompt
+- Reference Sandcastle-specific features (retry config, fallback, SLO, model_pool)
+"""
+
+
+async def explain_error(
+    step_id: str,
+    step_type: str,
+    error: str,
+    *,
+    prompt: str = "",
+    model: str = "",
+    workflow_name: str = "",
+) -> dict:
+    """Explain a step failure using AI and suggest a fix.
+
+    Args:
+        step_id: Failed step identifier.
+        step_type: Step type (llm, http, code, etc.).
+        error: Raw error message from the step.
+        prompt: Step prompt (truncated for context).
+        model: Model used by the step.
+        workflow_name: Parent workflow name.
+
+    Returns:
+        Dict with: summary, cause, fix, severity.
+    """
+    import json
+
+    api_key = _resolve_api_key()
+    if not api_key:
+        return {
+            "summary": error[:200],
+            "cause": "Unable to generate AI explanation (API key not set)",
+            "fix": "Set ANTHROPIC_API_KEY (or provider key) to enable AI error explanations",
+            "severity": "medium",
+        }
+
+    # Scrub secrets from error and prompt before sending to external LLM
+    scrubbed_error = _scrub_secrets(error[:2000])
+    scrubbed_prompt = _scrub_secrets(prompt[:500]) if prompt else "N/A"
+
+    user_msg = f"""Workflow: {workflow_name or 'unknown'}
+Step: {step_id} (type: {step_type})
+Model: {model or 'N/A'}
+Prompt (first 500 chars): {scrubbed_prompt}
+
+ERROR:
+{scrubbed_error}"""
+
+    # Use a cheaper/faster model for explanations
+    cfg = _get_advisor_config()
+    explain_model = cfg.get("model", _MODEL)
+    # Prefer haiku for Anthropic (cheaper), otherwise use configured model
+    if cfg.get("api_key_env") == "ANTHROPIC_API_KEY":
+        explain_model = "claude-haiku-4-5-20251001"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _get_api_url(),
+                headers=_get_headers(api_key),
+                json=_build_request_body(
+                    model=explain_model,
+                    system=_EXPLAIN_SYSTEM,
+                    messages=[{"role": "user", "content": user_msg}],
+                    max_tokens=512,
+                ),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = _parse_response_text(data)
+            return json.loads(text)
+    except Exception:
+        # Fallback to basic explanation
+        return {
+            "summary": error[:200],
+            "cause": "AI explanation unavailable",
+            "fix": "Check the raw error message above for details",
+            "severity": "medium",
+        }

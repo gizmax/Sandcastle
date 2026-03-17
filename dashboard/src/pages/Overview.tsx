@@ -439,12 +439,6 @@ export default function Overview() {
 
   const mockSparklines = useMemo(() => generateMockSparklines(), []);
   const mockHeatmap = useMemo(() => generateMockHeatmap(), []);
-  const costForecastRng = useMemo(() => {
-    const today = new Date();
-    const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 777;
-    return seededRandom(seed);
-  }, []);
-
   useEffect(() => {
     if (!showPanel) return;
     function handleClick(e: MouseEvent) {
@@ -577,7 +571,17 @@ export default function Overview() {
 
   const widgetRenderers: Record<string, () => React.ReactNode> = {
     "health-hero": () => (
-      <HealthHero score={advisor.score} activeInsights={advisor.activeInsights} loading={advisor.loading} />
+      <>
+        <HealthHero score={advisor.score} activeInsights={advisor.activeInsights} loading={advisor.loading} />
+        {advisor.errors.length > 0 && (
+          <div className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
+            <p className="text-xs font-medium text-warning">
+              Advisor data incomplete - {advisor.errors.length} endpoint{advisor.errors.length > 1 ? "s" : ""} failed
+            </p>
+            <p className="mt-1 text-[11px] text-muted">{advisor.errors.join(", ")}</p>
+          </div>
+        )}
+      </>
     ),
     stats: () => (
       <StatsCards
@@ -591,7 +595,7 @@ export default function Overview() {
     "quick-actions": () => <QuickActions />,
     pinned: () => <PinnedWorkflowsWidget />,
     heatmap: () => <ActivityHeatmap cells={mockHeatmap} />,
-    "cost-forecast": () => <CostForecast rng={costForecastRng} />,
+    "cost-forecast": () => <CostForecast />,
     charts: () => (
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
         <RunsChart data={stats.runs_by_day} />

@@ -11,6 +11,7 @@ import pytest
 from sandcastle.engine.dag import (
     ClassifyConfig,
     CodeConfig,
+    ComposioConfig,
     ConditionConfig,
     DelegateConfig,
     GateConfig,
@@ -49,6 +50,7 @@ _execute_sensor_step = _executor_mod._execute_sensor_step
 _execute_gate_step = _executor_mod._execute_gate_step
 _execute_transform_step = _executor_mod._execute_transform_step
 _execute_notify_step = _executor_mod._execute_notify_step
+_execute_composio_step = _executor_mod._execute_composio_step
 
 
 # ---- DAG parsing tests ----
@@ -231,17 +233,18 @@ steps:
     def test_valid_step_types_set(self):
         """All new types should be in VALID_STEP_TYPES."""
         for t in ["llm", "http", "code", "condition", "classify", "loop",
-                   "race", "sensor", "gate", "transform", "notify", "delegate"]:
+                   "race", "sensor", "gate", "transform", "notify", "delegate",
+                   "composio"]:
             assert t in VALID_STEP_TYPES
 
     def test_non_prompt_types(self):
-        """http, code, condition, loop, race, sensor, transform, notify don't need prompts."""
-        for t in ["http", "code", "condition", "loop", "race", "sensor", "transform", "notify"]:
+        """http, code, condition, loop, race, sensor, gate, transform, notify, composio don't need prompts."""
+        for t in ["http", "code", "condition", "loop", "race", "sensor", "gate", "transform", "notify", "composio"]:
             assert t in NON_PROMPT_TYPES
 
     def test_non_llm_types(self):
-        """http, code, condition, loop, race, sensor, transform, notify don't use LLM models."""
-        for t in ["http", "code", "condition", "loop", "race", "sensor", "transform", "notify"]:
+        """http, code, condition, loop, race, sensor, transform, notify, composio don't use LLM models."""
+        for t in ["http", "code", "condition", "loop", "race", "sensor", "transform", "notify", "composio"]:
             assert t in NON_LLM_TYPES
 
 
@@ -1125,10 +1128,9 @@ steps:
     def test_gate_in_valid_step_types(self):
         assert "gate" in VALID_STEP_TYPES
 
-    def test_gate_placeholder_prompt(self):
-        """Gate steps should NOT be in NON_PROMPT_TYPES (gate uses LLM for eval)."""
-        # Gate is not in NON_PROMPT_TYPES since it can use LLM eval
-        assert "gate" not in NON_PROMPT_TYPES
+    def test_gate_in_non_prompt_types(self):
+        """Gate steps are in NON_PROMPT_TYPES - they use gate_config.strategies, not prompt."""
+        assert "gate" in NON_PROMPT_TYPES
 
 
 # ---- Phase 2: Validation tests ----
@@ -1719,3 +1721,217 @@ class TestNotifyStepExecutor:
         result = await _execute_notify_step(step, context)
         assert result.status == "failed"
         assert "Missing" in result.error
+
+
+# ---- Composio step type tests ----
+
+class TestComposioStepParsing:
+    """Test YAML parsing for Composio step type."""
+
+    def test_parse_composio_step(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: send-email
+    type: composio
+    composio_config:
+      action: "gmail_send_email"
+      params:
+        to: "user@example.com"
+        subject: "Hello"
+        body: "World"
+      connected_account_id: "acc-123"
+      app: "gmail"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("send-email")
+        assert step.type == "composio"
+        assert step.composio_config is not None
+        assert step.composio_config.action == "gmail_send_email"
+        assert step.composio_config.params["to"] == "user@example.com"
+        assert step.composio_config.connected_account_id == "acc-123"
+        assert step.composio_config.app == "gmail"
+
+    def test_parse_composio_minimal(self):
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: create-issue
+    type: composio
+    composio_config:
+      action: "github_create_issue"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("create-issue")
+        assert step.type == "composio"
+        assert step.composio_config.action == "github_create_issue"
+        assert step.composio_config.params == {}
+        assert step.composio_config.connected_account_id == ""
+        assert step.composio_config.app == ""
+
+    def test_composio_no_prompt_required(self):
+        """Composio steps should work without a prompt field."""
+        yaml_content = """
+name: test
+description: Test workflow
+default_model: sonnet
+steps:
+  - id: action
+    type: composio
+    composio_config:
+      action: "slack_send_message"
+"""
+        wf = parse_yaml_string(yaml_content)
+        step = wf.get_step("action")
+        assert step.type == "composio"
+        # Should have placeholder prompt, not empty
+        assert step.prompt != ""
+
+    def test_composio_is_valid_type(self):
+        assert "composio" in VALID_STEP_TYPES
+        assert "composio" in NON_PROMPT_TYPES
+        assert "composio" in NON_LLM_TYPES
+
+
+class TestComposioStepExecution:
+    """Test Composio step execution handler."""
+
+    @pytest.fixture
+    def context(self):
+        ctx = MagicMock(spec=RunContext)
+        ctx.input = {"recipient": "test@example.com"}
+        ctx.step_outputs = {}
+        ctx.run_id = "test-run"
+        ctx.item = None
+        ctx.parallel_index = None
+        return ctx
+
+    @pytest.mark.asyncio
+    async def test_composio_missing_config(self, context):
+        step = StepDefinition(id="bad", type="composio")
+        result = await _execute_composio_step(step, context)
+        assert result.status == "failed"
+        assert "Missing composio_config" in result.error
+
+    @pytest.mark.asyncio
+    async def test_composio_missing_action(self, context):
+        step = StepDefinition(
+            id="bad", type="composio",
+            composio_config=ComposioConfig(action=""),
+        )
+        result = await _execute_composio_step(step, context)
+        assert result.status == "failed"
+        assert "action is required" in result.error
+
+    @pytest.mark.asyncio
+    async def test_composio_missing_api_key(self, context):
+        step = StepDefinition(
+            id="test", type="composio",
+            composio_config=ComposioConfig(action="gmail_send_email"),
+        )
+        with patch.dict("os.environ", {}, clear=False):
+            # Ensure TOOL_COMPOSIO_API_KEY is not set
+            import os
+            old = os.environ.pop("TOOL_COMPOSIO_API_KEY", None)
+            try:
+                result = await _execute_composio_step(step, context)
+                assert result.status == "failed"
+                assert "TOOL_COMPOSIO_API_KEY" in result.error
+            finally:
+                if old is not None:
+                    os.environ["TOOL_COMPOSIO_API_KEY"] = old
+
+    @pytest.mark.asyncio
+    async def test_composio_successful_execution(self, context):
+        step = StepDefinition(
+            id="send", type="composio",
+            composio_config=ComposioConfig(
+                action="gmail_send_email",
+                params={"to": "{input.recipient}", "subject": "Test"},
+            ),
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"data": {"messageId": "abc123", "status": "sent"}}
+
+        with patch.dict("os.environ", {"TOOL_COMPOSIO_API_KEY": "test-key"}), \
+             patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            result = await _execute_composio_step(step, context)
+
+            assert result.status == "completed"
+            assert result.output["messageId"] == "abc123"
+            assert result.cost_usd == 0.0
+            assert result.duration_seconds > 0
+
+    @pytest.mark.asyncio
+    async def test_composio_api_error(self, context):
+        import httpx
+
+        step = StepDefinition(
+            id="fail", type="composio",
+            composio_config=ComposioConfig(action="bad_action"),
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 422
+        mock_response.text = "Invalid action"
+
+        with patch.dict("os.environ", {"TOOL_COMPOSIO_API_KEY": "test-key"}), \
+             patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(
+                side_effect=httpx.HTTPStatusError(
+                    "422", request=MagicMock(), response=mock_response,
+                )
+            )
+            mock_client_cls.return_value = mock_client
+
+            result = await _execute_composio_step(step, context)
+
+            assert result.status == "failed"
+            assert "422" in result.error
+
+    @pytest.mark.asyncio
+    async def test_composio_template_resolution(self, context):
+        """Verify that template variables in action and params are resolved."""
+        step = StepDefinition(
+            id="tmpl", type="composio",
+            composio_config=ComposioConfig(
+                action="gmail_send_email",
+                params={"to": "{input.recipient}"},
+            ),
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"data": {"ok": True}}
+
+        with patch.dict("os.environ", {"TOOL_COMPOSIO_API_KEY": "test-key"}), \
+             patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            result = await _execute_composio_step(step, context)
+
+            # Check that the post was called with resolved params
+            call_args = mock_client.post.call_args
+            payload = call_args.kwargs.get("json") or call_args[1].get("json")
+            assert payload["input"]["to"] == "test@example.com"
