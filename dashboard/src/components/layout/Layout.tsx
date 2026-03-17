@@ -14,7 +14,20 @@ import type { StreamEvent } from "@/hooks/useEventStream";
 import { api } from "@/api/client";
 import { AdvisorProvider } from "@/components/providers/AdvisorProvider";
 
-const INITIAL_NOTIFICATIONS: Notification[] = [];
+function makeDemoNotifications(): Notification[] {
+  if (!api.isMockMode) return [];
+  const now = Date.now();
+  return [
+    { id: "demo-1", type: "success", message: "data-enrichment completed in 12.4s", timestamp: new Date(now - 2 * 60_000), read: false, link: "/runs" },
+    { id: "demo-2", type: "error", message: "content-moderation failed: sandbox timeout", timestamp: new Date(now - 8 * 60_000), read: false, link: "/runs?status=failed" },
+    { id: "demo-3", type: "success", message: "weekly-report completed in 45.1s", timestamp: new Date(now - 22 * 60_000), read: true, link: "/runs" },
+    { id: "demo-4", type: "warning", message: "Approval needed: deploy-staging step gate", timestamp: new Date(now - 35 * 60_000), read: true, link: "/approvals" },
+    { id: "demo-5", type: "success", message: "ticket-triage completed in 8.7s", timestamp: new Date(now - 55 * 60_000), read: true, link: "/runs" },
+    { id: "demo-6", type: "info", message: "Schedule daily-digest fired", timestamp: new Date(now - 90 * 60_000), read: true, link: "/schedules" },
+  ];
+}
+
+const INITIAL_NOTIFICATIONS: Notification[] = makeDemoNotifications();
 
 // Map SSE event types to notification types
 function eventToNotificationType(eventType: string): Notification["type"] {
