@@ -9,7 +9,7 @@ import { VersionDiffModal } from "@/components/workflows/VersionDiffModal";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { CopyButton } from "@/components/shared/CopyButton";
-import { cn } from "@/lib/utils";
+import { cn, HUB_CONTRIB_URL } from "@/lib/utils";
 
 interface WorkflowVersion {
   id: string;
@@ -366,7 +366,7 @@ export default function WorkflowDetailPage() {
                       </button>
                     </div>
                     <a
-                      href="https://github.com/gizmax/Sandcastle/tree/main/hub"
+                      href={HUB_CONTRIB_URL}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={cn(

@@ -3,8 +3,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
+const isGitHubPages = !!process.env.GITHUB_PAGES;
+
 export default defineConfig({
-  base: process.env.GITHUB_PAGES ? "/Sandcastle/" : "/",
+  base: isGitHubPages ? "/Sandcastle/" : "/",
+  define: {
+    __GITHUB_PAGES__: JSON.stringify(isGitHubPages),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

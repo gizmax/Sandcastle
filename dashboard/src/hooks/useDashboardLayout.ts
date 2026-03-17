@@ -71,13 +71,16 @@ function readStorage(): WidgetConfig[] {
   }
 }
 
+let cachedSnapshot: WidgetConfig[] = readStorage();
+
 function persist(widgets: WidgetConfig[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(widgets));
+  cachedSnapshot = readStorage();
   emitChange();
 }
 
 function getSnapshot(): WidgetConfig[] {
-  return readStorage();
+  return cachedSnapshot;
 }
 
 export function useDashboardLayout() {

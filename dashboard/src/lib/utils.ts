@@ -39,6 +39,18 @@ export function parseUTC(date: string | Date): Date {
   return new Date(date);
 }
 
+declare const __GITHUB_PAGES__: boolean;
+
+/** Repo URL for the current deployment platform. */
+export const REPO_URL = typeof __GITHUB_PAGES__ !== "undefined" && __GITHUB_PAGES__
+  ? "https://github.com/gizmax/Sandcastle"
+  : "https://gitlab.com/gizmax-group/sandcastle";
+
+/** Hub contribution URL for the current deployment platform. */
+export const HUB_CONTRIB_URL = typeof __GITHUB_PAGES__ !== "undefined" && __GITHUB_PAGES__
+  ? "https://github.com/gizmax/Sandcastle/tree/main/hub"
+  : "https://gitlab.com/gizmax-group/sandcastle/-/tree/main/hub";
+
 export function formatRelativeTime(date: string | Date): string {
   const now = new Date();
   const then = parseUTC(date);

@@ -21,7 +21,7 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-function getSnapshot(): string[] {
+function readStorage(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
@@ -33,8 +33,15 @@ function getSnapshot(): string[] {
   }
 }
 
+let cachedSnapshot: string[] = readStorage();
+
+function getSnapshot(): string[] {
+  return cachedSnapshot;
+}
+
 function persist(names: string[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(names.slice(0, MAX_PINNED)));
+  cachedSnapshot = readStorage();
   emitChange();
 }
 

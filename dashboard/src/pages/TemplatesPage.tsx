@@ -25,7 +25,7 @@ import jsYaml from "js-yaml";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { cn } from "@/lib/utils";
+import { cn, HUB_CONTRIB_URL } from "@/lib/utils";
 import {
   TEMPLATE_PACKS,
   resolveCategory,
@@ -817,7 +817,7 @@ export default function TemplatesPage() {
               )}
             </div>
             <a
-              href="https://github.com/gizmax/Sandcastle/tree/main/hub"
+              href={HUB_CONTRIB_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
@@ -900,7 +900,7 @@ export default function TemplatesPage() {
               action={
                 communitySearch
                   ? { label: "Clear search", onClick: () => setCommunitySearch("") }
-                  : { label: "Submit a workflow", onClick: () => window.open("https://github.com/gizmax/Sandcastle/tree/main/hub", "_blank") }
+                  : { label: "Submit a workflow", onClick: () => window.open(HUB_CONTRIB_URL, "_blank") }
               }
             />
           ) : (
