@@ -4,7 +4,7 @@ pages:
   script:
     - cd dashboard
     - npm ci
-    - GITLAB_PAGES=true npm run build
+    - npm run build
     - cp dist/index.html dist/404.html
     - cd ..
     - mkdir -p public
