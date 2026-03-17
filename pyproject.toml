@@ -75,11 +75,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.com/gizmax-group/sandcastle"
-Repository = "https://gitlab.com/gizmax-group/sandcastle"
-Documentation = "https://gitlab.com/gizmax-group/sandcastle/-/blob/main/README.md"
-Issues = "https://gitlab.com/gizmax-group/sandcastle/-/issues"
-Dashboard = "https://gizmax-group.gitlab.io/sandcastle/"
+Homepage = "https://github.com/gizmax/Sandcastle"
+Repository = "https://github.com/gizmax/Sandcastle"
+Documentation = "https://github.com/gizmax/Sandcastle/blob/main/README.md"
+Issues = "https://github.com/gizmax/Sandcastle/issues"
+Dashboard = "https://gizmax.github.io/Sandcastle/"
 
 [project.scripts]
 sandcastle = "sandcastle.__main__:main"
