@@ -318,10 +318,14 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
 
 
 def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
-    """Calculate backoff delay in seconds."""
+    """Calculate backoff delay with jitter to prevent thundering herd."""
+    import random
+
     if backoff == "exponential":
-        return min(2**attempt, 60)  # Cap at 60s
-    return 2.0  # Fixed 2s delay
+        base = min(2**attempt, 60)  # Cap at 60s
+        # Full jitter: uniform random between 0 and base delay
+        return random.uniform(0, base)
+    return random.uniform(1.0, 3.0)  # Fixed ~2s with jitter
 
 
 async def _save_run_step(
@@ -2445,6 +2449,108 @@ _CODE_STEP_BLOCKED_PATTERNS = re.compile(
     r"__reduce__|__reduce_ex__|pickle",
     re.IGNORECASE,
 )
+
+
+def _resolve_params_deep(obj: Any, context: RunContext) -> Any:
+    """Recursively resolve template variables in nested dicts/lists."""
+    if isinstance(obj, str):
+        return resolve_templates(obj, context)
+    if isinstance(obj, dict):
+        return {k: _resolve_params_deep(v, context) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_params_deep(item, context) for item in obj]
+    return obj
+
+
+async def _execute_composio_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a Composio action step (500+ integrations via Composio API)."""
+    import time
+
+    import httpx
+
+    started_at = time.monotonic()
+    cfg = step.composio_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing composio_config")
+
+    action = cfg.action
+    if not action:
+        return StepResult(step_id=step.id, status="failed", error="composio_config.action is required")
+
+    try:
+        # Resolve template variables in action and params (deep)
+        action = resolve_templates(action, context)
+        params = _resolve_params_deep(cfg.params or {}, context)
+
+        import os
+
+        api_key = os.environ.get("TOOL_COMPOSIO_API_KEY", "")
+        if not api_key:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="TOOL_COMPOSIO_API_KEY environment variable not set",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        # Build request payload
+        payload: dict = {"actionName": action, "input": params}
+        if cfg.connected_account_id:
+            payload["connectedAccountId"] = resolve_templates(
+                cfg.connected_account_id, context,
+            )
+        if cfg.app:
+            payload["appName"] = resolve_templates(cfg.app, context)
+
+        async with httpx.AsyncClient(timeout=step.timeout) as client:
+            resp = await client.post(
+                "https://backend.composio.dev/api/v2/actions/execute",
+                json=payload,
+                headers={
+                    "X-API-Key": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            result_data = resp.json()
+
+        duration = time.monotonic() - started_at
+
+        # Extract output from Composio response
+        output = result_data.get("data", result_data)
+        status = "completed"
+        error = None
+
+        # Check Composio-level errors
+        if result_data.get("error"):
+            status = "failed"
+            error = str(result_data["error"])
+
+        return StepResult(
+            step_id=step.id,
+            status=status,
+            output=output,
+            error=error,
+            cost_usd=0.0,  # Composio costs tracked externally
+            duration_seconds=duration,
+        )
+    except httpx.HTTPStatusError as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Composio API error: {e.response.status_code} - {e.response.text[:500]}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+    except Exception as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Composio step failed: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
 
 
 async def _execute_code_step(
@@ -4759,7 +4865,7 @@ async def _prepare_and_run_step(
     _HYBRID_TYPES = {
         "llm", "http", "code", "condition", "classify", "loop",
         "race", "sensor", "gate", "transform", "notify", "delegate",
-        "browser", "sub_workflow",
+        "browser", "sub_workflow", "composio",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -4800,6 +4906,8 @@ async def _prepare_and_run_step(
             return await _execute_sub_workflow_step(
                 s, ctx, storage, depth=depth,
             )
+        if s.type == "composio":
+            return await _execute_composio_step(s, ctx)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---

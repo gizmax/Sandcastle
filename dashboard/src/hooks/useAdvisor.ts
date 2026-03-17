@@ -21,6 +21,7 @@ interface AdvisorState {
   activeInsights: Insight[];
   loading: boolean;
   lastChecked: Date | null;
+  errors: string[];
 }
 
 export function useAdvisor() {
@@ -31,6 +32,7 @@ export function useAdvisor() {
     activeInsights: [],
     loading: true,
     lastChecked: null,
+    errors: [],
   });
 
   const lastRefreshRef = useRef(0);
@@ -71,6 +73,29 @@ export function useAdvisor() {
     // Don't update state if the component unmounted during fetch
     if (!mountedRef.current) return;
 
+    const responses = [
+      ["health", healthRes],
+      ["stats", statsRes],
+      ["runs", runsRes],
+      ["tools", toolsRes],
+      ["dead-letter", dlqRes],
+      ["violations", violationsRes],
+      ["optimizer", optimizerRes],
+      ["autopilot", autopilotRes],
+      ["approvals", approvalsRes],
+      ["workflows", workflowsRes],
+      ["schedules", schedulesRes],
+      ["eval", evalRes],
+      ["api-keys", apiKeysRes],
+    ] as const;
+
+    const errors: string[] = [];
+    for (const [name, res] of responses) {
+      if (res.error) {
+        errors.push(`${name}: ${res.error.message ?? res.error.code}`);
+      }
+    }
+
     const data: AdvisorData = {
       health: healthRes.data ?? null,
       stats: statsRes.data ?? null,
@@ -98,6 +123,7 @@ export function useAdvisor() {
       activeInsights,
       loading: false,
       lastChecked: new Date(),
+      errors,
     }));
 
     lastRefreshRef.current = Date.now();

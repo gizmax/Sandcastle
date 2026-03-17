@@ -316,18 +316,21 @@ class TestBudgetChecks:
 
 class TestBackoffDelay:
 
-    def test_exponential_grows(self):
+    def test_exponential_in_range(self):
         d1 = _backoff_delay(1)
         d2 = _backoff_delay(2)
         d3 = _backoff_delay(3)
-        assert d1 < d2 < d3
+        assert 0 <= d1 <= 2
+        assert 0 <= d2 <= 4
+        assert 0 <= d3 <= 8
 
     def test_exponential_capped_at_60(self):
-        assert _backoff_delay(100) == 60
+        result = _backoff_delay(100)
+        assert 0 <= result <= 60
 
     def test_fixed_backoff(self):
-        assert _backoff_delay(1, "fixed") == 2.0
-        assert _backoff_delay(10, "fixed") == 2.0
+        assert 1.0 <= _backoff_delay(1, "fixed") <= 3.0
+        assert 1.0 <= _backoff_delay(10, "fixed") <= 3.0
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1086,8 +1089,8 @@ class TestFieldPreservation:
         fields = dc.fields(StepDefinition)
         # If someone adds a field, this test reminds them to check
         # all places that construct StepDefinitions
-        assert len(fields) == 34, (
-            f"StepDefinition has {len(fields)} fields (expected 34). "
+        assert len(fields) == 35, (
+            f"StepDefinition has {len(fields)} fields (expected 35). "
             "If you added a new field, verify all dataclasses.replace() "
             "callers handle it correctly."
         )

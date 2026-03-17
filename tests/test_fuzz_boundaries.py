@@ -1487,22 +1487,26 @@ from sandcastle.engine.executor import _backoff_delay
 
 class TestBackoffDelay:
     def test_exponential_attempt_0(self):
-        assert _backoff_delay(0, "exponential") == 1.0
+        result = _backoff_delay(0, "exponential")
+        assert 0 <= result <= 1.0  # uniform(0, min(2**0, 60))
 
     def test_exponential_attempt_1(self):
-        assert _backoff_delay(1, "exponential") == 2.0
+        result = _backoff_delay(1, "exponential")
+        assert 0 <= result <= 2.0  # uniform(0, min(2**1, 60))
 
     def test_exponential_capped_at_60(self):
-        assert _backoff_delay(100, "exponential") == 60.0
+        result = _backoff_delay(100, "exponential")
+        assert 0 <= result <= 60.0
 
-    def test_fixed_always_2(self):
-        assert _backoff_delay(0, "fixed") == 2.0
-        assert _backoff_delay(5, "fixed") == 2.0
-        assert _backoff_delay(100, "fixed") == 2.0
+    def test_fixed_in_range(self):
+        assert 1.0 <= _backoff_delay(0, "fixed") <= 3.0
+        assert 1.0 <= _backoff_delay(5, "fixed") <= 3.0
+        assert 1.0 <= _backoff_delay(100, "fixed") <= 3.0
 
     def test_unknown_backoff_type(self):
         """Unknown backoff type falls through to fixed."""
-        assert _backoff_delay(0, "linear") == 2.0
+        result = _backoff_delay(0, "linear")
+        assert 1.0 <= result <= 3.0
 
 
 # ---------------------------------------------------------------------------

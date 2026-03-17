@@ -38,7 +38,11 @@ export interface AdvisorData {
   approvals: { id: string; status: string }[];
   workflows: { name: string }[];
   schedules: { id: string; enabled: boolean }[];
-  evalStats: { total_runs: number } | null;
+  evalStats: {
+    total_runs: number;
+    avg_pass_rate?: number;
+    pass_rate_trend?: { date: string; avg_pass_rate: number; runs: number }[];
+  } | null;
   apiKeys: { id: string; expires_at?: string | null }[];
 }
 
@@ -88,6 +92,17 @@ export function computeScore(data: AdvisorData): ScoreResult {
   const pendingApprovals = data.approvals.filter((a) => a.status === "pending");
   if (pendingApprovals.length > 5) {
     deduct("operations", "Approval backlog", 5);
+  }
+
+  // Quality: eval regression (-10)
+  if (data.evalStats?.pass_rate_trend && data.evalStats.pass_rate_trend.length >= 2) {
+    const trend = data.evalStats.pass_rate_trend;
+    // avg_pass_rate is 0..1 from backend (raw from DB)
+    const latest = trend[trend.length - 1].avg_pass_rate;
+    const previous = trend[trend.length - 2].avg_pass_rate;
+    // Compare in integer basis points to eliminate IEEE 754 edge cases
+    const dropBps = Math.round((previous - latest) * 10000);
+    if (dropBps > 1000) deduct("quality", "Eval quality regression", 10);
   }
 
   // Adoption: missing features (-3 each)
@@ -229,6 +244,26 @@ export function generateInsights(data: AdvisorData): Insight[] {
         description: "Review policy rules - frequent violations may indicate misconfigured policies.",
         link: "/violations",
         icon: "Shield",
+      });
+    }
+  }
+
+  // Eval quality regression
+  if (data.evalStats?.pass_rate_trend && data.evalStats.pass_rate_trend.length >= 2) {
+    const trend = data.evalStats.pass_rate_trend;
+    // avg_pass_rate is 0..1 from backend (raw from DB)
+    const latestPr = trend[trend.length - 1].avg_pass_rate;
+    const previousPr = trend[trend.length - 2].avg_pass_rate;
+    // Compare in integer basis points to eliminate IEEE 754 edge cases
+    const dropBps = Math.round((previousPr - latestPr) * 10000);
+    if (dropBps > 1000) {  // >10pp drop (>1000 basis points)
+      insights.push({
+        id: "eval-regression",
+        severity: "warning",
+        title: "Eval quality regression detected",
+        description: `Pass rate dropped ${Math.round(dropBps / 100)}pp (${Math.round(previousPr * 100)}% -> ${Math.round(latestPr * 100)}%). Review recent workflow changes.`,
+        link: "/evaluations",
+        icon: "TrendingDown",
       });
     }
   }

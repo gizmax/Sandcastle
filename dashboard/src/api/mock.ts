@@ -491,11 +491,11 @@ const MOCK_EVAL_STATS = {
   avg_pass_rate: 0.75,
   total_cost_usd: 5.33,
   last_run_at: h(2),
-  pass_rate_trend: Array.from({ length: 14 }, (_, i) => ({
-    date: d(13 - i),
-    avg_pass_rate: 0.6 + Math.random() * 0.35,
-    runs: Math.floor(Math.random() * 3) + 1,
-  })),
+  pass_rate_trend: Array.from({ length: 14 }, (_, i) => {
+    // Deterministic values per day index
+    const v = [0.82, 0.78, 0.85, 0.79, 0.88, 0.91, 0.87, 0.83, 0.76, 0.72, 0.80, 0.85, 0.74, 0.71];
+    return { date: d(13 - i), avg_pass_rate: v[i], runs: (i % 3) + 1 };
+  }),
 };
 
 const MOCK_AUTOPILOT_EXPERIMENTS = [
@@ -5667,6 +5667,37 @@ const routes: MockRoute[] = [
   {
     match: /^\/stats$/,
     handler: () => MOCK_STATS,
+  },
+  {
+    match: /^\/stats\/forecast$/,
+    method: "GET",
+    handler: () => {
+      // Deterministic seed based on today's date
+      const today = new Date();
+      const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+      let s = seed;
+      const rng = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+      return {
+        historical: Array.from({ length: 30 }, (_, i) => {
+          const dt = new Date(today);
+          dt.setDate(dt.getDate() - (29 - i));
+          const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+          return {
+            date: dt.toISOString().slice(0, 10),
+            cost: +(isWeekend ? rng() * 1.5 : 1.5 + rng() * 3).toFixed(2),
+            runs: isWeekend ? Math.floor(rng() * 3) : 3 + Math.floor(rng() * 8),
+          };
+        }),
+        projected: Array.from({ length: 7 }, (_, i) => {
+          const dt = new Date(today);
+          dt.setDate(dt.getDate() + i + 1);
+          return { date: dt.toISOString().slice(0, 10), cost: 2.1 };
+        }),
+        daily_average: 2.1,
+        trend_percent: -5.2,
+        projected_monthly: 63.0,
+      };
+    },
   },
   {
     match: /^\/workflows$/,

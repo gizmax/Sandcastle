@@ -1190,21 +1190,31 @@ class TestUnresolvedVariables:
 
 
 class TestBackoffDelay:
-    """Test _backoff_delay calculation."""
+    """Test _backoff_delay calculation with jitter."""
 
-    def test_exponential_backoff(self):
-        assert _backoff_delay(0, "exponential") == 1  # 2^0 = 1
-        assert _backoff_delay(1, "exponential") == 2
-        assert _backoff_delay(2, "exponential") == 4
-        assert _backoff_delay(3, "exponential") == 8
+    def test_exponential_backoff_range(self):
+        # With jitter, delay is in [0, 2^attempt] capped at 60
+        for _ in range(20):
+            d0 = _backoff_delay(0, "exponential")
+            assert 0 <= d0 <= 1  # 2^0 = 1
+            d1 = _backoff_delay(1, "exponential")
+            assert 0 <= d1 <= 2
+            d2 = _backoff_delay(2, "exponential")
+            assert 0 <= d2 <= 4
+            d3 = _backoff_delay(3, "exponential")
+            assert 0 <= d3 <= 8
 
     def test_exponential_backoff_capped(self):
-        assert _backoff_delay(10, "exponential") == 60  # capped at 60s
+        for _ in range(20):
+            d = _backoff_delay(10, "exponential")
+            assert 0 <= d <= 60  # capped at 60s
 
-    def test_fixed_backoff(self):
-        assert _backoff_delay(0, "fixed") == 2.0
-        assert _backoff_delay(1, "fixed") == 2.0
-        assert _backoff_delay(10, "fixed") == 2.0
+    def test_fixed_backoff_range(self):
+        for _ in range(20):
+            d = _backoff_delay(0, "fixed")
+            assert 1.0 <= d <= 3.0
+            d2 = _backoff_delay(10, "fixed")
+            assert 1.0 <= d2 <= 3.0
 
 
 # ============================================================================

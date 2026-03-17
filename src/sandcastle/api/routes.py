@@ -41,7 +41,9 @@ from sandcastle.api.schemas import (
     EvalRunResponse,
     EvalStatsResponse,
     EvalSuiteRunRequest,
+    ExplainErrorRequest,
     ExperimentResponse,
+    RunEstimateRequest,
     ForkRequest,
     GenerateChatRequest,
     HealthResponse,
@@ -1345,6 +1347,200 @@ async def get_stats(request: Request) -> ApiResponse:
     )
 
 
+@router.get("/stats/forecast")
+async def get_cost_forecast(request: Request) -> ApiResponse:
+    """Get cost forecast based on real historical data (last 30 days + 7-day projection)."""
+    tenant_id = get_tenant_id(request)
+    now = datetime.now(timezone.utc)
+    thirty_days_ago = now - timedelta(days=30)
+
+    async with async_session() as session:
+        # Daily costs for the last 30 days
+        daily_q = (
+            select(
+                _trunc_day(Run.created_at).label("day"),
+                func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
+                func.count(Run.id).label("runs"),
+            )
+            .where(Run.created_at >= thirty_days_ago)
+            .group_by("day")
+            .order_by("day")
+        )
+        daily_q = _apply_tenant_filter(daily_q, tenant_id, Run.tenant_id)
+        rows = (await session.execute(daily_q)).all()
+
+    # Build zero-filled 30-day historical data (inactive days = 0)
+    db_data: dict[str, dict] = {}
+    for row in rows:
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day)
+        db_data[day_str] = {
+            "date": day_str,
+            "cost": round(float(row.cost), 4),
+            "runs": int(row.runs),
+        }
+
+    historical = []
+    for i in range(29, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        if day in db_data:
+            historical.append(db_data[day])
+        else:
+            historical.append({"date": day, "cost": 0.0, "runs": 0})
+
+    # Compute 7-day moving average for projection (uses zero-filled data)
+    costs = [h["cost"] for h in historical]
+    if len(costs) >= 7:
+        recent_avg = sum(costs[-7:]) / 7
+    elif costs:
+        recent_avg = sum(costs) / len(costs)
+    else:
+        recent_avg = 0.0
+
+    # Compute trend (last 14 days vs first 14 days)
+    if len(costs) >= 14:
+        first_half = sum(costs[:14]) / 14
+        second_half = sum(costs[14:]) / max(len(costs) - 14, 1)
+        trend_pct = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0.0
+    else:
+        trend_pct = 0.0
+
+    # Project next 7 days
+    projected = []
+    for i in range(1, 8):
+        future_date = now + timedelta(days=i)
+        projected.append({
+            "date": future_date.strftime("%Y-%m-%d"),
+            "cost": round(recent_avg, 4),
+        })
+
+    # Monthly projection
+    projected_monthly = round(recent_avg * 30, 2)
+
+    return ApiResponse(
+        data={
+            "historical": historical,
+            "projected": projected,
+            "daily_average": round(recent_avg, 4),
+            "trend_percent": round(trend_pct, 1),
+            "projected_monthly": projected_monthly,
+        }
+    )
+
+
+@router.post("/runs/estimate")
+async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
+    """Estimate cost of a workflow run before execution."""
+    from sandcastle.engine.dag import parse_yaml_string
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+
+    yaml_content = request.yaml_content
+
+    from sandcastle.engine.dag import validate
+
+    try:
+        wf = parse_yaml_string(yaml_content)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=ApiResponse(
+            error=ErrorResponse(code="INVALID_YAML", message=str(exc)),
+        ).model_dump())
+
+    validation_errors = validate(wf)
+    is_valid = len(validation_errors) == 0
+
+    # Average tokens per step type (empirical estimates)
+    AVG_TOKENS = {
+        "standard": (2000, 1500),
+        "llm": (1000, 800),
+        "classify": (500, 200),
+        "gate": (500, 200),
+        "delegate": (2000, 1500),
+        "browser": (3000, 2000),
+    }
+    # sub_workflow parent doesn't invoke LLM itself - child workflow has its own costs
+    NON_LLM = {
+        "http", "code", "condition", "loop", "race", "sensor",
+        "transform", "notify", "composio", "sub_workflow",
+    }
+    # classify and gate issue a single LLM call, not max_turns
+    SINGLE_CALL_TYPES = {"classify", "gate"}
+
+    step_estimates = []
+    total = 0.0
+
+    for step in wf.steps:
+        if step.type in NON_LLM or step.type == "approval":
+            step_estimates.append({
+                "step_id": step.id,
+                "type": step.type,
+                "model": None,
+                "estimated_cost_usd": 0.0,
+                "note": "No LLM cost" if step.type != "sub_workflow" else "Cost in child workflow",
+            })
+            continue
+
+        # Resolve effective model
+        model_key = step.model or wf.default_model or "sonnet"
+        # classify uses classify_config model if set
+        if step.type == "classify" and step.classify_config:
+            classify_model = getattr(step.classify_config, "model", None)
+            if classify_model:
+                model_key = classify_model
+        # gate reads model from first llm_eval strategy
+        if step.type == "gate" and step.gate_config:
+            for strat in (step.gate_config.strategies or []):
+                if strat.get("type") == "llm_eval":
+                    strat_model = strat.get("config", {}).get("model")
+                    if strat_model:
+                        model_key = strat_model
+                    break
+
+        model_info = PROVIDER_REGISTRY.get(model_key)
+        if not model_info:
+            model_info = PROVIDER_REGISTRY.get("sonnet")
+            unknown_note = f" (unknown model '{model_key}', using sonnet pricing)"
+        else:
+            unknown_note = ""
+
+        avg_in, avg_out = AVG_TOKENS.get(step.type, (1500, 1000))
+
+        # classify and gate issue a single LLM call, not max_turns
+        if step.type in SINGLE_CALL_TYPES:
+            turns = 1
+        else:
+            turns = min(step.max_turns, 5)
+
+        est_in = avg_in * turns
+        est_out = avg_out * turns
+
+        cost = (est_in * model_info.input_price_per_m + est_out * model_info.output_price_per_m) / 1_000_000
+
+        # If parallel_over, multiply by estimated batch size (default 10)
+        if step.parallel_over:
+            cost *= 10
+            note = "x10 (parallel_over estimate)"
+        else:
+            note = f"~{est_in} in + ~{est_out} out tokens{unknown_note}"
+
+        step_estimates.append({
+            "step_id": step.id,
+            "type": step.type,
+            "model": model_key,
+            "estimated_cost_usd": round(cost, 6),
+            "note": note,
+        })
+        total += cost
+
+    return ApiResponse(data={
+        "workflow_name": wf.name,
+        "valid": is_valid,
+        "total_estimated_cost_usd": round(total, 4),
+        "steps": step_estimates,
+        "validation_errors": validation_errors,
+        "disclaimer": "Estimates based on average token usage. Actual costs may vary."
+        + ("" if is_valid else " Workflow has validation errors - estimate may be unreliable."),
+    })
+
+
 # --- Generate ---
 
 
@@ -1452,6 +1648,46 @@ async def generate_chat(req: Request, request: GenerateChatRequest) -> ApiRespon
             ).model_dump(),
         )
 
+    return ApiResponse(data=result)
+
+
+@router.post("/advisor/explain")
+async def advisor_explain_error(req: Request, request: ExplainErrorRequest) -> ApiResponse:
+    """Explain a step failure using AI and suggest a fix."""
+    await execution_limiter.check(req)
+    from sandcastle.engine.generator import explain_error
+
+    try:
+        result = await explain_error(
+            step_id=request.step_id,
+            step_type=request.step_type,
+            error=request.error,
+            prompt=request.prompt,
+            model=request.model,
+            workflow_name=request.workflow_name,
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.error("Advisor explain upstream error: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UPSTREAM_ERROR",
+                    message="Upstream provider returned an error",
+                )
+            ).model_dump(),
+        )
+    except Exception as exc:
+        logger.error("Advisor explain failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="EXPLAIN_FAILED",
+                    message="Error explanation failed",
+                )
+            ).model_dump(),
+        )
     return ApiResponse(data=result)
 
 

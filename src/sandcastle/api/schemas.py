@@ -244,6 +244,25 @@ class GenerateChatRequest(BaseModel):
     )
 
 
+class ExplainErrorRequest(BaseModel):
+    """Request to explain a step failure using AI."""
+
+    step_id: str = Field(..., description="Failed step identifier", min_length=1)
+    step_type: str = Field("standard", description="Step type (llm, http, code, etc.)")
+    error: str = Field(..., description="Raw error message", min_length=1, max_length=10000)
+    prompt: str = Field("", description="Step prompt (for context)", max_length=5000)
+    model: str = Field("", description="Model used by the step")
+    workflow_name: str = Field("", description="Parent workflow name")
+
+
+class RunEstimateRequest(BaseModel):
+    """Request to estimate the cost of a workflow run before execution."""
+
+    yaml_content: str = Field(
+        ..., description="Workflow YAML content", min_length=1, max_length=500000,
+    )
+
+
 class WorkflowSaveRequest(BaseModel):
     """Request to save a workflow YAML file."""
 
