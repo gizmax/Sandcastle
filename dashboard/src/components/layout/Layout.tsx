@@ -14,8 +14,7 @@ import type { StreamEvent } from "@/hooks/useEventStream";
 import { api } from "@/api/client";
 import { AdvisorProvider } from "@/components/providers/AdvisorProvider";
 
-function makeDemoNotifications(): Notification[] {
-  if (!api.isMockMode) return [];
+const DEMO_NOTIFICATIONS: () => Notification[] = () => {
   const now = Date.now();
   return [
     { id: "demo-1", type: "success", message: "data-enrichment completed in 12.4s", timestamp: new Date(now - 2 * 60_000), read: false, link: "/runs" },
@@ -25,9 +24,7 @@ function makeDemoNotifications(): Notification[] {
     { id: "demo-5", type: "success", message: "ticket-triage completed in 8.7s", timestamp: new Date(now - 55 * 60_000), read: true, link: "/runs" },
     { id: "demo-6", type: "info", message: "Schedule daily-digest fired", timestamp: new Date(now - 90 * 60_000), read: true, link: "/schedules" },
   ];
-}
-
-const INITIAL_NOTIFICATIONS: Notification[] = makeDemoNotifications();
+};
 
 // Map SSE event types to notification types
 function eventToNotificationType(eventType: string): Notification["type"] {
@@ -111,7 +108,7 @@ const ROUTE_LABELS: Record<string, string> = {
 function LayoutInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [dlqCount, setDlqCount] = useState(0);
   const [approvalsCount, setApprovalsCount] = useState(0);
   const [isDemo, setIsDemo] = useState(api.isMockMode);
@@ -143,6 +140,13 @@ function LayoutInner() {
 
   // Track mock mode changes
   useEffect(() => api.onMockChange(setIsDemo), []);
+
+  // Seed demo notifications when entering mock mode
+  useEffect(() => {
+    if (isDemo) {
+      setNotifications((prev) => prev.length === 0 ? DEMO_NOTIFICATIONS() : prev);
+    }
+  }, [isDemo]);
 
   // Fetch pending approvals count on mount
   useEffect(() => {
