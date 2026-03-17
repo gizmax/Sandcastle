@@ -93,27 +93,6 @@ const ENDPOINT_NAMES = [
   "api-keys",
 ] as const;
 
-/**
- * Build an api.get mock that maps each call's path to the provided response.
- * The order of api.get calls in useAdvisor is:
- *   /health, /stats, /runs, /tools, /dead-letter, /violations/stats,
- *   /optimizer/stats, /autopilot/stats, /approvals, /workflows, /schedules,
- *   /eval/stats, /api-keys
- *
- * We match by path prefix.
- */
-function makeGetMock(failPaths: Set<string>) {
-  return vi.fn(async (path: string) => {
-    const normalised = path.split("?")[0]; // strip query params just in case
-    const shouldFail =
-      failPaths.has(normalised) ||
-      // also match /violations/stats -> "violations"
-      [...failPaths].some((p) => normalised.startsWith(`/${p}`));
-    if (shouldFail) return { ...ERROR_RESPONSE };
-    return { ...SUCCESS_RESPONSE };
-  });
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
