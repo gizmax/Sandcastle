@@ -136,7 +136,7 @@ export default function Workflows() {
 
   if (loading) {
     return (
-      <div className="space-y-4 sm:space-y-6">
+      <div className="space-y-4 sm:space-y-6" role="status" aria-label="Loading workflows">
         <div className="flex items-center justify-between">
           <Skeleton className="h-8 w-40" />
           <Skeleton className="h-9 w-36 rounded-lg" />
@@ -239,7 +239,7 @@ export default function Workflows() {
         </div>
       </div>
       {workflows.length > 0 && (
-        <p className="text-xs text-muted">
+        <p className="text-xs text-muted" data-testid="workflow-count">
           {searchQuery
             ? `${filteredWorkflows.length} of ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`
             : `${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`}

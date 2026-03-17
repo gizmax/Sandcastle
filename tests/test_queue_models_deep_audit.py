@@ -441,10 +441,10 @@ class TestRemoveSchedule:
 class TestListSchedules:
     """Tests for list_schedules."""
 
-    def test_list_empty(self):
+    def test_list_returns_list(self):
         from sandcastle.queue.scheduler import list_schedules
 
-        # May contain jobs from other tests, but should not raise
+        # May contain jobs from other tests, but must return a list and not raise
         result = list_schedules()
         assert isinstance(result, list)
 

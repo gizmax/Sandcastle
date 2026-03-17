@@ -57,7 +57,7 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="workflow-list">
       {onSelectionChange && (
         <button
           type="button"

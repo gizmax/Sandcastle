@@ -1053,8 +1053,10 @@ class TestSettingsDefaults:
         assert s.scheduler_enabled is True
 
     def test_default_telemetry_disabled(self):
-        s = _make_settings()
-        assert s.telemetry_enabled is False
+        with patch.dict(os.environ, {"TELEMETRY_ENABLED": ""}, clear=False):
+            os.environ.pop("TELEMETRY_ENABLED", None)
+            s = _make_settings()
+            assert s.telemetry_enabled is False
 
     def test_default_csp_report_only_false(self):
         s = _make_settings()

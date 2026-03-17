@@ -1195,7 +1195,7 @@ describe("Workflows Page", () => {
     render(<Workflows />);
     await waitFor(() => {
       expect(screen.getByTestId("workflow-list")).toBeInTheDocument();
-      expect(screen.getByText("2 workflows")).toBeInTheDocument();
+      expect(screen.getByTestId("workflow-count")).toHaveTextContent("2 workflows");
     });
   });
 
