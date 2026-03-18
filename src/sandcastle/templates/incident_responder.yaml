@@ -134,7 +134,7 @@ steps:
 
   - id: check-recent-deploys
     depends_on: [fetch-alert-context]
-    type: code
+    type: standard
     prompt: |
       Check the GitHub repository for recent deployments, merged PRs, and
       code changes that might correlate with the incident.

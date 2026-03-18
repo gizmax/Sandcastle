@@ -175,7 +175,7 @@ steps:
 
   - id: seo-optimization
     depends_on: [content-outlines, trend-research]
-    type: code
+    type: standard
     prompt: |
       Create an SEO optimization checklist and keyword mapping for the entire
       content calendar.
