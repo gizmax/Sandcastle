@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
+import { API_BASE_URL } from "@/lib/constants";
 
 export type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
@@ -26,14 +27,15 @@ let nextEventId = 1;
 
 /**
  * Hook that connects to the global SSE endpoint GET /events.
- * Uses the native EventSource API with automatic reconnection and backoff.
+ * Uses fetch-based streaming with auth headers instead of native EventSource
+ * to avoid leaking the API key in URL query parameters (server logs, history).
  * In mock/demo mode, skips connection entirely to avoid console spam.
  * Should be used via EventStreamProvider context - not directly in components.
  */
 export function useEventStream() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [events, setEvents] = useState<StreamEvent[]>([]);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const attemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmountedRef = useRef(false);
@@ -54,6 +56,25 @@ export function useEventStream() {
     });
   }, []);
 
+  const scheduleReconnect = useCallback((connectFn: () => void) => {
+    if (unmountedRef.current) return;
+
+    if (attemptRef.current >= MOCK_MAX_ATTEMPTS) {
+      mockModeRef.current = true;
+      console.info("[Sandcastle] Event stream unavailable, stopping reconnection attempts");
+      return;
+    }
+
+    const delay = getBackoffDelay(attemptRef.current);
+    attemptRef.current += 1;
+    console.info(`[Sandcastle] Event stream disconnected, reconnecting in ${Math.round(delay)}ms`);
+
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (!unmountedRef.current) connectFn();
+    }, delay);
+  }, []);
+
   const connect = useCallback(() => {
     // In mock mode, don't attempt SSE connections at all
     if (mockModeRef.current) {
@@ -62,71 +83,94 @@ export function useEventStream() {
     }
 
     // Clean up any existing connection
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
     }
 
     setStatus("connecting");
 
-    const url = api.sseUrl("/events");
-    const es = new EventSource(url);
-    esRef.current = es;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    es.onopen = () => {
-      setStatus("connected");
-      attemptRef.current = 0;
-      console.info("[Sandcastle] Event stream connected");
-    };
+    // Use fetch with auth headers instead of EventSource with ?token= query param
+    // to avoid leaking the API key in server access logs and browser history.
+    const url = `${API_BASE_URL}/events`;
 
-    es.onerror = () => {
-      es.close();
-      esRef.current = null;
-      if (unmountedRef.current) return;
-      setStatus("disconnected");
-
-      // If we've failed multiple times and there's no backend, stop retrying
-      if (attemptRef.current >= MOCK_MAX_ATTEMPTS) {
-        mockModeRef.current = true;
-        console.info("[Sandcastle] Event stream unavailable, stopping reconnection attempts");
-        return;
-      }
-
-      // Schedule reconnect with backoff
-      const delay = getBackoffDelay(attemptRef.current);
-      attemptRef.current += 1;
-      console.info(`[Sandcastle] Event stream disconnected, reconnecting in ${Math.round(delay)}ms`);
-
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null;
-        if (!unmountedRef.current) connect();
-      }, delay);
-    };
-
-    // Listen for specific event types from the backend
-    const eventTypes = ["run.started", "run.completed", "run.failed", "step.started", "step.completed", "step.failed", "dlq.new"];
-
-    for (const eventType of eventTypes) {
-      es.addEventListener(eventType, (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data) as Record<string, unknown>;
-          addEvent(eventType, data);
-        } catch {
-          // Ignore parse errors on malformed messages
-        }
-      });
-    }
-
-    // Also listen for generic "message" events
-    es.onmessage = (e: MessageEvent) => {
+    (async () => {
       try {
-        const data = JSON.parse(e.data) as Record<string, unknown>;
-        addEvent("message", data);
-      } catch {
-        // Ignore
+        const res = await fetch(url, {
+          headers: api.authHeaders(),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          if (!unmountedRef.current) {
+            setStatus("disconnected");
+            scheduleReconnect(connect);
+          }
+          return;
+        }
+
+        setStatus("connected");
+        attemptRef.current = 0;
+        console.info("[Sandcastle] Event stream connected");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        const EVENT_TYPES = new Set([
+          "run.started", "run.completed", "run.failed",
+          "step.started", "step.completed", "step.failed",
+          "dlq.new", "message",
+        ]);
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          let currentEvent = "message";
+          let currentData = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              currentData += (currentData ? "\n" : "") + line.slice(6);
+            } else if (line.trim() === "" && currentData) {
+              // Blank line = dispatch accumulated event per SSE spec
+              if (EVENT_TYPES.has(currentEvent)) {
+                try {
+                  const data = JSON.parse(currentData) as Record<string, unknown>;
+                  addEvent(currentEvent, data);
+                } catch {
+                  // Ignore parse errors on malformed messages
+                }
+              }
+              currentEvent = "message";
+              currentData = "";
+            }
+          }
+        }
+
+        // Stream ended cleanly - reconnect
+        if (!unmountedRef.current) {
+          setStatus("disconnected");
+          scheduleReconnect(connect);
+        }
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        if (!unmountedRef.current) {
+          setStatus("disconnected");
+          scheduleReconnect(connect);
+        }
       }
-    };
-  }, [addEvent]);
+    })();
+  }, [addEvent, scheduleReconnect]);
 
   // Track mock mode changes from the API client
   useEffect(() => {
@@ -134,9 +178,9 @@ export function useEventStream() {
       mockModeRef.current = mock;
       if (mock) {
         // If switching to mock mode, close any active connection
-        if (esRef.current) {
-          esRef.current.close();
-          esRef.current = null;
+        if (abortRef.current) {
+          abortRef.current.abort();
+          abortRef.current = null;
         }
         if (reconnectTimerRef.current) {
           clearTimeout(reconnectTimerRef.current);
@@ -154,9 +198,9 @@ export function useEventStream() {
 
     return () => {
       unmountedRef.current = true;
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
       }
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);

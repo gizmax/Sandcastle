@@ -1,5 +1,5 @@
 import { Download, Eye, ExternalLink, User, GitFork, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, isSafeUrl } from "@/lib/utils";
 
 // Category label + color mappings
 const CATEGORY_META: Record<string, { label: string; color: string }> = {
@@ -103,7 +103,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
       {/* Author */}
       <div className="flex items-center gap-1.5 mb-1">
         <User className="h-3 w-3 text-muted-foreground" />
-        {template.author_url ? (
+        {template.author_url && isSafeUrl(template.author_url) ? (
           <a
             href={template.author_url}
             target="_blank"

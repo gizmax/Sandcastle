@@ -51,6 +51,39 @@ export const HUB_CONTRIB_URL = typeof __GITHUB_PAGES__ !== "undefined" && __GITH
   ? "https://github.com/gizmax/Sandcastle/tree/main/hub"
   : "https://gitlab.com/gizmax-group/sandcastle/-/tree/main/hub";
 
+/**
+ * Mask credentials in a connection string URL before displaying in the DOM.
+ * Strips username and password from URLs like postgresql://user:pass@host/db.
+ * For non-URL strings (e.g. SQLite file paths) falls back to a regex scrub.
+ */
+export function maskConnectionString(url: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = "****";
+    if (parsed.username && parsed.username !== "") parsed.username = "****";
+    return parsed.toString();
+  } catch {
+    // Not a valid URL (e.g. sqlite path) - show as-is unless it looks like
+    // it has embedded credentials in the form :password@
+    return url.replace(/:[^:@/\\]+@/, ":****@");
+  }
+}
+
+/**
+ * Returns true if the given URL uses http: or https: protocol.
+ * Use this before placing untrusted strings into href or src attributes
+ * to prevent javascript: and data: URI injection.
+ */
+export function isSafeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export function formatRelativeTime(date: string | Date): string {
   const now = new Date();
   const then = parseUTC(date);

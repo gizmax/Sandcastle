@@ -34,19 +34,22 @@ export default function ApiKeysPage() {
   const [deactivating, setDeactivating] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  // External services state
-  const [anthropicKey, setAnthropicKey] = useState("");
-  const [e2bKey, setE2bKey] = useState("");
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [minimaxKey, setMinimaxKey] = useState("");
-  const [openrouterKey, setOpenrouterKey] = useState("");
-  const originalRef = useRef<{
-    anthropic_api_key: string;
-    e2b_api_key: string;
-    openai_api_key: string;
-    minimax_api_key: string;
-    openrouter_api_key: string;
-  } | null>(null);
+  // External services state - track which keys are configured (boolean)
+  // and only expose an editable input when the user explicitly clicks "Change".
+  // This prevents masked partial values from being written into component state
+  // where they could be accidentally submitted or logged.
+  type ServiceKey = "anthropic_api_key" | "e2b_api_key" | "openai_api_key" | "minimax_api_key" | "openrouter_api_key";
+  const [configured, setConfigured] = useState<Record<ServiceKey, boolean>>({
+    anthropic_api_key: false,
+    e2b_api_key: false,
+    openai_api_key: false,
+    minimax_api_key: false,
+    openrouter_api_key: false,
+  });
+  // editingKeys: set of keys the user has clicked "Change" on
+  const [editingKeys, setEditingKeys] = useState<Set<ServiceKey>>(new Set());
+  // newValues: what the user has typed for keys being edited (empty = unchanged)
+  const [newValues, setNewValues] = useState<Partial<Record<ServiceKey, string>>>({});
   const [saving, setSaving] = useState(false);
 
   const fetchKeys = useCallback(async () => {
@@ -64,18 +67,15 @@ export default function ApiKeysPage() {
   const fetchSettings = useCallback(async () => {
     const res = await api.get<SettingsData>("/settings");
     if (res.data) {
-      setAnthropicKey(res.data.anthropic_api_key);
-      setE2bKey(res.data.e2b_api_key);
-      setOpenaiKey(res.data.openai_api_key);
-      setMinimaxKey(res.data.minimax_api_key);
-      setOpenrouterKey(res.data.openrouter_api_key);
-      originalRef.current = {
-        anthropic_api_key: res.data.anthropic_api_key,
-        e2b_api_key: res.data.e2b_api_key,
-        openai_api_key: res.data.openai_api_key,
-        minimax_api_key: res.data.minimax_api_key,
-        openrouter_api_key: res.data.openrouter_api_key,
-      };
+      // Store only whether each key is configured (non-empty), not the masked value.
+      // This avoids loading partial/masked secrets into editable form state.
+      setConfigured({
+        anthropic_api_key: Boolean(res.data.anthropic_api_key),
+        e2b_api_key: Boolean(res.data.e2b_api_key),
+        openai_api_key: Boolean(res.data.openai_api_key),
+        minimax_api_key: Boolean(res.data.minimax_api_key),
+        openrouter_api_key: Boolean(res.data.openrouter_api_key),
+      });
     }
   }, []);
 
@@ -130,22 +130,32 @@ export default function ApiKeysPage() {
     }
   }, [deactivateId]);
 
-  const credentialsDirty =
-    originalRef.current != null &&
-    (anthropicKey !== originalRef.current.anthropic_api_key ||
-      e2bKey !== originalRef.current.e2b_api_key ||
-      openaiKey !== originalRef.current.openai_api_key ||
-      minimaxKey !== originalRef.current.minimax_api_key ||
-      openrouterKey !== originalRef.current.openrouter_api_key);
+  // Dirty if any editing field has a non-empty new value
+  const credentialsDirty = Object.values(newValues).some((v) => v && v.length > 0);
+
+  const handleStartEditing = useCallback((key: ServiceKey) => {
+    setEditingKeys((prev) => new Set([...prev, key]));
+    setNewValues((prev) => ({ ...prev, [key]: "" }));
+  }, []);
+
+  const handleCancelEditing = useCallback((key: ServiceKey) => {
+    setEditingKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    setNewValues((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const handleSaveCredentials = useCallback(async () => {
-    if (!originalRef.current) return;
     const changed: Record<string, string> = {};
-    if (anthropicKey !== originalRef.current.anthropic_api_key) changed.anthropic_api_key = anthropicKey;
-    if (e2bKey !== originalRef.current.e2b_api_key) changed.e2b_api_key = e2bKey;
-    if (openaiKey !== originalRef.current.openai_api_key) changed.openai_api_key = openaiKey;
-    if (minimaxKey !== originalRef.current.minimax_api_key) changed.minimax_api_key = minimaxKey;
-    if (openrouterKey !== originalRef.current.openrouter_api_key) changed.openrouter_api_key = openrouterKey;
+    for (const [key, value] of Object.entries(newValues)) {
+      if (value && value.length > 0) changed[key] = value;
+    }
     if (Object.keys(changed).length === 0) return;
 
     setSaving(true);
@@ -155,16 +165,19 @@ export default function ApiKeysPage() {
     if (res.error) {
       toast.error(`Failed to save: ${res.error.message}`);
     } else {
-      originalRef.current = {
-        anthropic_api_key: anthropicKey,
-        e2b_api_key: e2bKey,
-        openai_api_key: openaiKey,
-        minimax_api_key: minimaxKey,
-        openrouter_api_key: openrouterKey,
-      };
+      // Mark saved keys as configured, clear editing state
+      setConfigured((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(changed) as ServiceKey[]) {
+          next[key] = true;
+        }
+        return next;
+      });
+      setEditingKeys(new Set());
+      setNewValues({});
       toast.success("Credentials saved");
     }
-  }, [anthropicKey, e2bKey, openaiKey, minimaxKey, openrouterKey]);
+  }, [newValues]);
 
   if (loading) {
     return (
@@ -227,62 +240,59 @@ export default function ApiKeysPage() {
         description="API keys for AI providers and sandbox runtimes"
       >
         <div className="space-y-4">
-          <div>
-            <FieldLabel htmlFor="anthropic_api_key">Anthropic API Key</FieldLabel>
-            <input
-              id="anthropic_api_key"
-              type="password"
-              className={inputClass}
-              value={anthropicKey}
-              onChange={(e) => setAnthropicKey(e.target.value)}
-              placeholder={originalRef.current?.anthropic_api_key || "sk-ant-..."}
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="e2b_api_key">E2B API Key</FieldLabel>
-            <input
-              id="e2b_api_key"
-              type="password"
-              className={inputClass}
-              value={e2bKey}
-              onChange={(e) => setE2bKey(e.target.value)}
-              placeholder={originalRef.current?.e2b_api_key || "e2b_..."}
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="openai_api_key">OpenAI API Key</FieldLabel>
-            <input
-              id="openai_api_key"
-              type="password"
-              className={inputClass}
-              value={openaiKey}
-              onChange={(e) => setOpenaiKey(e.target.value)}
-              placeholder={originalRef.current?.openai_api_key || "sk-..."}
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="minimax_api_key">MiniMax API Key</FieldLabel>
-            <input
-              id="minimax_api_key"
-              type="password"
-              className={inputClass}
-              value={minimaxKey}
-              onChange={(e) => setMinimaxKey(e.target.value)}
-              placeholder={originalRef.current?.minimax_api_key || "minimax-..."}
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="openrouter_api_key">OpenRouter API Key</FieldLabel>
-            <input
-              id="openrouter_api_key"
-              type="password"
-              className={inputClass}
-              value={openrouterKey}
-              onChange={(e) => setOpenrouterKey(e.target.value)}
-              placeholder={originalRef.current?.openrouter_api_key || "sk-or-..."}
-            />
-          </div>
-          <HelperText>Leave empty to keep the current value. Values are masked for security.</HelperText>
+          {(
+            [
+              { key: "anthropic_api_key" as ServiceKey, label: "Anthropic API Key", placeholder: "sk-ant-..." },
+              { key: "e2b_api_key" as ServiceKey, label: "E2B API Key", placeholder: "e2b_..." },
+              { key: "openai_api_key" as ServiceKey, label: "OpenAI API Key", placeholder: "sk-..." },
+              { key: "minimax_api_key" as ServiceKey, label: "MiniMax API Key", placeholder: "minimax-..." },
+              { key: "openrouter_api_key" as ServiceKey, label: "OpenRouter API Key", placeholder: "sk-or-..." },
+            ] as const
+          ).map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <FieldLabel htmlFor={key}>{label}</FieldLabel>
+              {editingKeys.has(key) ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    id={key}
+                    type="password"
+                    className={cn(inputClass, "flex-1")}
+                    value={newValues[key] ?? ""}
+                    onChange={(e) => setNewValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCancelEditing(key)}
+                    className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 h-9">
+                  {configured[key] ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 border border-success/30 px-2.5 py-0.5 text-xs font-medium text-success">
+                      Configured
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-border/40 px-2.5 py-0.5 text-xs text-muted">
+                      Not set
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleStartEditing(key)}
+                    className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                  >
+                    {configured[key] ? "Change" : "Set"}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          <HelperText>Click "Change" to update a key. The current value is never shown.</HelperText>
           <div className="flex justify-end">
             <button
               disabled={!credentialsDirty || saving}

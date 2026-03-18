@@ -11,7 +11,7 @@ import {
   Minimize2,
   Pin,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, isSafeUrl } from "@/lib/utils";
 
 interface TerminalLogProps {
   logs: string;
@@ -148,7 +148,7 @@ function SegmentSpan({ segment }: { segment: Segment }) {
     case "timestamp":
       return <span className="text-gray-500">{segment.text}</span>;
     case "url":
-      return (
+      return isSafeUrl(segment.text) ? (
         <a
           href={segment.text}
           target="_blank"
@@ -158,6 +158,8 @@ function SegmentSpan({ segment }: { segment: Segment }) {
         >
           {segment.text}
         </a>
+      ) : (
+        <span className="text-accent">{segment.text}</span>
       );
     case "json":
       return <span className="text-purple-400">{segment.text}</span>;

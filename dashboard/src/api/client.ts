@@ -405,9 +405,9 @@ class ApiClient {
 
   /**
    * Build an SSE URL with token query parameter for auth.
-   * Only needed for native EventSource API which cannot send headers.
-   * For fetch-based SSE streaming, use authHeaders() instead to avoid
-   * leaking the API key in server logs and browser history.
+   * @deprecated Use fetch() with authHeaders() instead. This method puts the
+   * API key in the URL query string which leaks it into server logs and
+   * browser history. Kept only for backward compatibility with existing tests.
    */
   sseUrl(path: string): string {
     const url = new URL(`${this.baseUrl}${path}`, window.location.origin);

@@ -22,7 +22,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { AiChatSidebar } from "@/components/runs/AiChatSidebar";
 import { fireConfetti, playCelebrationSound } from "@/lib/confetti";
 import { detectAnomalies, detectRetryHeavy, type Anomaly } from "@/lib/anomalyDetection";
-import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn } from "@/lib/utils";
+import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn, isSafeUrl } from "@/lib/utils";
 
 interface Step {
   step_id: string;
@@ -675,7 +675,7 @@ export default function RunDetailPage() {
                 <div key={i} className="rounded-lg border border-border overflow-hidden bg-background">
                   {img.error ? (
                     <div className="flex items-center justify-center h-40 text-xs text-error px-2 text-center">{img.error}</div>
-                  ) : img.url ? (
+                  ) : img.url && isSafeUrl(img.url) ? (
                     <a href={img.url} target="_blank" rel="noopener noreferrer">
                       <img src={img.url} alt={img.filename || `Image ${i + 1}`} className="w-full h-auto object-contain max-h-72" loading="lazy" />
                     </a>

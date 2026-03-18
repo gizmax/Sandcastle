@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
-import { cn, inputClass } from "@/lib/utils";
+import { cn, inputClass, isSafeUrl, maskConnectionString } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -302,7 +302,7 @@ export default function SettingsPage() {
                   {copied ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                 </button>
               </div>
-              {update.releaseUrl && (
+              {update.releaseUrl && isSafeUrl(update.releaseUrl) && (
                 <a
                   href={update.releaseUrl}
                   target="_blank"
@@ -748,13 +748,13 @@ export default function SettingsPage() {
             <div>
               <p className="text-sm font-medium text-foreground">Database</p>
               <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.database_url || "Not configured"}
+                {settings.database_url ? maskConnectionString(settings.database_url) : "Not configured"}
               </p>
             </div>
             <div>
               <p className="text-sm font-medium text-foreground">Queue</p>
               <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.redis_url || "In-process"}
+                {settings.redis_url ? maskConnectionString(settings.redis_url) : "In-process"}
               </p>
             </div>
             <div>

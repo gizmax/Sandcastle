@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, RotateCcw, GitFork, Copy, Check, FileText } 
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { TerminalLog } from "@/components/runs/TerminalLog";
 import { API_BASE_URL } from "@/lib/constants";
-import { cn, formatDuration, formatCost, parseUTC } from "@/lib/utils";
+import { cn, formatDuration, formatCost, parseUTC, isSafeUrl } from "@/lib/utils";
 
 interface ImageInfo {
   index: number;
@@ -215,7 +215,7 @@ export function StepCard({
                       <div className="flex items-center justify-center h-32 text-xs text-error px-2 text-center">
                         {img.error}
                       </div>
-                    ) : img.url ? (
+                    ) : img.url && isSafeUrl(img.url) ? (
                       <img
                         src={img.url}
                         alt={`Generated image ${img.index + 1}`}
