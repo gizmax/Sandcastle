@@ -3248,6 +3248,377 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="composio.mjs",
         icon="composio",
     ),
+    # --- v0.23: Ecosystem integrations ---
+    "langfuse": ToolDefinition(
+        name="langfuse",
+        description="Langfuse - LLM observability: traces, generations, and scores",
+        category="observability",
+        functions=[
+            ToolFunction(
+                name="create_trace",
+                description="Create a new trace for an LLM request",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Trace name"},
+                        "metadata": {
+                            "type": "object",
+                            "description": "Optional metadata key-value pairs",
+                        },
+                    },
+                    "required": ["name"],
+                },
+            ),
+            ToolFunction(
+                name="create_generation",
+                description="Record an LLM generation inside a trace",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "trace_id": {"type": "string", "description": "Parent trace ID"},
+                        "name": {"type": "string", "description": "Generation name"},
+                        "model": {"type": "string", "description": "Model name (e.g. gpt-4o)"},
+                        "input": {"type": "object", "description": "Input messages/prompt"},
+                        "output": {"type": "object", "description": "Model output"},
+                        "usage": {
+                            "type": "object",
+                            "description": "Token usage {input, output, total}",
+                        },
+                    },
+                    "required": ["trace_id", "name", "model", "input", "output"],
+                },
+            ),
+            ToolFunction(
+                name="create_score",
+                description="Attach a numeric score to a trace",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "trace_id": {"type": "string", "description": "Trace ID to score"},
+                        "name": {"type": "string", "description": "Score name (e.g. 'quality')"},
+                        "value": {
+                            "type": "number",
+                            "description": "Numeric score value",
+                        },
+                        "comment": {
+                            "type": "string",
+                            "description": "Optional comment",
+                        },
+                    },
+                    "required": ["trace_id", "name", "value"],
+                },
+            ),
+            ToolFunction(
+                name="get_trace",
+                description="Retrieve a trace with all observations and scores",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "trace_id": {"type": "string", "description": "Trace ID to retrieve"},
+                    },
+                    "required": ["trace_id"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_LANGFUSE_SECRET_KEY",
+            "TOOL_LANGFUSE_PUBLIC_KEY",
+        ],
+        connector_file="langfuse.mjs",
+        icon="langfuse",
+    ),
+    "qdrant": ToolDefinition(
+        name="qdrant",
+        description="Qdrant vector database - search, upsert, and manage vector collections",
+        category="data",
+        functions=[
+            ToolFunction(
+                name="search",
+                description="Similarity search in a collection",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "vector": {
+                            "type": "array",
+                            "description": "Query vector (float array)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return",
+                            "default": 10,
+                        },
+                        "filter": {
+                            "type": "object",
+                            "description": "Qdrant filter conditions",
+                        },
+                    },
+                    "required": ["collection", "vector"],
+                },
+            ),
+            ToolFunction(
+                name="upsert",
+                description="Insert or update points in a collection",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "points": {
+                            "type": "array",
+                            "description": "Points to upsert [{id, vector, payload}]",
+                        },
+                    },
+                    "required": ["collection", "points"],
+                },
+            ),
+            ToolFunction(
+                name="get_collections",
+                description="List all collections in the Qdrant instance",
+                parameters={"type": "object", "properties": {}},
+            ),
+            ToolFunction(
+                name="delete_points",
+                description="Delete points matching a filter from a collection",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "collection": {"type": "string", "description": "Collection name"},
+                        "filter": {
+                            "type": "object",
+                            "description": "Qdrant filter conditions for points to delete",
+                        },
+                    },
+                    "required": ["collection", "filter"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_QDRANT_URL"],
+        connector_file="qdrant.mjs",
+        icon="qdrant",
+    ),
+    "gcs": ToolDefinition(
+        name="gcs",
+        description="Google Cloud Storage - upload, download, list, and delete objects",
+        category="storage",
+        functions=[
+            ToolFunction(
+                name="upload",
+                description="Upload an object to a GCS bucket",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "bucket": {"type": "string", "description": "GCS bucket name"},
+                        "path": {"type": "string", "description": "Object path/name in bucket"},
+                        "content": {"type": "string", "description": "Object content"},
+                        "content_type": {
+                            "type": "string",
+                            "description": "MIME type",
+                            "default": "application/octet-stream",
+                        },
+                    },
+                    "required": ["bucket", "path", "content"],
+                },
+            ),
+            ToolFunction(
+                name="download",
+                description="Download an object from a GCS bucket",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "bucket": {"type": "string", "description": "GCS bucket name"},
+                        "path": {"type": "string", "description": "Object path/name in bucket"},
+                    },
+                    "required": ["bucket", "path"],
+                },
+            ),
+            ToolFunction(
+                name="list_objects",
+                description="List objects in a GCS bucket with optional prefix filter",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "bucket": {"type": "string", "description": "GCS bucket name"},
+                        "prefix": {
+                            "type": "string",
+                            "description": "Filter objects by prefix",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Max objects to return",
+                            "default": 100,
+                        },
+                    },
+                    "required": ["bucket"],
+                },
+            ),
+            ToolFunction(
+                name="delete_object",
+                description="Delete an object from a GCS bucket",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "bucket": {"type": "string", "description": "GCS bucket name"},
+                        "path": {"type": "string", "description": "Object path/name to delete"},
+                    },
+                    "required": ["bucket", "path"],
+                },
+            ),
+        ],
+        credential_env_vars=[
+            "TOOL_GCS_SERVICE_ACCOUNT_JSON",
+            "TOOL_GCS_PROJECT_ID",
+        ],
+        connector_file="gcs.mjs",
+        icon="gcs",
+    ),
+    "azure-blob": ToolDefinition(
+        name="azure-blob",
+        description="Azure Blob Storage - upload, download, list, and delete blobs",
+        category="storage",
+        functions=[
+            ToolFunction(
+                name="upload",
+                description="Upload a blob to an Azure container",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "container": {"type": "string", "description": "Container name"},
+                        "blob_name": {"type": "string", "description": "Blob name/path"},
+                        "content": {"type": "string", "description": "Blob content"},
+                        "content_type": {
+                            "type": "string",
+                            "description": "MIME type",
+                            "default": "application/octet-stream",
+                        },
+                    },
+                    "required": ["container", "blob_name", "content"],
+                },
+            ),
+            ToolFunction(
+                name="download",
+                description="Download a blob from an Azure container",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "container": {"type": "string", "description": "Container name"},
+                        "blob_name": {"type": "string", "description": "Blob name/path"},
+                    },
+                    "required": ["container", "blob_name"],
+                },
+            ),
+            ToolFunction(
+                name="list_blobs",
+                description="List blobs in an Azure container with optional prefix filter",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "container": {"type": "string", "description": "Container name"},
+                        "prefix": {
+                            "type": "string",
+                            "description": "Filter blobs by prefix",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Max blobs to return",
+                            "default": 100,
+                        },
+                    },
+                    "required": ["container"],
+                },
+            ),
+            ToolFunction(
+                name="delete_blob",
+                description="Delete a blob from an Azure container",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "container": {"type": "string", "description": "Container name"},
+                        "blob_name": {"type": "string", "description": "Blob name/path to delete"},
+                    },
+                    "required": ["container", "blob_name"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_AZURE_STORAGE_CONNECTION_STRING"],
+        connector_file="azure-blob.mjs",
+        icon="azure",
+    ),
+    "exa": ToolDefinition(
+        name="exa",
+        description="Exa - neural web search, content retrieval, and similar-page discovery",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="search",
+                description="Neural web search returning ranked results",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "num_results": {
+                            "type": "integer",
+                            "description": "Number of results to return",
+                            "default": 10,
+                        },
+                        "type": {
+                            "type": "string",
+                            "description": "Search type: auto, neural, keyword",
+                            "default": "auto",
+                        },
+                        "use_autoprompt": {
+                            "type": "boolean",
+                            "description": "Let Exa rewrite query for better results",
+                            "default": False,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            ToolFunction(
+                name="get_contents",
+                description="Retrieve full text content for a list of result IDs",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "ids": {
+                            "type": "array",
+                            "description": "List of Exa result IDs",
+                        },
+                        "text": {
+                            "type": "boolean",
+                            "description": "Include full text content",
+                            "default": True,
+                        },
+                        "highlights": {
+                            "type": "boolean",
+                            "description": "Include highlighted excerpts",
+                            "default": False,
+                        },
+                    },
+                    "required": ["ids"],
+                },
+            ),
+            ToolFunction(
+                name="find_similar",
+                description="Find pages similar to a given URL",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "Source URL to find similar pages for"},
+                        "num_results": {
+                            "type": "integer",
+                            "description": "Number of similar results to return",
+                            "default": 10,
+                        },
+                    },
+                    "required": ["url"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_EXA_API_KEY"],
+        connector_file="exa.mjs",
+        icon="exa",
+    ),
 }
 
 # All known tool names (for YAML validation)
