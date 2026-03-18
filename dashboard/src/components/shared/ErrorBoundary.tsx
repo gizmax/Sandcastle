@@ -61,6 +61,14 @@ export class ErrorBoundary extends Component<Props, State> {
                 ? "Could not reach the server. Check your network connection and try again."
                 : (this.state.error?.message || "An unexpected error occurred")}
             </p>
+            {!this.state.isNetworkError && this.state.error && (
+              <details className="mt-3 text-left max-w-lg">
+                <summary className="text-xs text-muted cursor-pointer hover:text-foreground">Technical details</summary>
+                <pre className="mt-2 max-h-40 overflow-auto rounded bg-background p-2 text-[10px] text-muted font-mono whitespace-pre-wrap">
+                  {this.state.error.stack || this.state.error.message}
+                </pre>
+              </details>
+            )}
           </div>
           <button
             onClick={this.handleReset}
