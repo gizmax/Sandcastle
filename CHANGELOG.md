@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-03-18
+
+### Added
+- **Tamper-evident audit trail** - new `AuditEvent` model with SHA-256 hash chain (`entry_hash` + `prev_hash`). Hooks on 7 executor lifecycle events + 9 admin route actions. Endpoints: `GET /audit`, `GET /runs/{id}/audit`, `GET /audit/verify/{id}`.
+- **EU AI Act risk classification** - `risk_level: minimal|limited|high|unacceptable` in workflow YAML, propagated to Run model and API. Unacceptable risk blocked, high risk requires approval in compliance mode.
+- **Global emergency stop** - `POST /admin/emergency-stop` cancels all running/queued workflows, sets Redis/in-memory flag checked by executor.
+- **Input prompt logging** - `RunStep.input_prompt` now populated with the resolved prompt sent to the LLM.
+- **EU AI Act compliance mode** - `compliance_mode: eu_ai_act` in settings enforces high-risk approval requirements.
+- **Transparency report** - `GET /runs/{id}/transparency-report` returns Article 13 report with AI models, human oversight, policy violations.
+- **Annex IV generator** - `GET /workflows/{name}/annex-iv` generates technical documentation stub for EU AI Act Annex IV.
+- **Compliance status** - `GET /compliance/status` returns active compliance features.
+- **Privacy Router** - new `PrivacyRouter` class with 7 PII patterns (email, phone, SSN, credit card, IP, IBAN, DOB). Configurable per-workflow and per-server. Modes: `redact` or `audit_only`.
+- **LightPanda browser mode** - `mode: "lightpanda"` for 10x faster headless browsing via CDP.
+- **Browserbase browser mode** - `mode: "browserbase"` for cloud-hosted browser sessions with zero cold-start.
+- **OpenTelemetry instrumentation** - workflow and step-level OTLP spans with cost, duration, token counts. Optional: `pip install sandcastle-ai[otel]`.
+- **5 new connectors**: Langfuse (LLM observability), Qdrant (vector DB), GCS (Google Cloud Storage), Azure Blob Storage, Exa (neural web search). Total connectors: 63.
+- Pre-baked Playwright + Chromium in Dockerfile.runner (eliminates 60s cold-start).
+
 ## [0.22.0] - 2026-03-17
 
 ### Added
