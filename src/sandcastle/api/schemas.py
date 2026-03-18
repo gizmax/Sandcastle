@@ -1057,5 +1057,29 @@ class MemoryListResponse(BaseModel):
     total: int = Field(..., ge=0)
 
 
+class AuditEventResponse(BaseModel):
+    """A single audit trail event."""
+
+    id: str
+    event_type: str
+    run_id: str | None = None
+    actor_id: str
+    actor_key_prefix: str | None = None
+    source_ip: str | None = None
+    payload: dict[str, Any] | None = None
+    prev_hash: str
+    entry_hash: str
+    created_at: datetime | None = None
+
+
+class AuditVerifyResponse(BaseModel):
+    """Result of verifying an audit chain for a run."""
+
+    run_id: str | None = None
+    valid: bool
+    chain_length: int = Field(..., ge=0)
+    broken_at: dict[str, Any] | None = None
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()

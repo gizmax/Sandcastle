@@ -620,6 +620,37 @@ class WorkflowVersion(Base):
     )
 
 
+class AuditEvent(Base):
+    """Tamper-evident audit log entry with SHA-256 hash chain."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_run_id", "run_id"),
+        Index("ix_audit_events_actor_id", "actor_id"),
+        Index("ix_audit_events_event_type", "event_type"),
+        Index("ix_audit_events_created_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_key_prefix: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    run: Mapped[Run | None] = relationship(foreign_keys=[run_id])
+
+
 # Database engine and session factory
 
 def _build_engine_url() -> str:

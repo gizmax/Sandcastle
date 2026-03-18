@@ -328,6 +328,30 @@ def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
     return random.uniform(1.0, 3.0)  # Fixed ~2s with jitter
 
 
+async def _emit_audit_event(
+    event_type: str,
+    run_id: str | None,
+    actor_id: str,
+    payload: dict,
+) -> None:
+    """Persist an audit event to the database without raising on failure."""
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        from sandcastle.models.db import async_session as _audit_session
+
+        async with _audit_session() as session:
+            await append_audit_event(
+                session=session,
+                event_type=event_type,
+                run_id=run_id,
+                actor_id=actor_id,
+                payload=payload,
+            )
+            await session.commit()
+    except Exception as _exc:
+        logger.warning("Audit event '%s' could not be persisted: %s", event_type, _exc)
+
+
 async def _save_run_step(
     run_id: str,
     step_id: str,
@@ -926,6 +950,12 @@ async def execute_step_with_retry(
             "workflow": context.workflow_name,
         },
     )
+    await _emit_audit_event(
+        "step.started",
+        run_id=context.run_id,
+        actor_id="system",
+        payload={"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
+    )
 
     for attempt in range(1, max_attempts + 1):
         result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
@@ -1016,6 +1046,12 @@ async def execute_step_with_retry(
                     "duration_seconds": result.duration_seconds,
                 },
             )
+            await _emit_audit_event(
+                "step.completed",
+                run_id=context.run_id,
+                actor_id="system",
+                payload={"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds},
+            )
 
             return result
 
@@ -1079,6 +1115,12 @@ async def execute_step_with_retry(
                     "step_id": step.id,
                     "error": result.error,
                 },
+            )
+            await _emit_audit_event(
+                "step.failed",
+                run_id=context.run_id,
+                actor_id="system",
+                payload={"step_id": step.id, "error": result.error, "attempts": attempt},
             )
 
             return result
@@ -5217,6 +5259,12 @@ async def execute_workflow(
             "workflow": workflow.name,
         },
     )
+    await _emit_audit_event(
+        "run.started",
+        run_id=run_id,
+        actor_id="system",
+        payload={"workflow": workflow.name},
+    )
 
     # Dependency-based scheduler: start steps as soon as deps complete
     all_step_ids = [s.id for s in workflow.steps]
@@ -5366,6 +5414,12 @@ async def execute_workflow(
                 "total_cost_usd": context.total_cost,
             },
         )
+        await _emit_audit_event(
+            "run.completed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "duration_seconds": duration, "total_cost_usd": context.total_cost},
+        )
 
         return WorkflowResult(
             run_id=run_id,
@@ -5397,6 +5451,12 @@ async def execute_workflow(
                 "error": f"Policy blocked: {e}",
             },
         )
+        await _emit_audit_event(
+            "run.failed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "error": f"Policy blocked: {e}", "reason": "policy_blocked"},
+        )
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -5416,6 +5476,12 @@ async def execute_workflow(
                 "workflow": workflow.name,
                 "error": str(e),
             },
+        )
+        await _emit_audit_event(
+            "run.failed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "error": str(e), "reason": "step_execution_error"},
         )
         return WorkflowResult(
             run_id=run_id,
@@ -5437,6 +5503,12 @@ async def execute_workflow(
                 "workflow": workflow.name,
                 "error": str(e),
             },
+        )
+        await _emit_audit_event(
+            "run.failed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "error": str(e), "reason": "unexpected_error"},
         )
         return WorkflowResult(
             run_id=run_id,
@@ -5563,6 +5635,12 @@ async def _send_to_dead_letter(
                 "step_name": step_id,
                 "error": error,
             },
+        )
+        await _emit_audit_event(
+            "dlq.created",
+            run_id=run_id,
+            actor_id="system",
+            payload={"step_id": step_id, "error": error, "attempts": attempts},
         )
 
         logger.info(f"Step '{step_id}' sent to dead letter queue")

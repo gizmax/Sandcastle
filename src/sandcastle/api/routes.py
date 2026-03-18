@@ -88,6 +88,8 @@ from sandcastle.api.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
+    AuditEventResponse,
+    AuditVerifyResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -111,11 +113,13 @@ from sandcastle.models.db import (
     RunStatus,
     Schedule,
     Setting,
+    AuditEvent,
     ToolConnection,
     WorkflowVersion,
     WorkflowVersionStatus,
     async_session,
 )
+from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
 from sandcastle.queue.worker import enqueue_workflow
 
@@ -3109,6 +3113,13 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
 
         await cancel_run_local(run_id)
 
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="run.cancelled", run_id=run_id, actor_id=get_tenant_id(req) or "system", payload={"run_id": run_id}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit run.cancelled failed: %s", _ae)
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
     )
@@ -4014,6 +4025,13 @@ async def resolve_dead_letter(
         item.resolved_by = "manual"
         await session.commit()
 
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="dlq.resolved", run_id=str(item.run_id), actor_id=get_tenant_id(req) or "system", payload={"dlq_item_id": item_id, "resolved_by": "manual"}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit dlq.resolved failed: %s", _ae)
     return ApiResponse(
         data=DeadLetterItemResponse(
             id=str(item.id),
@@ -4559,6 +4577,13 @@ async def _resolve_and_update_approval(
                 run.error = f"Approval rejected at step '{approval.step_id}'"
 
         await session.commit()
+        try:
+            from sandcastle.engine.audit import append_audit_event
+            status_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+            await append_audit_event(session=session, event_type="approval.resolved", run_id=str(approval.run_id) if approval.run_id else None, actor_id=tenant_id or "system", payload={"approval_id": approval_id, "step_id": approval.step_id, "new_status": status_val})
+            await session.commit()
+        except Exception as _ae:
+            logger.warning("Audit approval.resolved failed: %s", _ae)
 
     return approval
 
@@ -5694,6 +5719,15 @@ async def update_settings(
         logging.getLogger().setLevel(getattr(logging, request.log_level.upper()))
 
     logger.info(f"Settings updated: {list(updates.keys())}")
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        _SENSITIVE = frozenset({"anthropic_api_key", "e2b_api_key", "openai_api_key", "minimax_api_key", "openrouter_api_key"})
+        safe_updates = {k: "<redacted>" if k in _SENSITIVE else str(v) for k, v in updates.items()}
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="settings.updated", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"keys_changed": list(safe_updates.keys()), "values": safe_updates}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit settings.updated failed: %s", _ae)
     return ApiResponse(data=_build_settings_response())
 
 
@@ -5944,6 +5978,13 @@ async def promote_workflow(req: Request, name: str, request: WorkflowPromoteRequ
         await session.commit()
 
         new_status = wv.status.value if hasattr(wv.status, "value") else wv.status
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="workflow.promoted", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"workflow_name": name, "to_status": new_status}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit workflow.promoted failed: %s", _ae)
 
     return ApiResponse(
         data={
@@ -7002,3 +7043,177 @@ async def remove_all_memories(
             ).model_dump(),
         )
     return ApiResponse(data={"deleted_all": True, "scope_id": scope_id})
+
+# --- Audit Trail ---
+
+
+def _audit_event_to_response(ev):
+    """Convert an AuditEvent ORM row to a response schema."""
+    return AuditEventResponse(
+        id=str(ev.id),
+        event_type=ev.event_type,
+        run_id=str(ev.run_id) if ev.run_id else None,
+        actor_id=ev.actor_id,
+        actor_key_prefix=ev.actor_key_prefix,
+        source_ip=ev.source_ip,
+        payload=ev.payload,
+        prev_hash=ev.prev_hash,
+        entry_hash=ev.entry_hash,
+        created_at=ev.created_at,
+    )
+
+
+@router.get("/audit")
+async def list_audit_events(
+    req: Request,
+    run_id: str | None = Query(None, description="Filter by run ID"),
+    actor_id: str | None = Query(None, description="Filter by actor ID"),
+    event_type: str | None = Query(None, description="Filter by event type"),
+    since: str | None = Query(None, description="ISO datetime lower bound (inclusive)"),
+    until: str | None = Query(None, description="ISO datetime upper bound (inclusive)"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List audit events (admin only). Supports filtering by run, actor, type, and date range."""
+    _require_admin(req)
+
+    async with async_session() as session:
+        base = select(AuditEvent)
+        count_base = select(func.count(AuditEvent.id))
+
+        if run_id is not None:
+            try:
+                run_uuid = uuid.UUID(run_id)
+                base = base.where(AuditEvent.run_id == run_uuid)
+                count_base = count_base.where(AuditEvent.run_id == run_uuid)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_ID", message="Invalid run_id format")
+                    ).model_dump(),
+                )
+
+        if actor_id is not None:
+            base = base.where(AuditEvent.actor_id == actor_id)
+            count_base = count_base.where(AuditEvent.actor_id == actor_id)
+
+        if event_type is not None:
+            base = base.where(AuditEvent.event_type == event_type)
+            count_base = count_base.where(AuditEvent.event_type == event_type)
+
+        if since is not None:
+            try:
+                since_dt = datetime.fromisoformat(since)
+                base = base.where(AuditEvent.created_at >= since_dt)
+                count_base = count_base.where(AuditEvent.created_at >= since_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_DATE", message="Invalid since datetime format")
+                    ).model_dump(),
+                )
+
+        if until is not None:
+            try:
+                until_dt = datetime.fromisoformat(until)
+                base = base.where(AuditEvent.created_at <= until_dt)
+                count_base = count_base.where(AuditEvent.created_at <= until_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_DATE", message="Invalid until datetime format")
+                    ).model_dump(),
+                )
+
+        total = await session.scalar(count_base) or 0
+        stmt = base.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+    return ApiResponse(
+        data=[_audit_event_to_response(ev) for ev in events],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/runs/{run_id}/audit")
+async def get_run_audit(
+    run_id: str,
+    req: Request,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """Return the full audit trail for a specific run."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        run_stmt = select(Run).where(Run.id == run_uuid)
+        run_stmt = _apply_tenant_filter(run_stmt, tenant_id, Run.tenant_id)
+        run_result = await session.execute(run_stmt)
+        run = run_result.scalar_one_or_none()
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        total_stmt = select(func.count(AuditEvent.id)).where(AuditEvent.run_id == run_uuid)
+        total = await session.scalar(total_stmt) or 0
+
+        stmt = (
+            select(AuditEvent)
+            .where(AuditEvent.run_id == run_uuid)
+            .order_by(AuditEvent.created_at.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+    return ApiResponse(
+        data=[_audit_event_to_response(ev) for ev in events],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/audit/verify/{run_id}")
+async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
+    """Verify the tamper-evident hash chain for a run audit trail."""
+    _require_admin(req)
+
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        valid, chain_length, broken_at = await verify_audit_chain(session, run_id)
+
+    return ApiResponse(
+        data=AuditVerifyResponse(
+            run_id=run_id,
+            valid=valid,
+            chain_length=chain_length,
+            broken_at=broken_at,
+        )
+    )
