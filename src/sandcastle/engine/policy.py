@@ -26,10 +26,10 @@ VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
 # --- Built-in regex patterns ---
 
 BUILTIN_PATTERNS: dict[str, str] = {
-    "email": r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
-    "phone": r"[\+]?[(]?[0-9]{1,4}[)]?[-\s\./0-9]{7,15}",
+    "email": r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b",
+    "phone": r"(?<![0-9])[\+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]{7,15}(?![0-9])",
     "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
-    "credit_card": r"\b(?:\d[ \-]*?){13,19}\b",
+    "credit_card": r"\b(?:\d[ -]*?){13,19}\b",
 }
 
 
