@@ -113,7 +113,7 @@ function generateMockHeatmap(): HeatmapCell[] {
 // Sparkline (wider, card-bottom style)
 // ---------------------------------------------------------------------------
 
-function Sparkline({ values, color }: { values: number[]; color: string }) {
+function Sparkline({ values, className }: { values: number[]; className?: string }) {
   if (values.length < 2) return null;
   const w = 80; const h = 28; const padding = 2;
   const min = Math.min(...values);
@@ -127,15 +127,15 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
     })
     .join(" ");
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className="shrink-0">
-      <polyline points={points} fill="none" stroke={color} strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className={cn("shrink-0", className)}>
+      <polyline points={points} fill="none" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round" className="stroke-accent" />
     </svg>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Trend badge - light variant
+// Trend badge
 // ---------------------------------------------------------------------------
 
 function TrendBadge({ percent, positiveIsGood }: { percent: number; positiveIsGood: boolean }) {
@@ -146,8 +146,8 @@ function TrendBadge({ percent, positiveIsGood }: { percent: number; positiveIsGo
     <span className={cn(
       "inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold",
       isGood
-        ? "bg-emerald-50 text-emerald-600"
-        : "bg-red-50 text-red-500"
+        ? "bg-success/10 text-success"
+        : "bg-error/10 text-error"
     )}>
       {isUp ? "+" : ""}{Math.abs(percent).toFixed(1)}%
     </span>
@@ -155,29 +155,28 @@ function TrendBadge({ percent, positiveIsGood }: { percent: number; positiveIsGo
 }
 
 // ---------------------------------------------------------------------------
-// Light stat card with sparkline
+// Stat card with sparkline
 // ---------------------------------------------------------------------------
 
-interface LightStatCardProps {
+interface StatCardProps {
   label: string;
   value: string;
   icon: React.ElementType;
-  iconColor: string;
   iconBg: string;
+  iconColor: string;
   spark?: SparklineData;
-  sparkColor?: string;
   positiveIsGood?: boolean;
 }
 
-function LightStatCard({
-  label, value, icon: Icon, iconColor, iconBg,
-  spark, sparkColor = "#C8FF00", positiveIsGood = true,
-}: LightStatCardProps) {
+function BentoStatCard({
+  label, value, icon: Icon, iconBg, iconColor,
+  spark, positiveIsGood = true,
+}: StatCardProps) {
   return (
     <div className={cn(
-      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
+      "bg-surface rounded-2xl shadow-sm border border-border",
       "p-6",
-      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "hover:border-accent/30 transition-all duration-300",
       "flex flex-col gap-3"
     )}>
       <div className="flex items-start justify-between">
@@ -190,11 +189,11 @@ function LightStatCard({
       </div>
       <div className="flex items-end justify-between gap-2">
         <div>
-          <p className="text-xs font-medium text-[#9ca3af] uppercase tracking-wider mb-0.5">{label}</p>
-          <p className="text-3xl font-bold text-[#1a1a1a] tracking-tight leading-none">{value}</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-0.5">{label}</p>
+          <p className="text-3xl font-bold text-foreground tracking-tight leading-none">{value}</p>
         </div>
         {spark && spark.values.length >= 2 && (
-          <Sparkline values={spark.values} color={sparkColor} />
+          <Sparkline values={spark.values} />
         )}
       </div>
     </div>
@@ -202,17 +201,17 @@ function LightStatCard({
 }
 
 // ---------------------------------------------------------------------------
-// Health Hero - light variant
+// Health Hero
 // ---------------------------------------------------------------------------
 
-const SEVERITY_DOT_LIGHT: Record<Severity, string> = {
-  critical: "bg-red-500",
-  warning: "bg-amber-400",
-  optimize: "bg-[#C8FF00]",
-  discover: "bg-violet-400",
+const SEVERITY_DOT: Record<Severity, string> = {
+  critical: "bg-error",
+  warning: "bg-warning",
+  optimize: "bg-accent",
+  discover: "bg-running",
 };
 
-function LightHealthHero({
+function BentoHealthHero({
   score, activeInsights, loading, totalRuns, successRate, totalCost, avgDuration,
 }: {
   score: number; activeInsights: Insight[]; loading: boolean;
@@ -223,20 +222,19 @@ function LightHealthHero({
 
   return (
     <div className={cn(
-      "bg-gradient-to-br from-white via-white to-violet-50",
-      "rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-surface rounded-2xl shadow-sm border border-border",
+      "hover:border-accent/30 transition-all duration-300",
       "p-6 flex flex-col gap-4 h-full relative"
     )}>
       {/* Health badge - top right */}
       <div className="absolute top-5 right-5">
         {loading ? (
-          <div className="h-14 w-14 rounded-full bg-gray-100 animate-pulse" />
+          <div className="h-14 w-14 rounded-full bg-border animate-pulse" />
         ) : (
           <div className={cn(
             "flex items-center justify-center w-14 h-14 rounded-full",
-            "text-xl font-bold text-[#1a1a1a]",
-            score >= 80 ? "bg-[#C8FF00]" : score >= 50 ? "bg-amber-400" : "bg-red-400"
+            "text-xl font-bold",
+            score >= 80 ? "bg-success/20 text-success" : score >= 50 ? "bg-warning/20 text-warning" : "bg-error/20 text-error"
           )}>
             {score}
           </div>
@@ -245,34 +243,34 @@ function LightHealthHero({
 
       {/* Title area */}
       <div>
-        <p className="text-xs font-medium text-[#9ca3af] uppercase tracking-wider mb-1">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
           Workflow Command Center
         </p>
-        <p className="text-5xl font-bold text-[#1a1a1a] tracking-tight leading-none">
+        <p className="text-5xl font-bold text-foreground tracking-tight leading-none">
           {totalRuns}
         </p>
-        <p className="mt-1 text-sm text-[#6b7280]">workflows ran today</p>
+        <p className="mt-1 text-sm text-muted-foreground">workflows ran today</p>
       </div>
 
       {/* Mini-stat pills */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 border border-success/20 px-3 py-1.5 text-xs font-semibold text-success">
+          <span className="h-1.5 w-1.5 rounded-full bg-success" />
           {successRate}% success
         </span>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 border border-violet-100 px-3 py-1.5 text-xs font-semibold text-violet-700">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 border border-accent/20 px-3 py-1.5 text-xs font-semibold text-accent">
           <DollarSign className="h-3 w-3" />
           {formatCost(totalCost)} cost
         </span>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 border border-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-running/10 border border-running/20 px-3 py-1.5 text-xs font-semibold text-running">
+          <span className="h-1.5 w-1.5 rounded-full bg-running" />
           {avgDuration > 0 ? `${Math.round(avgDuration)}s` : "n/a"} avg
         </span>
       </div>
 
       {/* Status */}
       {!loading && actionable.length === 0 && (
-        <div className="flex items-center gap-1.5 text-emerald-600">
+        <div className="flex items-center gap-1.5 text-success">
           <CheckCircle2 className="h-4 w-4" />
           <span className="text-sm font-medium">All systems operational - {scoreLabel}</span>
         </div>
@@ -287,18 +285,18 @@ function LightHealthHero({
               to={insight.link}
               className={cn(
                 "flex items-center gap-2.5 rounded-xl px-3 py-2",
-                "bg-white/60 border border-black/[0.04]",
-                "hover:bg-white hover:border-black/[0.08]",
+                "bg-background border border-border",
+                "hover:border-accent/30 hover:bg-surface",
                 "transition-colors duration-150 text-sm"
               )}
             >
-              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", SEVERITY_DOT_LIGHT[insight.severity])} />
-              <span className="flex-1 text-[#1a1a1a] truncate">{insight.title}</span>
-              <ArrowRight className="h-3 w-3 text-[#9ca3af] shrink-0" />
+              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", SEVERITY_DOT[insight.severity])} />
+              <span className="flex-1 text-foreground truncate">{insight.title}</span>
+              <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
             </Link>
           ))}
           {actionable.length > 4 && (
-            <p className="px-3 text-xs text-[#9ca3af]">+{actionable.length - 4} more</p>
+            <p className="px-3 text-xs text-muted-foreground">+{actionable.length - 4} more</p>
           )}
         </div>
       )}
@@ -307,20 +305,20 @@ function LightHealthHero({
 }
 
 // ---------------------------------------------------------------------------
-// Quick Actions - light variant
+// Quick Actions
 // ---------------------------------------------------------------------------
 
-function LightQuickActions() {
+function BentoQuickActions() {
   const navigate = useNavigate();
   const { pinnedWorkflows } = usePinnedWorkflows();
 
   return (
     <div className={cn(
-      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-surface rounded-2xl shadow-sm border border-border",
+      "hover:border-accent/30 transition-all duration-300",
       "p-6 flex flex-col gap-3 h-full"
     )}>
-      <p className="text-xs font-medium text-[#9ca3af] uppercase tracking-wider mb-1">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
         Quick Actions
       </p>
 
@@ -328,9 +326,8 @@ function LightQuickActions() {
         onClick={() => navigate("/workflows")}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "bg-[#C8FF00] text-[#1a1a1a] font-semibold",
-          "shadow-[0_2px_8px_rgba(200,255,0,0.3)]",
-          "hover:bg-[#d4ff33] transition-all duration-200 active:scale-[0.98]"
+          "bg-accent text-accent-foreground font-semibold",
+          "hover:bg-accent-hover transition-all duration-200 active:scale-[0.98]"
         )}
       >
         <Play className="h-4 w-4 shrink-0" />
@@ -341,8 +338,8 @@ function LightQuickActions() {
         onClick={() => navigate("/runs?status=failed")}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "border border-red-200 text-red-500",
-          "hover:bg-red-50 hover:border-red-300",
+          "border border-error/30 text-error",
+          "hover:bg-error/10 hover:border-error/50",
           "transition-all duration-200 active:scale-[0.98]"
         )}
       >
@@ -354,8 +351,8 @@ function LightQuickActions() {
         onClick={() => navigate("/runs?sort=cost")}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "border border-black/[0.08] text-[#6b7280]",
-          "hover:border-black/[0.14] hover:bg-[#f5f5f7]",
+          "border border-border text-muted-foreground",
+          "hover:border-accent/30 hover:text-foreground hover:bg-background",
           "transition-all duration-200 active:scale-[0.98]"
         )}
       >
@@ -364,10 +361,10 @@ function LightQuickActions() {
       </button>
 
       {pinnedWorkflows.length > 0 && (
-        <div className="mt-1 pt-3 border-t border-black/[0.04]">
+        <div className="mt-1 pt-3 border-t border-border">
           <div className="flex items-center gap-2 mb-2">
-            <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-[#9ca3af]">Pinned</span>
+            <Star className="h-3.5 w-3.5 text-accent fill-accent" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pinned</span>
           </div>
           <div className="space-y-1">
             {pinnedWorkflows.slice(0, 3).map((wfName) => (
@@ -376,13 +373,13 @@ function LightQuickActions() {
                 onClick={() => navigate(`/workflows/${encodeURIComponent(wfName)}`)}
                 className={cn(
                   "flex items-center gap-2 w-full rounded-lg px-3 py-2",
-                  "bg-[#f5f5f7] border border-black/[0.04]",
-                  "hover:bg-[#eeeef0] hover:border-black/[0.08]",
+                  "bg-background border border-border",
+                  "hover:border-accent/30 hover:bg-surface",
                   "transition-colors text-left"
                 )}
               >
-                <GitBranch className="h-3 w-3 text-[#818CF8] shrink-0" />
-                <span className="text-sm text-[#1a1a1a] truncate">{wfName}</span>
+                <GitBranch className="h-3 w-3 text-running shrink-0" />
+                <span className="text-sm text-foreground truncate">{wfName}</span>
               </button>
             ))}
           </div>
@@ -393,21 +390,21 @@ function LightQuickActions() {
 }
 
 // ---------------------------------------------------------------------------
-// Activity Heatmap - light lime variant
+// Activity Heatmap
 // ---------------------------------------------------------------------------
 
 const DAY_LABELS = ["", "M", "", "W", "", "F", ""];
 
-function getLightIntensityClass(count: number, maxCount: number): string {
-  if (count === 0) return "bg-[#f0f0f2]";
+function getHeatmapIntensityClass(count: number, maxCount: number): string {
+  if (count === 0) return "bg-border";
   const ratio = count / maxCount;
-  if (ratio < 0.25) return "bg-[#C8FF00]/20";
-  if (ratio < 0.5) return "bg-[#C8FF00]/40";
-  if (ratio < 0.75) return "bg-[#C8FF00]/70";
-  return "bg-[#C8FF00]";
+  if (ratio < 0.25) return "bg-accent/20";
+  if (ratio < 0.5) return "bg-accent/40";
+  if (ratio < 0.75) return "bg-accent/70";
+  return "bg-accent";
 }
 
-function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
+function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
   const weeks: (HeatmapCell | null)[][] = [];
@@ -441,19 +438,19 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
 
   return (
     <div className={cn(
-      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-surface rounded-2xl shadow-sm border border-border",
+      "hover:border-accent/30 transition-all duration-300",
       "p-6"
     )}>
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[#1a1a1a]">Activity</h3>
-        <div className="flex items-center gap-1.5 text-[10px] text-[#9ca3af]">
+        <h3 className="text-sm font-semibold text-foreground">Activity</h3>
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <span>Less</span>
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#f0f0f2]" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#C8FF00]/20" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#C8FF00]/40" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#C8FF00]/70" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#C8FF00]" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-border" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-accent/20" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-accent/40" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-accent/70" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-accent" />
           <span>More</span>
         </div>
       </div>
@@ -464,7 +461,7 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
           {weeks.map((_, col) => {
             const ml = monthLabels.find((m) => m.col === col);
             return (
-              <div key={col} className="flex-1 text-[10px] text-[#9ca3af] min-w-0">
+              <div key={col} className="flex-1 text-[10px] text-muted-foreground min-w-0">
                 {ml ? ml.label : ""}
               </div>
             );
@@ -475,7 +472,7 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
           {/* Day labels */}
           <div className="flex flex-col gap-[3px] pr-1.5 pt-[3px]" style={{ width: "28px", minWidth: "28px" }}>
             {DAY_LABELS.map((label, i) => (
-              <div key={i} className="flex h-[14px] items-center text-[10px] leading-none text-[#9ca3af]">
+              <div key={i} className="flex h-[14px] items-center text-[10px] leading-none text-muted-foreground">
                 {label}
               </div>
             ))}
@@ -490,7 +487,7 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
                     key={row}
                     className={cn(
                       "h-[14px] rounded-[3px] transition-colors duration-100 cursor-default",
-                      cell ? getLightIntensityClass(cell.count, maxCount) : "bg-transparent"
+                      cell ? getHeatmapIntensityClass(cell.count, maxCount) : "bg-transparent"
                     )}
                     onMouseEnter={(e) => {
                       if (!cell) return;
@@ -512,7 +509,7 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
 
       {tooltip && (
         <div
-          className="pointer-events-none fixed z-50 rounded-lg bg-[#1a1a1a] px-2.5 py-1.5 text-[11px] font-medium text-white shadow-xl"
+          className="pointer-events-none fixed z-50 rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background shadow-xl"
           style={{
             left: tooltip.x, top: tooltip.y,
             transform: "translate(-50%, -100%)",
@@ -526,46 +523,46 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Recent Runs - light minimal table
+// Recent Runs - minimal table
 // ---------------------------------------------------------------------------
 
-function LightRecentRuns({ runs }: { runs: RunItem[] }) {
+function BentoRecentRuns({ runs }: { runs: RunItem[] }) {
   const navigate = useNavigate();
 
   if (runs.length === 0) return null;
 
   const statusStyle = (status: string) => {
     switch (status) {
-      case "completed": return "bg-[#C8FF00]/20 text-[#4a7c00]";
-      case "failed": return "bg-red-50 text-red-600";
-      case "running": return "bg-blue-50 text-blue-600";
-      default: return "bg-gray-100 text-[#6b7280]";
+      case "completed": return "bg-success/10 text-success";
+      case "failed": return "bg-error/10 text-error";
+      case "running": return "bg-running/10 text-running";
+      default: return "bg-border text-muted-foreground";
     }
   };
 
   return (
     <div className={cn(
-      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-surface rounded-2xl shadow-sm border border-border",
+      "hover:border-accent/30 transition-all duration-300",
       "overflow-hidden"
     )}>
-      <div className="px-5 py-4 border-b border-black/[0.04]">
-        <h3 className="text-sm font-semibold text-[#1a1a1a]">Recent Runs</h3>
+      <div className="px-5 py-4 border-b border-border">
+        <h3 className="text-sm font-semibold text-foreground">Recent Runs</h3>
       </div>
-      <div className="divide-y divide-black/[0.04]">
+      <div className="divide-y divide-border">
         {runs.slice(0, 5).map((run) => (
           <button
             key={run.run_id}
             onClick={() => navigate(`/runs/${run.run_id}`)}
-            className="flex w-full items-center gap-3 px-5 py-3.5 text-left hover:bg-[#f5f5f7] transition-colors duration-150"
+            className="flex w-full items-center gap-3 px-5 py-3.5 text-left hover:bg-background transition-colors duration-150"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[#1a1a1a]">{run.workflow_name}</p>
-              <p className="text-xs text-[#9ca3af] mt-0.5">
+              <p className="truncate text-sm font-medium text-foreground">{run.workflow_name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
                 {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
               </p>
             </div>
-            <span className="text-xs font-mono text-[#6b7280] shrink-0">
+            <span className="text-xs font-mono text-muted-foreground shrink-0">
               {formatCost(run.total_cost_usd)}
             </span>
             <span className={cn(
@@ -582,7 +579,7 @@ function LightRecentRuns({ runs }: { runs: RunItem[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Layout switcher (shared - light variant)
+// Layout switcher (shared)
 // ---------------------------------------------------------------------------
 
 export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
@@ -612,7 +609,7 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
   ];
 
   return (
-    <div className="flex items-center gap-0.5 rounded-xl border border-black/[0.08] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] p-0.5">
+    <div className="flex items-center gap-0.5 rounded-xl border border-border bg-surface shadow-sm p-0.5">
       {options.map((opt) => (
         <button
           key={opt.id}
@@ -624,8 +621,8 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
           className={cn(
             "flex items-center justify-center rounded-lg w-7 h-7 transition-all duration-150",
             layout === opt.id
-              ? "bg-[#C8FF00] text-[#1a1a1a] shadow-sm"
-              : "text-[#9ca3af] hover:text-[#1a1a1a]"
+              ? "bg-accent text-accent-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
           )}
         >
           {opt.icon}
@@ -636,7 +633,7 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
 }
 
 // ---------------------------------------------------------------------------
-// OverviewBento page - light lime theme
+// OverviewBento page
 // ---------------------------------------------------------------------------
 
 export default function OverviewBento({
@@ -677,38 +674,34 @@ export default function OverviewBento({
     return () => { cancelled = true; };
   }, [retryCount]);
 
-  const pageClass = "min-h-screen bg-[#f5f5f7] -m-4 sm:-m-6 p-4 sm:p-6 lg:p-8";
-
   if (loading) {
     return (
-      <div className={pageClass}>
-        <div className="space-y-4 sm:space-y-5">
-          <div className="flex items-center justify-between">
-            <Skeleton className="h-8 w-36 rounded-xl bg-black/[0.04]" />
-            <Skeleton className="h-8 w-28 rounded-xl bg-black/[0.04]" />
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-            <Skeleton className="h-56 rounded-2xl lg:col-span-2 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />
-            <Skeleton className="h-56 rounded-2xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
-            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-28 rounded-2xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />)}
-          </div>
-          <Skeleton className="h-36 rounded-2xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />
+      <div className="space-y-4 sm:space-y-5">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-36 rounded-xl" />
+          <Skeleton className="h-8 w-28 rounded-xl" />
         </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+          <Skeleton className="h-56 rounded-2xl lg:col-span-2" />
+          <Skeleton className="h-56 rounded-2xl" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+        </div>
+        <Skeleton className="h-36 rounded-2xl" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className={pageClass}>
-        <h1 className="mb-4 text-2xl font-bold tracking-tight text-[#1a1a1a]">Overview</h1>
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
-          <p className="text-sm text-red-600">{error}</p>
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Overview</h1>
+        <div className="rounded-2xl border border-error/30 bg-error/5 p-5">
+          <p className="text-sm text-error">{error}</p>
           <button
             onClick={() => { setLoading(true); setRetryCount((c) => c + 1); }}
-            className="mt-2 text-xs font-semibold text-[#4a7c00] hover:text-[#3a6000] transition-colors"
+            className="mt-2 text-xs font-semibold text-accent hover:text-accent-hover transition-colors"
           >
             Retry
           </button>
@@ -723,22 +716,22 @@ export default function OverviewBento({
   const avgDuration = stats?.avg_duration_seconds ?? 0;
 
   return (
-    <div className={pageClass}>
+    <div className="space-y-4 sm:space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-[#C8FF00]">
-            <Castle className="h-4 w-4 text-[#1a1a1a]" />
+          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
+            <Castle className="h-4 w-4 text-accent-foreground" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-[#1a1a1a]">Overview</h1>
+          <h1 className="text-xl font-bold tracking-tight text-foreground">Overview</h1>
         </div>
         <LayoutSwitcher layout={layout} setLayout={setLayout} />
       </div>
 
       {/* Row 1: Command Center (2/3) + Quick Actions (1/3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-4 sm:mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <div className="lg:col-span-2">
-          <LightHealthHero
+          <BentoHealthHero
             score={advisor.score}
             activeInsights={advisor.activeInsights}
             loading={advisor.loading}
@@ -749,64 +742,59 @@ export default function OverviewBento({
           />
         </div>
         <div>
-          <LightQuickActions />
+          <BentoQuickActions />
         </div>
       </div>
 
       {/* Row 2: 3 stat cards */}
       {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-4 sm:mb-5">
-          <LightStatCard
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+          <BentoStatCard
             label="Runs Today"
             value={String(totalRuns)}
             icon={Activity}
-            iconColor="text-[#4a7c00]"
-            iconBg="bg-[#C8FF00]/20"
+            iconColor="text-accent"
+            iconBg="bg-accent/10"
             spark={mockSparklines.runs}
-            sparkColor="#C8FF00"
             positiveIsGood={true}
           />
-          <LightStatCard
+          <BentoStatCard
             label="Success Rate"
             value={`${successRate}%`}
             icon={CheckCircle}
-            iconColor="text-emerald-600"
-            iconBg="bg-emerald-50"
+            iconColor="text-success"
+            iconBg="bg-success/10"
             spark={mockSparklines.rate}
-            sparkColor="#22C55E"
             positiveIsGood={true}
           />
-          <LightStatCard
+          <BentoStatCard
             label="Cost Today"
             value={formatCost(totalCost)}
             icon={DollarSign}
-            iconColor="text-[#8B5CF6]"
-            iconBg="bg-violet-50"
+            iconColor="text-running"
+            iconBg="bg-running/10"
             spark={mockSparklines.cost}
-            sparkColor="#8B5CF6"
             positiveIsGood={false}
           />
         </div>
       )}
 
       {/* Row 3: Activity Heatmap (full width) */}
-      <div className="mb-4 sm:mb-5">
-        <LightActivityHeatmap cells={mockHeatmap} />
-      </div>
+      <BentoActivityHeatmap cells={mockHeatmap} />
 
       {/* Row 4: Cost Forecast (2/3) + Recent Runs (1/3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-4 sm:mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <div className="lg:col-span-2">
           <div className={cn(
-            "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-            "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "bg-surface rounded-2xl shadow-sm border border-border",
+            "hover:border-accent/30 transition-all duration-300",
             "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
           )}>
             <CostForecast />
           </div>
         </div>
         <div>
-          <LightRecentRuns runs={recentRuns} />
+          <BentoRecentRuns runs={recentRuns} />
         </div>
       </div>
 
@@ -814,15 +802,15 @@ export default function OverviewBento({
       {stats && stats.runs_by_day.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
           <div className={cn(
-            "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-            "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "bg-surface rounded-2xl shadow-sm border border-border",
+            "hover:border-accent/30 transition-all duration-300",
             "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
           )}>
             <RunsChart data={stats.runs_by_day} />
           </div>
           <div className={cn(
-            "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
-            "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "bg-surface rounded-2xl shadow-sm border border-border",
+            "hover:border-accent/30 transition-all duration-300",
             "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
           )}>
             {stats.cost_by_workflow && (
