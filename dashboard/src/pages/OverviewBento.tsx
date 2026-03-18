@@ -97,7 +97,7 @@ function generateMockHeatmap(): HeatmapCell[] {
   const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 99;
   const rng = seededRandom(seed);
   const cells: HeatmapCell[] = [];
-  for (let i = 83; i >= 0; i--) {
+  for (let i = 181; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const dayOfWeek = d.getDay();
@@ -459,11 +459,12 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
       </div>
 
       <div className="relative overflow-x-auto">
-        <div className="flex" style={{ paddingLeft: "28px" }}>
+        {/* Month labels */}
+        <div className="flex gap-[3px]" style={{ paddingLeft: "28px" }}>
           {weeks.map((_, col) => {
             const ml = monthLabels.find((m) => m.col === col);
             return (
-              <div key={col} className="text-[10px] text-[#9ca3af]" style={{ width: "14px", minWidth: "14px" }}>
+              <div key={col} className="flex-1 text-[10px] text-[#9ca3af] min-w-0">
                 {ml ? ml.label : ""}
               </div>
             );
@@ -471,22 +472,24 @@ function LightActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
         </div>
 
         <div className="flex gap-0">
-          <div className="flex flex-col gap-[2px] pr-1 pt-[2px]" style={{ width: "24px", minWidth: "24px" }}>
+          {/* Day labels */}
+          <div className="flex flex-col gap-[3px] pr-1.5 pt-[3px]" style={{ width: "28px", minWidth: "28px" }}>
             {DAY_LABELS.map((label, i) => (
-              <div key={i} className="flex h-[12px] items-center text-[10px] leading-none text-[#9ca3af]">
+              <div key={i} className="flex h-[14px] items-center text-[10px] leading-none text-[#9ca3af]">
                 {label}
               </div>
             ))}
           </div>
 
-          <div className="flex gap-[2px]">
+          {/* Grid - stretches to fill card width */}
+          <div className="flex gap-[3px] flex-1">
             {weeks.map((week, col) => (
-              <div key={col} className="flex flex-col gap-[2px]">
+              <div key={col} className="flex flex-col gap-[3px] flex-1">
                 {week.map((cell, row) => (
                   <div
                     key={row}
                     className={cn(
-                      "h-[12px] w-[12px] rounded-[2px] transition-colors duration-100 cursor-default",
+                      "h-[14px] rounded-[3px] transition-colors duration-100 cursor-default",
                       cell ? getLightIntensityClass(cell.count, maxCount) : "bg-transparent"
                     )}
                     onMouseEnter={(e) => {
