@@ -62,22 +62,26 @@ steps:
 
   - id: alert
     type: condition
-    condition: "{steps.check_metrics.output.above_threshold} == true"
-    if_true:
-      - id: create_alert
-        prompt: |
-          Create a PagerDuty incident for metric anomaly:
-          - Project: {input.project_name}
-          - Metric: {input.metric_query}
-          - Current value: {steps.check_metrics.output.current_value}
-          - Threshold: {input.threshold}
-          - Latest deployment: {steps.check_deployments.output}
+    depends_on: [check_metrics, check_deployments]
+    condition_config:
+      expression: "{steps.check_metrics.output.above_threshold} == true"
+      then_steps: [create_alert]
+      else_steps: [log_ok]
 
-          Create a high-urgency incident with these details.
-        tools: [pagerduty]
-    if_false:
-      - id: log_ok
-        prompt: |
-          All metrics are within normal range for {input.project_name}.
-          Current value: {steps.check_metrics.output.current_value} (threshold: {input.threshold})
-          Latest deployment status: {steps.check_deployments.output.status}
+  - id: create_alert
+    prompt: |
+      Create a PagerDuty incident for metric anomaly:
+      - Project: {input.project_name}
+      - Metric: {input.metric_query}
+      - Current value: {steps.check_metrics.output.current_value}
+      - Threshold: {input.threshold}
+      - Latest deployment: {steps.check_deployments.output}
+
+      Create a high-urgency incident with these details.
+    tools: [pagerduty]
+
+  - id: log_ok
+    prompt: |
+      All metrics are within normal range for {input.project_name}.
+      Current value: {steps.check_metrics.output.current_value} (threshold: {input.threshold})
+      Latest deployment status: {steps.check_deployments.output.status}
