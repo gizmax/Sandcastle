@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { formatRelativeTime, cn } from "@/lib/utils";
+import { formatRelativeTime, cn, isSafeUrl } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 
 interface ApprovalItem {
@@ -416,7 +416,7 @@ export default function ApprovalsPage() {
                                   <div className="flex items-center justify-center h-40 text-xs text-error px-2 text-center">
                                     {img.error}
                                   </div>
-                                ) : img.url ? (
+                                ) : img.url && isSafeUrl(img.url) ? (
                                   <img
                                     src={img.url}
                                     alt={`Generated image ${img.index + 1}`}

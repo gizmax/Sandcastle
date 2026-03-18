@@ -25,7 +25,7 @@ import jsYaml from "js-yaml";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { cn, HUB_CONTRIB_URL } from "@/lib/utils";
+import { cn, HUB_CONTRIB_URL, isSafeUrl } from "@/lib/utils";
 import {
   TEMPLATE_PACKS,
   resolveCategory,
@@ -1042,7 +1042,7 @@ export default function TemplatesPage() {
                 </span>
               </div>
               <div className="text-xs text-muted-foreground">
-                by {communityPreviewTarget.author_url ? (
+                by {communityPreviewTarget.author_url && isSafeUrl(communityPreviewTarget.author_url) ? (
                   <a href={communityPreviewTarget.author_url} target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover">@{communityPreviewTarget.author}</a>
                 ) : (
                   <span className="text-muted-foreground">@{communityPreviewTarget.author}</span>
