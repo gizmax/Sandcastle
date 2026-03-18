@@ -60,6 +60,7 @@ class StepResult:
     status: str = "completed"  # "completed" | "failed" | "skipped"
     error: str | None = None
     attempt: int = 1
+    input_prompt: str | None = None  # Resolved prompt sent to the LLM
 
 
 @dataclass
@@ -328,6 +329,33 @@ def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
     return random.uniform(1.0, 3.0)  # Fixed ~2s with jitter
 
 
+async def _emit_audit_event(
+    event_type: str,
+    run_id: str | None,
+    actor_id: str,
+    payload: dict,
+) -> None:
+    """Append an audit event in its own session. Failures are silently logged.
+
+    Isolation from the caller's session means audit failures never abort execution.
+    """
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        from sandcastle.models.db import async_session
+
+        async with async_session() as session:
+            await append_audit_event(
+                session=session,
+                event_type=event_type,
+                run_id=run_id,
+                actor_id=actor_id,
+                payload=payload,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Audit event '%s' could not be persisted: %s", event_type, exc)
+
+
 async def _save_run_step(
     run_id: str,
     step_id: str,
@@ -339,10 +367,12 @@ async def _save_run_step(
     attempt: int = 1,
     error: str | None = None,
     model: str | None = None,
+    input_prompt: str | None = None,
 ) -> None:
     """Create or update a RunStep record in the database.
 
     Uses upsert: INSERT on first call (running), UPDATE on completion/failure.
+    The ``input_prompt`` is the resolved text sent to the LLM for audit purposes.
     """
     try:
         from sqlalchemy import select as sa_select
@@ -388,6 +418,8 @@ async def _save_run_step(
                 existing.error = error
                 if model:
                     existing.model = model
+                if input_prompt is not None:
+                    existing.input_prompt = input_prompt
                 if status in ("completed", "failed", "skipped"):
                     existing.completed_at = now
             else:
@@ -403,6 +435,7 @@ async def _save_run_step(
                     attempt=attempt,
                     error=error,
                     model=model,
+                    input_prompt=input_prompt,
                     started_at=now if status == "running" else None,
                     completed_at=(now if status in ("completed", "failed", "skipped") else None),
                 )
@@ -529,6 +562,11 @@ _cancel_flags: collections.OrderedDict[str, None] = collections.OrderedDict()
 _MAX_CANCEL_FLAGS = 10000
 _cancel_flags_lock = asyncio.Lock()
 
+# Global emergency stop flag for local mode (no Redis).
+# When set, ALL runs are treated as cancelled.
+_emergency_stop_local: bool = False
+_emergency_stop_lock = asyncio.Lock()
+
 
 async def cancel_run_local(run_id: str) -> None:
     """Set cancel flag in-memory (local mode without Redis)."""
@@ -545,6 +583,36 @@ async def cancel_run_local(run_id: str) -> None:
                 evict_count,
             )
         _cancel_flags[run_id] = None
+
+
+async def set_emergency_stop_local() -> None:
+    """Activate the global emergency stop flag (local mode without Redis)."""
+    global _emergency_stop_local
+    async with _emergency_stop_lock:
+        _emergency_stop_local = True
+
+
+async def clear_emergency_stop_local() -> None:
+    """Clear the global emergency stop flag (local mode without Redis)."""
+    global _emergency_stop_local
+    async with _emergency_stop_lock:
+        _emergency_stop_local = False
+
+
+async def is_emergency_stop_active() -> bool:
+    """Return True if the global emergency stop is currently active."""
+    from sandcastle.config import settings
+
+    if not settings.redis_url:
+        async with _emergency_stop_lock:
+            return _emergency_stop_local
+
+    try:
+        r = await _get_redis()
+        result = await r.get("emergency_stop:global")
+        return result is not None
+    except Exception:
+        return False
 
 
 _redis_pool = None
@@ -568,10 +636,16 @@ async def _get_redis():
 
 
 async def _check_cancel(run_id: str) -> bool:
-    """Check if a run has been cancelled via Redis flag or in-memory set."""
+    """Check if a run has been cancelled via Redis flag or in-memory set.
+
+    Also checks the global emergency stop flag which cancels ALL runs.
+    """
     from sandcastle.config import settings
 
     if not settings.redis_url:
+        async with _emergency_stop_lock:
+            if _emergency_stop_local:
+                return True
         async with _cancel_flags_lock:
             if run_id in _cancel_flags:
                 return True
@@ -579,6 +653,10 @@ async def _check_cancel(run_id: str) -> bool:
 
     try:
         r = await _get_redis()
+        # Check global emergency stop first (fastest path)
+        emergency = await r.get("emergency_stop:global")
+        if emergency is not None:
+            return True
         result = await r.get(f"cancel:{run_id}")
         return result is not None
     except Exception:
@@ -926,6 +1004,12 @@ async def execute_step_with_retry(
             "workflow": context.workflow_name,
         },
     )
+    await _emit_audit_event(
+        "step.started",
+        context.run_id,
+        "system",
+        {"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
+    )
 
     for attempt in range(1, max_attempts + 1):
         result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
@@ -998,6 +1082,7 @@ async def execute_step_with_retry(
                 duration_seconds=result.duration_seconds,
                 attempt=attempt,
                 model=step.model,
+                input_prompt=result.input_prompt,
             )
 
             # Broadcast step.completed event (truncate large outputs for event bus)
@@ -1068,6 +1153,7 @@ async def execute_step_with_retry(
                 attempt=attempt,
                 error=result.error,
                 model=step.model,
+                input_prompt=result.input_prompt,
             )
 
             # Broadcast step.failed event
@@ -1327,6 +1413,7 @@ async def _execute_step_once(
 ) -> StepResult:
     """Execute a single attempt of a step."""
     started_at = datetime.now(timezone.utc)
+    resolved_input_prompt: str | None = None  # Populated after template resolution
 
     try:
         # SLO-based model selection (optimizer)
@@ -1383,6 +1470,8 @@ async def _execute_step_once(
         # cache key reflects the actual inputs, not the raw template string.
         prompt = resolve_templates(step.prompt, context, step.depends_on)
         prompt = await resolve_storage_refs(prompt, storage)
+        # Capture resolved prompt (before system prefix) for audit/compliance.
+        resolved_input_prompt = prompt
 
         # Step result cache - check before executing (skip for memory steps)
         cache_key = ""
@@ -1727,6 +1816,7 @@ async def _execute_step_once(
             duration_seconds=duration,
             status="completed",
             attempt=attempt,
+            input_prompt=resolved_input_prompt,
         )
 
     except (StepBlocked, WorkflowPaused):
@@ -1743,6 +1833,7 @@ async def _execute_step_once(
             status="failed",
             error=str(e),
             attempt=attempt,
+            input_prompt=resolved_input_prompt,
         )
 
 
@@ -5067,6 +5158,27 @@ async def execute_workflow(
             status="failed",
             error=f"Max workflow depth ({settings.max_workflow_depth}) exceeded",
         )
+
+    # EU AI Act: block unacceptable risk workflows before any execution begins
+    risk_level = getattr(workflow, "risk_level", "minimal")
+    if risk_level == "unacceptable":
+        return WorkflowResult(
+            run_id=run_id or str(uuid.uuid4()),
+            outputs={},
+            total_cost_usd=0.0,
+            status="failed",
+            error="Unacceptable risk workflows cannot be executed under EU AI Act",
+        )
+
+    # EU AI Act: warn if high-risk workflow has no approval step
+    if risk_level == "high":
+        has_approval = any(s.type == "approval" for s in workflow.steps)
+        if not has_approval:
+            logger.warning(
+                "Workflow '%s' is classified as high-risk (EU AI Act) but has no "
+                "approval step. Human oversight is recommended.",
+                workflow.name,
+            )
 
     if run_id is None:
         run_id = str(uuid.uuid4())
