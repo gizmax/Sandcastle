@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     telemetry_enabled: bool = False  # Set to True to send error reports via Sentry
     sentry_dsn: str = ""  # Sentry DSN - get one free at sentry.io
 
+    # Privacy Router (PII redaction)
+    privacy_enabled: bool = False
+    privacy_entities: str = "email,phone,ssn,credit_card"  # comma-separated entity types
+    privacy_apply_to: str = "outputs,webhooks"  # comma-separated apply_to targets
+
     # Logging
     log_level: str = "info"
 

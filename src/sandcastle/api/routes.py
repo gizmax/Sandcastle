@@ -2113,6 +2113,28 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         }
         event_type = _sync_event_map.get(result.status, "workflow.failed")
 
+        # Apply PII redaction to webhook outputs if privacy router is active.
+        webhook_outputs = result.outputs
+        if webhook_urls:
+            try:
+                from sandcastle.config import settings as _cfg
+                from sandcastle.engine.privacy import PrivacyRouter
+
+                _srv_priv = {
+                    "enabled": _cfg.privacy_enabled,
+                    "entities": _cfg.privacy_entities,
+                    "apply_to": _cfg.privacy_apply_to,
+                }
+                _priv_router = PrivacyRouter.from_workflow(
+                    workflow_privacy=getattr(workflow, "privacy", None),
+                    server_config=_srv_priv,
+                )
+                if _priv_router and "webhooks" in _priv_router.config.apply_to:
+                    scrubbed, _matches = _priv_router.scrub_dict(webhook_outputs)
+                    webhook_outputs = scrubbed
+            except Exception as _priv_err:
+                logger.warning("PrivacyRouter webhook scrub failed: %s", _priv_err)
+
         webhook_urls = list(dict.fromkeys(webhook_urls))
         for webhook_url in webhook_urls:
             duration = 0.0
@@ -2124,7 +2146,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 run_id=run_id,
                 workflow=workflow.name,
                 status=result.status,
-                outputs=result.outputs,
+                outputs=webhook_outputs,
                 costs=result.total_cost_usd,
                 duration_seconds=duration,
                 error=result.error,

@@ -4870,6 +4870,7 @@ async def _prepare_and_run_step(
     global_policies: list,
     step_overrides: dict[str, dict] | None,
     depth: int,
+    privacy_router: Any = None,
 ) -> None:
     """Execute one step, update context in place. Raises on abort failure."""
     step = workflow.get_step(step_id)
@@ -4915,12 +4916,32 @@ async def _prepare_and_run_step(
         context.costs.append(result.cost_usd)
         context.step_results[step_id] = result
         if result.status == "completed":
-            context.step_outputs[step_id] = result.output
+            # Apply PII redaction to output if privacy router is active and
+            # "outputs" is in the apply_to list.
+            output = result.output
+            if (
+                privacy_router is not None
+                and "outputs" in privacy_router.config.apply_to
+            ):
+                try:
+                    scrubbed, matches = privacy_router.scrub_dict(output)
+                    if matches:
+                        logger.info(
+                            "PrivacyRouter: redacted %d PII match(es) from step '%s' output",
+                            len(matches),
+                            step_id,
+                        )
+                    output = scrubbed
+                except Exception as priv_err:
+                    logger.warning(
+                        "PrivacyRouter scrub failed for step '%s': %s", step_id, priv_err
+                    )
+            context.step_outputs[step_id] = output
             await _save_run_step(
                 run_id=context.run_id,
                 step_id=step.id,
                 status="completed",
-                output=result.output,
+                output=output,
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 model=model,
@@ -5305,6 +5326,31 @@ async def execute_workflow(
         except Exception as e:
             logger.warning(f"Could not load global policies: {e}")
 
+    # Build PrivacyRouter if privacy is configured at workflow or server level.
+    privacy_router = None
+    try:
+        from sandcastle.engine.privacy import PrivacyRouter
+
+        server_privacy = {
+            "enabled": settings.privacy_enabled,
+            "entities": settings.privacy_entities,
+            "apply_to": settings.privacy_apply_to,
+        }
+        privacy_router = PrivacyRouter.from_workflow(
+            workflow_privacy=getattr(workflow, "privacy", None),
+            server_config=server_privacy,
+        )
+        if privacy_router:
+            logger.info(
+                "PrivacyRouter enabled for run %s: entities=%s, mode=%s, apply_to=%s",
+                run_id,
+                privacy_router.config.entities,
+                privacy_router.config.mode,
+                privacy_router.config.apply_to,
+            )
+    except Exception as e:
+        logger.warning("Could not initialize PrivacyRouter: %s", e)
+
     logger.info(
         "Sandshore runtime: e2b_key=%s, backend=%s",
         "set" if settings.e2b_api_key else "unset",
@@ -5424,6 +5470,7 @@ async def execute_workflow(
                         global_policies,
                         step_overrides,
                         depth,
+                        privacy_router=privacy_router,
                     )
                 )
 
