@@ -1,6 +1,12 @@
 FROM node:20-slim
 
 RUN useradd --uid 1000 --create-home runner
+
+# Pre-install Playwright + Chromium as root so browsers land in a system path
+# accessible to the runner user. This eliminates the ~60s cold-start penalty
+# that occurs when playwright/chromium must be installed at step runtime.
+RUN npm install playwright && npx playwright install --with-deps chromium
+
 USER runner
 WORKDIR /home/user
 

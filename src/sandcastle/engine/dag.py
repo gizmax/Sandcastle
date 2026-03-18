@@ -232,7 +232,7 @@ class DelegateConfig:
 class BrowserConfig:
     """Configuration for a browser automation step."""
 
-    mode: str = "playwright"  # "playwright" | "computer_use" | "dom"
+    mode: str = "playwright"  # "playwright" | "computer_use" | "dom" | "lightpanda" | "browserbase"
     start_url: str = ""
     viewport_width: int = 1280
     viewport_height: int = 720
