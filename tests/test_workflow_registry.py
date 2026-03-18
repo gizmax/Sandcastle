@@ -11,35 +11,37 @@ from sandcastle.main import app
 
 client = TestClient(app)
 
-VALID_WORKFLOW = """
-name: test-registry
-description: Registry test workflow
-steps:
-  - id: greet
-    prompt: "Say hello to {input.name}"
-    model: haiku
-    max_turns: 3
-"""
+def _unique_name(prefix: str = "reg") -> str:
+    """Generate a unique workflow name to avoid cross-run collisions."""
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
-VALID_WORKFLOW_V2 = """
-name: test-registry
+
+def _make_workflow_yaml(name: str, v2: bool = False) -> str:
+    """Generate workflow YAML with unique name embedded."""
+    if v2:
+        return f"""
+name: {name}
 description: Registry test workflow v2
 steps:
   - id: greet
-    prompt: "Say hello to {input.name} with more detail"
+    prompt: "Say hello to {{input.name}} with more detail"
     model: sonnet
     max_turns: 5
   - id: summarize
-    prompt: "Summarize: {steps.greet.output}"
+    prompt: "Summarize: {{steps.greet.output}}"
     model: haiku
     depends_on:
       - greet
 """
-
-
-def _unique_name(prefix: str = "reg") -> str:
-    """Generate a unique workflow name to avoid cross-run collisions."""
-    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+    return f"""
+name: {name}
+description: Registry test workflow
+steps:
+  - id: greet
+    prompt: "Say hello to {{input.name}}"
+    model: haiku
+    max_turns: 3
+"""
 
 
 class TestSaveCreatesVersion:
@@ -55,14 +57,14 @@ class TestSaveCreatesVersion:
                 "/api/workflows",
                 json={
                     "name": name,
-                    "content": VALID_WORKFLOW,
+                    "content": _make_workflow_yaml(name),
                     "description": "First save",
                 },
             )
         assert response.status_code == 200
         data = response.json()["data"]
-        # name in response comes from YAML content, not request.name
-        assert data["name"] == "test-registry"
+        # name in response comes from YAML content (now matches unique name)
+        assert data["name"] == name
         # Version should be set if registry is available
         if data.get("version") is not None:
             assert data["version"] >= 1
@@ -82,7 +84,7 @@ class TestPromotionPipeline:
             # Save a workflow first (creates draft)
             client.post(
                 "/api/workflows",
-                json={"name": name, "content": VALID_WORKFLOW},
+                json={"name": name, "content": _make_workflow_yaml(name)},
             )
 
             # Promote draft -> staging
@@ -104,7 +106,7 @@ class TestPromotionPipeline:
             # Save and promote to staging
             client.post(
                 "/api/workflows",
-                json={"name": name, "content": VALID_WORKFLOW},
+                json={"name": name, "content": _make_workflow_yaml(name)},
             )
             client.post(f"/api/workflows/{name}/promote", json={})
 
@@ -131,7 +133,7 @@ class TestRollback:
             # Save v1 and promote to production
             client.post(
                 "/api/workflows",
-                json={"name": name, "content": VALID_WORKFLOW},
+                json={"name": name, "content": _make_workflow_yaml(name)},
             )
             client.post(f"/api/workflows/{name}/promote", json={})
             client.post(f"/api/workflows/{name}/promote", json={})
@@ -139,7 +141,7 @@ class TestRollback:
             # Save v2 and promote to production (v1 becomes archived)
             client.post(
                 "/api/workflows",
-                json={"name": name, "content": VALID_WORKFLOW_V2},
+                json={"name": name, "content": _make_workflow_yaml(name, v2=True)},
             )
             client.post(f"/api/workflows/{name}/promote", json={})
             client.post(f"/api/workflows/{name}/promote", json={})
@@ -170,7 +172,7 @@ class TestVersionHistory:
                 "/api/workflows",
                 json={
                     "name": name,
-                    "content": VALID_WORKFLOW,
+                    "content": _make_workflow_yaml(name),
                     "description": "v1",
                 },
             )
@@ -178,7 +180,7 @@ class TestVersionHistory:
                 "/api/workflows",
                 json={
                     "name": name,
-                    "content": VALID_WORKFLOW_V2,
+                    "content": _make_workflow_yaml(name, v2=True),
                     "description": "v2",
                 },
             )
@@ -200,7 +202,7 @@ class TestDiskFallback:
 
     def test_disk_workflow_auto_imports(self, tmp_path):
         name = _unique_name("disk")
-        (tmp_path / f"{name}.yaml").write_text(VALID_WORKFLOW)
+        (tmp_path / f"{name}.yaml").write_text(_make_workflow_yaml(name))
 
         with patch("sandcastle.api.routes.settings") as mock_settings:
             mock_settings.workflows_dir = str(tmp_path)
@@ -243,7 +245,7 @@ class TestRunStoresVersion:
             # Save workflow first (creates v1 draft)
             client.post(
                 "/api/workflows",
-                json={"name": name, "content": VALID_WORKFLOW},
+                json={"name": name, "content": _make_workflow_yaml(name)},
             )
             # Promote to production
             client.post(f"/api/workflows/{name}/promote", json={})
