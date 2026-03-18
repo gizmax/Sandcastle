@@ -1082,12 +1082,12 @@ class AuditVerifyResponse(BaseModel):
     broken_at: dict[str, Any] | None = None
 
 
-
 class EmergencyStopResponse(BaseModel):
     """Response after triggering a global emergency stop."""
 
     cancelled_count: int = Field(..., ge=0, description="Number of runs transitioned to CANCELLED")
     active: bool = Field(True, description="Whether the emergency stop flag is now active")
+
 
 
 # Fix forward reference for ApiResponse.meta

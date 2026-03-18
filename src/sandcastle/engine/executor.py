@@ -1006,9 +1006,9 @@ async def execute_step_with_retry(
     )
     await _emit_audit_event(
         "step.started",
-        context.run_id,
-        "system",
-        {"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
+        run_id=context.run_id,
+        actor_id="system",
+        payload={"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
     )
 
     for attempt in range(1, max_attempts + 1):
@@ -1101,6 +1101,12 @@ async def execute_step_with_retry(
                     "duration_seconds": result.duration_seconds,
                 },
             )
+            await _emit_audit_event(
+                "step.completed",
+                run_id=context.run_id,
+                actor_id="system",
+                payload={"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds},
+            )
 
             return result
 
@@ -1165,6 +1171,12 @@ async def execute_step_with_retry(
                     "step_id": step.id,
                     "error": result.error,
                 },
+            )
+            await _emit_audit_event(
+                "step.failed",
+                run_id=context.run_id,
+                actor_id="system",
+                payload={"step_id": step.id, "error": result.error, "attempts": attempt},
             )
 
             return result
@@ -5375,6 +5387,12 @@ async def execute_workflow(
             "workflow": workflow.name,
         },
     )
+    await _emit_audit_event(
+        "run.started",
+        run_id=run_id,
+        actor_id="system",
+        payload={"workflow": workflow.name},
+    )
 
     # Dependency-based scheduler: start steps as soon as deps complete
     all_step_ids = [s.id for s in workflow.steps]
@@ -5525,6 +5543,12 @@ async def execute_workflow(
                 "total_cost_usd": context.total_cost,
             },
         )
+        await _emit_audit_event(
+            "run.completed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "duration_seconds": duration, "total_cost_usd": context.total_cost},
+        )
 
         return WorkflowResult(
             run_id=run_id,
@@ -5556,6 +5580,12 @@ async def execute_workflow(
                 "error": f"Policy blocked: {e}",
             },
         )
+        await _emit_audit_event(
+            "run.failed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "error": f"Policy blocked: {e}", "reason": "policy_blocked"},
+        )
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -5575,6 +5605,12 @@ async def execute_workflow(
                 "workflow": workflow.name,
                 "error": str(e),
             },
+        )
+        await _emit_audit_event(
+            "run.failed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "error": str(e), "reason": "step_execution_error"},
         )
         return WorkflowResult(
             run_id=run_id,
@@ -5596,6 +5632,12 @@ async def execute_workflow(
                 "workflow": workflow.name,
                 "error": str(e),
             },
+        )
+        await _emit_audit_event(
+            "run.failed",
+            run_id=run_id,
+            actor_id="system",
+            payload={"workflow": workflow.name, "error": str(e), "reason": "unexpected_error"},
         )
         return WorkflowResult(
             run_id=run_id,
@@ -5722,6 +5764,12 @@ async def _send_to_dead_letter(
                 "step_name": step_id,
                 "error": error,
             },
+        )
+        await _emit_audit_event(
+            "dlq.created",
+            run_id=run_id,
+            actor_id="system",
+            payload={"step_id": step_id, "error": error, "attempts": attempts},
         )
 
         logger.info(f"Step '{step_id}' sent to dead letter queue")

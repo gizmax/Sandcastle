@@ -91,6 +91,8 @@ from sandcastle.api.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
+    AuditEventResponse,
+    AuditVerifyResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -115,11 +117,13 @@ from sandcastle.models.db import (
     RunStatus,
     Schedule,
     Setting,
+    AuditEvent,
     ToolConnection,
     WorkflowVersion,
     WorkflowVersionStatus,
     async_session,
 )
+from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
 from sandcastle.queue.worker import enqueue_workflow
 
@@ -3138,6 +3142,13 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
 
         await cancel_run_local(run_id)
 
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="run.cancelled", run_id=run_id, actor_id=get_tenant_id(req) or "system", payload={"run_id": run_id}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit run.cancelled failed: %s", _ae)
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
     )
@@ -4107,6 +4118,13 @@ async def resolve_dead_letter(
         item.resolved_by = "manual"
         await session.commit()
 
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="dlq.resolved", run_id=str(item.run_id), actor_id=get_tenant_id(req) or "system", payload={"dlq_item_id": item_id, "resolved_by": "manual"}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit dlq.resolved failed: %s", _ae)
     return ApiResponse(
         data=DeadLetterItemResponse(
             id=str(item.id),
@@ -4652,6 +4670,13 @@ async def _resolve_and_update_approval(
                 run.error = f"Approval rejected at step '{approval.step_id}'"
 
         await session.commit()
+        try:
+            from sandcastle.engine.audit import append_audit_event
+            status_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+            await append_audit_event(session=session, event_type="approval.resolved", run_id=str(approval.run_id) if approval.run_id else None, actor_id=tenant_id or "system", payload={"approval_id": approval_id, "step_id": approval.step_id, "new_status": status_val})
+            await session.commit()
+        except Exception as _ae:
+            logger.warning("Audit approval.resolved failed: %s", _ae)
 
     return approval
 
@@ -5787,6 +5812,15 @@ async def update_settings(
         logging.getLogger().setLevel(getattr(logging, request.log_level.upper()))
 
     logger.info(f"Settings updated: {list(updates.keys())}")
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        _SENSITIVE = frozenset({"anthropic_api_key", "e2b_api_key", "openai_api_key", "minimax_api_key", "openrouter_api_key"})
+        safe_updates = {k: "<redacted>" if k in _SENSITIVE else str(v) for k, v in updates.items()}
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="settings.updated", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"keys_changed": list(safe_updates.keys()), "values": safe_updates}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit settings.updated failed: %s", _ae)
     return ApiResponse(data=_build_settings_response())
 
 
@@ -6037,6 +6071,13 @@ async def promote_workflow(req: Request, name: str, request: WorkflowPromoteRequ
         await session.commit()
 
         new_status = wv.status.value if hasattr(wv.status, "value") else wv.status
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="workflow.promoted", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"workflow_name": name, "to_status": new_status}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit workflow.promoted failed: %s", _ae)
 
     return ApiResponse(
         data={
@@ -7259,8 +7300,6 @@ async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
                 error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
             ).model_dump(),
         )
-
-    from sandcastle.engine.audit import verify_audit_chain
 
     async with async_session() as session:
         valid, chain_length, broken_at = await verify_audit_chain(session, run_id)
