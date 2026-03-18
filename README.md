@@ -1,11 +1,11 @@
 # Sandcastle
 
-**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Pluggable sandbox backends, multi-provider model routing, 55 built-in integrations, and a full-featured dashboard included.
+**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Pluggable sandbox backends, multi-provider model routing, 63 built-in integrations, and a full-featured dashboard included.
 
 [![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-7161%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-8700%2B%20passing-brightgreen?style=flat-square)]()
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -28,15 +28,21 @@
 - [MCP Integration](#mcp-integration)
 - [Features](#features)
 - [Pluggable Sandbox Backends](#pluggable-sandbox-backends)
+- [Browser Step - LightPanda & Browserbase](#browser-step---lightpanda--browserbase)
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
-- [55 Built-in Integrations](#55-built-in-integrations)
+- [63 Built-in Integrations](#63-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
 - [15 Step Types](#15-step-types)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
 - [Policy Engine](#policy-engine)
+- [Privacy Router (PII Redaction)](#privacy-router-pii-redaction)
 - [Cost-Latency Optimizer](#cost-latency-optimizer)
+- [Cost Estimation API](#cost-estimation-api)
+- [EU AI Act Compliance](#eu-ai-act-compliance)
+- [Tamper-Evident Audit Trail](#tamper-evident-audit-trail)
+- [OpenTelemetry](#opentelemetry)
 - [Agent Memory](#agent-memory)
 - [Evaluations](#evaluations)
 - [Directory Input & CSV Export](#directory-input--csv-export)
@@ -95,7 +101,7 @@ You'll need API keys for your chosen setup:
 
 Or use the `docker` backend (needs Docker installed) or `local` backend (dev only, no sandbox isolation) and skip the E2B key.
 
-Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 23 workflow templates included, 55 integrations ready to connect.
+Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 23 workflow templates included, 63 integrations ready to connect.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
@@ -465,7 +471,7 @@ Once connected, ask your AI assistant to:
 |---|---|
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
-| **55 built-in integrations** across 9 categories | Yes |
+| **63 built-in integrations** across 9 categories | Yes |
 | **15 step types** (standard, llm, http, code, race, sensor, gate...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
@@ -496,7 +502,13 @@ Once connected, ask your AI assistant to:
 | **Self-optimizing workflows (AutoPilot)** | Yes |
 | **Hierarchical workflows (workflow-as-step)** | Yes |
 | **Policy engine (PII redaction, secret guard)** | Yes |
+| **Privacy router (PII redaction, 7 patterns)** | Yes |
+| **Pre-run cost estimation** (`POST /runs/estimate`) | Yes |
 | **Cost-latency optimizer (SLO-based routing)** | Yes |
+| **EU AI Act compliance** (risk classification, transparency reports, Annex IV) | Yes |
+| **Tamper-evident audit trail** (SHA-256 hash chain) | Yes |
+| **OpenTelemetry instrumentation** (workflow + step spans) | Yes |
+| **Browser modes** (LightPanda headless, Browserbase cloud) | Yes |
 | **Concurrency control** (rate limiter, semaphores) | Yes |
 | **Agent memory** (semantic search, decay, conflict detection) | Yes |
 | **Evaluations** (test suites, assertions, pass rate tracking) | Yes |
@@ -538,6 +550,32 @@ All backends share the same `SandboxBackend` protocol - same YAML, same API, sam
 
 ---
 
+## Browser Step - LightPanda & Browserbase
+
+The built-in `browser` step type supports three modes for web automation:
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **playwright** (default) | Chromium via Playwright (pre-baked in Dockerfile) | General web automation |
+| **lightpanda** | 10x faster headless browsing via CDP (no Chromium) | High-throughput scraping |
+| **browserbase** | Cloud-hosted browser sessions, zero cold-start | Production scraping, scalable |
+
+```yaml
+steps:
+  - id: "scrape"
+    type: browser
+    browser:
+      mode: lightpanda          # "playwright" | "lightpanda" | "browserbase"
+      url: "https://example.com"
+      actions:
+        - click: "#load-more"
+        - extract: ".results"
+```
+
+For Browserbase, set `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` in your environment. LightPanda requires the `lightpanda` binary on `PATH` or set `LIGHTPANDA_PATH`.
+
+---
+
 ## Multi-Provider Model Routing
 
 Use different AI providers per step. Claude for quality-critical tasks, cheaper models for simple scoring, or mix providers in a single workflow:
@@ -573,25 +611,25 @@ Automatic failover: if a provider returns 429 or 5xx, Sandcastle retries with th
 
 ---
 
-## 55 Built-in Integrations
+## 63 Built-in Integrations
 
 <p align="center">
   <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
 </p>
 
-Sandcastle ships with 55 zero-config tool connectors across 9 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
+Sandcastle ships with 63 zero-config tool connectors across 9 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
 
 | Category | Tools |
 |----------|-------|
 | **Communication** | Slack, Microsoft Teams, Discord, Twilio, SendGrid, Resend, WhatsApp |
 | **Project Management** | Jira, Linear, Notion, Airtable, Google Sheets, Figma |
 | **CRM** | HubSpot, Salesforce, Zendesk, Intercom |
-| **Data** | MongoDB, Snowflake, Supabase, Pinecone, Redis, Database, Google Drive |
+| **Data** | MongoDB, Snowflake, Supabase, Pinecone, Redis, Database, Google Drive, Qdrant, GCS, Azure Blob |
 | **ERP** | SAP, ServiceNow, Helios, ABRA |
 | **Payments** | Stripe, Shopify, QuickBooks, Plaid, DocuSign |
-| **AI** | OpenAI, Anthropic, ElevenLabs |
+| **AI** | OpenAI, Anthropic, ElevenLabs, Langfuse |
 | **DevOps** | GitHub, AWS S3, Vercel, Cloudflare Workers, Datadog, PagerDuty |
-| **General** | Webhook, Zapier, Calendly, Firecrawl, Tavily, MCP Bridge, Human Input, Filesystem, Shell, Python Runtime, Code Interpreter, Browser |
+| **General** | Webhook, Zapier, Calendly, Firecrawl, Tavily, Exa, MCP Bridge, Human Input, Filesystem, Shell, Python Runtime, Code Interpreter, Browser |
 
 ```yaml
 steps:
@@ -886,6 +924,72 @@ Built-in patterns for email, phone, SSN, and credit card numbers. Custom regex p
 
 ---
 
+## Privacy Router (PII Redaction)
+
+The Privacy Router runs automatically on all step inputs and outputs, detecting and redacting sensitive data before it reaches logs, storage, or downstream steps.
+
+**7 built-in PII patterns:** email addresses, phone numbers, SSNs, credit card numbers, IP addresses, IBANs, and dates of birth.
+
+**Two modes:**
+- `redact` - replaces matched values with `[REDACTED]` tokens
+- `audit_only` - logs the detection without modifying the data
+
+Configure per-workflow in YAML or globally via environment variables:
+
+```yaml
+# Per-workflow configuration
+privacy:
+  mode: redact            # "redact" | "audit_only"
+  patterns:               # optional: restrict to specific patterns
+    - email
+    - credit_card
+    - ssn
+  exclude_steps:          # optional: skip privacy check on these steps
+    - internal-analysis
+```
+
+```bash
+# Per-server configuration (env vars)
+PRIVACY_MODE=redact
+PRIVACY_PATTERNS=email,phone,ssn,credit_card,ip,iban,dob
+```
+
+The Privacy Router integrates with the audit trail - every redaction event is logged with run ID, step ID, and matched pattern type (not the matched value).
+
+---
+
+## Cost Estimation API
+
+Estimate the cost of a workflow before running it. The `/runs/estimate` endpoint parses the workflow YAML, resolves model assignments per step (including classify/gate overrides), and returns a per-step and total cost breakdown based on average token usage.
+
+```bash
+curl -X POST http://localhost:8080/api/runs/estimate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "lead-enrichment",
+    "input": { "target_url": "https://example.com" }
+  }'
+```
+
+```json
+{
+  "data": {
+    "valid": true,
+    "validation_errors": [],
+    "estimated_cost_usd": 0.18,
+    "steps": [
+      { "id": "scrape",  "model": "sonnet", "estimated_cost_usd": 0.06 },
+      { "id": "enrich",  "model": "sonnet", "estimated_cost_usd": 0.09 },
+      { "id": "score",   "model": "haiku",  "estimated_cost_usd": 0.03 }
+    ]
+  }
+}
+```
+
+The `valid` field indicates whether the workflow passes validation. Invalid workflows still return an estimate but include a disclaimer that the figure may be unreliable. Falls back to sonnet pricing for unknown models.
+
+---
+
 ## Cost-Latency Optimizer
 
 SLO-based dynamic model routing. Define quality, cost, and latency constraints per step, and Sandcastle automatically selects the best model from a pool based on historical performance data. Budget pressure detection forces cheaper models when spending approaches limits.
@@ -919,6 +1023,119 @@ steps:
 ```
 
 The optimizer scores each model option across multiple objectives, filters out options that violate SLO constraints, and tracks confidence based on sample count. Cold starts default to a balanced middle option until enough data is collected.
+
+---
+
+## EU AI Act Compliance
+
+Sandcastle includes built-in support for EU AI Act requirements. Classify workflows by risk level, enforce compliance policies, generate transparency reports, and produce Annex IV technical documentation.
+
+### Risk Classification
+
+Set `risk_level` in any workflow YAML:
+
+```yaml
+name: "Loan Assessment"
+risk_level: high          # "minimal" | "limited" | "high" | "unacceptable"
+description: "Automated credit scoring workflow."
+steps:
+  - id: "evaluate"
+    prompt: "Evaluate loan application: {input.application}"
+```
+
+Risk level behavior:
+- `unacceptable` - blocked at submission, workflow will not run
+- `high` - requires human approval when `COMPLIANCE_MODE=eu_ai_act` is set
+- `limited` / `minimal` - logged and included in transparency reports, no gate
+
+### Compliance Mode
+
+```bash
+# Enable EU AI Act enforcement in .env
+COMPLIANCE_MODE=eu_ai_act
+```
+
+Check active compliance features:
+
+```bash
+GET /api/compliance/status
+```
+
+### Transparency Reports
+
+Every completed run exposes an Article 13 transparency report:
+
+```bash
+GET /api/runs/{run_id}/transparency-report
+```
+
+Returns: AI models used, human oversight steps, policy violations, risk level, and input prompt log (if `risk_level: high`).
+
+### Annex IV Generator
+
+Generate a technical documentation stub for EU AI Act Annex IV:
+
+```bash
+GET /api/workflows/{workflow_name}/annex-iv
+```
+
+Returns a structured document covering system description, intended purpose, risk level, human oversight measures, and technical characteristics.
+
+### Emergency Stop
+
+Cancel all running and queued workflows globally (e.g. in response to a compliance incident):
+
+```bash
+POST /api/admin/emergency-stop
+```
+
+Sets a Redis/in-memory flag checked by the executor. All active runs are cancelled immediately.
+
+---
+
+## Tamper-Evident Audit Trail
+
+Every significant event in Sandcastle is appended to a tamper-evident audit log. Each entry is chained to the previous using SHA-256 hashes (`entry_hash` covers the event content; `prev_hash` is the hash of the preceding entry), making retroactive modification detectable.
+
+**Hooked events:** workflow submission, step start/complete/fail, approval decisions, admin actions (emergency stop, key rotation, bulk delete), and policy violations.
+
+### Audit Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/audit` | Paginated audit log (filterable by run, event type, date) |
+| `GET` | `/api/runs/{id}/audit` | Audit events for a specific run |
+| `GET` | `/api/audit/verify/{id}` | Verify hash chain integrity for an event |
+
+```bash
+# Verify the hash chain for a run's audit events
+curl http://localhost:8080/api/audit/verify/run_abc123
+# Returns: { "valid": true, "chain_length": 12, "broken_at": null }
+```
+
+---
+
+## OpenTelemetry
+
+Sandcastle emits OTLP traces for every workflow run and step, including cost, token counts, and duration as span attributes.
+
+Install the optional extra:
+
+```bash
+pip install sandcastle-ai[otel]
+```
+
+Configure via environment variables:
+
+```bash
+OTEL_ENABLED=true
+OTEL_ENDPOINT=http://localhost:4318    # OTLP HTTP collector endpoint
+OTEL_SERVICE_NAME=sandcastle           # optional, defaults to "sandcastle"
+```
+
+Each workflow run creates a root span. Each step creates a child span with attributes: `sandcastle.step.id`, `sandcastle.step.model`, `sandcastle.step.cost_usd`, `sandcastle.step.input_tokens`, `sandcastle.step.output_tokens`, `sandcastle.step.duration_ms`.
+
+Compatible with any OTLP-capable backend: Jaeger, Grafana Tempo, Honeycomb, Datadog, etc.
 
 ---
 
@@ -1141,6 +1358,21 @@ Sliding-window rate limiting on expensive endpoints (workflow execution). Per-te
 - **In-memory** (default) - single-process, zero deps
 - **Redis** (auto-detected from `REDIS_URL`) - distributed, uses sorted sets with atomic check+increment
 
+### Secret Scrubber
+
+Step outputs and log messages are automatically scrubbed for leaked credentials before storage. The scrubber catches:
+- Credential URLs (`postgres://user:pass@host`, `redis://:pass@host`)
+- PEM private key blocks (RSA, EC, DSA, ENCRYPTED)
+- Azure `AccountKey=` values
+- Compound env-style secrets (`aws_secret_access_key=...`)
+- JSON-quoted secrets (`"password": "value"`)
+
+The scrubber is idempotent (double-scrubbing produces the same output) and uses a two-layer defense: PEM regex runs first, then token-based regex.
+
+### Privacy Router
+
+The Privacy Router (see [Privacy Router (PII Redaction)](#privacy-router-pii-redaction)) provides a second layer of output sanitization, detecting and redacting PII (emails, phones, SSNs, credit cards, IPs, IBANs, dates of birth) across all step outputs. Configurable per-workflow or globally.
+
 ### Docker Sandbox Hardening
 
 When using the Docker backend, every container runs with:
@@ -1259,7 +1491,7 @@ Visual drag-and-drop editor for building workflows. Add steps, connect dependenc
 
 ### Integrations
 
-55 tool connectors across 9 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
+63 tool connectors across 9 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
 
 <p align="center">
   <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
@@ -1416,6 +1648,9 @@ First-run guided setup that walks new users through API key configuration, sandb
 | `POST` | `/api/runs/{id}/cancel` | Cancel a running workflow |
 | `POST` | `/api/runs/{id}/replay` | Replay from a specific step |
 | `POST` | `/api/runs/{id}/fork` | Fork from a step with overrides |
+| `POST` | `/api/runs/estimate` | Pre-run cost estimation with per-step breakdown |
+| `GET` | `/api/runs/{id}/audit` | Audit events for a specific run |
+| `GET` | `/api/runs/{id}/transparency-report` | EU AI Act Article 13 transparency report |
 
 ### Schedules
 
@@ -1496,6 +1731,21 @@ First-run guided setup that walks new users through API key configuration, sandb
 | `DELETE` | `/api/api-keys/{id}` | Deactivate key |
 | `POST` | `/api/api-keys/{id}/rotate` | Rotate key with grace period |
 | `PUT` | `/api/api-keys/{id}/allowlist` | Set IP allowlist (CIDR notation) |
+
+### Audit Trail
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/audit` | Paginated audit log (filterable by run, type, date) |
+| `GET` | `/api/audit/verify/{id}` | Verify SHA-256 hash chain integrity for an event |
+
+### Compliance (EU AI Act)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/compliance/status` | Active compliance features and mode |
+| `GET` | `/api/workflows/{name}/annex-iv` | Generate Annex IV technical documentation stub |
+| `POST` | `/api/admin/emergency-stop` | Cancel all running/queued workflows globally |
 
 ### Templates
 
@@ -1592,7 +1842,7 @@ flowchart TD
     CF --> Execution
     E2B2 --> Merge
 
-    Execution["Parallel Execution\n55 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
+    Execution["Parallel Execution\n63 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
 
     Provider --> Gate{"Approval\nGate?"}
 
@@ -1626,7 +1876,7 @@ flowchart TD
 | Storage | Local filesystem | S3 / MinIO |
 | Agent Runtime | Sandshore (E2B / Docker / Local / Cloudflare) | Sandshore (E2B / Docker / Local / Cloudflare) |
 | Model Providers | Claude, OpenAI, MiniMax, Google/Gemini | Claude, OpenAI, MiniMax, Google/Gemini |
-| Integrations | 55 tools, 9 categories | 55 tools, 9 categories |
+| Integrations | 63 tools, 9 categories | 63 tools, 9 categories |
 | Security | Fernet encryption, HMAC auth, rate limiting | + Redis rate limiting, seccomp, IP allowlists |
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react | @xyflow/react |
@@ -1705,6 +1955,21 @@ MEMORY_GRAPH_ENABLED=false     # Enable Neo4j graph backend
 # License
 LICENSE_KEY=                   # sc_lic_... (community tier if empty)
 
+# EU AI Act / Compliance
+COMPLIANCE_MODE=               # "eu_ai_act" to enable enforcement
+PRIVACY_MODE=redact            # "redact" | "audit_only" (default: off)
+PRIVACY_PATTERNS=email,phone,ssn,credit_card,ip,iban,dob
+
+# OpenTelemetry (requires pip install sandcastle-ai[otel])
+OTEL_ENABLED=false
+OTEL_ENDPOINT=http://localhost:4318
+OTEL_SERVICE_NAME=sandcastle
+
+# Browser step modes
+# BROWSERBASE_API_KEY=...
+# BROWSERBASE_PROJECT_ID=...
+# LIGHTPANDA_PATH=lightpanda    # path to lightpanda binary
+
 # Dashboard
 SANDBOX_ROOT=             # restrict browse + CSV export to this directory
 DASHBOARD_ORIGIN=http://localhost:5173
@@ -1717,7 +1982,7 @@ LOG_LEVEL=info
 ## Development
 
 ```bash
-# Run tests (7161 passing)
+# Run tests (8700+ passing)
 uv run pytest
 
 # Type check backend
