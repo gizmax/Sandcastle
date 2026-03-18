@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
+import {
+  Castle, Play, CheckCircle2, ArrowRight, Activity,
+  DollarSign, CheckCircle, AlertTriangle, TrendingUp,
+} from "lucide-react";
 import { api } from "@/api/client";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
-import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCost, formatRelativeTime } from "@/lib/utils";
 import type { Insight, Severity } from "@/lib/insights";
@@ -76,56 +78,69 @@ function generateMockSparklines(): Record<string, SparklineData> {
 }
 
 // ---------------------------------------------------------------------------
-// Greeting helper
-// ---------------------------------------------------------------------------
-
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return "Good morning.";
-  if (hour < 17) return "Good afternoon.";
-  return "Good evening.";
-}
-
-// ---------------------------------------------------------------------------
-// Insight dot colors
+// Insight severity dot colors - light theme
 // ---------------------------------------------------------------------------
 
 const SEVERITY_DOT: Record<Severity, string> = {
-  critical: "bg-rose-500",
+  critical: "bg-red-500",
   warning: "bg-amber-400",
-  optimize: "bg-teal-500",
+  optimize: "bg-[#C8FF00]",
   discover: "bg-violet-400",
 };
 
 // ---------------------------------------------------------------------------
-// Stat pill
+// Trend indicator
 // ---------------------------------------------------------------------------
 
-interface StatPillProps {
-  label: string;
-  value: string;
-  trend?: number;
-  positiveIsGood?: boolean;
-  separator?: boolean;
+function TrendPill({ percent, positiveIsGood }: { percent: number; positiveIsGood: boolean }) {
+  if (!Number.isFinite(percent) || Math.abs(percent) < 0.5) return null;
+  const isUp = percent > 0;
+  const isGood = positiveIsGood ? isUp : !isUp;
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+      isGood ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500"
+    )}>
+      {isUp ? "+" : ""}{Math.abs(percent).toFixed(1)}%
+    </span>
+  );
 }
 
-function StatPill({ label, value, trend, positiveIsGood = true, separator = false }: StatPillProps) {
-  const showTrend = trend !== undefined && Number.isFinite(trend) && Math.abs(trend) >= 0.5;
-  const isUp = (trend ?? 0) > 0;
-  const isGood = showTrend ? (positiveIsGood ? isUp : !isUp) : null;
+// ---------------------------------------------------------------------------
+// Focus stat card
+// ---------------------------------------------------------------------------
 
+interface FocusStatCardProps {
+  label: string;
+  value: string;
+  icon: React.ElementType;
+  iconBg: string;
+  iconColor: string;
+  trend?: number;
+  positiveIsGood?: boolean;
+}
+
+function FocusStatCard({
+  label, value, icon: Icon, iconBg, iconColor, trend, positiveIsGood = true,
+}: FocusStatCardProps) {
   return (
-    <div className={cn("flex items-center gap-2", separator && "pl-4 border-l border-stone-200")}>
-      <span className="text-sm font-semibold text-stone-800">{value}</span>
-      {showTrend && (
-        <span className={cn(
-          "text-xs font-medium",
-          isGood ? "text-emerald-600" : "text-rose-500"
-        )}>
-          {isUp ? "+" : ""}{Math.abs(trend ?? 0).toFixed(0)}%
-        </span>
-      )}
-      <span className="text-sm text-stone-400">{label}</span>
+    <div className={cn(
+      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
+      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "p-5 flex flex-col gap-3"
+    )}>
+      <div className="flex items-start justify-between">
+        <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center", iconBg)}>
+          <Icon className={cn("h-4 w-4 shrink-0", iconColor)} />
+        </div>
+        {trend !== undefined && (
+          <TrendPill percent={trend} positiveIsGood={positiveIsGood} />
+        )}
+      </div>
+      <div>
+        <p className="text-xs font-medium text-[#9ca3af] uppercase tracking-wider mb-1">{label}</p>
+        <p className="text-3xl font-bold text-[#1a1a1a] tracking-tight leading-none">{value}</p>
+      </div>
     </div>
   );
 }
@@ -139,85 +154,115 @@ interface CostBarProps {
   projected: number;
 }
 
-function CostProgressBar({ spent, projected }: CostBarProps) {
+function LimeCostBar({ spent, projected }: CostBarProps) {
   const pct = projected > 0 ? Math.min((spent / projected) * 100, 100) : 0;
-  const isOverHalf = pct > 50;
   const isNearBudget = pct > 80;
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-xs text-stone-500">
-        <span className="font-medium text-stone-700">{formatCost(spent)} spent</span>
-        <span>{formatCost(projected)} projected</span>
+    <div className={cn(
+      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
+      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "p-5"
+    )}>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-50">
+          <TrendingUp className="h-3.5 w-3.5 text-[#8B5CF6]" />
+        </div>
+        <p className="text-sm font-semibold text-[#1a1a1a]">Monthly Cost</p>
       </div>
-      <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+      <div className="flex items-center justify-between text-xs text-[#6b7280] mb-2">
+        <span className="font-semibold text-[#1a1a1a]">{formatCost(spent)} spent</span>
+        <span>Projected: {formatCost(projected)}</span>
+      </div>
+      <div className="h-2 bg-[#f0f0f2] rounded-full overflow-hidden">
         <div
           className={cn(
             "h-full rounded-full transition-all duration-700",
-            isNearBudget ? "bg-amber-400" : isOverHalf ? "bg-teal-500" : "bg-teal-400"
+            isNearBudget ? "bg-amber-400" : "bg-[#C8FF00]"
           )}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="flex items-center justify-between text-[11px] text-stone-400">
-        <span>This month</span>
-        <span>{pct.toFixed(0)}% of projected</span>
+      <p className="mt-1.5 text-[11px] text-[#9ca3af] text-right">{pct.toFixed(0)}% of projected</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recent activity - minimal light rows
+// ---------------------------------------------------------------------------
+
+function FocusRecentRuns({ runs }: { runs: RunItem[] }) {
+  const navigate = useNavigate();
+
+  if (runs.length === 0) return null;
+
+  const statusStyle = (status: string) => {
+    switch (status) {
+      case "completed": return "bg-[#C8FF00]/20 text-[#4a7c00]";
+      case "failed": return "bg-red-50 text-red-600";
+      case "running": return "bg-blue-50 text-blue-600";
+      default: return "bg-gray-100 text-[#6b7280]";
+    }
+  };
+
+  const statusIcon = (status: string) => {
+    switch (status) {
+      case "completed": return <CheckCircle className="h-3.5 w-3.5 text-[#4a7c00]" />;
+      case "failed": return <AlertTriangle className="h-3.5 w-3.5 text-red-500" />;
+      default: return <Activity className="h-3.5 w-3.5 text-blue-500" />;
+    }
+  };
+
+  return (
+    <div className={cn(
+      "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
+      "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "overflow-hidden"
+    )}>
+      <div className="flex items-center justify-between px-5 py-4 border-b border-black/[0.04]">
+        <p className="text-sm font-semibold text-[#1a1a1a]">Recent Activity</p>
+        <Link
+          to="/runs"
+          className="text-xs font-medium text-[#818CF8] hover:text-[#6366f1] transition-colors"
+        >
+          View all
+        </Link>
+      </div>
+      <div className="divide-y divide-black/[0.04]">
+        {runs.slice(0, 5).map((run) => (
+          <button
+            key={run.run_id}
+            onClick={() => navigate(`/runs/${run.run_id}`)}
+            className="flex w-full items-center gap-3 px-5 py-3.5 text-left hover:bg-[#f5f5f7] transition-colors duration-150"
+          >
+            <div className="shrink-0">
+              {statusIcon(run.status)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-[#1a1a1a]">{run.workflow_name}</p>
+              <p className="text-xs text-[#9ca3af] mt-0.5">
+                {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
+              </p>
+            </div>
+            <span className="text-xs font-mono text-[#6b7280] shrink-0">
+              {formatCost(run.total_cost_usd)}
+            </span>
+            <span className={cn(
+              "text-[10px] font-semibold rounded-full px-2 py-0.5 shrink-0 capitalize",
+              statusStyle(run.status)
+            )}>
+              {run.status}
+            </span>
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Minimal runs table
-// ---------------------------------------------------------------------------
-
-function MinimalRunsTable({ runs }: { runs: RunItem[] }) {
-  const navigate = useNavigate();
-
-  if (runs.length === 0) return null;
-
-  return (
-    <div className="space-y-0">
-      {runs.slice(0, 6).map((run, i) => (
-        <button
-          key={run.run_id}
-          onClick={() => navigate(`/runs/${run.run_id}`)}
-          className={cn(
-            "flex w-full items-center gap-3 py-3 text-left",
-            "transition-colors duration-100 hover:bg-stone-50/80 -mx-2 px-2 rounded-lg",
-            i < runs.length - 1 && "border-b border-stone-100"
-          )}
-        >
-          <RunStatusBadge status={run.status} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-stone-700">{run.workflow_name}</p>
-          </div>
-          <span className="text-xs text-stone-400 shrink-0 font-mono">
-            {formatCost(run.total_cost_usd)}
-          </span>
-          <span className="text-xs text-stone-400 shrink-0">
-            {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Section label
-// ---------------------------------------------------------------------------
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400 mb-3">
-      {children}
-    </p>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// OverviewFocus page
+// OverviewFocus page - Apple-style light theme
 // ---------------------------------------------------------------------------
 
 export default function OverviewFocus({
@@ -241,7 +286,7 @@ export default function OverviewFocus({
         setError(null);
         const [statsRes, runsRes] = await Promise.all([
           api.get<Stats>("/stats"),
-          api.get<RunItem[]>("/runs", { limit: "6" }),
+          api.get<RunItem[]>("/runs", { limit: "5" }),
         ]);
         if (cancelled) return;
         if (statsRes.data) setStats(statsRes.data);
@@ -257,22 +302,22 @@ export default function OverviewFocus({
     return () => { cancelled = true; };
   }, [retryCount]);
 
-  const pageClass = "min-h-full bg-gradient-to-br from-slate-50 to-stone-100 -m-4 sm:-m-6 p-4 sm:p-6";
+  const pageClass = "min-h-screen bg-[#f5f5f7] -m-4 sm:-m-6 p-4 sm:p-6";
 
   if (loading) {
     return (
       <div className={pageClass}>
-        <div className="max-w-2xl mx-auto space-y-6 pt-4">
-          <div className="flex items-center justify-between">
-            <Skeleton className="h-9 w-48 rounded-xl" />
-            <Skeleton className="h-8 w-28 rounded-lg" />
+        <div className="max-w-3xl mx-auto space-y-4 pt-4">
+          <div className="flex items-center justify-end">
+            <Skeleton className="h-8 w-28 rounded-xl bg-black/[0.04]" />
           </div>
-          <Skeleton className="h-7 w-72 rounded-lg mx-auto" />
-          <Skeleton className="h-6 w-64 rounded-lg mx-auto" />
-          <Skeleton className="h-4 w-full rounded-full" />
-          <div className="space-y-2">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+          <Skeleton className="h-44 rounded-3xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />
+          <div className="grid grid-cols-3 gap-4">
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-28 rounded-2xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />)}
           </div>
+          <Skeleton className="h-32 rounded-2xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />
+          <Skeleton className="h-10 rounded-2xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />
+          {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-14 rounded-xl bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]" />)}
         </div>
       </div>
     );
@@ -281,12 +326,12 @@ export default function OverviewFocus({
   if (error) {
     return (
       <div className={pageClass}>
-        <div className="max-w-2xl mx-auto pt-8">
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5">
-            <p className="text-sm text-rose-600">{error}</p>
+        <div className="max-w-3xl mx-auto pt-8">
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+            <p className="text-sm text-red-600">{error}</p>
             <button
               onClick={() => { setLoading(true); setRetryCount((c) => c + 1); }}
-              className="mt-2 text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors"
+              className="mt-2 text-xs font-semibold text-[#4a7c00] hover:text-[#3a6000] transition-colors"
             >
               Retry
             </button>
@@ -300,131 +345,166 @@ export default function OverviewFocus({
   const successRate = stats ? Math.round(stats.success_rate * 100) : 0;
   const totalCost = stats?.total_cost_today ?? 0;
 
-  // Advisor insights - actionable only
-  const actionableInsights = advisor.activeInsights.filter((i) => i.severity !== "discover");
+  // Hero message based on score
+  const heroTitle = advisor.score >= 80
+    ? "All systems running smoothly"
+    : advisor.score >= 50
+    ? "A few things need attention"
+    : "Several issues require action";
 
-  // Projected monthly cost (approximate from avg daily rate * 30)
+  // Projected monthly cost
   const historicalDays = stats?.runs_by_day ?? [];
   const avgDailyCost = historicalDays.length > 0
-    ? historicalDays.reduce((s, _) => {
-        // We don't have per-day cost in runs_by_day, so derive from total_cost_today
-        return s;
-      }, totalCost) / Math.max(historicalDays.length, 1)
+    ? totalCost / Math.max(historicalDays.length, 1)
     : totalCost;
   const projectedMonthly = avgDailyCost * 30;
 
+  // Actionable insights
+  const actionableInsights = advisor.activeInsights.filter((i) => i.severity !== "discover");
+
   return (
     <div className={pageClass}>
-      <div className="max-w-2xl mx-auto">
-        {/* Header with switcher */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="w-8" /> {/* spacer */}
-          <div className="text-center">
-            {/* Intentionally empty - greeting below is the "header" */}
-          </div>
+      <div className="max-w-3xl mx-auto">
+        {/* Switcher - top right */}
+        <div className="flex items-center justify-end mb-5">
           <LayoutSwitcher layout={layout} setLayout={setLayout} />
         </div>
 
-        {/* Greeting + score */}
-        <div className="text-center mb-6">
-          <p className="text-2xl font-bold text-stone-800 mb-1">
-            {getGreeting()}{" "}
-            {stats && (
-              <span className="text-stone-500 font-normal">
-                {totalRuns} workflow{totalRuns !== 1 ? "s" : ""} ran today.
-              </span>
-            )}
-          </p>
-          {!advisor.loading && (
-            <div className="flex items-center justify-center gap-2 mt-2">
-              <span className="text-4xl font-bold text-stone-800">{advisor.score}</span>
-              <span className={cn(
-                "text-sm font-semibold",
-                advisor.score >= 80 ? "text-emerald-600" : advisor.score >= 50 ? "text-amber-500" : "text-rose-500"
-              )}>
-                {advisor.score >= 80 ? "healthy" : advisor.score >= 50 ? "needs attention" : "critical"}
-              </span>
-            </div>
+        {/* Section 1: Greeting Hero */}
+        <div className={cn(
+          "bg-white rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
+          "p-8 sm:p-10 text-center mb-5"
+        )}>
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#C8FF00] mb-4">
+            <Castle className="h-8 w-8 text-[#1a1a1a]" />
+          </div>
+          {advisor.loading ? (
+            <>
+              <Skeleton className="h-8 w-72 rounded-xl mx-auto mb-2 bg-black/[0.04]" />
+              <Skeleton className="h-5 w-56 rounded-lg mx-auto bg-black/[0.04]" />
+            </>
+          ) : (
+            <>
+              <h1 className="text-2xl sm:text-3xl font-bold text-[#1a1a1a] tracking-tight">
+                {heroTitle}
+              </h1>
+              <p className="mt-2 text-base text-[#6b7280]">
+                {stats
+                  ? `${totalRuns} workflow${totalRuns !== 1 ? "s" : ""} completed today with ${successRate}% success rate`
+                  : "Loading statistics..."}
+              </p>
+              <div className="mt-5 inline-flex items-center gap-2 bg-[#C8FF00]/15 rounded-full px-4 py-1.5">
+                {advisor.score >= 80 ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#4a7c00]" />
+                ) : (
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                )}
+                <span className="text-sm font-medium text-[#4a7c00]">
+                  Health Score: {advisor.score}
+                </span>
+              </div>
+            </>
           )}
         </div>
 
-        {/* Stat pills - centered horizontal */}
+        {/* Section 2: Stats Row */}
         {stats && (
-          <div className="flex items-center justify-center gap-0 mb-8 flex-wrap gap-y-2">
-            <StatPill
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-5">
+            <FocusStatCard
+              label="Runs Today"
               value={String(totalRuns)}
-              label="runs"
+              icon={Activity}
+              iconBg="bg-[#C8FF00]/20"
+              iconColor="text-[#4a7c00]"
               trend={mockSparklines.runs?.trendPercent}
               positiveIsGood={true}
             />
-            <StatPill
+            <FocusStatCard
+              label="Success Rate"
               value={`${successRate}%`}
-              label="success"
+              icon={CheckCircle}
+              iconBg="bg-emerald-50"
+              iconColor="text-emerald-600"
               trend={mockSparklines.rate?.trendPercent}
               positiveIsGood={true}
-              separator={true}
             />
-            <StatPill
+            <FocusStatCard
+              label="Cost Today"
               value={formatCost(totalCost)}
-              label="cost"
+              icon={DollarSign}
+              iconBg="bg-violet-50"
+              iconColor="text-[#8B5CF6]"
               trend={mockSparklines.cost?.trendPercent}
               positiveIsGood={false}
-              separator={true}
             />
           </div>
         )}
 
-        {/* Insights as plain text list */}
-        {actionableInsights.length > 0 && (
-          <div className="mb-8">
-            <SectionLabel>Needs attention</SectionLabel>
-            <div className="space-y-2">
+        {/* Section 3: Insights (only if any) */}
+        {!advisor.loading && actionableInsights.length > 0 && (
+          <div className={cn(
+            "bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-black/[0.04]",
+            "hover:shadow-[0_4px_20px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "overflow-hidden mb-5"
+          )}>
+            <div className="px-5 py-4 border-b border-black/[0.04] flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              <p className="text-sm font-semibold text-[#1a1a1a]">
+                {actionableInsights.length} item{actionableInsights.length > 1 ? "s" : ""} need attention
+              </p>
+            </div>
+            <div className="divide-y divide-black/[0.04]">
               {actionableInsights.slice(0, 6).map((insight: Insight) => (
                 <Link
                   key={insight.id}
                   to={insight.link}
-                  className={cn(
-                    "flex items-start gap-3 py-2 group",
-                    "hover:bg-stone-100/60 -mx-3 px-3 rounded-xl transition-colors duration-150"
-                  )}
+                  className="flex items-center gap-3 px-5 py-3.5 hover:bg-[#f5f5f7] transition-colors duration-150 group"
                 >
-                  <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", SEVERITY_DOT[insight.severity])} />
-                  <span className="flex-1 text-sm text-stone-600 group-hover:text-stone-800 transition-colors">
+                  <span className={cn("h-2 w-2 shrink-0 rounded-full", SEVERITY_DOT[insight.severity])} />
+                  <span className="flex-1 text-sm text-[#6b7280] group-hover:text-[#1a1a1a] transition-colors truncate">
                     {insight.title}
                   </span>
-                  <ExternalLink className="h-3 w-3 mt-1 text-stone-300 group-hover:text-stone-400 shrink-0 transition-colors" />
+                  <ArrowRight className="h-3.5 w-3.5 text-[#9ca3af] shrink-0 group-hover:text-[#6b7280] transition-colors" />
                 </Link>
               ))}
               {actionableInsights.length > 6 && (
-                <p className="text-xs text-stone-400 pl-4">+{actionableInsights.length - 6} more items</p>
+                <p className="px-5 py-3 text-xs text-[#9ca3af]">
+                  +{actionableInsights.length - 6} more items
+                </p>
               )}
             </div>
           </div>
         )}
 
-        {/* Cost progress bar */}
+        {/* Section 4: Cost Bar */}
         {stats && projectedMonthly > 0 && (
-          <div className="mb-8">
-            <SectionLabel>Monthly cost</SectionLabel>
-            <CostProgressBar spent={totalCost} projected={projectedMonthly} />
+          <div className="mb-5">
+            <LimeCostBar spent={totalCost} projected={projectedMonthly} />
           </div>
         )}
 
-        {/* Recent runs - minimal table */}
+        {/* Section 5: Recent Activity */}
         {recentRuns.length > 0 && (
           <div className="mb-6">
-            <div className="flex items-center justify-between mb-1">
-              <SectionLabel>Recent runs</SectionLabel>
-              <Link
-                to="/runs"
-                className="text-xs text-teal-600 hover:text-teal-700 font-medium mb-3 inline-block transition-colors"
-              >
-                View all
-              </Link>
-            </div>
-            <MinimalRunsTable runs={recentRuns} />
+            <FocusRecentRuns runs={recentRuns} />
           </div>
         )}
+
+        {/* Section 6: Quick Action CTA */}
+        <div className="flex justify-center pb-4">
+          <button
+            onClick={() => { window.location.href = "/workflows"; }}
+            className={cn(
+              "bg-[#C8FF00] text-[#1a1a1a] font-semibold rounded-xl px-6 py-3",
+              "shadow-[0_2px_8px_rgba(200,255,0,0.3)]",
+              "hover:bg-[#d4ff33] transition-all duration-200 active:scale-[0.98]",
+              "flex items-center gap-2"
+            )}
+          >
+            <Play className="h-4 w-4" />
+            Run a Workflow
+          </button>
+        </div>
       </div>
     </div>
   );
