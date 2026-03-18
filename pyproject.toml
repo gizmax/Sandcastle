@@ -80,10 +80,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gizmax/Sandcastle"
+Homepage = "https://sandcastle-ai.eu"
 Repository = "https://github.com/gizmax/Sandcastle"
 Documentation = "https://github.com/gizmax/Sandcastle/blob/main/README.md"
 Issues = "https://github.com/gizmax/Sandcastle/issues"
+"Live Demo" = "https://gizmax.github.io/Sandcastle/"
+Changelog = "https://github.com/gizmax/Sandcastle/blob/main/CHANGELOG.md"
 Dashboard = "https://gizmax.github.io/Sandcastle/"
 
 [project.scripts]

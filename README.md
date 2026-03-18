@@ -6,6 +6,8 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-8700%2B%20passing-brightgreen?style=flat-square)]()
+[![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)]()
+[![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
 <p align="center">
@@ -1228,7 +1230,7 @@ Works with any output shape - dicts become columns, lists of dicts become rows, 
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
 </p>
 
-Sandcastle ships with 23 built-in workflow templates. The [Community Hub](https://gizmax.cz/sandcastle/hub) adds 118 more from the community - curated collections for marketing, sales, DevOps, and more.
+Sandcastle ships with 23 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) adds 118 more from the community - curated collections for marketing, sales, DevOps, and more.
 
 | Category | Built-in Templates |
 |----------|-----------|
