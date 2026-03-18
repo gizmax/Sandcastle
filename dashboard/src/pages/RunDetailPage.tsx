@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, FileText, ChevronRight } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
 import { toast } from "sonner";
@@ -774,59 +774,13 @@ export default function RunDetailPage() {
             />
           </button>
           {transparencyReportExpanded && (
-            <div className="border-t border-border px-5 py-4 space-y-4">
+            <div className="border-t border-border px-5 py-4">
               {loadingReport ? (
                 <p className="text-sm text-muted">Loading transparency report...</p>
               ) : transparencyReport ? (
-                <>
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileText className="h-4 w-4 text-accent" />
-                    <span className="text-sm font-medium text-foreground">Transparency Report</span>
-                    <span className="text-xs font-mono text-muted">{String(transparencyReport.report_version || "")}</span>
-                  </div>
-                  {transparencyReport.eu_ai_act && typeof transparencyReport.eu_ai_act === "object" && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {Object.entries(transparencyReport.eu_ai_act as Record<string, unknown>).map(([key, val]) => (
-                        <div key={key}>
-                          <p className="text-xs font-medium text-muted-foreground capitalize mb-0.5">
-                            {key.replace(/_/g, " ")}
-                          </p>
-                          <p className="text-sm font-mono text-foreground">
-                            {Array.isArray(val) ? val.join(", ") : typeof val === "object" && val !== null ? JSON.stringify(val) : String(val ?? "")}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {typeof transparencyReport.system_description === "string" && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-1">System Description</p>
-                      <p className="text-sm text-foreground">{transparencyReport.system_description}</p>
-                    </div>
-                  )}
-                  {Array.isArray(transparencyReport.model_usage) && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2">Model Usage</p>
-                      <div className="space-y-1.5">
-                        {(transparencyReport.model_usage as Array<Record<string, unknown>>).map((usage, i) => (
-                          <div key={i} className="flex items-center gap-3 rounded-lg bg-background border border-border/50 px-3 py-2">
-                            <span className="font-mono text-xs text-muted-foreground min-w-[80px]">{String(usage.step_id)}</span>
-                            <span className="text-xs text-foreground flex-1">{String(usage.model)}</span>
-                            <span className="text-xs text-muted font-mono">${Number(usage.cost_usd).toFixed(2)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {typeof transparencyReport.audit_trail_hash === "string" && (
-                    <div className="flex items-center gap-2 rounded-lg bg-background border border-border/50 px-3 py-2">
-                      <Shield className="h-3.5 w-3.5 text-success shrink-0" />
-                      <span className="font-mono text-xs text-muted truncate">
-                        {transparencyReport.audit_trail_hash}
-                      </span>
-                    </div>
-                  )}
-                </>
+                <pre className="max-h-96 overflow-auto rounded-lg bg-background p-4 font-mono text-xs text-foreground whitespace-pre-wrap">
+                  {JSON.stringify(transparencyReport, null, 2)}
+                </pre>
               ) : (
                 <p className="text-sm text-muted">No transparency report available</p>
               )}
