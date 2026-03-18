@@ -1704,6 +1704,10 @@
           <div class="stat-label">Tests Passing</div>
         </div>
         <div class="stat-item">
+          <div class="stat-number">63</div>
+          <div class="stat-label">Integrations</div>
+        </div>
+        <div class="stat-item">
           <div class="stat-number">236</div>
           <div class="stat-label">Templates</div>
         </div>
@@ -1714,6 +1718,10 @@
         <div class="stat-item">
           <div class="stat-number">4</div>
           <div class="stat-label">Backends</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number" style="font-size: clamp(18px, 3vw, 28px); color: #10b981;">EU AI Act</div>
+          <div class="stat-label">Ready</div>
         </div>
       </div>
       <div class="badges-row">
@@ -1939,8 +1947,8 @@
           <div class="tab-grid">
             <div class="feature-card">
               <span class="feature-icon">🔧</span>
-              <h3>58 Tool Connectors</h3>
-              <p>Slack, GitHub, OpenAI, Anthropic, AWS S3, Google Sheets, Airtable, Discord, Supabase, Pinecone, Stripe, Shopify, PagerDuty, Datadog, and 44 more. Add <code>tools: [slack]</code> to any step.</p>
+              <h3>63 Tool Connectors</h3>
+              <p>Slack, GitHub, OpenAI, Anthropic, AWS S3, Google Sheets, Airtable, Discord, Supabase, Pinecone, Stripe, Shopify, PagerDuty, Datadog, Langfuse, Qdrant, GCS, Azure Blob, Exa, and 44 more. Add <code>tools: [slack]</code> to any step.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🤝</span>
@@ -1970,7 +1978,7 @@
             <div class="feature-card">
               <span class="feature-icon">🌐</span>
               <h3>Browser RPA</h3>
-              <p>Three modes: Playwright (selector-based), Computer Use (vision AI), DOM Extract (accessibility tree). Action caching, CAPTCHA escalation, execution replay.</p>
+              <p>Five modes: Playwright (selector-based), Computer Use (vision AI), DOM Extract (accessibility tree), LightPanda (10x faster headless via CDP), Browserbase (cloud-hosted, zero cold-start). Action caching, CAPTCHA escalation, execution replay.</p>
             </div>
             <div class="feature-card">
               <span class="feature-icon">🧠</span>
@@ -2017,6 +2025,11 @@
               <span class="feature-icon">🏪</span>
               <h3>Community Hub</h3>
               <p>Browse, install, and share workflow templates. One-click install from the dashboard or <code>sandcastle hub install author/name</code> from CLI.</p>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📡</span>
+              <h3>OpenTelemetry</h3>
+              <p>Optional OTLP instrumentation with workflow and step-level spans. Includes cost, duration, and token counts as span attributes. Install with <code>pip install sandcastle-ai[otel]</code>.</p>
             </div>
           </div>
         </div>
@@ -2267,6 +2280,67 @@
     </div>
   </section>
 
+  <!-- Enterprise Trust -->
+  <section class="enterprise-section" style="border-top: 1px solid var(--border);">
+    <div class="container fade-in">
+      <span class="section-label">Enterprise Trust</span>
+      <h2 class="section-title">Enterprise-Ready Compliance</h2>
+      <p class="section-subtitle">Built-in EU AI Act compliance, tamper-evident audit trail, and PII redaction - so you can deploy AI in regulated industries.</p>
+
+      <div class="enterprise-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 48px;">
+
+        <!-- EU AI Act Compliance -->
+        <div class="enterprise-card" style="padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; position: relative; overflow: hidden;">
+          <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #10b981, #34d399);"></div>
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(16, 185, 129, 0.12); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">🛡️</div>
+            <h3 style="font-size: 17px; font-weight: 700; color: var(--text);">EU AI Act Compliance</h3>
+          </div>
+          <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px;">
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #10b981; font-weight: 700; flex-shrink: 0;">&#10003;</span>Risk classification: minimal / limited / high / unacceptable</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #10b981; font-weight: 700; flex-shrink: 0;">&#10003;</span>Compliance mode enforcement for high-risk workflows</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #10b981; font-weight: 700; flex-shrink: 0;">&#10003;</span>Transparency reports (Article 13)</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #10b981; font-weight: 700; flex-shrink: 0;">&#10003;</span>Annex IV technical documentation generator</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #10b981; font-weight: 700; flex-shrink: 0;">&#10003;</span>Emergency stop for high-risk workflows</li>
+          </ul>
+        </div>
+
+        <!-- Tamper-Evident Audit Trail -->
+        <div class="enterprise-card" style="padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; position: relative; overflow: hidden;">
+          <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #6366f1, #818cf8);"></div>
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(99, 102, 241, 0.12); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">🔒</div>
+            <h3 style="font-size: 17px; font-weight: 700; color: var(--text);">Tamper-Evident Audit Trail</h3>
+          </div>
+          <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px;">
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #6366f1; font-weight: 700; flex-shrink: 0;">&#10003;</span>SHA-256 hash chain on all audit events</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #6366f1; font-weight: 700; flex-shrink: 0;">&#10003;</span>Full lifecycle tracking across 7 executor events</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #6366f1; font-weight: 700; flex-shrink: 0;">&#10003;</span>Chain integrity verification endpoint</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #6366f1; font-weight: 700; flex-shrink: 0;">&#10003;</span>Per-run and global audit trail APIs</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: #6366f1; font-weight: 700; flex-shrink: 0;">&#10003;</span>Admin route actions fully logged</li>
+          </ul>
+        </div>
+
+        <!-- Privacy Router (PII Redaction) -->
+        <div class="enterprise-card" style="padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; position: relative; overflow: hidden;">
+          <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--accent), #fbbf24);"></div>
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <div style="width: 44px; height: 44px; border-radius: 10px; background: var(--accent-dim); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">🔏</div>
+            <h3 style="font-size: 17px; font-weight: 700; color: var(--text);">Privacy Router (PII Redaction)</h3>
+          </div>
+          <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px;">
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: var(--accent); font-weight: 700; flex-shrink: 0;">&#10003;</span>7 PII patterns: email, phone, SSN, credit card, IP, IBAN, DOB</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: var(--accent); font-weight: 700; flex-shrink: 0;">&#10003;</span>Per-workflow or per-server configuration</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: var(--accent); font-weight: 700; flex-shrink: 0;">&#10003;</span>Redact or audit-only modes</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: var(--accent); font-weight: 700; flex-shrink: 0;">&#10003;</span>Zero-dependency regex engine</li>
+            <li style="display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-muted);"><span style="color: var(--accent); font-weight: 700; flex-shrink: 0;">&#10003;</span>Applied to all LLM inputs and outputs</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
   <!-- Bottom CTA (C6) -->
   <section class="bottom-cta">
     <div class="container fade-in">
@@ -2420,8 +2494,8 @@
   <footer>
     <div class="container footer-inner">
       <div class="footer-left">
-        <strong>Sandcastle</strong> - BSL 1.1 (Apache 2.0 after 2030)<br>
-        Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax
+        <strong>Sandcastle</strong> v0.23.0 - BSL 1.1 (Apache 2.0 after 2030)<br>
+        &copy; 2026 Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax
       </div>
       <div class="footer-links">
         <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener">GitHub</a>
