@@ -636,12 +636,7 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
 // OverviewBento page
 // ---------------------------------------------------------------------------
 
-export default function OverviewBento({
-  layout, setLayout,
-}: {
-  layout: string;
-  setLayout: (l: string) => void;
-}) {
+export default function OverviewBento() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -725,7 +720,7 @@ export default function OverviewBento({
           </div>
           <h1 className="text-xl font-bold tracking-tight text-foreground">Overview</h1>
         </div>
-        <LayoutSwitcher layout={layout} setLayout={setLayout} />
+        {/* Layout switcher removed - bento is the only layout */}
       </div>
 
       {/* Row 1: Command Center (2/3) + Quick Actions (1/3) */}
