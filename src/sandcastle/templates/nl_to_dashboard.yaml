@@ -9,7 +9,7 @@ description: Transform natural language business questions into optimized SQL qu
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
-default_tools: [postgres]
+default_tools: [postgresql]
 
 input_schema:
   required: ["business_question", "database_schema"]
@@ -149,12 +149,12 @@ steps:
          - Round decimals to 2 places for currency, 1 place for percentages
 
       Use the Postgres tool to execute the query:
-        node /home/user/tools/postgres.mjs query '<sql>'
+        node /home/user/tools/postgresql.mjs query '<sql>'
 
       Output the complete SQL query with inline comments explaining each section.
     model: sonnet
     max_turns: 10
-    tools: [postgres]
+    tools: [postgresql]
 
   - id: query-optimization
     depends_on: [sql-generation]
