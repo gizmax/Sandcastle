@@ -11484,6 +11484,132 @@
         }
       },
       "sha256": "b099e34ec67e112142702ac9d92fde6b7757f9f866c88f4763fbf8899df1ee6d"
+    },
+    {
+      "slug": "gizmax/market-sizing",
+      "name": "TAM/SAM/SOM Market Sizing",
+      "description": "Research industry data, analyze competitor landscape, and calculate Total Addressable, Serviceable Addressable, and Serviceable Obtainable Market with executive report",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Market Research",
+        "TAM",
+        "SAM",
+        "SOM",
+        "Strategy",
+        "Market Sizing"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "tavily",
+        "exa"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/market_sizing.yaml",
+      "source": "built-in",
+      "created_at": "2026-03-19",
+      "updated_at": "2026-03-19",
+      "featured": true,
+      "downloads": 0
+    },
+    {
+      "slug": "gizmax/competitive-intel",
+      "name": "Deep Competitive Intelligence",
+      "description": "Identify competitors, analyze pricing and features, build SWOT analyses, feature comparison matrices, and generate strategic battlecards",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Competitive Analysis",
+        "SWOT",
+        "Strategy",
+        "Market Research",
+        "Battlecards"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "tavily",
+        "browser",
+        "exa"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitive_intel.yaml",
+      "source": "built-in",
+      "created_at": "2026-03-19",
+      "updated_at": "2026-03-19",
+      "featured": true,
+      "downloads": 0
+    },
+    {
+      "slug": "gizmax/customer-persona-builder",
+      "name": "AI Customer Persona Builder",
+      "description": "Research target market demographics, analyze competitor reviews, identify pain points, build detailed personas with journey maps and messaging frameworks",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Personas",
+        "Customer Research",
+        "Marketing",
+        "User Journey",
+        "Messaging"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "tavily",
+        "browser"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/customer_persona_builder.yaml",
+      "source": "built-in",
+      "created_at": "2026-03-19",
+      "updated_at": "2026-03-19",
+      "featured": false,
+      "downloads": 0
+    },
+    {
+      "slug": "gizmax/pricing-optimizer",
+      "name": "Competitive Pricing Optimizer",
+      "description": "Research competitor pricing, analyze pricing models, estimate willingness-to-pay, recommend optimal tier strategy with pricing page copy and FAQ",
+      "author": "gizmax",
+      "author_url": "https://github.com/gizmax",
+      "version": "1.0.0",
+      "category": "general_ai",
+      "tags": [
+        "Pricing",
+        "Strategy",
+        "SaaS",
+        "Revenue",
+        "Market Research"
+      ],
+      "models_used": [
+        "sonnet",
+        "haiku"
+      ],
+      "tools_used": [
+        "tavily",
+        "browser"
+      ],
+      "step_count": 6,
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/pricing_optimizer.yaml",
+      "source": "built-in",
+      "created_at": "2026-03-19",
+      "updated_at": "2026-03-19",
+      "featured": false,
+      "downloads": 0
     }
   ],
   "categories": [
@@ -11519,7 +11645,7 @@
     }
   ],
   "stats": {
-    "total_templates": 181,
+    "total_templates": 185,
     "total_authors": 22,
     "total_downloads": 27098,
     "last_updated": "2026-02-25T20:00:00Z"
@@ -11770,6 +11896,20 @@
         "jmartinez/permit-application-processor"
       ],
       "downloads": 184
+    },
+    {
+      "id": "market-research",
+      "name": "Market Research",
+      "description": "TAM/SAM/SOM sizing, competitive intelligence, customer personas, pricing strategy, and trend analysis",
+      "icon": "search",
+      "template_slugs": [
+        "gizmax/market-sizing",
+        "gizmax/competitive-intel",
+        "gizmax/customer-persona-builder",
+        "gizmax/pricing-optimizer",
+        "gizmax/trend-radar"
+      ],
+      "downloads": 0
     }
   ]
 }
