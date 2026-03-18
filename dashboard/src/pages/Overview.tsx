@@ -15,6 +15,8 @@ import { useDashboardLayout, WIDGET_LABELS } from "@/hooks/useDashboardLayout";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
+import OverviewBento, { LayoutSwitcher } from "@/pages/OverviewBento";
+import OverviewFocus from "@/pages/OverviewFocus";
 
 interface Stats {
   total_runs_today: number;
@@ -419,7 +421,31 @@ function WidgetWrapper({
 // Overview page
 // ---------------------------------------------------------------------------
 
+/**
+ * Root Overview entry point - delegates to a variant based on the user's
+ * persisted layout preference.
+ */
 export default function Overview() {
+  const [layout, setLayout] = useState<string>(
+    () => localStorage.getItem("sandcastle_overview_layout") || "bento"
+  );
+
+  if (layout === "bento") return <OverviewBento layout={layout} setLayout={setLayout} />;
+  if (layout === "focus") return <OverviewFocus layout={layout} setLayout={setLayout} />;
+  return <OverviewDefault layout={layout} setLayout={setLayout} />;
+}
+
+// ---------------------------------------------------------------------------
+// OverviewDefault - the original widget-based layout, extracted to its own
+// component so hooks are always called unconditionally.
+// ---------------------------------------------------------------------------
+
+function OverviewDefault({
+  layout, setLayout,
+}: {
+  layout: string;
+  setLayout: (l: string) => void;
+}) {
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
@@ -609,36 +635,39 @@ export default function Overview() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Overview</h1>
-        <div className="relative">
-          <button
-            ref={btnRef}
-            onClick={() => {
-              const next = !showPanel;
-              setShowPanel(next);
-              if (next) setCustomizing(true);
-              else setCustomizing(false);
-            }}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
-              customizing
-                ? "bg-accent text-accent-foreground shadow-sm"
-                : "text-muted hover:text-foreground hover:bg-surface border border-transparent hover:border-border",
+        <div className="flex items-center gap-2">
+          <LayoutSwitcher layout={layout} setLayout={setLayout} />
+          <div className="relative">
+            <button
+              ref={btnRef}
+              onClick={() => {
+                const next = !showPanel;
+                setShowPanel(next);
+                if (next) setCustomizing(true);
+                else setCustomizing(false);
+              }}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
+                customizing
+                  ? "bg-accent text-accent-foreground shadow-sm"
+                  : "text-muted hover:text-foreground hover:bg-surface border border-transparent hover:border-border",
+              )}
+              aria-label="Customize dashboard"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{customizing ? "Done" : "Customize"}</span>
+            </button>
+            {showPanel && (
+              <div ref={panelRef} className="absolute right-0 top-full z-40 mt-2">
+                <DashboardCustomizer
+                  widgets={widgets}
+                  onMove={moveWidget}
+                  onToggle={toggleWidget}
+                  onReset={resetLayout}
+                />
+              </div>
             )}
-            aria-label="Customize dashboard"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{customizing ? "Done" : "Customize"}</span>
-          </button>
-          {showPanel && (
-            <div ref={panelRef} className="absolute right-0 top-full z-40 mt-2">
-              <DashboardCustomizer
-                widgets={widgets}
-                onMove={moveWidget}
-                onToggle={toggleWidget}
-                onReset={resetLayout}
-              />
-            </div>
-          )}
+          </div>
         </div>
       </div>
 
