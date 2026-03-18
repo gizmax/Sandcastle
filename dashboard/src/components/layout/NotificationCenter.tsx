@@ -51,6 +51,20 @@ const typeColors: Record<Notification["type"], string> = {
   info: "text-running",
 };
 
+const typeDotColors: Record<Notification["type"], string> = {
+  success: "bg-success",
+  error: "bg-error",
+  warning: "bg-warning",
+  info: "bg-running",
+};
+
+const typeBorderColors: Record<Notification["type"], string> = {
+  success: "border-l-success",
+  error: "border-l-error",
+  warning: "border-l-warning",
+  info: "border-l-running",
+};
+
 function badgeColor(insights: Insight[], unreadCount: number): string {
   const hasCritical = insights.some((i) => i.severity === "critical");
   const hasWarning = insights.some((i) => i.severity === "warning");
@@ -243,21 +257,30 @@ export function NotificationCenter({
                           setOpen(false);
                         }}
                         className={cn(
-                          "flex w-full items-start gap-3 px-4 py-3 text-left",
+                          "flex w-full items-start gap-3 pl-3 pr-4 py-3 text-left",
+                          "border-l-2",
+                          typeBorderColors[n.type],
                           "hover:bg-border/30 transition-colors duration-150",
                           !n.read && "bg-accent/5",
                         )}
                       >
-                        <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", typeColors[n.type])} />
+                        <span className={cn(
+                          "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                          typeDotColors[n.type],
+                          n.read && "opacity-40"
+                        )} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm text-foreground">{n.message}</p>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {formatRelativeTime(n.timestamp)}
                           </p>
                         </div>
-                        {!n.read && (
-                          <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
-                        )}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <Icon className={cn("h-3.5 w-3.5", typeColors[n.type])} />
+                          {!n.read && (
+                            <div className="h-1.5 w-1.5 rounded-full bg-accent" />
+                          )}
+                        </div>
                       </button>
                     );
                   })
