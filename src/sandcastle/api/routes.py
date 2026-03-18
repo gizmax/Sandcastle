@@ -5694,6 +5694,13 @@ _SENSITIVE_KEYS = frozenset({
     "tool_google_service_account",
     "tool_teams_webhook_url",
     "tool_postgresql_url",
+    "tool_langfuse_secret_key",
+    "tool_langfuse_public_key",
+    "tool_qdrant_api_key",
+    "tool_gcs_service_account_json",
+    "tool_azure_storage_connection_string",
+    "tool_azure_storage_key",
+    "tool_exa_api_key",
 })
 
 

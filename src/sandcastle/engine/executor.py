@@ -1011,6 +1011,12 @@ async def execute_step_with_retry(
         payload={"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
     )
 
+    # Open OTEL step span (no-op when tracer not initialized)
+    from sandcastle.engine.otel import record_step_result, step_span
+
+    _step_span_cm = step_span(context.run_id, step.id, step.type, model=step.model)
+    _step_otel_span = _step_span_cm.__enter__()
+
     for attempt in range(1, max_attempts + 1):
         result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
 
@@ -1108,6 +1114,13 @@ async def execute_step_with_retry(
                 payload={"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds},
             )
 
+            record_step_result(
+                _step_otel_span,
+                status="completed",
+                cost=result.cost_usd,
+                duration=result.duration_seconds,
+            )
+            _step_span_cm.__exit__(None, None, None)
             return result
 
         # Last attempt - check for fallback
@@ -1134,6 +1147,13 @@ async def execute_step_with_retry(
                     # Combine costs from all attempts + fallback
                     fallback_result.cost_usd += result.cost_usd
                     fallback_result.duration_seconds += result.duration_seconds
+                    record_step_result(
+                        _step_otel_span,
+                        status="completed",
+                        cost=fallback_result.cost_usd,
+                        duration=fallback_result.duration_seconds,
+                    )
+                    _step_span_cm.__exit__(None, None, None)
                     return fallback_result
 
             logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
@@ -1179,12 +1199,20 @@ async def execute_step_with_retry(
                 payload={"step_id": step.id, "error": result.error, "attempts": attempt},
             )
 
+            record_step_result(
+                _step_otel_span,
+                status="failed",
+                cost=result.cost_usd,
+                duration=result.duration_seconds,
+            )
+            _step_span_cm.__exit__(None, None, None)
             return result
 
         delay = _backoff_delay(attempt, backoff)
         logger.info(f"Step '{step.id}' attempt {attempt} failed, retrying in {delay}s...")
         await asyncio.sleep(delay)
 
+    _step_span_cm.__exit__(None, None, None)
     return result  # Should not reach here
 
 
@@ -3947,7 +3975,7 @@ async def _execute_browser_step(
 ) -> StepResult:
     """Execute a browser automation step.
 
-    Supports three modes:
+    Supports five modes:
     - playwright: Agent writes and executes Playwright scripts inside the
       sandbox via the standard agent loop. The step prompt is augmented with
       browser tool instructions, viewport config, and start URL context.
@@ -3957,6 +3985,10 @@ async def _execute_browser_step(
       actions. Loops until the task is complete or the timeout is reached.
     - dom: Uses the accessibility tree instead of screenshots for faster and
       cheaper data extraction from known page layouts.
+    - lightpanda: Launches the LightPanda browser (fast, low-memory) via CDP
+      and connects Playwright to it. Follows the same flow as dom mode.
+    - browserbase: Uses Browserbase cloud browser infrastructure. Creates a
+      managed session via the Browserbase API and connects Playwright to it.
     """
     import os
     import time
@@ -4006,6 +4038,28 @@ async def _execute_browser_step(
             )
         elif cfg.mode == "playwright":
             result = await _browser_playwright_mode(
+                step,
+                cfg,
+                prompt,
+                credentials_json,
+                context,
+                sandbox,
+                storage,
+                started_at,
+            )
+        elif cfg.mode == "lightpanda":
+            result = await _browser_lightpanda_mode(
+                step,
+                cfg,
+                prompt,
+                credentials_json,
+                context,
+                sandbox,
+                storage,
+                started_at,
+            )
+        elif cfg.mode == "browserbase":
+            result = await _browser_browserbase_mode(
                 step,
                 cfg,
                 prompt,
@@ -4873,6 +4927,384 @@ async def _take_sandbox_screenshot(
     return None
 
 
+async def _browser_lightpanda_mode(
+    step: StepDefinition,
+    cfg: Any,
+    prompt: str,
+    credentials_json: str | None,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    started_at: float,
+) -> StepResult:
+    """LightPanda mode: launch the LightPanda browser via CDP and connect Playwright to it.
+
+    LightPanda is a fast, low-memory browser that exposes a Chrome DevTools Protocol
+    endpoint. This mode launches the binary, connects Playwright over CDP, then follows
+    the same accessibility-tree extraction flow as dom mode.
+    """
+    import asyncio
+    import os
+    import time
+
+    logger.info("Browser LightPanda mode: %s -> %s", step.id, cfg.start_url)
+
+    # Validate URL before proceeding
+    if not cfg.start_url:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="LightPanda mode requires a start_url",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    try:
+        validated_url = _validate_browser_url(cfg.start_url)
+    except ValueError as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Invalid browser URL: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    # Resolve LightPanda binary path
+    from sandcastle.config import settings as _settings
+
+    lp_binary = _settings.lightpanda_path or os.environ.get("LIGHTPANDA_PATH") or "lightpanda"
+
+    cdp_port = 9222
+    lp_proc = None
+    try:
+        # Launch LightPanda with CDP enabled
+        lp_proc = await asyncio.create_subprocess_exec(
+            lp_binary,
+            "--remote-debugging-port",
+            str(cdp_port),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        # Give the process a moment to bind the port
+        await asyncio.sleep(0.5)
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            if lp_proc:
+                lp_proc.terminate()
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="playwright package is required for lightpanda mode: pip install playwright",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(
+                f"http://localhost:{cdp_port}"
+            )
+            try:
+                page = await browser.new_page(
+                    viewport={"width": cfg.viewport_width, "height": cfg.viewport_height}
+                )
+                await page.goto(validated_url, timeout=cfg.timeout_seconds * 1000)
+
+                # Extract accessibility tree / interactive elements (same as dom mode)
+                elements = await page.evaluate(
+                    """() => {
+                        const items = [];
+                        const selectors = 'a, button, input, select, textarea, [role="button"], [onclick]';
+                        document.querySelectorAll(selectors).forEach((el, i) => {
+                            items.push({
+                                index: i,
+                                tag: el.tagName.toLowerCase(),
+                                type: el.getAttribute('type') || '',
+                                text: (el.textContent || '').trim().slice(0, 100),
+                                placeholder: el.getAttribute('placeholder') || '',
+                                name: el.getAttribute('name') || '',
+                                href: el.getAttribute('href') || '',
+                                role: el.getAttribute('role') || '',
+                            });
+                        });
+                        return items;
+                    }"""
+                )
+                title = await page.title()
+                current_url = page.url
+                body_text = await page.evaluate(
+                    "() => document.body.innerText.slice(0, 5000)"
+                )
+                dom_output = json.dumps({
+                    "elements": elements,
+                    "page_info": {"title": title, "url": current_url, "body_text": body_text},
+                })
+            finally:
+                await browser.close()
+
+    except FileNotFoundError:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                f"LightPanda binary not found at '{lp_binary}'. "
+                "Set LIGHTPANDA_PATH env var or install lightpanda on PATH."
+            ),
+            duration_seconds=time.monotonic() - started_at,
+        )
+    except Exception as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"LightPanda mode error: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+    finally:
+        if lp_proc is not None:
+            try:
+                lp_proc.terminate()
+                await lp_proc.wait()
+            except Exception:
+                pass
+
+    # Build augmented prompt and delegate to LLM (same pattern as dom mode)
+    dom_context = f"Page: {cfg.start_url}\n{dom_output}"
+    augmented_prompt = (
+        "You are a browser automation agent working in DOM mode (via LightPanda). "
+        "You can interact with elements by their index number or CSS selector.\n\n"
+        "Available tools:\n"
+        "- click(selector) - click an element\n"
+        "- type_text(selector, text) - type into an element\n"
+        "- select_option(selector, value) - select dropdown option\n"
+        "- get_text(selector) - get element text\n"
+        "- navigate(url) - go to a URL\n\n"
+        f"Current page state:\n{dom_context}\n\n"
+        f"Task: {step.prompt}"
+    )
+
+    if cfg.output_schema:
+        augmented_prompt += (
+            f"\n\nExtract data matching this schema:\n"
+            f"{json.dumps(cfg.output_schema, indent=2)}\n"
+            f"Return the extracted data as valid JSON."
+        )
+
+    lp_step = StepDefinition(
+        id=step.id,
+        prompt=augmented_prompt,
+        depends_on=step.depends_on,
+        model=step.model or "sonnet",
+        max_turns=step.max_turns or 5,
+        timeout=max(step.timeout, cfg.timeout_seconds),
+        output_schema=step.output_schema,
+        type="standard",
+    )
+
+    if storage is None:
+        from sandcastle.engine.storage import LocalStorage
+
+        storage = LocalStorage("/tmp/sandcastle_lp_storage")
+
+    result = await execute_step_with_retry(lp_step, context, sandbox, storage)
+    result.step_id = step.id
+    return result
+
+
+async def _browser_browserbase_mode(
+    step: StepDefinition,
+    cfg: Any,
+    prompt: str,
+    credentials_json: str | None,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    started_at: float,
+) -> StepResult:
+    """Browserbase cloud browser mode.
+
+    Creates a managed browser session via the Browserbase API and connects
+    Playwright to it over CDP. Follows the same flow as playwright mode once
+    connected. Cleans up the session on exit.
+
+    Requires:
+    - BROWSERBASE_API_KEY env var (or browserbase_api_key in settings)
+    - Optional: BROWSERBASE_PROJECT_ID env var (or browserbase_project_id)
+    """
+    import os
+    import time
+
+    import httpx
+
+    logger.info("Browser Browserbase mode: %s -> %s", step.id, cfg.start_url)
+
+    from sandcastle.config import settings as _settings
+
+    api_key = (
+        _settings.browserbase_api_key
+        or os.environ.get("BROWSERBASE_API_KEY", "")
+    )
+    if not api_key:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                "Browserbase mode requires BROWSERBASE_API_KEY. "
+                "Set it in .env or as an environment variable."
+            ),
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    project_id = (
+        _settings.browserbase_project_id
+        or os.environ.get("BROWSERBASE_PROJECT_ID", "")
+    )
+
+    session_id: str | None = None
+    connect_url: str | None = None
+
+    # Create Browserbase session
+    try:
+        session_payload: dict = {}
+        if project_id:
+            session_payload["projectId"] = project_id
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://www.browserbase.com/v1/sessions",
+                headers={
+                    "x-bb-api-key": api_key,
+                    "Content-Type": "application/json",
+                },
+                json=session_payload,
+            )
+            resp.raise_for_status()
+            session_data = resp.json()
+            session_id = session_data.get("id")
+            connect_url = session_data.get("connectUrl")
+
+    except httpx.HTTPStatusError as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Browserbase session creation failed (HTTP {e.response.status_code}): {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+    except Exception as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Browserbase session creation failed: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    if not connect_url:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="Browserbase API did not return a connectUrl",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    try:
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="playwright package is required for browserbase mode: pip install playwright",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        # Connect to the Browserbase session via CDP
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(connect_url)
+            try:
+                page = await browser.new_page(
+                    viewport={"width": cfg.viewport_width, "height": cfg.viewport_height}
+                )
+
+                if cfg.start_url:
+                    start_url = _validate_browser_url(cfg.start_url)
+                    await page.goto(start_url, timeout=cfg.timeout_seconds * 1000)
+
+                # Inject credentials into local storage / cookies if provided
+                if credentials_json:
+                    logger.debug("Browserbase: credentials env available for step %s", step.id)
+
+                # Capture current state
+                title = await page.title()
+                current_url = page.url
+                body_text = await page.evaluate(
+                    "() => document.body.innerText.slice(0, 5000)"
+                )
+            finally:
+                await browser.close()
+
+    except Exception as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Browserbase browser error: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+    finally:
+        # Clean up the Browserbase session
+        if session_id:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.delete(
+                        f"https://www.browserbase.com/v1/sessions/{session_id}",
+                        headers={"x-bb-api-key": api_key},
+                    )
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Failed to delete Browserbase session %s: %s", session_id, cleanup_err
+                )
+
+    # Build augmented prompt (same pattern as playwright mode)
+    browser_instructions = (
+        "You have accessed a page via Browserbase cloud browser.\n\n"
+        f"Page title: {title}\n"
+        f"Current URL: {current_url}\n"
+        f"Page content (first 5000 chars):\n{body_text}\n\n"
+    )
+
+    if credentials_json:
+        browser_instructions += (
+            "## Credentials\n"
+            f"Available variables: {', '.join(credentials_json.split(','))}\n"
+        )
+
+    augmented_prompt = f"{browser_instructions}\n## Task\n{step.prompt}\n"
+
+    if cfg.output_schema:
+        augmented_prompt += (
+            f"\n\nExtract data matching this schema:\n"
+            f"{json.dumps(cfg.output_schema, indent=2)}\n"
+            f"Return the extracted data as valid JSON."
+        )
+
+    from sandcastle.engine.dag import StepDefinition as _StepDef
+
+    bb_step = _StepDef(
+        id=step.id,
+        prompt=augmented_prompt,
+        depends_on=step.depends_on,
+        model=step.model,
+        max_turns=step.max_turns,
+        timeout=max(step.timeout, cfg.timeout_seconds),
+        output_schema=step.output_schema,
+        retry=step.retry,
+        fallback=step.fallback,
+        type="standard",
+        tools=step.tools,
+    )
+
+    result = await execute_step_with_retry(bb_step, context, sandbox, storage)
+    result.step_id = step.id
+    return result
+
+
 async def _prepare_and_run_step(
     step_id: str,
     workflow: WorkflowDefinition,
@@ -5263,6 +5695,12 @@ async def execute_workflow(
         sandbox_backend=getattr(settings, "sandbox_backend", ""),
     )
 
+    # Initialize OpenTelemetry tracing if enabled
+    from sandcastle.engine.otel import init_otel, workflow_span
+
+    if settings.otel_enabled and settings.otel_endpoint:
+        init_otel(settings.otel_service_name, settings.otel_endpoint)
+
     # Initialize agent memory if configured
     if workflow.memory:
         try:
@@ -5455,6 +5893,9 @@ async def execute_workflow(
             await asyncio.gather(*running.values(), return_exceptions=True)
             running.clear()
 
+    # Enter OTEL workflow span (no-op when tracer not initialized)
+    _wf_span_cm = workflow_span(run_id, workflow.name)
+    _wf_span = _wf_span_cm.__enter__()
     try:
         while True:
             # Cancel check
@@ -5669,6 +6110,7 @@ async def execute_workflow(
     finally:
         async with _cancel_flags_lock:
             _cancel_flags.pop(run_id, None)
+        _wf_span_cm.__exit__(None, None, None)
 
 
 async def _save_routing_decision(

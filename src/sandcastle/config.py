@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     docker_cpu_period: int = 100_000  # CPU period in microseconds
     docker_cpu_quota: int = 50_000  # CPU quota in microseconds (50% of one core)
 
+    # Browser backends
+    lightpanda_path: str = ""  # Path to lightpanda binary (empty = use PATH)
+    browserbase_api_key: str = ""  # Browserbase cloud browser API key
+    browserbase_project_id: str = ""  # Browserbase project ID (optional)
+
     # License
     license_key: str = ""  # Ed25519-signed license key (sc_lic_...)
 
@@ -145,6 +150,11 @@ class Settings(BaseSettings):
 
     # Compliance mode: "" = disabled, "eu_ai_act" = EU AI Act enforcement
     compliance_mode: str = ""
+
+    # OpenTelemetry (distributed tracing)
+    otel_enabled: bool = False  # Set to True to enable OTLP trace export
+    otel_endpoint: str = ""  # OTLP HTTP endpoint, e.g. "http://localhost:4318"
+    otel_service_name: str = "sandcastle"  # Service name reported in traces
 
     # Logging
     log_level: str = "info"
@@ -428,6 +438,7 @@ class Settings(BaseSettings):
         "tool_zendesk_api_token", "tool_smtp_password",
         "tool_google_service_account", "tool_teams_webhook_url",
         "tool_postgresql_url",
+        "browserbase_api_key",
     })
 
     def safe_dump(self) -> dict:
