@@ -1,0 +1,345 @@
+# name: Customer Persona Builder
+# description: Research target market and competitor reviews to build 3-5 data-driven personas with journey maps and messaging
+# tags: [Market-Research, Personas, Customer-Research, Messaging]
+# category: marketing
+
+name: customer-persona-builder
+description: Mine demographics, competitor reviews, and behavioral data to build 3-5 detailed customer personas with journey maps and messaging.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+
+input_schema:
+  required: ["product_description", "target_audience"]
+  properties:
+    product_description:
+      type: string
+      description: "What the product does and who it is for (2-3 sentences)"
+      example: "AI-powered workflow orchestrator for engineering teams that automates multi-step processes with pluggable integrations and sandbox execution"
+    target_audience:
+      type: string
+      description: "Broad description of the intended buyers and users"
+      example: "Engineering managers and DevOps leads at B2B SaaS companies, 50-500 employees"
+    industry:
+      type: string
+      description: "Industry vertical to focus the research on"
+      example: "B2B SaaS / Developer Tools"
+    competitor_urls:
+      type: string
+      description: "Comma-separated URLs of competitor product pages or G2 pages to mine reviews from"
+      example: "https://zapier.com, https://make.com, https://g2.com/products/zapier/reviews"
+
+steps:
+  - id: demographic-research
+    prompt: |
+      You are a customer research analyst. Research the target market demographics
+      and professional profiles for this product.
+
+      Product: {input.product_description}
+      Target audience: {input.target_audience}
+      Industry: {input.industry}
+
+      DEMOGRAPHIC AND PROFESSIONAL RESEARCH:
+
+      1. BUYER VS. USER DISTINCTION:
+         - Who approves budget (economic buyer): typical title, seniority, org size
+         - Who evaluates the product (technical buyer): typical role and concerns
+         - Who uses it daily (end user): job function, technical skill level
+         - Who champions internally (influencer): role and motivation
+         Map these roles for the industry context of {input.industry}
+
+      2. FIRMOGRAPHIC PROFILE OF TYPICAL BUYER:
+         - Company size sweet spots: what employee count ranges buy this type of product most?
+         - Revenue/ARR ranges of typical buyer companies
+         - Industry vertical distribution: which sub-verticals drive the most demand?
+         - Geographic concentrations (where are buyers located?)
+         - Company maturity: what stage (startup/growth/enterprise) buys this type of product?
+         - Funding status correlation: do funded startups buy differently from bootstrapped?
+
+      3. PROFESSIONAL DEMOGRAPHICS:
+         - Education background typical for the buyer persona
+         - Years of experience range
+         - Career trajectory: what did they do before their current role?
+         - Skills and tools they use daily (tech stack affinity)
+         - Professional communities they belong to (Slack groups, subreddits, conferences)
+         - Content consumption habits: blogs, podcasts, newsletters, YouTube channels
+
+      4. QUANTITATIVE SEGMENTATION:
+         Based on the research, propose 4-6 distinct segments of potential buyers.
+         For each segment, estimate:
+         - Relative size as % of total addressable audience
+         - Estimated willingness-to-pay range (monthly or annual)
+         - Decision-making autonomy: can they buy independently or need approval chain?
+         - Urgency: how acute is their problem today?
+
+      Return structured research with clear source citations where available.
+    model: sonnet
+    max_turns: 10
+
+  - id: review-scrape-analysis
+    depends_on: [demographic-research]
+    prompt: |
+      Mine competitor product reviews and community discussions to extract authentic
+      customer voices, pain points, and success patterns.
+
+      Demographic research: {steps.demographic-research.output}
+      Product: {input.product_description}
+      Industry: {input.industry}
+      Competitor URLs to research: {input.competitor_urls}
+
+      REVIEW MINING TASKS:
+
+      1. G2/CAPTERRA/TRUSTRADIUS REVIEW ANALYSIS:
+         For the product category (and any competitor URLs provided), research reviews on
+         G2, Capterra, TrustRadius, and Product Hunt.
+
+         Extract and categorize:
+         - Top 10 PAIN POINTS mentioned by reviewers (quote directly where possible)
+           Format: "[quote]" - Source, rating, reviewer role
+         - Top 10 DELIGHTS / MUST-HAVE FEATURES customers love
+         - Top 10 FEATURE REQUESTS or limitations mentioned
+         - Top 5 SWITCHING TRIGGERS (what made them look for an alternative?)
+         - Top 5 reasons people CHOSE this product over alternatives
+
+      2. COMMUNITY DISCUSSION MINING:
+         Research Reddit, Hacker News, Twitter/X, LinkedIn, and relevant Slack/Discord
+         communities for organic discussions about this product category.
+         - What questions do people ask repeatedly (indicating confusion or unmet needs)?
+         - What workarounds or hacks do users share (indicating product gaps)?
+         - What benchmarks or alternatives do people compare?
+         - What success stories are shared (indicating the "dream outcome")?
+
+      3. JOB POSTING SIGNALS:
+         Research job postings that mention tools in this category.
+         - What job titles are posting (validates who the buyer/user is)?
+         - What adjacent tools/skills appear alongside this category?
+         - What problems are they trying to solve (from the job description context)?
+
+      4. EMOTIONAL LANGUAGE CATALOG:
+         Collect verbatim phrases that reveal emotional states:
+         - Frustration phrases: "I'm so tired of...", "Why can't it just..."
+         - Aspiration phrases: "I wish I could...", "If only this could..."
+         - Success phrases: "This saved us...", "We finally..."
+         - Fear phrases: "I'm worried about...", "We can't afford to..."
+
+      Return organized by theme with 3-5 verbatim quotes per theme.
+    model: haiku
+    max_turns: 5
+
+  - id: pain-goals-objections
+    depends_on: [review-scrape-analysis, demographic-research]
+    prompt: |
+      Analyze the research to extract a comprehensive map of pain points, goals,
+      and objections organized by buyer segment.
+
+      Review insights: {steps.review-scrape-analysis.output}
+      Demographic research: {steps.demographic-research.output}
+      Product: {input.product_description}
+
+      ANALYSIS FRAMEWORK:
+
+      1. PAIN POINT TAXONOMY:
+         Organize all discovered pain points into a 3-level hierarchy:
+         - Category (e.g., "Workflow Automation")
+           - Problem area (e.g., "Integration complexity")
+             - Specific pain (e.g., "Building custom integrations takes 2-3 weeks per connector")
+         For each pain: frequency score (1-10), severity score (1-10), segment affected
+
+      2. GOALS AND DESIRED OUTCOMES:
+         Map the "jobs to be done" - what outcomes are buyers hiring this product for?
+         Use the format: "When [situation], I want to [motivation], so I can [expected outcome]"
+         Provide 8-10 JTBD statements mapped to the discovered buyer segments.
+
+      3. OBJECTION TAXONOMY:
+         Organize all discovered objections and hesitations into categories:
+         - Price objections: "Too expensive for our stage"
+         - Trust objections: "We're not sure this will scale"
+         - Status quo objections: "We can build this ourselves"
+         - Complexity objections: "Our team doesn't have the skills"
+         - Timing objections: "Not the right time, we have other priorities"
+         For each objection: frequency, severity, which segment raises it most
+
+      4. BUYING TRIGGER EVENTS:
+         What events cause buyers to actively start evaluating a solution?
+         Examples: new funding round, headcount growth, failed audit, new executive hire,
+         competitor started using X, hit a scale limit with current approach
+         List 8-10 trigger events with frequency and urgency ratings
+
+      5. SEGMENT-TO-PAIN MAPPING:
+         Create a matrix: which segment feels which pain most acutely?
+         This directly informs persona differentiation.
+    model: haiku
+    max_turns: 5
+
+  - id: build-personas
+    depends_on: [demographic-research, review-scrape-analysis, pain-goals-objections]
+    prompt: |
+      Build 4 richly detailed customer personas based on all research.
+
+      Demographic research: {steps.demographic-research.output}
+      Review mining insights: {steps.review-scrape-analysis.output}
+      Pain points, goals, objections: {steps.pain-goals-objections.output}
+      Product: {input.product_description}
+
+      Create exactly 4 personas. Each persona must be grounded in the research data,
+      not invented. Name each persona after an archetype (e.g., "The Scaling CTO",
+      "The Overwhelmed Ops Manager", "The Budget-Conscious Founder").
+
+      PERSONA TEMPLATE (repeat for all 4):
+
+      ---
+      ### Persona [N]: [Archetype Name]
+
+      **Snapshot:**
+      - Name: [realistic first name]
+      - Job title: [specific title]
+      - Company type: [stage, size, industry]
+      - Location: [city/region]
+      - Age range: [e.g., 32-40]
+      - Experience level: [e.g., 8 years in DevOps, 3 in current role]
+      - Reports to: [title]
+      - Budget authority: [owns budget / needs approval / influences but does not decide]
+
+      **A Day in Their Life:**
+      Write 3-4 sentences describing a typical workday, the tools they touch,
+      the meetings they attend, and the pressures they feel. Make it vivid and specific.
+
+      **Primary Goals (top 3):**
+      - Goal 1: [specific, measurable outcome they are working toward]
+      - Goal 2: ...
+      - Goal 3: ...
+
+      **Core Pain Points (top 3, with evidence from review mining):**
+      - Pain 1: [specific frustration, ideally with a direct quote]
+      - Pain 2: ...
+      - Pain 3: ...
+
+      **Key Objections to Buying:**
+      - Objection 1 + counter-strategy
+      - Objection 2 + counter-strategy
+      - Objection 3 + counter-strategy
+
+      **Buying Triggers:**
+      - What event would make this persona start evaluating a solution actively?
+
+      **Information Sources:**
+      - Where do they research tools? (e.g., HackerNews, specific newsletters, peer recommendations)
+      - Who do they trust? (e.g., engineering influencers, analyst reports, peer reviews on G2)
+      - What content format do they prefer? (long-form docs / short demos / peer case studies)
+
+      **Psychographic Profile:**
+      - Personality: [2-3 adjectives grounded in the data]
+      - Risk tolerance: Low / Medium / High (with reasoning)
+      - Decision style: Analytical / Intuitive / Collaborative / Decisive
+      - Values: [what they care about most professionally]
+
+      **Size of Segment:** [Estimated % of total addressable audience]
+      **Priority Tier:** Tier 1 (primary ICP) / Tier 2 (secondary) / Tier 3 (edge case)
+      ---
+    model: sonnet
+    max_turns: 10
+
+  - id: journey-mapping
+    depends_on: [build-personas, pain-goals-objections]
+    prompt: |
+      Map each persona to a customer journey and identify critical moments of truth.
+
+      Personas: {steps.build-personas.output}
+      Pain points and triggers: {steps.pain-goals-objections.output}
+      Product: {input.product_description}
+
+      For each of the 4 personas, create a customer journey map covering 5 stages:
+
+      STAGE 1 - UNAWARE / STATUS QUO:
+      - What is this persona doing today instead of using our product?
+      - What pain are they tolerating without realizing there is a better solution?
+      - Emotional state: [descriptor, e.g., "frustrated but resigned"]
+      - How to reach them: channels and content that work at this stage
+
+      STAGE 2 - PROBLEM AWARE:
+      - What triggers them to recognize there is a problem to solve?
+      - What are they searching for at this stage? (search query examples)
+      - What content or communities do they consult?
+      - Emotional state: [descriptor, e.g., "motivated to fix this"]
+      - Key message that resonates at this stage
+
+      STAGE 3 - SOLUTION AWARE / EVALUATING:
+      - What criteria are they using to evaluate options?
+      - Who else is involved in the buying decision?
+      - What proof do they need? (ROI data, case studies, free trial, demo)
+      - Key objections that arise at this stage
+      - Emotional state: [descriptor, e.g., "cautious and skeptical"]
+      - How we win at this stage
+
+      STAGE 4 - DECISION / PURCHASE:
+      - What is the final decision trigger?
+      - Who signs off? What is the approval process?
+      - What could cause them to delay or abandon?
+      - Emotional state: [descriptor, e.g., "ready to commit but needs reassurance"]
+      - The one thing we must nail to close
+
+      STAGE 5 - ONBOARDING AND EXPANSION:
+      - What does time-to-value look like for this persona?
+      - What does early success look like (AHA moment)?
+      - What causes churn for this persona type?
+      - Expansion triggers: what would make them upgrade or buy more seats?
+      - Emotional state at success: [descriptor, e.g., "confident and evangelical"]
+
+      Also identify the TOP 3 MOMENTS OF TRUTH across all personas:
+      the critical touchpoints where we win or lose this persona.
+    model: sonnet
+    max_turns: 10
+
+  - id: persona-messaging
+    depends_on: [build-personas, journey-mapping]
+    prompt: |
+      Generate persona-specific messaging frameworks and content recommendations.
+
+      Personas: {steps.build-personas.output}
+      Journey maps: {steps.journey-mapping.output}
+      Product: {input.product_description}
+
+      For each of the 4 personas, produce a messaging card:
+
+      ---
+      ### Messaging Card: [Persona Name]
+
+      **Core Value Proposition** (1 sentence, their language, not ours):
+      "For [persona title] who [primary pain], [product name] [key benefit] so you can
+      [desired outcome], unlike [primary alternative] which [key limitation]."
+
+      **Headline Options** (3 variations, A/B testable):
+      - Version A: [pain-focused headline]
+      - Version B: [outcome-focused headline]
+      - Version C: [social proof / credibility headline]
+
+      **Supporting Messages** (3 key points that build the case):
+      1. [Message 1 anchored to their top pain point]
+      2. [Message 2 anchored to their primary goal]
+      3. [Message 3 as objection handler for their biggest hesitation]
+
+      **Proof Points They Need:**
+      - Social proof format: [case study type / peer testimonial / logo recognition]
+      - Data proof: [ROI metric / time-saved statistic / reliability number]
+      - Credibility proof: [analyst mention / award / security certification]
+
+      **CTA That Converts for This Persona:**
+      - Primary CTA: [action + microcopy]
+      - Why this works: [1 sentence tied to their psychology]
+
+      **Channel and Format Recommendations:**
+      - Best acquisition channel for this persona
+      - Best content format (long-form / video demo / peer comparison / ROI calculator)
+      - Best nurture sequence topic order
+
+      **Words That Resonate vs. Words to Avoid:**
+      - Use: [5 words/phrases from their vernacular]
+      - Avoid: [5 words/phrases that feel like marketing-speak to this persona]
+      ---
+
+      Finally, provide a CROSS-PERSONA MESSAGE ARCHITECTURE:
+      The 3 universal messages that work across all 4 personas,
+      and the 3 biggest messaging pivots between persona types.
+    model: sonnet
+    max_turns: 10
