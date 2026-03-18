@@ -128,7 +128,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
     })
     .join(" ");
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className="shrink-0 opacity-70">
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className="shrink-0 opacity-80">
       <polyline points={points} fill="none" stroke={color} strokeWidth="1.5"
         strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -136,7 +136,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Trend badge
+// Trend badge - neon variant
 // ---------------------------------------------------------------------------
 
 function TrendBadge({ percent, positiveIsGood }: { percent: number; positiveIsGood: boolean }) {
@@ -146,7 +146,9 @@ function TrendBadge({ percent, positiveIsGood }: { percent: number; positiveIsGo
   return (
     <span className={cn(
       "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-      isGood ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-600"
+      isGood
+        ? "bg-[#00FF88]/10 text-[#00FF88] border border-[#00FF88]/20"
+        : "bg-[#FF0066]/10 text-[#FF0066] border border-[#FF0066]/20"
     )}>
       {isUp ? "+" : ""}{Math.abs(percent).toFixed(1)}%
     </span>
@@ -154,7 +156,7 @@ function TrendBadge({ percent, positiveIsGood }: { percent: number; positiveIsGo
 }
 
 // ---------------------------------------------------------------------------
-// Bento stat card
+// Bento stat card - neon dark variant
 // ---------------------------------------------------------------------------
 
 interface BentoStatCardProps {
@@ -170,18 +172,18 @@ interface BentoStatCardProps {
 
 function BentoStatCard({
   label, value, icon: Icon, iconColor, iconBg,
-  spark, sparkColor = "#0d9488", positiveIsGood = true,
+  spark, sparkColor = "#00FF88", positiveIsGood = true,
 }: BentoStatCardProps) {
   return (
     <div className={cn(
-      "bg-white rounded-2xl border border-black/[0.04]",
-      "shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-6",
-      "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+      "p-6",
+      "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,255,136,0.08)] transition-all duration-300",
       "flex flex-col gap-3"
     )}>
       <div className="flex items-start justify-between">
         <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center", iconBg)}>
-          <Icon className={cn("h-4.5 w-4.5", iconColor)} style={{ height: "18px", width: "18px" }} />
+          <Icon className={cn("shrink-0", iconColor)} style={{ height: "18px", width: "18px" }} />
         </div>
         {spark && (
           <TrendBadge percent={spark.trendPercent} positiveIsGood={positiveIsGood} />
@@ -189,8 +191,8 @@ function BentoStatCard({
       </div>
       <div className="flex items-end justify-between gap-2">
         <div>
-          <p className="text-[11px] font-medium text-stone-400 uppercase tracking-wide mb-0.5">{label}</p>
-          <p className="text-3xl font-bold text-stone-800 tracking-tight leading-none">{value}</p>
+          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-0.5">{label}</p>
+          <p className="text-3xl font-bold text-white tracking-tight leading-none">{value}</p>
         </div>
         {spark && spark.values.length >= 2 && (
           <Sparkline values={spark.values} color={sparkColor} />
@@ -201,13 +203,13 @@ function BentoStatCard({
 }
 
 // ---------------------------------------------------------------------------
-// Health Hero - large bento cell
+// Health Hero - neon dark variant
 // ---------------------------------------------------------------------------
 
-const SEVERITY_DOT: Record<Severity, string> = {
-  critical: "bg-rose-500",
-  warning: "bg-amber-400",
-  optimize: "bg-teal-500",
+const SEVERITY_DOT_NEON: Record<Severity, string> = {
+  critical: "bg-[#FF0066]",
+  warning: "bg-[#FFB800]",
+  optimize: "bg-[#00FF88]",
   discover: "bg-violet-400",
 };
 
@@ -217,48 +219,56 @@ function BentoHealthHero({
   score: number; activeInsights: Insight[]; loading: boolean;
 }) {
   const actionable = activeInsights.filter((i) => i.severity !== "discover");
-  const scoreColor = score >= 80 ? "text-emerald-600" : score >= 50 ? "text-amber-500" : "text-rose-500";
-  const scoreLabel = score >= 80 ? "Healthy" : score >= 50 ? "Needs attention" : "Critical";
+  const scoreColor = score >= 80 ? "text-[#00FF88]" : score >= 50 ? "text-[#FFB800]" : "text-[#FF0066]";
+  const scoreLabel = score >= 80 ? "Healthy" : score >= 50 ? "Needs Attention" : "Critical";
+  const ringGlow = score >= 80
+    ? "shadow-[0_0_40px_rgba(0,255,136,0.2)]"
+    : score >= 50
+    ? "shadow-[0_0_40px_rgba(255,184,0,0.2)]"
+    : "shadow-[0_0_40px_rgba(255,0,102,0.2)]";
 
   return (
     <div className={cn(
-      "bg-gradient-to-br from-teal-50 to-emerald-50 rounded-2xl",
-      "border border-black/[0.04] ring-1 ring-teal-200/50",
-      "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-      "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-gradient-to-br from-[#0a1a12] to-[#12121a] rounded-2xl",
+      "border border-white/[0.06]",
+      "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,255,136,0.08)] transition-all duration-300",
       "p-6 flex flex-col gap-4 h-full"
     )}>
       {/* Score row */}
       <div className="flex items-center gap-4">
         {loading ? (
-          <div className="h-[120px] w-[120px] rounded-full bg-white/60 animate-pulse" />
+          <div className="h-[120px] w-[120px] rounded-full bg-white/[0.04] animate-pulse" />
         ) : (
-          <ScoreRing score={score} size="lg" />
+          <div className={cn("rounded-full", ringGlow)}>
+            <ScoreRing score={score} size="lg" />
+          </div>
         )}
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-teal-600 mb-1">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#00FF88]/70 mb-1">
             Health Score
           </p>
           {loading ? (
-            <div className="h-6 w-28 bg-white/60 rounded animate-pulse" />
+            <div className="h-6 w-28 bg-white/[0.06] rounded animate-pulse" />
           ) : (
             <p className={cn("text-xl font-bold", scoreColor)}>{scoreLabel}</p>
           )}
           {!loading && actionable.length === 0 && (
-            <div className="mt-2 flex items-center gap-1.5 text-emerald-600">
+            <div className="mt-2 flex items-center gap-1.5 text-[#00FF88]">
               <CheckCircle2 className="h-4 w-4" />
-              <span className="text-sm font-medium">All systems healthy</span>
+              <span className="text-sm font-medium drop-shadow-[0_0_8px_rgba(0,255,136,0.5)]">
+                All systems operational
+              </span>
             </div>
           )}
           {!loading && actionable.length > 0 && (
-            <p className="mt-1 text-xs text-stone-500">
+            <p className="mt-1 text-xs text-gray-500">
               {actionable.length} item{actionable.length > 1 ? "s" : ""} need attention
             </p>
           )}
         </div>
       </div>
 
-      {/* Insights */}
+      {/* Insights - actionable */}
       {!loading && actionable.length > 0 && (
         <div className="flex flex-col gap-1 flex-1">
           {actionable.slice(0, 4).map((insight) => (
@@ -267,21 +277,23 @@ function BentoHealthHero({
               to={insight.link}
               className={cn(
                 "flex items-center gap-2.5 rounded-xl px-3 py-2",
-                "bg-white/60 hover:bg-white/90 transition-colors duration-150 text-sm"
+                "bg-[#00FF88]/[0.06] border border-[#00FF88]/10",
+                "hover:bg-[#00FF88]/[0.10] hover:border-[#00FF88]/20",
+                "transition-colors duration-150 text-sm"
               )}
             >
-              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", SEVERITY_DOT[insight.severity])} />
-              <span className="flex-1 text-stone-700 truncate">{insight.title}</span>
-              <ArrowRight className="h-3 w-3 text-stone-400 shrink-0" />
+              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", SEVERITY_DOT_NEON[insight.severity])} />
+              <span className="flex-1 text-gray-200 truncate">{insight.title}</span>
+              <ArrowRight className="h-3 w-3 text-gray-600 shrink-0" />
             </Link>
           ))}
           {actionable.length > 4 && (
-            <p className="px-3 text-xs text-stone-400">+{actionable.length - 4} more</p>
+            <p className="px-3 text-xs text-gray-600">+{actionable.length - 4} more</p>
           )}
         </div>
       )}
 
-      {/* All healthy message */}
+      {/* All healthy - show optimize hints */}
       {!loading && actionable.length === 0 && (
         <div className="flex-1 flex flex-col gap-2">
           {activeInsights.filter((i) => i.severity === "optimize").slice(0, 3).map((insight) => (
@@ -290,12 +302,14 @@ function BentoHealthHero({
               to={insight.link}
               className={cn(
                 "flex items-center gap-2.5 rounded-xl px-3 py-2",
-                "bg-white/50 hover:bg-white/80 transition-colors duration-150 text-sm"
+                "bg-[#00FF88]/[0.04] border border-[#00FF88]/[0.08]",
+                "hover:bg-[#00FF88]/[0.08] hover:border-[#00FF88]/[0.15]",
+                "transition-colors duration-150 text-sm"
               )}
             >
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-teal-400" />
-              <span className="flex-1 text-stone-600 truncate">{insight.title}</span>
-              <ArrowRight className="h-3 w-3 text-stone-400 shrink-0" />
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#00FF88]/50" />
+              <span className="flex-1 text-gray-400 truncate">{insight.title}</span>
+              <ArrowRight className="h-3 w-3 text-gray-600 shrink-0" />
             </Link>
           ))}
         </div>
@@ -305,7 +319,7 @@ function BentoHealthHero({
 }
 
 // ---------------------------------------------------------------------------
-// Quick Actions - bento cell
+// Quick Actions - neon dark variant
 // ---------------------------------------------------------------------------
 
 function BentoQuickActions() {
@@ -314,12 +328,11 @@ function BentoQuickActions() {
 
   return (
     <div className={cn(
-      "bg-white rounded-2xl border border-black/[0.04]",
-      "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-      "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+      "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,255,136,0.08)] transition-all duration-300",
       "p-6 flex flex-col gap-3 h-full"
     )}>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400 mb-1">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
         Quick Actions
       </p>
 
@@ -327,9 +340,9 @@ function BentoQuickActions() {
         onClick={() => navigate("/workflows")}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "bg-teal-500 hover:bg-teal-600 text-white",
-          "transition-all duration-200 active:scale-[0.98]",
-          "shadow-[0_2px_8px_rgba(13,148,136,0.3)]"
+          "bg-[#00FF88] text-black font-semibold",
+          "hover:shadow-[0_0_30px_rgba(0,255,136,0.3)] hover:brightness-110",
+          "transition-all duration-200 active:scale-[0.98]"
         )}
       >
         <Play className="h-4 w-4 shrink-0" />
@@ -340,7 +353,8 @@ function BentoQuickActions() {
         onClick={() => navigate("/runs?status=failed")}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100",
+          "border border-[#FF0066]/40 text-[#FF0066]",
+          "hover:bg-[#FF0066]/10 hover:border-[#FF0066]/60",
           "transition-all duration-200 active:scale-[0.98]"
         )}
       >
@@ -352,7 +366,8 @@ function BentoQuickActions() {
         onClick={() => navigate("/runs?sort=cost")}
         className={cn(
           "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-100",
+          "border border-white/10 text-gray-300",
+          "hover:border-white/20 hover:bg-white/[0.03]",
           "transition-all duration-200 active:scale-[0.98]"
         )}
       >
@@ -361,10 +376,10 @@ function BentoQuickActions() {
       </button>
 
       {pinnedWorkflows.length > 0 && (
-        <div className="mt-1 pt-3 border-t border-stone-100">
+        <div className="mt-1 pt-3 border-t border-white/[0.06]">
           <div className="flex items-center gap-2 mb-2">
-            <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Pinned</span>
+            <Star className="h-3.5 w-3.5 text-[#FFB800] fill-[#FFB800]" />
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Pinned</span>
           </div>
           <div className="space-y-1">
             {pinnedWorkflows.slice(0, 3).map((wfName) => (
@@ -373,11 +388,13 @@ function BentoQuickActions() {
                 onClick={() => navigate(`/workflows/${encodeURIComponent(wfName)}`)}
                 className={cn(
                   "flex items-center gap-2 w-full rounded-lg px-3 py-2",
-                  "hover:bg-stone-50 transition-colors text-left"
+                  "bg-[#0088FF]/[0.06] border border-[#0088FF]/10",
+                  "hover:bg-[#0088FF]/10 hover:border-[#0088FF]/20",
+                  "transition-colors text-left"
                 )}
               >
-                <GitBranch className="h-3 w-3 text-stone-400 shrink-0" />
-                <span className="text-sm text-stone-600 truncate">{wfName}</span>
+                <GitBranch className="h-3 w-3 text-[#0088FF]/60 shrink-0" />
+                <span className="text-sm text-gray-300 truncate">{wfName}</span>
               </button>
             ))}
           </div>
@@ -388,18 +405,18 @@ function BentoQuickActions() {
 }
 
 // ---------------------------------------------------------------------------
-// Activity Heatmap - bento style
+// Activity Heatmap - neon dark variant
 // ---------------------------------------------------------------------------
 
 const DAY_LABELS = ["", "M", "", "W", "", "F", ""];
 
 function getBentoIntensityClass(count: number, maxCount: number): string {
-  if (count === 0) return "bg-stone-100";
+  if (count === 0) return "bg-white/[0.03] border border-white/[0.04]";
   const ratio = count / maxCount;
-  if (ratio < 0.25) return "bg-teal-200";
-  if (ratio < 0.5) return "bg-teal-400";
-  if (ratio < 0.75) return "bg-teal-500";
-  return "bg-teal-600";
+  if (ratio < 0.25) return "bg-[#00FF88]/20";
+  if (ratio < 0.5) return "bg-[#00FF88]/40";
+  if (ratio < 0.75) return "bg-[#00FF88]/70";
+  return "bg-[#00FF88]";
 }
 
 function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
@@ -436,20 +453,19 @@ function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
 
   return (
     <div className={cn(
-      "bg-white rounded-2xl border border-black/[0.04]",
-      "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-      "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+      "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+      "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,255,136,0.08)] transition-all duration-300",
       "p-6"
     )}>
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-stone-700">Activity</h3>
-        <div className="flex items-center gap-1.5 text-[10px] text-stone-400">
+        <h3 className="text-sm font-semibold text-gray-200">Activity</h3>
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
           <span>Less</span>
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-stone-100" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-teal-200" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-teal-400" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-teal-500" />
-          <div className="h-[9px] w-[9px] rounded-[2px] bg-teal-600" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-white/[0.03] border border-white/[0.04]" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#00FF88]/20" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#00FF88]/40" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#00FF88]/70" />
+          <div className="h-[9px] w-[9px] rounded-[2px] bg-[#00FF88]" />
           <span>More</span>
         </div>
       </div>
@@ -459,7 +475,7 @@ function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
           {weeks.map((_, col) => {
             const ml = monthLabels.find((m) => m.col === col);
             return (
-              <div key={col} className="text-[10px] text-stone-400" style={{ width: "14px", minWidth: "14px" }}>
+              <div key={col} className="text-[10px] text-gray-600" style={{ width: "14px", minWidth: "14px" }}>
                 {ml ? ml.label : ""}
               </div>
             );
@@ -469,7 +485,7 @@ function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
         <div className="flex gap-0">
           <div className="flex flex-col gap-[2px] pr-1 pt-[2px]" style={{ width: "24px", minWidth: "24px" }}>
             {DAY_LABELS.map((label, i) => (
-              <div key={i} className="flex h-[12px] items-center text-[10px] leading-none text-stone-400">
+              <div key={i} className="flex h-[12px] items-center text-[10px] leading-none text-gray-600">
                 {label}
               </div>
             ))}
@@ -505,7 +521,7 @@ function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
 
       {tooltip && (
         <div
-          className="pointer-events-none fixed z-50 rounded-lg bg-stone-800 px-2.5 py-1.5 text-[11px] font-medium text-white shadow-xl"
+          className="pointer-events-none fixed z-50 rounded-lg bg-[#0a0a0f] border border-[#00FF88]/20 px-2.5 py-1.5 text-[11px] font-medium text-[#00FF88] shadow-xl shadow-[#00FF88]/5"
           style={{
             left: tooltip.x, top: tooltip.y,
             transform: "translate(-50%, -100%)",
@@ -549,7 +565,7 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
   ];
 
   return (
-    <div className="flex items-center gap-0.5 rounded-lg border border-stone-200 bg-stone-50 p-0.5">
+    <div className="flex items-center gap-0.5 rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
       {options.map((opt) => (
         <button
           key={opt.id}
@@ -561,8 +577,8 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
           className={cn(
             "flex items-center justify-center rounded-md w-7 h-7 transition-all duration-150",
             layout === opt.id
-              ? "bg-white shadow-sm text-teal-600"
-              : "text-stone-400 hover:text-stone-600"
+              ? "bg-[#00FF88]/10 shadow-sm text-[#00FF88]"
+              : "text-gray-600 hover:text-gray-300"
           )}
         >
           {opt.icon}
@@ -614,25 +630,25 @@ export default function OverviewBento({
     return () => { cancelled = true; };
   }, [retryCount]);
 
-  // Page wrapper - light bento gradient
-  const pageClass = "min-h-full bg-gradient-to-br from-slate-50 to-stone-100 -m-4 sm:-m-6 p-4 sm:p-6";
+  // Full-bleed neon dark background
+  const pageClass = "min-h-screen bg-[#0a0a0f] -m-4 sm:-m-6 p-4 sm:p-6";
 
   if (loading) {
     return (
       <div className={pageClass}>
         <div className="space-y-4 sm:space-y-5">
           <div className="flex items-center justify-between">
-            <Skeleton className="h-8 w-36 rounded-xl" />
-            <Skeleton className="h-8 w-28 rounded-lg" />
+            <Skeleton className="h-8 w-36 rounded-xl bg-white/[0.04]" />
+            <Skeleton className="h-8 w-28 rounded-lg bg-white/[0.04]" />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-            <Skeleton className="h-56 rounded-2xl lg:col-span-2" />
-            <Skeleton className="h-56 rounded-2xl" />
+            <Skeleton className="h-56 rounded-2xl lg:col-span-2 bg-white/[0.04]" />
+            <Skeleton className="h-56 rounded-2xl bg-white/[0.04]" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
-            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-28 rounded-2xl bg-white/[0.04]" />)}
           </div>
-          <Skeleton className="h-36 rounded-2xl" />
+          <Skeleton className="h-36 rounded-2xl bg-white/[0.04]" />
         </div>
       </div>
     );
@@ -641,12 +657,12 @@ export default function OverviewBento({
   if (error) {
     return (
       <div className={pageClass}>
-        <h1 className="mb-4 text-2xl font-bold tracking-tight text-stone-800">Overview</h1>
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5">
-          <p className="text-sm text-rose-600">{error}</p>
+        <h1 className="mb-4 text-2xl font-bold tracking-tight text-gray-200">Overview</h1>
+        <div className="rounded-2xl border border-[#FF0066]/20 bg-[#FF0066]/5 p-5">
+          <p className="text-sm text-[#FF0066]">{error}</p>
           <button
             onClick={() => { setLoading(true); setRetryCount((c) => c + 1); }}
-            className="mt-2 text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors"
+            className="mt-2 text-xs font-semibold text-[#00FF88] hover:text-[#00FF88]/80 transition-colors"
           >
             Retry
           </button>
@@ -663,7 +679,7 @@ export default function OverviewBento({
     <div className={pageClass}>
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-2xl font-bold tracking-tight text-stone-800">Overview</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-200">Overview</h1>
         <LayoutSwitcher layout={layout} setLayout={setLayout} />
       </div>
 
@@ -688,30 +704,30 @@ export default function OverviewBento({
             label="Runs Today"
             value={String(totalRuns)}
             icon={Activity}
-            iconColor="text-teal-600"
-            iconBg="bg-teal-50"
+            iconColor="text-[#00FF88]"
+            iconBg="bg-[#00FF88]/10"
             spark={mockSparklines.runs}
-            sparkColor="#0d9488"
+            sparkColor="#00FF88"
             positiveIsGood={true}
           />
           <BentoStatCard
             label="Success Rate"
             value={`${successRate}%`}
             icon={CheckCircle}
-            iconColor="text-emerald-600"
-            iconBg="bg-emerald-50"
+            iconColor="text-[#0088FF]"
+            iconBg="bg-[#0088FF]/10"
             spark={mockSparklines.rate}
-            sparkColor="#059669"
+            sparkColor="#0088FF"
             positiveIsGood={true}
           />
           <BentoStatCard
             label="Cost Today"
             value={formatCost(totalCost)}
             icon={DollarSign}
-            iconColor="text-amber-600"
-            iconBg="bg-amber-50"
+            iconColor="text-[#FFB800]"
+            iconBg="bg-[#FFB800]/10"
             spark={mockSparklines.cost}
-            sparkColor="#f59e0b"
+            sparkColor="#FFB800"
             positiveIsGood={false}
           />
         </div>
@@ -726,20 +742,21 @@ export default function OverviewBento({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-4 sm:mb-5">
         <div className="lg:col-span-2">
           <div className={cn(
-            "bg-white rounded-2xl border border-black/[0.04]",
-            "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-            "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+            "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,136,255,0.08)] transition-all duration-300",
             "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
           )}>
             <CostForecast />
           </div>
         </div>
         <div className={cn(
-          "bg-white rounded-2xl border border-black/[0.04]",
-          "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-          "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+          "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+          "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,255,136,0.08)] transition-all duration-300",
           "overflow-hidden",
-          "[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+          "[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none",
+          // Recent runs row styling overrides
+          "[&_button]:hover:bg-white/[0.03]",
+          "[&_.font-data]:text-[#FFB800]"
         )}>
           <RecentRuns runs={recentRuns} />
         </div>
@@ -749,17 +766,15 @@ export default function OverviewBento({
       {stats && stats.runs_by_day.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
           <div className={cn(
-            "bg-white rounded-2xl border border-black/[0.04]",
-            "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-            "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+            "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,255,136,0.08)] transition-all duration-300",
             "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
           )}>
             <RunsChart data={stats.runs_by_day} />
           </div>
           <div className={cn(
-            "bg-white rounded-2xl border border-black/[0.04]",
-            "shadow-[0_1px_3px_rgba(0,0,0,0.04)]",
-            "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all duration-300",
+            "bg-[#12121a] rounded-2xl border border-white/[0.06]",
+            "hover:border-white/[0.12] hover:shadow-[0_0_30px_rgba(0,136,255,0.08)] transition-all duration-300",
             "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
           )}>
             {stats.cost_by_workflow && (
