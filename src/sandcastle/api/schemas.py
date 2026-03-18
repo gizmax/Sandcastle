@@ -1089,6 +1089,87 @@ class EmergencyStopResponse(BaseModel):
     active: bool = Field(True, description="Whether the emergency stop flag is now active")
 
 
+# --- Transparency / Compliance ---
+
+
+class TransparencyAiModelEntry(BaseModel):
+    """A single AI model usage entry in the transparency report."""
+
+    step_id: str
+    model: str
+    cost_usd: float = Field(0.0, ge=0)
+
+
+class TransparencyHumanOversightEntry(BaseModel):
+    """A single human oversight (approval) entry in the transparency report."""
+
+    step_id: str
+    type: str = "approval"
+    status: str
+    reviewer: str | None = None
+
+
+class TransparencyPolicyViolationEntry(BaseModel):
+    """A single policy violation entry in the transparency report."""
+
+    step_id: str
+    policy: str
+    severity: str
+    action: str
+
+
+class TransparencyReportResponse(BaseModel):
+    """EU AI Act Article 13 transparency report for a workflow run."""
+
+    run_id: str
+    workflow_name: str
+    risk_level: str = "minimal"
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    status: str
+    total_cost_usd: float = Field(0.0, ge=0)
+    ai_models_used: list[TransparencyAiModelEntry] = Field(default_factory=list)
+    human_oversight: list[TransparencyHumanOversightEntry] = Field(default_factory=list)
+    policy_violations: list[TransparencyPolicyViolationEntry] = Field(default_factory=list)
+    privacy_applied: bool = False
+    total_steps: int = Field(0, ge=0)
+    failed_steps: int = Field(0, ge=0)
+    disclaimer: str = (
+        "This report was generated for EU AI Act Article 13 transparency requirements."
+    )
+
+
+class AnnexIVSections(BaseModel):
+    """Content sections for the Annex IV technical documentation."""
+
+    intended_purpose: str = ""
+    ai_models: list[str] = Field(default_factory=list)
+    step_types: list[str] = Field(default_factory=list)
+    human_oversight: str = ""
+    risk_classification: str = ""
+    testing_evidence: dict[str, Any] = Field(default_factory=dict)
+    known_limitations: str = ""
+    data_handling: str = ""
+    audit_trail: str = ""
+
+
+class AnnexIVResponse(BaseModel):
+    """EU AI Act Annex IV technical documentation stub for a workflow."""
+
+    workflow_name: str
+    version: str | None = None
+    risk_level: str = "minimal"
+    generated_at: datetime
+    sections: AnnexIVSections
+
+
+class ComplianceStatusResponse(BaseModel):
+    """Current compliance mode status and active features."""
+
+    mode: str
+    active: bool
+    features: dict[str, bool] = Field(default_factory=dict)
+
 
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()

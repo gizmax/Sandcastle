@@ -23,6 +23,8 @@ from sqlalchemy.orm import selectinload
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
+    AnnexIVResponse,
+    AnnexIVSections,
     ApiKeyAllowlistRequest,
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
@@ -35,6 +37,7 @@ from sandcastle.api.schemas import (
     AuditEventResponse,
     AuditVerifyResponse,
     AutoPilotStatsResponse,
+    ComplianceStatusResponse,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
     EmergencyStopResponse,
@@ -80,6 +83,10 @@ from sandcastle.api.schemas import (
     ToolFunctionResponse,
     ToolListResponse,
     ToolResponse,
+    TransparencyAiModelEntry,
+    TransparencyHumanOversightEntry,
+    TransparencyPolicyViolationEntry,
+    TransparencyReportResponse,
     UpdateCheckResponse,
     WorkflowGenerateRequest,
     WorkflowInfoResponse,
@@ -7310,5 +7317,259 @@ async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
             valid=valid,
             chain_length=chain_length,
             broken_at=broken_at,
+        )
+    )
+
+
+# --- Transparency / Compliance ---
+
+
+@router.get("/runs/{run_id}/transparency-report")
+async def get_transparency_report(run_id: str, req: Request) -> ApiResponse:
+    """Generate an EU AI Act Article 13 transparency report for a run."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        run_stmt = (
+            select(Run)
+            .options(selectinload(Run.steps))
+            .where(Run.id == run_uuid)
+        )
+        run_stmt = _apply_tenant_filter(run_stmt, tenant_id, Run.tenant_id)
+        run_result = await session.execute(run_stmt)
+        run = run_result.scalar_one_or_none()
+
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        # Fetch approvals for this run
+        approvals_result = await session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.run_id == run_uuid)
+        )
+        approvals = approvals_result.scalars().all()
+
+        # Fetch policy violations for this run
+        violations_result = await session.execute(
+            select(PolicyViolation).where(PolicyViolation.run_id == run_uuid)
+        )
+        violations = violations_result.scalars().all()
+
+    # Build AI models used list from steps that have a cost > 0 and a model
+    ai_models: list[TransparencyAiModelEntry] = []
+    for step in run.steps:
+        model_val = getattr(step, "model", None)
+        cost_val = step.cost_usd or 0.0
+        if cost_val > 0 or model_val:
+            ai_models.append(
+                TransparencyAiModelEntry(
+                    step_id=step.step_id,
+                    model=model_val or "unknown",
+                    cost_usd=cost_val,
+                )
+            )
+
+    # Build human oversight entries from approval requests
+    human_oversight: list[TransparencyHumanOversightEntry] = [
+        TransparencyHumanOversightEntry(
+            step_id=a.step_id,
+            type="approval",
+            status=a.status.value if hasattr(a.status, "value") else str(a.status),
+            reviewer=a.reviewer_id,
+        )
+        for a in approvals
+    ]
+
+    # Build policy violation entries
+    policy_violations: list[TransparencyPolicyViolationEntry] = [
+        TransparencyPolicyViolationEntry(
+            step_id=v.step_id,
+            policy=v.policy_id,
+            severity=v.severity,
+            action=v.action_taken,
+        )
+        for v in violations
+    ]
+
+    # Count steps
+    total_steps = len(run.steps)
+    failed_steps = sum(
+        1 for s in run.steps
+        if (s.status.value if hasattr(s.status, "value") else s.status) == "failed"
+    )
+
+    report = TransparencyReportResponse(
+        run_id=str(run.id),
+        workflow_name=run.workflow_name,
+        risk_level=run.risk_level or "minimal",
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        status=run.status.value if hasattr(run.status, "value") else str(run.status),
+        total_cost_usd=run.total_cost_usd,
+        ai_models_used=ai_models,
+        human_oversight=human_oversight,
+        policy_violations=policy_violations,
+        privacy_applied=settings.privacy_enabled,
+        total_steps=total_steps,
+        failed_steps=failed_steps,
+    )
+    return ApiResponse(data=report)
+
+
+@router.get("/workflows/{name}/annex-iv")
+async def get_annex_iv(name: str, req: Request) -> ApiResponse:
+    """Generate an EU AI Act Annex IV technical documentation stub for a workflow."""
+    # Load workflow YAML
+    try:
+        yaml_content = _load_workflow_yaml(name)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND", message=f"Workflow '{name}' not found"
+                )
+            ).model_dump(),
+        )
+
+    # Parse workflow definition
+    try:
+        workflow = parse_yaml_string(yaml_content)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_WORKFLOW", message=f"Failed to parse workflow: {exc}"
+                )
+            ).model_dump(),
+        )
+
+    # Determine version from registry
+    version_str: str | None = None
+    async with async_session() as session:
+        wv_result = await session.execute(
+            select(WorkflowVersion)
+            .where(WorkflowVersion.workflow_name == name)
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        wv = wv_result.scalar_one_or_none()
+        if wv:
+            version_str = str(wv.version)
+
+        # Fetch recent eval run statistics
+        eval_result = await session.execute(
+            select(EvalRun)
+            .where(EvalRun.workflow_name == name, EvalRun.status == EvalRunStatus.COMPLETED)
+            .order_by(EvalRun.created_at.desc())
+            .limit(50)
+        )
+        eval_runs = eval_result.scalars().all()
+
+    # Collect unique AI models and step types
+    ai_models_used = sorted({
+        s.model or workflow.default_model or "unknown"
+        for s in workflow.steps
+        if s.type in ("standard", "llm", None, "")
+    })
+    step_types = sorted({s.type or "standard" for s in workflow.steps})
+
+    # Find human oversight description
+    approval_steps = [s for s in workflow.steps if s.type == "approval"]
+    if approval_steps:
+        oversight_desc = f"Approval gate at step '{approval_steps[0].id}'"
+    else:
+        oversight_desc = "No explicit approval step defined"
+
+    # Risk classification text
+    risk_level = getattr(workflow, "risk_level", "minimal") or "minimal"
+    if risk_level == "high":
+        risk_desc = "high - requires human oversight per EU AI Act Annex III"
+    elif risk_level == "limited":
+        risk_desc = "limited - transparency obligations apply per EU AI Act Article 52"
+    else:
+        risk_desc = "minimal - standard monitoring recommended"
+
+    # Testing evidence
+    testing_evidence: dict = {}
+    if eval_runs:
+        total_runs = len(eval_runs)
+        avg_pass_rate = sum(er.pass_rate for er in eval_runs) / total_runs
+        testing_evidence = {
+            "total_eval_runs": total_runs,
+            "pass_rate": round(avg_pass_rate, 4),
+        }
+    else:
+        testing_evidence = {"total_eval_runs": 0, "pass_rate": None}
+
+    # Data handling description from privacy settings
+    if settings.privacy_enabled:
+        privacy_entities = settings.privacy_entities or "email, phone, ssn"
+        data_handling = f"Privacy router enabled for: {privacy_entities}"
+    else:
+        data_handling = "Privacy router not enabled"
+
+    # Audit trail description
+    audit_desc = "Tamper-evident SHA-256 hash chain audit log enabled"
+
+    sections = AnnexIVSections(
+        intended_purpose=getattr(workflow, "description", "") or "",
+        ai_models=ai_models_used,
+        step_types=step_types,
+        human_oversight=oversight_desc,
+        risk_classification=risk_desc,
+        testing_evidence=testing_evidence,
+        known_limitations=(
+            "Cost estimates are approximate. LLM outputs may vary."
+        ),
+        data_handling=data_handling,
+        audit_trail=audit_desc,
+    )
+
+    return ApiResponse(
+        data=AnnexIVResponse(
+            workflow_name=name,
+            version=version_str,
+            risk_level=risk_level,
+            generated_at=datetime.now(timezone.utc),
+            sections=sections,
+        )
+    )
+
+
+@router.get("/compliance/status")
+async def get_compliance_status() -> ApiResponse:
+    """Return the current compliance mode status and active features."""
+    mode = settings.compliance_mode or ""
+    active = mode == "eu_ai_act"
+
+    features = {
+        "audit_trail": True,  # Always enabled - tamper-evident hash chain
+        "risk_classification": True,  # Always available via workflow risk_level
+        "privacy_router": settings.privacy_enabled,
+        "emergency_stop": True,  # Always available
+        "input_prompt_logging": True,  # Always captured in RunStep.input_prompt
+    }
+
+    return ApiResponse(
+        data=ComplianceStatusResponse(
+            mode=mode if mode else "disabled",
+            active=active,
+            features=features,
         )
     )

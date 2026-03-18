@@ -143,6 +143,9 @@ class Settings(BaseSettings):
     privacy_entities: str = "email,phone,ssn,credit_card"  # comma-separated entity types
     privacy_apply_to: str = "outputs,webhooks"  # comma-separated apply_to targets
 
+    # Compliance mode: "" = disabled, "eu_ai_act" = EU AI Act enforcement
+    compliance_mode: str = ""
+
     # Logging
     log_level: str = "info"
 

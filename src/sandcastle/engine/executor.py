@@ -5203,10 +5203,27 @@ async def execute_workflow(
             error="Unacceptable risk workflows cannot be executed under EU AI Act",
         )
 
-    # EU AI Act: warn if high-risk workflow has no approval step
+    # Compliance mode enforcement
+    compliance_mode = getattr(settings, "compliance_mode", "")
+    if compliance_mode == "eu_ai_act":
+        logger.info("EU AI Act compliance mode active")
+
+    # EU AI Act: warn (or fail in compliance mode) if high-risk workflow has no approval step
     if risk_level == "high":
         has_approval = any(s.type == "approval" for s in workflow.steps)
         if not has_approval:
+            if compliance_mode == "eu_ai_act":
+                return WorkflowResult(
+                    run_id=run_id or str(uuid.uuid4()),
+                    outputs={},
+                    total_cost_usd=0.0,
+                    status="failed",
+                    error=(
+                        "EU AI Act compliance mode: high-risk workflow '"
+                        + workflow.name
+                        + "' requires a human approval step but none was found."
+                    ),
+                )
             logger.warning(
                 "Workflow '%s' is classified as high-risk (EU AI Act) but has no "
                 "approval step. Human oversight is recommended.",
