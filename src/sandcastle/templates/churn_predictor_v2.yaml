@@ -223,7 +223,7 @@ steps:
 
   - id: hubspot-campaigns
     depends_on: [retention-playbooks, multi-signal-scoring]
-    type: condition
+    type: standard
     prompt: |
       Enroll at-risk customers into HubSpot retention sequences if a sequence ID is configured.
 
