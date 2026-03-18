@@ -9,7 +9,7 @@ description: Analyze codebase for technical debt signals - complexity hotspots, 
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
-default_tools: [code_interpreter]
+default_tools: [code-interpreter]
 
 input_schema:
   required: ["repo_url", "language"]
