@@ -9,7 +9,7 @@ description: Automate new employee onboarding - checklist, welcome email, accoun
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
-default_tools: [slack, notion, mail]
+default_tools: [slack, notion, resend]
 
 input_schema:
   required: ["employee_name", "role", "department", "start_date", "manager_email"]
@@ -150,7 +150,7 @@ steps:
       Onboarding checklist: {steps.create-checklist.output}
 
       Use the Mail tool:
-        node /home/user/tools/mail.mjs send '{input.employee_email}' '<subject>' '<body>'
+        node /home/user/tools/resend.mjs send '{input.employee_email}' '<subject>' '<body>'
 
       Compose a welcome email customized by seniority level ({input.seniority_level}) that includes:
 
@@ -178,7 +178,7 @@ steps:
       If employee_email is not provided, draft the email and clearly note it needs manual sending.
     model: sonnet
     max_turns: 5
-    tools: [mail]
+    tools: [resend]
 
   - id: setup-accounts
     depends_on: [create-checklist]
@@ -336,7 +336,7 @@ steps:
       Training plan: {steps.create-training-plan.output}
 
       Use the Mail tool:
-        node /home/user/tools/mail.mjs send '{input.manager_email}' '<subject>' '<body>'
+        node /home/user/tools/resend.mjs send '{input.manager_email}' '<subject>' '<body>'
 
       Send a comprehensive manager briefing email with:
 
@@ -380,4 +380,4 @@ steps:
       Start date: {input.start_date}. Manager: {input.manager_email}. Status: all systems go / pending items listed."
     model: sonnet
     max_turns: 5
-    tools: [mail, slack]
+    tools: [resend, slack]
