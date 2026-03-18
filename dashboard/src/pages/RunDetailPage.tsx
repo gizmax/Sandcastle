@@ -791,7 +791,9 @@ export default function RunDetailPage() {
                           <p className="text-xs font-medium text-muted-foreground capitalize mb-0.5">
                             {key.replace(/_/g, " ")}
                           </p>
-                          <p className="text-sm font-mono text-foreground">{String(val)}</p>
+                          <p className="text-sm font-mono text-foreground">
+                            {Array.isArray(val) ? val.join(", ") : typeof val === "object" && val !== null ? JSON.stringify(val) : String(val ?? "")}
+                          </p>
                         </div>
                       ))}
                     </div>
