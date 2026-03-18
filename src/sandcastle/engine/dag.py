@@ -436,6 +436,7 @@ class WorkflowDefinition:
     policies: list[PolicyDefinition] = field(default_factory=list)
     default_tools: list[str] = field(default_factory=list)  # Workflow-level default tools
     memory: MemoryConfig | None = None
+    privacy: dict | None = None  # PrivacyRouter config (parsed from YAML privacy: block)
 
     def get_step(self, step_id: str) -> StepDefinition:
         """Get a step by its ID."""
@@ -988,6 +989,7 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
         policies=global_policies,
         default_tools=data.get("default_tools", []),
         memory=_parse_memory_config(data.get("memory")),
+        privacy=data.get("privacy") if isinstance(data.get("privacy"), dict) else None,
     )
 
 

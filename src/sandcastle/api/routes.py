@@ -35,6 +35,7 @@ from sandcastle.api.schemas import (
     AutoPilotStatsResponse,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
+    EmergencyStopResponse,
     ErrorResponse,
     EvalAssertionResponse,
     EvalCaseResponse,
@@ -2108,6 +2109,28 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         }
         event_type = _sync_event_map.get(result.status, "workflow.failed")
 
+        # Apply PII redaction to webhook outputs if privacy router is active.
+        webhook_outputs = result.outputs
+        if webhook_urls:
+            try:
+                from sandcastle.config import settings as _cfg
+                from sandcastle.engine.privacy import PrivacyRouter
+
+                _srv_priv = {
+                    "enabled": _cfg.privacy_enabled,
+                    "entities": _cfg.privacy_entities,
+                    "apply_to": _cfg.privacy_apply_to,
+                }
+                _priv_router = PrivacyRouter.from_workflow(
+                    workflow_privacy=getattr(workflow, "privacy", None),
+                    server_config=_srv_priv,
+                )
+                if _priv_router and "webhooks" in _priv_router.config.apply_to:
+                    scrubbed, _matches = _priv_router.scrub_dict(webhook_outputs)
+                    webhook_outputs = scrubbed
+            except Exception as _priv_err:
+                logger.warning("PrivacyRouter webhook scrub failed: %s", _priv_err)
+
         webhook_urls = list(dict.fromkeys(webhook_urls))
         for webhook_url in webhook_urls:
             duration = 0.0
@@ -2119,7 +2142,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 run_id=run_id,
                 workflow=workflow.name,
                 status=result.status,
-                outputs=result.outputs,
+                outputs=webhook_outputs,
                 costs=result.total_cost_usd,
                 duration_seconds=duration,
                 error=result.error,
@@ -3111,6 +3134,70 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
 
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
+    )
+
+
+# --- Emergency Stop ---
+
+
+@router.post("/admin/emergency-stop")
+async def emergency_stop(req: Request) -> ApiResponse:
+    """Global emergency stop - cancel ALL running and queued runs immediately.
+
+    Sets a Redis key ``emergency_stop:global`` (TTL 24h) that the executor
+    checks on every cancel-check loop iteration.  In local mode (no Redis) an
+    in-memory flag is used instead.
+
+    Returns the number of runs that were transitioned to CANCELLED in the DB.
+    Requires admin privileges.
+    """
+    from sqlalchemy import update as sa_update
+
+    _require_admin(req)
+
+    # Bulk-cancel all active runs in the database.
+    async with async_session() as session:
+        # Count active runs first (used for the response).
+        count_stmt = select(func.count(Run.id)).where(
+            Run.status.in_([RunStatus.RUNNING, RunStatus.QUEUED])
+        )
+        cancelled_count = (await session.execute(count_stmt)).scalar_one() or 0
+
+        cancel_stmt = (
+            sa_update(Run)
+            .where(Run.status.in_([RunStatus.RUNNING, RunStatus.QUEUED]))
+            .values(
+                status=RunStatus.CANCELLED,
+                completed_at=datetime.now(timezone.utc),
+                error="Cancelled by global emergency stop",
+            )
+        )
+        await session.execute(cancel_stmt)
+        await session.commit()
+
+    # Set the global stop flag (Redis or in-memory).
+    if settings.redis_url:
+        try:
+            from sandcastle.engine.executor import _get_redis
+
+            r = await _get_redis()
+            await r.set("emergency_stop:global", "1", ex=86400)  # 24h TTL
+        except Exception as e:
+            logger.error(f"Could not set emergency stop flag in Redis: {e}")
+    else:
+        from sandcastle.engine.executor import set_emergency_stop_local
+
+        await set_emergency_stop_local()
+
+    logger.warning(
+        "Emergency stop activated by admin - cancelled %d run(s)", cancelled_count
+    )
+
+    return ApiResponse(
+        data=EmergencyStopResponse(
+            cancelled_count=cancelled_count,
+            active=True,
+        ).model_dump(),
     )
 
 
