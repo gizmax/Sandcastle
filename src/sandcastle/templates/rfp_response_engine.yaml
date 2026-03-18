@@ -9,7 +9,7 @@ description: Multi-agent RFP/RFQ response generator that ingests bid requirement
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
-default_tools: [web_search]
+default_tools: [tavily]
 
 input_schema:
   required: ["rfp_document", "company_name"]

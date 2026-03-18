@@ -9,7 +9,7 @@ description: Real-time PR crisis management - monitor channels, draft holding st
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
-default_tools: [web_search, slack]
+default_tools: [tavily, slack]
 
 input_schema:
   required: ["crisis_description", "company_name"]

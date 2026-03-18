@@ -9,7 +9,7 @@ description: Monitor how AI platforms represent your brand in generated answers,
 default_model: sonnet
 default_max_turns: 10
 default_timeout: 300
-default_tools: [web_search]
+default_tools: [tavily]
 
 input_schema:
   required: ["brand_name", "competitors"]
