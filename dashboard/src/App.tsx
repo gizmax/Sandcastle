@@ -27,6 +27,7 @@ const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const IntegrationsPage = lazy(() => import("@/pages/IntegrationsPage"));
 const EvaluationsPage = lazy(() => import("@/pages/EvaluationsPage"));
 const SystemHealthPage = lazy(() => import("@/pages/SystemHealthPage"));
+const CompliancePage = lazy(() => import("@/pages/CompliancePage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
 
 /** Wrap a lazy-loaded page in a per-route error boundary so a crash in one
@@ -100,6 +101,7 @@ export default function App() {
               <Route path="/api-keys" element={<PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary>} />
               <Route path="/settings" element={<PageBoundary name="settings"><SettingsPage /></PageBoundary>} />
               <Route path="/system-health" element={<PageBoundary name="system-health"><SystemHealthPage /></PageBoundary>} />
+              <Route path="/compliance" element={<PageBoundary name="compliance"><CompliancePage /></PageBoundary>} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

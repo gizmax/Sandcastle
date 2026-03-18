@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, FileText, ChevronRight } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { RiskLevelBadge } from "@/components/runs/RiskLevelBadge";
 import { AnomalyBadge } from "@/components/shared/AnomalyBadge";
 import { StepTimeline } from "@/components/runs/StepTimeline";
 import { LiveStream } from "@/components/runs/LiveStream";
@@ -55,6 +56,7 @@ interface RunDetail {
   depth: number;
   sub_workflow_of_step: string | null;
   sub_runs: { run_id: string; workflow_name: string; status: string; sub_workflow_of_step: string | null }[] | null;
+  risk_level?: string;
 }
 
 export default function RunDetailPage() {
@@ -74,6 +76,9 @@ export default function RunDetailPage() {
   const [celebrationMilestone, setCelebrationMilestone] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [vizMode, setVizMode] = useState<"pipeline" | "flamegraph">("pipeline");
+  const [transparencyReportExpanded, setTransparencyReportExpanded] = useState(false);
+  const [transparencyReport, setTransparencyReport] = useState<Record<string, unknown> | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [flamegraphExpanded, setFlamegraphExpanded] = useState(true);
   const { notifyRunComplete } = useNotifications();
   const prevStatusRef = useRef<string | null>(null);
@@ -259,6 +264,20 @@ export default function RunDetailPage() {
     await navigator.clipboard.writeText(JSON.stringify(clean, null, 2));
     toast.success("Output copied to clipboard");
   }, [run, filterOutputs]);
+
+  const handleLoadTransparencyReport = useCallback(async () => {
+    if (!id || transparencyReport) {
+      setTransparencyReportExpanded((e) => !e);
+      return;
+    }
+    setLoadingReport(true);
+    setTransparencyReportExpanded(true);
+    const res = await api.get<Record<string, unknown>>(`/runs/${id}/transparency-report`);
+    setLoadingReport(false);
+    if (res.data) {
+      setTransparencyReport(res.data);
+    }
+  }, [id, transparencyReport]);
 
   const handleReplay = useCallback((stepId: string) => {
     setModalStepId(stepId);
@@ -732,6 +751,85 @@ export default function RunDetailPage() {
           <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap">
             {JSON.stringify(filterOutputs(run.outputs), null, 2)}
           </pre>
+        </div>
+      )}
+
+      {/* EU AI Act compliance section */}
+      {run.risk_level && (
+        <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+          <button
+            onClick={handleLoadTransparencyReport}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-border/20 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-accent" />
+              <span className="text-sm font-semibold text-foreground">EU AI Act Compliance</span>
+              <RiskLevelBadge level={run.risk_level} />
+            </div>
+            <ChevronRight
+              className={cn(
+                "h-4 w-4 text-muted transition-transform duration-200",
+                transparencyReportExpanded && "rotate-90"
+              )}
+            />
+          </button>
+          {transparencyReportExpanded && (
+            <div className="border-t border-border px-5 py-4 space-y-4">
+              {loadingReport ? (
+                <p className="text-sm text-muted">Loading transparency report...</p>
+              ) : transparencyReport ? (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="h-4 w-4 text-accent" />
+                    <span className="text-sm font-medium text-foreground">Transparency Report</span>
+                    <span className="text-xs font-mono text-muted">{String(transparencyReport.report_version || "")}</span>
+                  </div>
+                  {transparencyReport.eu_ai_act && typeof transparencyReport.eu_ai_act === "object" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {Object.entries(transparencyReport.eu_ai_act as Record<string, unknown>).map(([key, val]) => (
+                        <div key={key}>
+                          <p className="text-xs font-medium text-muted-foreground capitalize mb-0.5">
+                            {key.replace(/_/g, " ")}
+                          </p>
+                          <p className="text-sm font-mono text-foreground">{String(val)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {typeof transparencyReport.system_description === "string" && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">System Description</p>
+                      <p className="text-sm text-foreground">{transparencyReport.system_description}</p>
+                    </div>
+                  )}
+                  {Array.isArray(transparencyReport.model_usage) && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Model Usage</p>
+                      <div className="space-y-1.5">
+                        {(transparencyReport.model_usage as Array<Record<string, unknown>>).map((usage, i) => (
+                          <div key={i} className="flex items-center gap-3 rounded-lg bg-background border border-border/50 px-3 py-2">
+                            <span className="font-mono text-xs text-muted-foreground min-w-[80px]">{String(usage.step_id)}</span>
+                            <span className="text-xs text-foreground flex-1">{String(usage.model)}</span>
+                            <span className="text-xs text-muted font-mono">${Number(usage.cost_usd).toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {typeof transparencyReport.audit_trail_hash === "string" && (
+                    <div className="flex items-center gap-2 rounded-lg bg-background border border-border/50 px-3 py-2">
+                      <Shield className="h-3.5 w-3.5 text-success shrink-0" />
+                      <span className="font-mono text-xs text-muted truncate">
+                        {transparencyReport.audit_trail_hash}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted">No transparency report available</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
