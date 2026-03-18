@@ -23,6 +23,8 @@ from sqlalchemy.orm import selectinload
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
+    AnnexIVResponse,
+    AnnexIVSections,
     ApiKeyAllowlistRequest,
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
@@ -32,9 +34,13 @@ from sandcastle.api.schemas import (
     ApiResponse,
     ApprovalRespondRequest,
     ApprovalResponse,
+    AuditEventResponse,
+    AuditVerifyResponse,
     AutoPilotStatsResponse,
+    ComplianceStatusResponse,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
+    EmergencyStopResponse,
     ErrorResponse,
     EvalAssertionResponse,
     EvalCaseResponse,
@@ -77,6 +83,10 @@ from sandcastle.api.schemas import (
     ToolFunctionResponse,
     ToolListResponse,
     ToolResponse,
+    TransparencyAiModelEntry,
+    TransparencyHumanOversightEntry,
+    TransparencyPolicyViolationEntry,
+    TransparencyReportResponse,
     UpdateCheckResponse,
     WorkflowGenerateRequest,
     WorkflowInfoResponse,
@@ -88,6 +98,8 @@ from sandcastle.api.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
+    AuditEventResponse,
+    AuditVerifyResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -98,6 +110,7 @@ from sandcastle.models.db import (
     ApiKey,
     ApprovalRequest,
     ApprovalStatus,
+    AuditEvent,
     AutoPilotExperiment,
     AutoPilotSample,
     DeadLetterItem,
@@ -111,11 +124,13 @@ from sandcastle.models.db import (
     RunStatus,
     Schedule,
     Setting,
+    AuditEvent,
     ToolConnection,
     WorkflowVersion,
     WorkflowVersionStatus,
     async_session,
 )
+from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
 from sandcastle.queue.worker import enqueue_workflow
 
@@ -2028,6 +2043,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 max_cost_usd=budget,
                 workflow_version=wf_version,
                 started_at=datetime.now(timezone.utc),
+                risk_level=getattr(workflow, "risk_level", "minimal"),
             )
             session.add(db_run)
             await session.commit()
@@ -2108,6 +2124,28 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         }
         event_type = _sync_event_map.get(result.status, "workflow.failed")
 
+        # Apply PII redaction to webhook outputs if privacy router is active.
+        webhook_outputs = result.outputs
+        if webhook_urls:
+            try:
+                from sandcastle.config import settings as _cfg
+                from sandcastle.engine.privacy import PrivacyRouter
+
+                _srv_priv = {
+                    "enabled": _cfg.privacy_enabled,
+                    "entities": _cfg.privacy_entities,
+                    "apply_to": _cfg.privacy_apply_to,
+                }
+                _priv_router = PrivacyRouter.from_workflow(
+                    workflow_privacy=getattr(workflow, "privacy", None),
+                    server_config=_srv_priv,
+                )
+                if _priv_router and "webhooks" in _priv_router.config.apply_to:
+                    scrubbed, _matches = _priv_router.scrub_dict(webhook_outputs)
+                    webhook_outputs = scrubbed
+            except Exception as _priv_err:
+                logger.warning("PrivacyRouter webhook scrub failed: %s", _priv_err)
+
         webhook_urls = list(dict.fromkeys(webhook_urls))
         for webhook_url in webhook_urls:
             duration = 0.0
@@ -2119,7 +2157,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 run_id=run_id,
                 workflow=workflow.name,
                 status=result.status,
-                outputs=result.outputs,
+                outputs=webhook_outputs,
                 costs=result.total_cost_usd,
                 duration_seconds=duration,
                 error=result.error,
@@ -2231,6 +2269,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 idempotency_key=request.idempotency_key,
                 max_cost_usd=budget,
                 workflow_version=wf_version,
+                risk_level=getattr(workflow, "risk_level", "minimal"),
             )
             session.add(db_run)
             await session.commit()
@@ -2540,6 +2579,7 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             ]
             if run.children
             else None,
+            risk_level=run.risk_level or "minimal",
         )
     )
 
@@ -3109,8 +3149,79 @@ async def cancel_run(run_id: str, req: Request) -> ApiResponse:
 
         await cancel_run_local(run_id)
 
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="run.cancelled", run_id=run_id, actor_id=get_tenant_id(req) or "system", payload={"run_id": run_id}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit run.cancelled failed: %s", _ae)
     return ApiResponse(
         data={"cancelled": True, "run_id": run_id},
+    )
+
+
+# --- Emergency Stop ---
+
+
+@router.post("/admin/emergency-stop")
+async def emergency_stop(req: Request) -> ApiResponse:
+    """Global emergency stop - cancel ALL running and queued runs immediately.
+
+    Sets a Redis key ``emergency_stop:global`` (TTL 24h) that the executor
+    checks on every cancel-check loop iteration.  In local mode (no Redis) an
+    in-memory flag is used instead.
+
+    Returns the number of runs that were transitioned to CANCELLED in the DB.
+    Requires admin privileges.
+    """
+    from sqlalchemy import update as sa_update
+
+    _require_admin(req)
+
+    # Bulk-cancel all active runs in the database.
+    async with async_session() as session:
+        # Count active runs first (used for the response).
+        count_stmt = select(func.count(Run.id)).where(
+            Run.status.in_([RunStatus.RUNNING, RunStatus.QUEUED])
+        )
+        cancelled_count = (await session.execute(count_stmt)).scalar_one() or 0
+
+        cancel_stmt = (
+            sa_update(Run)
+            .where(Run.status.in_([RunStatus.RUNNING, RunStatus.QUEUED]))
+            .values(
+                status=RunStatus.CANCELLED,
+                completed_at=datetime.now(timezone.utc),
+                error="Cancelled by global emergency stop",
+            )
+        )
+        await session.execute(cancel_stmt)
+        await session.commit()
+
+    # Set the global stop flag (Redis or in-memory).
+    if settings.redis_url:
+        try:
+            from sandcastle.engine.executor import _get_redis
+
+            r = await _get_redis()
+            await r.set("emergency_stop:global", "1", ex=86400)  # 24h TTL
+        except Exception as e:
+            logger.error(f"Could not set emergency stop flag in Redis: {e}")
+    else:
+        from sandcastle.engine.executor import set_emergency_stop_local
+
+        await set_emergency_stop_local()
+
+    logger.warning(
+        "Emergency stop activated by admin - cancelled %d run(s)", cancelled_count
+    )
+
+    return ApiResponse(
+        data=EmergencyStopResponse(
+            cancelled_count=cancelled_count,
+            active=True,
+        ).model_dump(),
     )
 
 
@@ -4014,6 +4125,13 @@ async def resolve_dead_letter(
         item.resolved_by = "manual"
         await session.commit()
 
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="dlq.resolved", run_id=str(item.run_id), actor_id=get_tenant_id(req) or "system", payload={"dlq_item_id": item_id, "resolved_by": "manual"}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit dlq.resolved failed: %s", _ae)
     return ApiResponse(
         data=DeadLetterItemResponse(
             id=str(item.id),
@@ -4559,6 +4677,13 @@ async def _resolve_and_update_approval(
                 run.error = f"Approval rejected at step '{approval.step_id}'"
 
         await session.commit()
+        try:
+            from sandcastle.engine.audit import append_audit_event
+            status_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+            await append_audit_event(session=session, event_type="approval.resolved", run_id=str(approval.run_id) if approval.run_id else None, actor_id=tenant_id or "system", payload={"approval_id": approval_id, "step_id": approval.step_id, "new_status": status_val})
+            await session.commit()
+        except Exception as _ae:
+            logger.warning("Audit approval.resolved failed: %s", _ae)
 
     return approval
 
@@ -5694,6 +5819,15 @@ async def update_settings(
         logging.getLogger().setLevel(getattr(logging, request.log_level.upper()))
 
     logger.info(f"Settings updated: {list(updates.keys())}")
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        _SENSITIVE = frozenset({"anthropic_api_key", "e2b_api_key", "openai_api_key", "minimax_api_key", "openrouter_api_key"})
+        safe_updates = {k: "<redacted>" if k in _SENSITIVE else str(v) for k, v in updates.items()}
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="settings.updated", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"keys_changed": list(safe_updates.keys()), "values": safe_updates}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit settings.updated failed: %s", _ae)
     return ApiResponse(data=_build_settings_response())
 
 
@@ -5944,6 +6078,13 @@ async def promote_workflow(req: Request, name: str, request: WorkflowPromoteRequ
         await session.commit()
 
         new_status = wv.status.value if hasattr(wv.status, "value") else wv.status
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as _as:
+            await append_audit_event(session=_as, event_type="workflow.promoted", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"workflow_name": name, "to_status": new_status}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
+            await _as.commit()
+    except Exception as _ae:
+        logger.warning("Audit workflow.promoted failed: %s", _ae)
 
     return ApiResponse(
         data={
@@ -7002,3 +7143,433 @@ async def remove_all_memories(
             ).model_dump(),
         )
     return ApiResponse(data={"deleted_all": True, "scope_id": scope_id})
+
+
+# --- Audit Trail ---
+
+
+def _audit_event_to_response(ev: AuditEvent) -> AuditEventResponse:
+    """Convert an AuditEvent ORM row to a response schema."""
+    return AuditEventResponse(
+        id=str(ev.id),
+        event_type=ev.event_type,
+        run_id=str(ev.run_id) if ev.run_id else None,
+        actor_id=ev.actor_id,
+        actor_key_prefix=ev.actor_key_prefix,
+        source_ip=ev.source_ip,
+        payload=ev.payload,
+        prev_hash=ev.prev_hash,
+        entry_hash=ev.entry_hash,
+        created_at=ev.created_at,
+    )
+
+
+@router.get("/audit")
+async def list_audit_events(
+    req: Request,
+    run_id: str | None = Query(None, description="Filter by run ID"),
+    actor_id: str | None = Query(None, description="Filter by actor ID"),
+    event_type: str | None = Query(None, description="Filter by event type"),
+    since: str | None = Query(None, description="ISO datetime lower bound (inclusive)"),
+    until: str | None = Query(None, description="ISO datetime upper bound (inclusive)"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List audit events (admin only). Supports filtering by run, actor, type, and date range."""
+    _require_admin(req)
+
+    async with async_session() as session:
+        base = select(AuditEvent)
+        count_base = select(func.count(AuditEvent.id))
+
+        if run_id is not None:
+            try:
+                run_uuid = uuid.UUID(run_id)
+                base = base.where(AuditEvent.run_id == run_uuid)
+                count_base = count_base.where(AuditEvent.run_id == run_uuid)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_ID", message="Invalid run_id format")
+                    ).model_dump(),
+                )
+
+        if actor_id is not None:
+            base = base.where(AuditEvent.actor_id == actor_id)
+            count_base = count_base.where(AuditEvent.actor_id == actor_id)
+
+        if event_type is not None:
+            base = base.where(AuditEvent.event_type == event_type)
+            count_base = count_base.where(AuditEvent.event_type == event_type)
+
+        if since is not None:
+            try:
+                since_dt = datetime.fromisoformat(since)
+                base = base.where(AuditEvent.created_at >= since_dt)
+                count_base = count_base.where(AuditEvent.created_at >= since_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_DATE", message="Invalid 'since' datetime format")
+                    ).model_dump(),
+                )
+
+        if until is not None:
+            try:
+                until_dt = datetime.fromisoformat(until)
+                base = base.where(AuditEvent.created_at <= until_dt)
+                count_base = count_base.where(AuditEvent.created_at <= until_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_DATE", message="Invalid 'until' datetime format")
+                    ).model_dump(),
+                )
+
+        total = await session.scalar(count_base) or 0
+        stmt = base.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+    return ApiResponse(
+        data=[_audit_event_to_response(ev) for ev in events],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/runs/{run_id}/audit")
+async def get_run_audit(
+    run_id: str,
+    req: Request,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """Return the full audit trail for a specific run."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        # Verify the run exists and belongs to the tenant
+        run_stmt = select(Run).where(Run.id == run_uuid)
+        run_stmt = _apply_tenant_filter(run_stmt, tenant_id, Run.tenant_id)
+        run_result = await session.execute(run_stmt)
+        run = run_result.scalar_one_or_none()
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        total_stmt = select(func.count(AuditEvent.id)).where(AuditEvent.run_id == run_uuid)
+        total = await session.scalar(total_stmt) or 0
+
+        stmt = (
+            select(AuditEvent)
+            .where(AuditEvent.run_id == run_uuid)
+            .order_by(AuditEvent.created_at.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+    return ApiResponse(
+        data=[_audit_event_to_response(ev) for ev in events],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/audit/verify/{run_id}")
+async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
+    """Verify the tamper-evident hash chain for a run's audit trail."""
+    _require_admin(req)
+
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        valid, chain_length, broken_at = await verify_audit_chain(session, run_id)
+
+    return ApiResponse(
+        data=AuditVerifyResponse(
+            run_id=run_id,
+            valid=valid,
+            chain_length=chain_length,
+            broken_at=broken_at,
+        )
+    )
+
+
+# --- Transparency / Compliance ---
+
+
+@router.get("/runs/{run_id}/transparency-report")
+async def get_transparency_report(run_id: str, req: Request) -> ApiResponse:
+    """Generate an EU AI Act Article 13 transparency report for a run."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        run_stmt = (
+            select(Run)
+            .options(selectinload(Run.steps))
+            .where(Run.id == run_uuid)
+        )
+        run_stmt = _apply_tenant_filter(run_stmt, tenant_id, Run.tenant_id)
+        run_result = await session.execute(run_stmt)
+        run = run_result.scalar_one_or_none()
+
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        # Fetch approvals for this run
+        approvals_result = await session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.run_id == run_uuid)
+        )
+        approvals = approvals_result.scalars().all()
+
+        # Fetch policy violations for this run
+        violations_result = await session.execute(
+            select(PolicyViolation).where(PolicyViolation.run_id == run_uuid)
+        )
+        violations = violations_result.scalars().all()
+
+    # Build AI models used list from steps that have a cost > 0 and a model
+    ai_models: list[TransparencyAiModelEntry] = []
+    for step in run.steps:
+        model_val = getattr(step, "model", None)
+        cost_val = step.cost_usd or 0.0
+        if cost_val > 0 or model_val:
+            ai_models.append(
+                TransparencyAiModelEntry(
+                    step_id=step.step_id,
+                    model=model_val or "unknown",
+                    cost_usd=cost_val,
+                )
+            )
+
+    # Build human oversight entries from approval requests
+    human_oversight: list[TransparencyHumanOversightEntry] = [
+        TransparencyHumanOversightEntry(
+            step_id=a.step_id,
+            type="approval",
+            status=a.status.value if hasattr(a.status, "value") else str(a.status),
+            reviewer=a.reviewer_id,
+        )
+        for a in approvals
+    ]
+
+    # Build policy violation entries
+    policy_violations: list[TransparencyPolicyViolationEntry] = [
+        TransparencyPolicyViolationEntry(
+            step_id=v.step_id,
+            policy=v.policy_id,
+            severity=v.severity,
+            action=v.action_taken,
+        )
+        for v in violations
+    ]
+
+    # Count steps
+    total_steps = len(run.steps)
+    failed_steps = sum(
+        1 for s in run.steps
+        if (s.status.value if hasattr(s.status, "value") else s.status) == "failed"
+    )
+
+    report = TransparencyReportResponse(
+        run_id=str(run.id),
+        workflow_name=run.workflow_name,
+        risk_level=run.risk_level or "minimal",
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        status=run.status.value if hasattr(run.status, "value") else str(run.status),
+        total_cost_usd=run.total_cost_usd,
+        ai_models_used=ai_models,
+        human_oversight=human_oversight,
+        policy_violations=policy_violations,
+        privacy_applied=settings.privacy_enabled,
+        total_steps=total_steps,
+        failed_steps=failed_steps,
+    )
+    return ApiResponse(data=report)
+
+
+@router.get("/workflows/{name}/annex-iv")
+async def get_annex_iv(name: str, req: Request) -> ApiResponse:
+    """Generate an EU AI Act Annex IV technical documentation stub for a workflow."""
+    # Load workflow YAML
+    try:
+        yaml_content = _load_workflow_yaml(name)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND", message=f"Workflow '{name}' not found"
+                )
+            ).model_dump(),
+        )
+
+    # Parse workflow definition
+    try:
+        workflow = parse_yaml_string(yaml_content)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_WORKFLOW", message=f"Failed to parse workflow: {exc}"
+                )
+            ).model_dump(),
+        )
+
+    # Determine version from registry
+    version_str: str | None = None
+    async with async_session() as session:
+        wv_result = await session.execute(
+            select(WorkflowVersion)
+            .where(WorkflowVersion.workflow_name == name)
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        wv = wv_result.scalar_one_or_none()
+        if wv:
+            version_str = str(wv.version)
+
+        # Fetch recent eval run statistics
+        eval_result = await session.execute(
+            select(EvalRun)
+            .where(EvalRun.workflow_name == name, EvalRun.status == EvalRunStatus.COMPLETED)
+            .order_by(EvalRun.created_at.desc())
+            .limit(50)
+        )
+        eval_runs = eval_result.scalars().all()
+
+    # Collect unique AI models and step types
+    ai_models_used = sorted({
+        s.model or workflow.default_model or "unknown"
+        for s in workflow.steps
+        if s.type in ("standard", "llm", None, "")
+    })
+    step_types = sorted({s.type or "standard" for s in workflow.steps})
+
+    # Find human oversight description
+    approval_steps = [s for s in workflow.steps if s.type == "approval"]
+    if approval_steps:
+        oversight_desc = f"Approval gate at step '{approval_steps[0].id}'"
+    else:
+        oversight_desc = "No explicit approval step defined"
+
+    # Risk classification text
+    risk_level = getattr(workflow, "risk_level", "minimal") or "minimal"
+    if risk_level == "high":
+        risk_desc = "high - requires human oversight per EU AI Act Annex III"
+    elif risk_level == "limited":
+        risk_desc = "limited - transparency obligations apply per EU AI Act Article 52"
+    else:
+        risk_desc = "minimal - standard monitoring recommended"
+
+    # Testing evidence
+    testing_evidence: dict = {}
+    if eval_runs:
+        total_runs = len(eval_runs)
+        avg_pass_rate = sum(er.pass_rate for er in eval_runs) / total_runs
+        testing_evidence = {
+            "total_eval_runs": total_runs,
+            "pass_rate": round(avg_pass_rate, 4),
+        }
+    else:
+        testing_evidence = {"total_eval_runs": 0, "pass_rate": None}
+
+    # Data handling description from privacy settings
+    if settings.privacy_enabled:
+        privacy_entities = settings.privacy_entities or "email, phone, ssn"
+        data_handling = f"Privacy router enabled for: {privacy_entities}"
+    else:
+        data_handling = "Privacy router not enabled"
+
+    # Audit trail description
+    audit_desc = "Tamper-evident SHA-256 hash chain audit log enabled"
+
+    sections = AnnexIVSections(
+        intended_purpose=getattr(workflow, "description", "") or "",
+        ai_models=ai_models_used,
+        step_types=step_types,
+        human_oversight=oversight_desc,
+        risk_classification=risk_desc,
+        testing_evidence=testing_evidence,
+        known_limitations=(
+            "Cost estimates are approximate. LLM outputs may vary."
+        ),
+        data_handling=data_handling,
+        audit_trail=audit_desc,
+    )
+
+    return ApiResponse(
+        data=AnnexIVResponse(
+            workflow_name=name,
+            version=version_str,
+            risk_level=risk_level,
+            generated_at=datetime.now(timezone.utc),
+            sections=sections,
+        )
+    )
+
+
+@router.get("/compliance/status")
+async def get_compliance_status() -> ApiResponse:
+    """Return the current compliance mode status and active features."""
+    mode = settings.compliance_mode or ""
+    active = mode == "eu_ai_act"
+
+    features = {
+        "audit_trail": True,  # Always enabled - tamper-evident hash chain
+        "risk_classification": True,  # Always available via workflow risk_level
+        "privacy_router": settings.privacy_enabled,
+        "emergency_stop": True,  # Always available
+        "input_prompt_logging": True,  # Always captured in RunStep.input_prompt
+    }
+
+    return ApiResponse(
+        data=ComplianceStatusResponse(
+            mode=mode if mode else "disabled",
+            active=active,
+            features=features,
+        )
+    )
