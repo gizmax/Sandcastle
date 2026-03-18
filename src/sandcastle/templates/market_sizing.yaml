@@ -1,0 +1,339 @@
+# name: Market Sizing (TAM/SAM/SOM)
+# description: Research industry data, analyze competitors, and calculate TAM/SAM/SOM with executive report
+# tags: [Market-Research, TAM, SAM, SOM, Strategy]
+# category: marketing
+
+name: market-sizing
+description: Research industry data and calculate TAM/SAM/SOM market sizing with methodology and executive report.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+
+input_schema:
+  required: ["product_category", "target_region"]
+  properties:
+    product_category:
+      type: string
+      description: "Product or service category to size (e.g. 'AI-powered workflow automation', 'B2B HR software')"
+      example: "AI workflow orchestration for software teams"
+    target_region:
+      type: string
+      description: "Geographic target market (e.g. 'North America', 'Global', 'Europe')"
+      example: "North America"
+    company_stage:
+      type: string
+      description: "Current stage of the company (e.g. 'Seed', 'Series A', 'Growth')"
+      default: "Seed"
+      example: "Series A"
+    current_revenue:
+      type: string
+      description: "Current annual revenue or ARR for SOM calibration (e.g. '$500K ARR', 'pre-revenue')"
+      default: "pre-revenue"
+      example: "$1M ARR"
+
+steps:
+  - id: industry-data-research
+    prompt: |
+      You are a market research analyst. Research authoritative industry data and reports
+      for the following product category and region.
+
+      Product category: {input.product_category}
+      Target region: {input.target_region}
+
+      RESEARCH TASKS:
+
+      1. INDUSTRY REPORTS AND ANALYST COVERAGE:
+         - Search for recent market research reports from Gartner, Forrester, IDC, Grand View
+           Research, MarketsandMarkets, Mordor Intelligence, and similar firms.
+         - For each report found: publisher, publication year, market size estimate (with units),
+           CAGR projection, and forecast period.
+         - Note any discrepancies in estimates across sources and explain likely causes
+           (different scope definitions, methodology, geography).
+
+      2. MARKET SIZE BENCHMARKS:
+         - Overall industry revenue (current year estimate, USD)
+         - Historical market size for 3 prior years (to calculate actual CAGR)
+         - Projected market size for next 5 years with CAGR
+         - Regional breakdown: what percentage of global market is {input.target_region}?
+
+      3. GROWTH DRIVERS AND HEADWINDS:
+         - Top 5 drivers currently accelerating market growth
+         - Top 3 headwinds or constraints slowing adoption
+         - Regulatory tailwinds or headwinds specific to {input.target_region}
+         - Technology substitution risk: is any emerging technology threatening this category?
+
+      4. BUYER UNIVERSE ESTIMATION:
+         - Estimate total number of potential buyer organizations in {input.target_region}
+           by company size tier (1-50, 51-200, 201-1000, 1000+ employees)
+         - Industry vertical breakdown of buyers (which sectors are largest buyers?)
+         - Buyer adoption rate: what percentage of potential buyers already use a solution
+           in this category vs. still relying on manual processes?
+
+      5. AVERAGE CONTRACT VALUE DATA:
+         - Typical ACV (Annual Contract Value) ranges by buyer segment
+         - Pricing benchmarks from visible competitor pricing pages
+         - Expansion revenue patterns (typical NRR or upsell rates in this category)
+
+      Return all data in a structured format with clear source citations.
+      Distinguish between confirmed data and estimated/triangulated figures.
+    model: sonnet
+    max_turns: 10
+
+  - id: competitor-landscape
+    depends_on: [industry-data-research]
+    prompt: |
+      Analyze the competitive landscape and market share distribution for this category.
+
+      Industry data: {steps.industry-data-research.output}
+      Product category: {input.product_category}
+      Target region: {input.target_region}
+
+      COMPETITIVE ANALYSIS TASKS:
+
+      1. MARKET LEADERS (top 5):
+         - Company name, founding year, estimated revenue or ARR
+         - Estimated market share percentage (with methodology notes)
+         - Primary customer segment (SMB, mid-market, enterprise)
+         - Funding status: total raised, latest round, key investors
+         - Key differentiators and known weaknesses
+
+      2. CHALLENGER AND NICHE PLAYERS (next 5-10):
+         - Same data points as above where available
+         - Niche positioning: what specific segment or use case do they own?
+
+      3. MARKET CONCENTRATION METRICS:
+         - Is this market fragmented (many small players) or concentrated (few leaders)?
+         - Estimate top-3 combined market share vs. the long tail
+         - Has concentration been increasing or decreasing over the past 3 years?
+
+      4. NEW ENTRANT SIGNALS:
+         - VC-backed startups entering this space in the last 18 months
+         - Big Tech adjacency risk: is AWS, Google, Microsoft, or Salesforce moving in?
+         - International players entering {input.target_region}?
+
+      5. PRICING MODEL LANDSCAPE:
+         - Distribution of pricing models across competitors
+           (freemium / per-seat / usage-based / flat-rate / hybrid)
+         - Price ranges by tier and target segment
+         - Which pricing innovations are gaining adoption?
+
+      Format as a structured competitive landscape brief with a summary table of top 10 players.
+    model: haiku
+    max_turns: 5
+
+  - id: tam-calculation
+    depends_on: [industry-data-research, competitor-landscape]
+    prompt: |
+      Calculate the Total Addressable Market (TAM) using a rigorous top-down methodology.
+
+      Industry data: {steps.industry-data-research.output}
+      Competitive landscape: {steps.competitor-landscape.output}
+      Product category: {input.product_category}
+      Target region: {input.target_region}
+
+      TOP-DOWN TAM METHODOLOGY:
+
+      Step 1: Start with the broadest relevant industry market size (in USD)
+              - Use the analyst report figures as the anchor
+              - Reference year and source for each figure
+
+      Step 2: Apply scoping filters (multiply each adjustment by the running total)
+              - Geographic filter: what fraction of the global market is {input.target_region}?
+              - Segment filter: what fraction of the industry addresses exactly this product's category?
+              - Buyer filter: what fraction of organizations are realistically buyers (vs. too large/small)?
+
+      Step 3: Adjust for current adoption rate
+              - Only count buyers who are currently spending on this category OR
+                who would spend if they knew a suitable solution existed (realistic addressable spend)
+
+      Step 4: Sanity check via bottom-up reconciliation
+              - Number of buyer organizations x average ACV per organization = bottom-up TAM
+              - Compare top-down and bottom-up; explain any significant gap
+
+      OUTPUT FORMAT:
+      - TAM (Top-Down): $X billion/million (YYYY estimate)
+        Assumptions: [list each multiplier used with source]
+      - TAM (Bottom-Up): $X billion/million
+        Assumptions: [buyer count, ACV used]
+      - Reconciled TAM: $X billion/million (use midpoint or explain weighting)
+      - TAM Growth Rate: X% CAGR through YYYY
+      - Confidence Level: High / Medium / Low with explanation
+    model: sonnet
+    max_turns: 5
+
+  - id: sam-calculation
+    depends_on: [tam-calculation, competitor-landscape]
+    prompt: |
+      Narrow the TAM to the Serviceable Addressable Market (SAM) based on realistic constraints.
+
+      TAM analysis: {steps.tam-calculation.output}
+      Competitive landscape: {steps.competitor-landscape.output}
+      Product category: {input.product_category}
+      Target region: {input.target_region}
+      Company stage: {input.company_stage}
+
+      SAM NARROWING METHODOLOGY:
+
+      The SAM is the subset of TAM that a company CAN realistically target given its
+      product scope, go-to-market constraints, and competitive position.
+
+      Apply the following filters to the TAM:
+
+      1. PRODUCT-FIT FILTER:
+         - Which buyer segments does this product category actually serve well?
+         - Exclude segments requiring fundamentally different product capabilities
+         - Quantify: what % of TAM passes this filter?
+
+      2. GEOGRAPHIC REACH FILTER:
+         - Within {input.target_region}, which sub-markets are reachable?
+         - Language, regulatory, or local-partner requirements that limit reach?
+         - Quantify: what % of regional TAM passes this filter?
+
+      3. GO-TO-MARKET CHANNEL FILTER:
+         - Based on company stage ({input.company_stage}), which segments are
+           reachable via realistic channels (PLG, inside sales, outbound, partnerships)?
+         - Enterprise-only segments may be unreachable at early stages
+         - Quantify: what % of product-fit TAM passes this filter?
+
+      4. COMPETITIVE EXCLUSION:
+         - Segments where an entrenched competitor has >80% share are effectively
+           excluded without a major differentiator - flag these for review
+         - Quantify: what % of reachable TAM is effectively locked out?
+
+      OUTPUT FORMAT:
+      - SAM: $X billion/million (= X% of TAM)
+        Layer-by-layer calculation: TAM x filter1 x filter2 x filter3 = SAM
+        Key assumptions for each filter
+      - Top 3 SAM segments with individual sizes
+      - Segment prioritization rationale
+      - Confidence Level: High / Medium / Low
+    model: sonnet
+    max_turns: 5
+
+  - id: som-calculation
+    depends_on: [sam-calculation, competitor-landscape]
+    prompt: |
+      Estimate the Serviceable Obtainable Market (SOM) based on competitive position and ramp.
+
+      SAM analysis: {steps.sam-calculation.output}
+      Competitive landscape: {steps.competitor-landscape.output}
+      Company stage: {input.company_stage}
+      Current revenue: {input.current_revenue}
+
+      SOM ESTIMATION METHODOLOGY:
+
+      The SOM is the realistic market share achievable in a defined time period
+      (typically 3-5 years) given competitive dynamics and execution capacity.
+
+      1. MARKET SHARE BENCHMARKING:
+         - What market share did comparable companies achieve in years 1-3 post-launch?
+         - Reference 3-5 analogous companies (similar stage, category, competitive dynamics)
+         - Typical range: 1-5% of SAM in year 3 for well-funded startups in competitive markets
+         - Adjust up for unique differentiators, down for strong incumbents
+
+      2. GROWTH SCENARIO MODELING:
+         Build three scenarios with explicit growth rate assumptions:
+
+         CONSERVATIVE (bear case):
+         - Assumptions: slower sales ramp, strong incumbent defense, 1-2 channel only
+         - Year 1 ARR target, Year 2, Year 3
+         - Implied market share of SAM at Year 3
+
+         BASE CASE:
+         - Assumptions: normal execution, 2-3 channels, moderate competitive response
+         - Year 1 ARR target, Year 2, Year 3
+         - Implied market share of SAM at Year 3
+
+         AGGRESSIVE (bull case):
+         - Assumptions: viral/PLG, multiple channels, favorable competitive dynamics
+         - Year 1 ARR target, Year 2, Year 3
+         - Implied market share of SAM at Year 3
+
+      3. CALIBRATION CHECK:
+         - Starting from {input.current_revenue}, what growth rates are implied?
+         - Are these growth rates consistent with category benchmarks?
+         - What team size and burn rate would be required to achieve base case?
+
+      OUTPUT FORMAT:
+      - SOM Year 1 / Year 2 / Year 3: $X / $Y / $Z (base case)
+      - Implied market share at Year 3: X% of SAM
+      - All three scenario tables
+      - Key risks that could push outcome toward conservative case
+    model: sonnet
+    max_turns: 5
+
+  - id: executive-report
+    depends_on: [tam-calculation, sam-calculation, som-calculation, competitor-landscape]
+    prompt: |
+      Compile a complete, executive-ready market sizing report with all findings.
+
+      TAM analysis: {steps.tam-calculation.output}
+      SAM analysis: {steps.sam-calculation.output}
+      SOM analysis: {steps.som-calculation.output}
+      Competitive landscape: {steps.competitor-landscape.output}
+      Product category: {input.product_category}
+      Target region: {input.target_region}
+      Company stage: {input.company_stage}
+
+      REPORT STRUCTURE:
+
+      ## Executive Summary
+      - 3-4 sentence summary: market size, growth rate, competitive intensity,
+        and the key opportunity or risk finding
+      - Investment thesis: is this market attractive? Rate as: Highly Attractive /
+        Attractive / Moderate / Unattractive with one-sentence rationale
+
+      ## Market Sizing Summary
+      Present as a clean table:
+      | Metric | Conservative | Base Case | Optimistic |
+      |--------|-------------|-----------|------------|
+      | TAM    | $X          | $X        | $X         |
+      | SAM    | $X          | $X        | $X         |
+      | SOM Y1 | $X          | $X        | $X         |
+      | SOM Y3 | $X          | $X        | $X         |
+
+      ## Market Dynamics
+      - Growth drivers (top 3, with impact rating)
+      - Headwinds and constraints (top 3, with impact rating)
+      - Market maturity stage: Nascent / Emerging / Growth / Mature / Declining
+
+      ## Competitive Position
+      - Fragmentation index: Fragmented / Semi-concentrated / Concentrated
+      - Top 3 competitive threats with threat level (Low/Medium/High)
+      - Whitespace opportunity: the most defensible market segment to target first
+
+      ## Methodology Notes
+      - Data sources used with dates
+      - Key assumptions (list the most impactful 5)
+      - Confidence ratings per metric
+
+      ## Chart Data (JSON)
+      Output a `chart_data` JSON object for visualization:
+      ```json
+      {
+        "tam_sam_som": {
+          "tam_low": 0, "tam_base": 0, "tam_high": 0,
+          "sam_low": 0, "sam_base": 0, "sam_high": 0,
+          "som_y1": 0, "som_y2": 0, "som_y3": 0
+        },
+        "market_growth": [
+          {"year": 2024, "market_size_bn": 0},
+          {"year": 2025, "market_size_bn": 0},
+          {"year": 2026, "market_size_bn": 0},
+          {"year": 2027, "market_size_bn": 0},
+          {"year": 2028, "market_size_bn": 0}
+        ],
+        "competitive_share": [
+          {"company": "Leader A", "share_pct": 0},
+          {"company": "Leader B", "share_pct": 0},
+          {"company": "Others", "share_pct": 0}
+        ]
+      }
+      ```
+      Fill all 0 values with your best estimates from the research.
+
+      ## Recommended Next Steps
+      3-5 concrete actions to validate these estimates and begin market capture.
+    model: sonnet
+    max_turns: 10

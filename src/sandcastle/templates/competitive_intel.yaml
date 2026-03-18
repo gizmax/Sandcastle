@@ -1,0 +1,305 @@
+# name: Competitive Intelligence Dossier
+# description: Deep research on top competitors covering pricing, features, SWOT, and strategic recommendations
+# tags: [Competitive-Intel, Strategy, Research, SWOT]
+# category: marketing
+
+name: competitive-intel
+description: Deep competitive intelligence covering top competitors' pricing, features, SWOT, and strategic moat assessment.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+
+input_schema:
+  required: ["company_name", "industry"]
+  properties:
+    company_name:
+      type: string
+      description: "Your company name for context and relative positioning"
+      example: "Acme Analytics"
+    product_url:
+      type: string
+      description: "Your product website URL for automated benchmarking"
+      example: "https://acme.io"
+    industry:
+      type: string
+      description: "Industry or product category (e.g. 'B2B SaaS analytics', 'HR tech', 'fintech lending')"
+      example: "B2B workflow automation SaaS"
+    key_competitors:
+      type: string
+      description: "Comma-separated list of known competitors to include (optional - will also discover others)"
+      example: "Zapier, Make, n8n, Temporal"
+
+steps:
+  - id: competitor-discovery
+    prompt: |
+      You are a competitive intelligence analyst. Identify and profile the top 10 competitors
+      for this company using comprehensive web research.
+
+      Company: {input.company_name}
+      Product URL: {input.product_url}
+      Industry: {input.industry}
+      Known competitors (seed list): {input.key_competitors}
+
+      DISCOVERY METHODOLOGY:
+
+      1. START WITH THE SEED LIST:
+         - Research each competitor already provided in the seed list
+         - Confirm they are genuine competitors (same buyer, same problem)
+
+      2. EXPAND VIA SEARCH:
+         - Search: "[industry] competitors", "[industry] alternatives", "best [industry] tools"
+         - Check G2 and Capterra category pages for the most relevant category
+         - Review "Compare" pages on known competitors' websites
+         - Check relevant Reddit/HackerNews threads for mentions of tools people use
+         - Review VC portfolio companies in the space (a16z, Sequoia, Bessemer portfolio sites)
+
+      3. CHECK ADJACENT CATEGORIES:
+         - Identify tools that partially overlap (feature competitors)
+         - Identify tools buyers consider even if not direct competitors (context competitors)
+
+      FOR EACH OF THE TOP 10 COMPETITORS, GATHER:
+      - Company name, website, founding year, HQ
+      - Funding status: total raised, last round date and amount, key investors
+      - Estimated ARR or revenue (from public signals, interviews, or press)
+      - Employee count (LinkedIn headcount)
+      - Company stage: Seed / Series A-C / Growth / Public / Bootstrapped
+      - Primary buyer persona (who buys this: job title, company size)
+      - Core product description (2 sentences)
+      - Deployment model: cloud-only / on-prem / hybrid
+      - Recent news (last 6 months): product launches, partnerships, funding, pivots
+
+      Format as a ranked list (most direct competitor first) with a short competitive
+      intensity rating per competitor: Direct / Partial / Adjacent.
+    model: sonnet
+    max_turns: 10
+
+  - id: pricing-features-research
+    depends_on: [competitor-discovery]
+    prompt: |
+      Research detailed pricing and feature information for each identified competitor.
+
+      Competitor list: {steps.competitor-discovery.output}
+      Company: {input.company_name}
+      Industry: {input.industry}
+
+      FOR EACH COMPETITOR, RESEARCH:
+
+      A. PRICING INTELLIGENCE:
+         - Visit each competitor's pricing page (or pricing-related pages if no dedicated page)
+         - Document every public pricing tier: tier name, price per month/year, billing cycle
+         - Note pricing model: flat-rate / per-seat / usage-based (API calls, tasks, rows) /
+           freemium (free tier + paid) / contact-sales-only
+         - Flag any free tier, trial period, or money-back guarantee
+         - Document pricing page last-change signals (compare to cached versions if detectable)
+         - Note any public discounts: annual discount %, startup programs, nonprofit rates
+         - Note any "hidden costs" mentioned in reviews: setup fees, support tiers, overage charges
+
+      B. FEATURE MAPPING:
+         For each competitor, assess these 15 core capability dimensions. Rate each:
+         Full (F) / Partial (P) / Absent (A) / Unknown (?)
+         1. Core workflow/task automation
+         2. Visual no-code builder
+         3. Code-based customization (SDK/API)
+         4. Pre-built integrations (list count if available)
+         5. AI/LLM native capabilities
+         6. Real-time monitoring and alerting
+         7. Version control and rollback
+         8. Team collaboration features
+         9. Role-based access control
+         10. Audit logging and compliance features
+         11. On-premise or private cloud deployment
+         12. Enterprise SSO (SAML/OKTA)
+         13. SLA guarantees and uptime
+         14. Dedicated customer support tier
+         15. Free trial or sandbox environment
+
+      C. POSITIONING STATEMENT:
+         What is the central claim on their homepage and marketing?
+         (One sentence each)
+
+      Return as a structured comparison across all 10 competitors.
+    model: haiku
+    max_turns: 5
+
+  - id: swot-per-competitor
+    depends_on: [competitor-discovery, pricing-features-research]
+    prompt: |
+      Perform a rigorous SWOT analysis for each of the top 5 most direct competitors.
+
+      Competitor profiles: {steps.competitor-discovery.output}
+      Pricing and features data: {steps.pricing-features-research.output}
+      Company we are benchmarking against: {input.company_name}
+
+      For each of the TOP 5 direct competitors, produce a complete SWOT analysis.
+      Be specific - every bullet must reference a concrete fact or data point.
+
+      TEMPLATE FOR EACH COMPETITOR:
+
+      ### [Competitor Name]
+
+      **STRENGTHS** (top 5, ranked by threat level to {input.company_name}):
+      - Each strength with evidence: WHY is it a strength? What data point proves it?
+      - Rate each: Threat Level to us = Critical / High / Medium / Low
+
+      **WEAKNESSES** (top 5, ranked by opportunity value for us):
+      - Each weakness with evidence: Source (review platform, support forum, social media)?
+      - Rate each: Opportunity for us = High / Medium / Low
+
+      **OPPORTUNITIES** (top 3 - what market shifts FAVOR this competitor):
+      - What trends or developments could strengthen their position in the next 12 months?
+      - Our counter-strategy for each opportunity
+
+      **THREATS** (top 3 - what could hurt this competitor):
+      - What trends, competitive dynamics, or product gaps put them at risk?
+      - How we exploit this threat
+
+      **COMPETITIVE MOAT ASSESSMENT:**
+      - Primary moat type: Network Effects / Data / Brand / Switching Costs /
+        Economies of Scale / Proprietary Technology / None
+      - Moat strength: Strong / Moderate / Weak
+      - Time to erode moat: <1 year / 1-3 years / 3+ years / Effectively permanent
+
+      **OVERALL THREAT LEVEL:** Critical / High / Medium / Low
+      **RECOMMENDED RESPONSE:** Attack / Monitor / Differentiate / Ignore
+    model: sonnet
+    max_turns: 10
+
+  - id: feature-comparison-matrix
+    depends_on: [pricing-features-research]
+    prompt: |
+      Build a comprehensive feature comparison matrix and identify key differentiation axes.
+
+      Pricing and features data: {steps.pricing-features-research.output}
+      Company: {input.company_name}
+      Industry: {input.industry}
+
+      DELIVERABLES:
+
+      1. MASTER FEATURE MATRIX:
+         Create a full comparison table with {input.company_name} plus top 10 competitors.
+         Use the 15 capability dimensions from the research plus any 5 industry-specific
+         dimensions that matter most in this category.
+         Columns: Feature | CompanyA | CompanyB | ... (one row per feature)
+         Cell values: Full / Partial / Absent / Unknown
+
+      2. DIFFERENTIATION ANALYSIS:
+         - Features where most competitors score Full (table stakes - must have):
+           List features that are now minimum requirements to compete
+         - Features where most competitors score Absent or Partial (whitespace):
+           These represent potential differentiators
+         - Features where there is high variance across competitors (battleground features):
+           These are the features buyers actively compare
+
+      3. FEATURE GAP HEATMAP (text description):
+         Which competitor has the most gaps? Which has the fewest?
+         Rank all 10 competitors from most-complete to most-gaps with gap count.
+
+      4. BUYER'S DECISION FRAMEWORK:
+         Based on the feature landscape, what are the top 5 questions a buyer in this
+         category asks when evaluating tools? Frame these as decision filters that
+         quickly eliminate most vendors, leaving a shortlist of 2-3.
+
+      5. FEATURE VELOCITY SIGNALS:
+         From recent release notes, product announcements, or job postings,
+         which competitors are shipping features fastest? Which appear to have
+         stalled or are in maintenance mode?
+    model: haiku
+    max_turns: 5
+
+  - id: pricing-strategy-analysis
+    depends_on: [pricing-features-research, competitor-discovery]
+    prompt: |
+      Analyze competitive pricing strategies and identify optimization opportunities.
+
+      Pricing data: {steps.pricing-features-research.output}
+      Competitor profiles: {steps.competitor-discovery.output}
+      Company: {input.company_name}
+      Industry: {input.industry}
+
+      PRICING ANALYSIS:
+
+      1. PRICING MODEL LANDSCAPE:
+         - Map all pricing models used across competitors (freemium, per-seat, usage-based, etc.)
+         - Which model appears to be winning adoption (by customer count signal)?
+         - Any emerging pricing model innovation (outcome-based, value-based, AI token pricing)?
+
+      2. PRICE POSITIONING MAP:
+         Create a 2D map described in text:
+         - X axis: Price level (Low-cost / Mid-market / Premium)
+         - Y axis: Target segment (SMB / Mid-market / Enterprise)
+         - Place each competitor in the map with their entry-level price as anchor
+
+      3. PRICE-FEATURE VALUE ANALYSIS:
+         For each pricing tier across all competitors, calculate:
+         - Features-per-dollar ratio (subjective but calibrated)
+         - Which competitor offers the best value at SMB price point?
+         - Which competitor offers the best value at mid-market price point?
+         - Which competitor has the most aggressive enterprise pricing?
+
+      4. PRICING FRICTION POINTS (from review mining):
+         - Which competitors have the most pricing complaints in reviews?
+         - Most common complaints: hidden costs / unclear overage / forced annual / no
+           monthly billing / expensive enterprise add-ons / poor startup program
+         - Opportunity: Where are buyers feeling ripped off by competitors?
+
+      5. PRICING STRATEGY RECOMMENDATIONS FOR {input.company_name}:
+         Based on the competitive landscape:
+         - Recommended entry price for the first paid tier (with rationale)
+         - Recommended pricing model with pros/cons vs alternatives
+         - 3 pricing differentiators to emphasize in messaging
+         - Pricing risks to watch: which competitor could cut prices to undercut us?
+    model: sonnet
+    max_turns: 5
+
+  - id: strategic-recommendations
+    depends_on: [swot-per-competitor, feature-comparison-matrix, pricing-strategy-analysis]
+    prompt: |
+      Synthesize all competitive intelligence into a strategic recommendations brief.
+
+      SWOT analyses: {steps.swot-per-competitor.output}
+      Feature matrix: {steps.feature-comparison-matrix.output}
+      Pricing analysis: {steps.pricing-strategy-analysis.output}
+      Company: {input.company_name}
+      Industry: {input.industry}
+
+      STRATEGIC COMPETITIVE INTELLIGENCE BRIEF:
+
+      ## Executive Summary (4-5 sentences)
+      - Overall competitive intensity rating: Low / Medium / High / Cutthroat
+      - Biggest competitive threat and why
+      - Biggest competitive opportunity and why
+      - Recommended strategic posture: Differentiate / Attack / Defend / Partner
+
+      ## Competitive Moat Assessment for {input.company_name}
+      - Current moat strengths (if any)
+      - Recommended moat-building initiatives (top 3)
+      - Timeframe to establish defensible position
+
+      ## Top 5 Strategic Recommendations
+      For each recommendation:
+      - **Action**: What to do specifically
+      - **Rationale**: Which competitive insight drives this recommendation
+      - **Priority**: P1 (immediate) / P2 (30 days) / P3 (90 days)
+      - **Success metric**: How to know it worked
+      - **Competitive response risk**: Will this provoke a competitor reaction?
+
+      ## Battlecard Summary
+      For the top 3 most-encountered competitors, a one-section competitive battlecard:
+      - **Positioning**: When facing [Competitor], emphasize...
+      - **Landmines**: Ask prospects about [weakness]...
+      - **Handle objections**:
+        - "But [Competitor] has feature X" - respond with...
+        - "But [Competitor] is cheaper" - respond with...
+        - "We already use [Competitor]" - respond with...
+
+      ## Monitoring Watchlist
+      Top 5 competitive signals to track weekly (with recommended monitoring method):
+      e.g., pricing page changes, job postings in specific roles, product changelog,
+      funding news, customer review velocity.
+
+      ## Risk Register
+      Top 3 competitive risks that could materially harm {input.company_name} in 12 months,
+      with probability (Low/Medium/High) and suggested mitigation.
+    model: sonnet
+    max_turns: 10

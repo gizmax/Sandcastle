@@ -1,0 +1,355 @@
+# name: Pricing Optimizer
+# description: Research competitor pricing, model willingness-to-pay, recommend optimal tiers, and generate pricing page copy
+# tags: [Pricing, Strategy, Revenue, Competitive-Intel]
+# category: marketing
+
+name: pricing-optimizer
+description: Research competitor pricing strategies, model willingness-to-pay, and generate optimal pricing tiers with copy and FAQ.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+
+input_schema:
+  required: ["product_name", "product_category", "target_customer"]
+  properties:
+    product_name:
+      type: string
+      description: "Name of the product to optimize pricing for"
+      example: "Sandcastle"
+    product_category:
+      type: string
+      description: "Product category for competitive benchmarking (e.g. 'workflow automation SaaS', 'B2B analytics platform')"
+      example: "AI workflow orchestration platform"
+    current_pricing:
+      type: string
+      description: "Current pricing tiers and model if any (leave blank if pre-launch)"
+      default: "not yet launched"
+      example: "Free tier, $49/month Pro, $199/month Team"
+    target_customer:
+      type: string
+      description: "Primary target customer description (title, company type, size)"
+      example: "Engineering managers and DevOps leads at B2B SaaS companies, 50-500 employees"
+
+steps:
+  - id: competitor-pricing-research
+    prompt: |
+      You are a pricing strategist. Research comprehensive competitive pricing data
+      for the following product category.
+
+      Product: {input.product_name}
+      Category: {input.product_category}
+      Target customer: {input.target_customer}
+
+      COMPETITOR PRICING RESEARCH:
+
+      1. IDENTIFY TOP 10 PRICING BENCHMARKS:
+         Search for competitors and pricing benchmarks in the {input.product_category} space.
+         For each competitor found:
+         - Company name and product URL
+         - All public pricing tiers (tier name, monthly price, annual price, billing options)
+         - What is included at each tier (user limits, usage limits, feature gates)
+         - Pricing model type: flat-rate / per-seat / usage-based / freemium / hybrid
+         - Free tier availability: yes/no, limits
+         - Trial availability: yes/no, duration, credit card required
+         - Enterprise/custom pricing: contact-sales only threshold
+
+      2. PRICING PAGE PATTERNS:
+         Analyze the design and psychology of competitor pricing pages:
+         - How many tiers do they show? (2 / 3 / 4 / 5+)
+         - Which tier is highlighted as "most popular" or "best value"?
+         - Do they use annual vs monthly toggle? Is annual the default?
+         - What anchoring tactics are used (crossed-out prices, savings callouts)?
+         - What is the call-to-action on each tier?
+         - Do they show a feature comparison table below the tiers?
+         - Do they use social proof near pricing (logos, testimonials, stats)?
+
+      3. PRICING EVOLUTION SIGNALS:
+         - Have any competitors changed pricing in the last 12 months? How?
+         - Any public backlash to pricing changes in review forums or social media?
+         - Any pricing changes coinciding with funding events?
+
+      4. MARKET PRICING NORMS:
+         Based on all competitors:
+         - Typical entry price for first paid tier in this category (range)
+         - Typical mid-tier price range
+         - Enterprise deal sizes (range, if estimable from case studies or reviews)
+         - Typical annual discount percentage offered (common range in category)
+         - Most prevalent pricing model in the category
+
+      Return as a structured competitive pricing database with a summary of norms.
+    model: sonnet
+    max_turns: 10
+
+  - id: pricing-model-analysis
+    depends_on: [competitor-pricing-research]
+    prompt: |
+      Analyze pricing model options and identify the optimal model for this product.
+
+      Competitive pricing data: {steps.competitor-pricing-research.output}
+      Product: {input.product_name}
+      Category: {input.product_category}
+      Target customer: {input.target_customer}
+      Current pricing: {input.current_pricing}
+
+      PRICING MODEL ANALYSIS:
+
+      Evaluate each relevant pricing model against this product and customer type.
+
+      1. FLAT-RATE (single price for all features):
+         - Pros for this product and customer
+         - Cons and risks
+         - CAC/LTV implications
+         - Example competitors using this model
+         - Fit score for {input.product_name}: 1-10
+
+      2. PER-SEAT / PER-USER:
+         - How does this scale with the target customer's usage patterns?
+         - Typical CAC/LTV ratio for per-seat models in this category
+         - Risk of seat-count gaming by customers
+         - Example competitors using this model
+         - Fit score for {input.product_name}: 1-10
+
+      3. USAGE-BASED / CONSUMPTION (pay for what you use):
+         - What is the natural unit of consumption for this product?
+           (e.g., API calls, workflow runs, records processed, storage)
+         - Does this align with value delivery to the customer?
+         - Revenue predictability implications for the business
+         - Example competitors using this model
+         - Fit score for {input.product_name}: 1-10
+
+      4. FREEMIUM + PAID TIERS:
+         - Is there a meaningful free tier that drives virality in this category?
+         - Conversion rates typical for freemium in this space (benchmark)
+         - Risk of free tier cannibalizing paid (how to prevent)
+         - Example competitors using this model
+         - Fit score for {input.product_name}: 1-10
+
+      5. HYBRID MODEL (combination):
+         - What hybrid combinations are working in this market?
+         - Example: base seat fee + usage overage, or freemium + per-seat above threshold
+         - Complexity vs. conversion tradeoff
+         - Fit score for {input.product_name}: 1-10
+
+      RECOMMENDATION:
+      - Recommended primary pricing model with detailed rationale
+      - If hybrid: exact formula and thresholds
+      - Key metric to meter (if usage-based or hybrid)
+      - Short-term vs long-term model evolution roadmap
+    model: haiku
+    max_turns: 5
+
+  - id: pricing-comparison-matrix
+    depends_on: [competitor-pricing-research]
+    prompt: |
+      Build a comprehensive pricing comparison matrix to identify positioning opportunities.
+
+      Competitive pricing data: {steps.competitor-pricing-research.output}
+      Product: {input.product_name}
+      Category: {input.product_category}
+      Target customer: {input.target_customer}
+
+      COMPARISON MATRIX AND ANALYSIS:
+
+      1. FULL PRICING MATRIX:
+         Create a side-by-side comparison table:
+         | Competitor | Model | Entry Price/mo | Mid Tier/mo | Enterprise | Free Tier | Annual Discount |
+         For all 10 competitors identified. Sort by entry price ascending.
+
+      2. VALUE-AT-PRICE SCORING:
+         For each competitor's entry-level paid tier, assess value delivered:
+         - Core features included
+         - User/usage limits at that price
+         - Support level
+         - Value score (1-10): what do you get for the money?
+         Identify: who offers best value at entry? Who is overpriced relative to value?
+
+      3. PRICE GAPS AND OPPORTUNITIES:
+         Identify price points where no competitor has a strong offering:
+         - Is there an underserved sweet spot between two competitor prices?
+         - Is there a segment being ignored by the pricing structure (e.g., indie developers,
+           agencies, large enterprises with complex needs)?
+         - Any competitor with a gap between free tier and first paid tier
+           that creates a "missing middle" customers fall through?
+
+      4. FEATURE-GATE STRATEGY:
+         Analyze which features competitors gate behind paid tiers vs. include free:
+         - What features appear to be the primary upgrade driver (most commonly gated)?
+         - What features do all competitors include even in free/entry tiers (table stakes)?
+         - What features are only in enterprise tiers (high-value locks)?
+
+      5. PACKAGING DIFFERENTIATION:
+         Identify packaging angles no competitor is using:
+         - A "team starter" tier priced for small teams
+         - An "unlimited" tier at a competitive price
+         - A "pay-as-you-grow" usage model
+         - A "nonprofit/startup" discount program
+         - A "lifetime deal" or perpetual license option
+
+      Return as a structured matrix with analysis and ranked opportunity list.
+    model: haiku
+    max_turns: 5
+
+  - id: willingness-to-pay-model
+    depends_on: [competitor-pricing-research, pricing-model-analysis]
+    prompt: |
+      Model willingness-to-pay and price sensitivity for this product's target customers.
+
+      Competitive pricing data: {steps.competitor-pricing-research.output}
+      Pricing model analysis: {steps.pricing-model-analysis.output}
+      Product: {input.product_name}
+      Target customer: {input.target_customer}
+
+      WILLINGNESS-TO-PAY (WTP) ANALYSIS:
+
+      1. VAN WESTENDORP PRICE SENSITIVITY FRAMEWORK:
+         Based on competitor pricing, review sentiment, and customer type, estimate
+         the four price thresholds:
+         - Too cheap (quality concern): below $X/month - "this seems too cheap to be real"
+         - Acceptable cheap (good value): around $X/month - "reasonable entry price"
+         - Acceptable expensive (must justify): around $X/month - "needs to show clear ROI"
+         - Too expensive (deal-breaker): above $X/month - "out of budget for most buyers"
+
+         Present these as ranges, not exact figures, since they vary by segment.
+         Provide separate estimates for SMB, mid-market, and enterprise buyers.
+
+      2. SEGMENT-SPECIFIC WTP:
+         For each primary buyer segment (inferred from target customer description):
+         - Monthly budget range for this category of tool
+         - Maximum monthly spend before needing CFO/VP approval
+         - Annual budget typically allocated for tools like this
+         - Typical payment method: credit card / PO / contract negotiation
+
+      3. VALUE METRIC ALIGNMENT:
+         Which value metric best tracks with customer value?
+         (users / workflow runs / records / API calls / seats / projects)
+         At what volume does the value metric justify a tier upgrade?
+         Map out 3-5 natural upsell trigger points along the value metric axis.
+
+      4. ROI-BASED PRICING ANCHOR:
+         Estimate the ROI the product delivers for a typical customer:
+         - Time saved per week (hours) x hourly cost of that time = value in $
+         - Revenue generated or protected (if estimable)
+         - Divide by 10 (customers typically expect 10x ROI minimum)
+         This gives a maximum justifiable price before ROI arguments break down.
+
+      5. PRICE SENSITIVITY BY BUYING CONTEXT:
+         - Self-serve (credit card, no sales): buyer willing to pay up to $X/month without conversation
+         - Sales-assisted (demo required): buyer engages at $X/month range with contract
+         - Enterprise (legal, procurement, security review): deal size typically $X-$Y/year
+
+      Summarize as a WTP matrix with recommended price floors and ceilings per tier.
+    model: sonnet
+    max_turns: 5
+
+  - id: pricing-strategy-recommendation
+    depends_on: [pricing-model-analysis, pricing-comparison-matrix, willingness-to-pay-model]
+    prompt: |
+      Synthesize all pricing research into a complete optimal pricing strategy recommendation.
+
+      Pricing model analysis: {steps.pricing-model-analysis.output}
+      Comparison matrix: {steps.pricing-comparison-matrix.output}
+      Willingness-to-pay model: {steps.willingness-to-pay-model.output}
+      Product: {input.product_name}
+      Current pricing: {input.current_pricing}
+      Target customer: {input.target_customer}
+
+      OPTIMAL PRICING STRATEGY:
+
+      1. RECOMMENDED PRICING ARCHITECTURE:
+         Present the recommended tier structure:
+
+         | Tier Name | Monthly Price | Annual Price | Annual Discount | Target Segment |
+         |-----------|--------------|--------------|-----------------|----------------|
+         | [Name]    | $X           | $X/yr        | X%              | [segment]      |
+
+         For each tier, specify:
+         - 5-7 core included features (not exhaustive, just the value drivers)
+         - Usage limits (if applicable): seats / runs / API calls / etc.
+         - Primary upgrade trigger: what behavior from a lower tier pushes this upgrade?
+         - Key feature gates that are NOT included (must upgrade for these)
+
+      2. PRICING RATIONALE:
+         - Why this price point for each tier (anchored to competitor landscape and WTP model)
+         - Why this number of tiers (3 is most common; justify if different)
+         - Annual vs monthly pricing strategy and default
+         - Free trial or freemium recommendation with specific limits
+
+      3. COMPETITIVE POSITIONING:
+         - Where does this pricing land on the competitor map?
+           (Price leader / Value-priced / Premium / Ultra-premium)
+         - The 3 competitors we are priced against intentionally and why
+         - The pricing narrative: "We cost X while [competitor] charges Y, but we give you Z"
+
+      4. REVENUE PROJECTION:
+         Estimate first-year revenue potential under this pricing:
+         - Conservative scenario: X paying customers at blended ACV = $Y ARR
+         - Base case: X paying customers at blended ACV = $Y ARR
+         - Key assumptions for each
+
+      5. PRICING RISKS AND MITIGATIONS:
+         - Risk 1: [e.g., competitor undercuts with a lower price] -> mitigation
+         - Risk 2: [e.g., feature-gate creates too much friction for upgrades] -> mitigation
+         - Risk 3: [e.g., usage-based model creates unpredictable revenue] -> mitigation
+
+      6. EVOLUTION ROADMAP:
+         - What pricing changes are likely needed at Series A / B / enterprise motion?
+         - What pricing experiments to run in first 90 days?
+    model: sonnet
+    max_turns: 10
+
+  - id: pricing-page-copy
+    depends_on: [pricing-strategy-recommendation]
+    prompt: |
+      Generate complete pricing page copy and FAQ based on the recommended strategy.
+
+      Pricing strategy: {steps.pricing-strategy-recommendation.output}
+      Product: {input.product_name}
+      Target customer: {input.target_customer}
+
+      DELIVERABLES:
+
+      1. PRICING PAGE HEADLINE AND SUBHEADLINE:
+         - Primary headline: simple, value-focused, 8 words max
+         - Subheadline: one sentence reinforcing the value proposition of the pricing
+         - Monthly/annual toggle label copy (e.g., "Save 20% with annual billing")
+
+      2. TIER COPY (for each recommended tier):
+         - Tier name: [memorable, aspirational, not "Basic/Pro/Enterprise" clichés]
+         - Tagline: 1 sentence describing who this tier is for
+         - Price display: primary price + billing context
+         - Feature list: 6-8 bullets, lead with the most impressive item
+         - CTA button text: action-oriented, tier-specific
+         - Trust signal near CTA: e.g., "No credit card required" / "Cancel anytime"
+
+      3. FEATURE COMPARISON TABLE HEADERS:
+         - Column headers for the tier comparison table (use tier names)
+         - Row category groupings (e.g., "Core Features", "Collaboration", "Security", "Support")
+
+      4. PRICING FAQ (8-10 questions):
+         Write complete Q&A pairs for the most common pricing objections:
+         - "Can I switch plans?"
+         - "What happens when I reach my [usage limit]?"
+         - "Do you offer a free trial?"
+         - "Is there a discount for annual billing?"
+         - "Do you offer nonprofit or startup discounts?"
+         - "What payment methods do you accept?"
+         - "Can I cancel anytime?"
+         - "What's included in support for each tier?"
+         - [2 more product-specific questions based on the pricing model]
+         For each: Q and a complete, reassuring A (2-4 sentences).
+
+      5. SOCIAL PROOF CALLOUTS NEAR PRICING:
+         - 3 suggested testimonial topics that would reduce pricing friction
+           (what a happy customer should say to address the most common objection)
+         - 2 metric callouts to display near pricing (e.g., "Join 1,200+ teams",
+           "Customers save 8 hrs/week on average")
+
+      6. ENTERPRISE CTA SECTION:
+         - Headline for the "Contact Sales" or "Enterprise" callout
+         - 3-4 bullet points describing what enterprise gets beyond standard tiers
+         - CTA button copy and supporting microcopy
+
+      Format all copy as ready-to-use text, clearly labeled by section.
+    model: sonnet
+    max_turns: 10
