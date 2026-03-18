@@ -329,6 +329,33 @@ def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
     return random.uniform(1.0, 3.0)  # Fixed ~2s with jitter
 
 
+async def _emit_audit_event(
+    event_type: str,
+    run_id: str | None,
+    actor_id: str,
+    payload: dict,
+) -> None:
+    """Append an audit event in its own session. Failures are silently logged.
+
+    Isolation from the caller's session means audit failures never abort execution.
+    """
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        from sandcastle.models.db import async_session
+
+        async with async_session() as session:
+            await append_audit_event(
+                session=session,
+                event_type=event_type,
+                run_id=run_id,
+                actor_id=actor_id,
+                payload=payload,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Audit event '%s' could not be persisted: %s", event_type, exc)
+
+
 async def _save_run_step(
     run_id: str,
     step_id: str,
@@ -976,6 +1003,12 @@ async def execute_step_with_retry(
             "step_type": step.type,
             "workflow": context.workflow_name,
         },
+    )
+    await _emit_audit_event(
+        "step.started",
+        context.run_id,
+        "system",
+        {"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
     )
 
     for attempt in range(1, max_attempts + 1):
@@ -5125,6 +5158,27 @@ async def execute_workflow(
             status="failed",
             error=f"Max workflow depth ({settings.max_workflow_depth}) exceeded",
         )
+
+    # EU AI Act: block unacceptable risk workflows before any execution begins
+    risk_level = getattr(workflow, "risk_level", "minimal")
+    if risk_level == "unacceptable":
+        return WorkflowResult(
+            run_id=run_id or str(uuid.uuid4()),
+            outputs={},
+            total_cost_usd=0.0,
+            status="failed",
+            error="Unacceptable risk workflows cannot be executed under EU AI Act",
+        )
+
+    # EU AI Act: warn if high-risk workflow has no approval step
+    if risk_level == "high":
+        has_approval = any(s.type == "approval" for s in workflow.steps)
+        if not has_approval:
+            logger.warning(
+                "Workflow '%s' is classified as high-risk (EU AI Act) but has no "
+                "approval step. Human oversight is recommended.",
+                workflow.name,
+            )
 
     if run_id is None:
         run_id = str(uuid.uuid4())

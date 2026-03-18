@@ -419,6 +419,9 @@ class StepDefinition:
     composio_config: ComposioConfig | None = None
 
 
+VALID_RISK_LEVELS = frozenset({"minimal", "limited", "high", "unacceptable"})
+
+
 @dataclass
 class WorkflowDefinition:
     """Full workflow definition parsed from YAML."""
@@ -436,6 +439,8 @@ class WorkflowDefinition:
     policies: list[PolicyDefinition] = field(default_factory=list)
     default_tools: list[str] = field(default_factory=list)  # Workflow-level default tools
     memory: MemoryConfig | None = None
+    risk_level: str = "minimal"  # EU AI Act risk classification
+    privacy: dict | None = None  # PrivacyRouter config (parsed from YAML privacy: block)
 
     def get_step(self, step_id: str) -> StepDefinition:
         """Get a step by its ID."""
@@ -988,6 +993,8 @@ def _parse_raw(data: dict) -> WorkflowDefinition:
         policies=global_policies,
         default_tools=data.get("default_tools", []),
         memory=_parse_memory_config(data.get("memory")),
+        risk_level=data.get("risk_level", "minimal"),
+        privacy=data.get("privacy") if isinstance(data.get("privacy"), dict) else None,
     )
 
 
@@ -1026,6 +1033,24 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         errors.append("Workflow name is required")
     elif len(workflow.name) > 200:
         errors.append(f"Workflow name too long ({len(workflow.name)} chars, max 200)")
+
+    # Validate EU AI Act risk level
+    if workflow.risk_level not in VALID_RISK_LEVELS:
+        errors.append(
+            f"Invalid risk_level '{workflow.risk_level}'. "
+            f"Must be one of: {', '.join(sorted(VALID_RISK_LEVELS))}"
+        )
+    elif workflow.risk_level == "unacceptable":
+        errors.append(
+            "Unacceptable risk workflows cannot be executed under EU AI Act"
+        )
+    elif workflow.risk_level == "high":
+        has_approval = any(s.type == "approval" for s in workflow.steps)
+        if not has_approval:
+            errors.append(
+                "High-risk workflow has no approval step. "
+                "EU AI Act requires human oversight for high-risk AI systems."
+            )
 
     if not workflow.steps:
         errors.append("Workflow must have at least one step")

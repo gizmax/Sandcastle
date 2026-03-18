@@ -32,6 +32,8 @@ from sandcastle.api.schemas import (
     ApiResponse,
     ApprovalRespondRequest,
     ApprovalResponse,
+    AuditEventResponse,
+    AuditVerifyResponse,
     AutoPilotStatsResponse,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
@@ -99,6 +101,7 @@ from sandcastle.models.db import (
     ApiKey,
     ApprovalRequest,
     ApprovalStatus,
+    AuditEvent,
     AutoPilotExperiment,
     AutoPilotSample,
     DeadLetterItem,
@@ -2029,6 +2032,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 max_cost_usd=budget,
                 workflow_version=wf_version,
                 started_at=datetime.now(timezone.utc),
+                risk_level=getattr(workflow, "risk_level", "minimal"),
             )
             session.add(db_run)
             await session.commit()
@@ -2232,6 +2236,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 idempotency_key=request.idempotency_key,
                 max_cost_usd=budget,
                 workflow_version=wf_version,
+                risk_level=getattr(workflow, "risk_level", "minimal"),
             )
             session.add(db_run)
             await session.commit()
@@ -2541,6 +2546,7 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             ]
             if run.children
             else None,
+            risk_level=run.risk_level or "minimal",
         )
     )
 
@@ -7067,3 +7073,181 @@ async def remove_all_memories(
             ).model_dump(),
         )
     return ApiResponse(data={"deleted_all": True, "scope_id": scope_id})
+
+
+# --- Audit Trail ---
+
+
+def _audit_event_to_response(ev: AuditEvent) -> AuditEventResponse:
+    """Convert an AuditEvent ORM row to a response schema."""
+    return AuditEventResponse(
+        id=str(ev.id),
+        event_type=ev.event_type,
+        run_id=str(ev.run_id) if ev.run_id else None,
+        actor_id=ev.actor_id,
+        actor_key_prefix=ev.actor_key_prefix,
+        source_ip=ev.source_ip,
+        payload=ev.payload,
+        prev_hash=ev.prev_hash,
+        entry_hash=ev.entry_hash,
+        created_at=ev.created_at,
+    )
+
+
+@router.get("/audit")
+async def list_audit_events(
+    req: Request,
+    run_id: str | None = Query(None, description="Filter by run ID"),
+    actor_id: str | None = Query(None, description="Filter by actor ID"),
+    event_type: str | None = Query(None, description="Filter by event type"),
+    since: str | None = Query(None, description="ISO datetime lower bound (inclusive)"),
+    until: str | None = Query(None, description="ISO datetime upper bound (inclusive)"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List audit events (admin only). Supports filtering by run, actor, type, and date range."""
+    _require_admin(req)
+
+    async with async_session() as session:
+        base = select(AuditEvent)
+        count_base = select(func.count(AuditEvent.id))
+
+        if run_id is not None:
+            try:
+                run_uuid = uuid.UUID(run_id)
+                base = base.where(AuditEvent.run_id == run_uuid)
+                count_base = count_base.where(AuditEvent.run_id == run_uuid)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_ID", message="Invalid run_id format")
+                    ).model_dump(),
+                )
+
+        if actor_id is not None:
+            base = base.where(AuditEvent.actor_id == actor_id)
+            count_base = count_base.where(AuditEvent.actor_id == actor_id)
+
+        if event_type is not None:
+            base = base.where(AuditEvent.event_type == event_type)
+            count_base = count_base.where(AuditEvent.event_type == event_type)
+
+        if since is not None:
+            try:
+                since_dt = datetime.fromisoformat(since)
+                base = base.where(AuditEvent.created_at >= since_dt)
+                count_base = count_base.where(AuditEvent.created_at >= since_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_DATE", message="Invalid 'since' datetime format")
+                    ).model_dump(),
+                )
+
+        if until is not None:
+            try:
+                until_dt = datetime.fromisoformat(until)
+                base = base.where(AuditEvent.created_at <= until_dt)
+                count_base = count_base.where(AuditEvent.created_at <= until_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="INVALID_DATE", message="Invalid 'until' datetime format")
+                    ).model_dump(),
+                )
+
+        total = await session.scalar(count_base) or 0
+        stmt = base.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+    return ApiResponse(
+        data=[_audit_event_to_response(ev) for ev in events],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/runs/{run_id}/audit")
+async def get_run_audit(
+    run_id: str,
+    req: Request,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """Return the full audit trail for a specific run."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        # Verify the run exists and belongs to the tenant
+        run_stmt = select(Run).where(Run.id == run_uuid)
+        run_stmt = _apply_tenant_filter(run_stmt, tenant_id, Run.tenant_id)
+        run_result = await session.execute(run_stmt)
+        run = run_result.scalar_one_or_none()
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+
+        total_stmt = select(func.count(AuditEvent.id)).where(AuditEvent.run_id == run_uuid)
+        total = await session.scalar(total_stmt) or 0
+
+        stmt = (
+            select(AuditEvent)
+            .where(AuditEvent.run_id == run_uuid)
+            .order_by(AuditEvent.created_at.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+    return ApiResponse(
+        data=[_audit_event_to_response(ev) for ev in events],
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/audit/verify/{run_id}")
+async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
+    """Verify the tamper-evident hash chain for a run's audit trail."""
+    _require_admin(req)
+
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    from sandcastle.engine.audit import verify_audit_chain
+
+    async with async_session() as session:
+        valid, chain_length, broken_at = await verify_audit_chain(session, run_id)
+
+    return ApiResponse(
+        data=AuditVerifyResponse(
+            run_id=run_id,
+            valid=valid,
+            chain_length=chain_length,
+            broken_at=broken_at,
+        )
+    )
