@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { RiskLevelBadge } from "@/components/runs/RiskLevelBadge";
 import { AnomalyBadge } from "@/components/shared/AnomalyBadge";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { detectAnomalies } from "@/lib/anomalyDetection";
@@ -13,6 +14,7 @@ interface RunItem {
   total_cost_usd: number;
   started_at: string | null;
   completed_at: string | null;
+  risk_level?: string;
 }
 
 interface RunsTableProps {
@@ -124,6 +126,9 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
                 <td className="px-3 sm:px-5 py-3">
                   <span className="inline-flex items-center gap-1.5 flex-wrap">
                     <RunStatusBadge status={run.status} />
+                    {run.risk_level && run.risk_level !== "minimal" && (
+                      <RiskLevelBadge level={run.risk_level} />
+                    )}
                     <AnomalyBadge anomalies={anomalyMap.get(run.run_id) ?? []} />
                   </span>
                 </td>

@@ -36,18 +36,18 @@ const h = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * 3600000).toI
 const d = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86400000).toISOString().slice(0, 10);
 
 const MOCK_RUNS = [
-  { run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.84, started_at: h(0.5), completed_at: h(0.45), parent_run_id: null },
-  { run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", status: "running", total_cost_usd: 0.67, started_at: h(0.1), completed_at: null, parent_run_id: null },
-  { run_id: "a1b2c3d4-3333-4000-8000-000000000003", workflow_name: "seo-audit", status: "completed", total_cost_usd: 1.23, started_at: h(2), completed_at: h(1.9), parent_run_id: "a1b2c3d4-1111-4000-8000-000000000001" },
-  { run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", status: "failed", total_cost_usd: 0.41, started_at: h(5), completed_at: h(4.95), parent_run_id: null },
-  { run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.72, started_at: h(8), completed_at: h(7.9), parent_run_id: null },
-  { run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", status: "completed", total_cost_usd: 1.35, started_at: h(12), completed_at: h(11.8), parent_run_id: null },
-  { run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.98, started_at: h(18), completed_at: h(17.9), parent_run_id: null },
-  { run_id: "a1b2c3d4-8888-4000-8000-000000000008", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 2.16, started_at: h(24), completed_at: h(23.8), parent_run_id: null },
-  { run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", status: "failed", total_cost_usd: 0.29, started_at: h(30), completed_at: h(29.9), parent_run_id: null },
-  { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.87, started_at: h(36), completed_at: h(35.8), parent_run_id: null },
-  { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.54, started_at: h(48), completed_at: h(47.5), parent_run_id: null },
-  { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.97, started_at: h(60), completed_at: h(59.8), parent_run_id: null },
+  { run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.84, started_at: h(0.5), completed_at: h(0.45), parent_run_id: null, risk_level: "minimal" },
+  { run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", status: "running", total_cost_usd: 0.67, started_at: h(0.1), completed_at: null, parent_run_id: null, risk_level: "limited" },
+  { run_id: "a1b2c3d4-3333-4000-8000-000000000003", workflow_name: "seo-audit", status: "completed", total_cost_usd: 1.23, started_at: h(2), completed_at: h(1.9), parent_run_id: "a1b2c3d4-1111-4000-8000-000000000001", risk_level: "minimal" },
+  { run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", status: "failed", total_cost_usd: 0.41, started_at: h(5), completed_at: h(4.95), parent_run_id: null, risk_level: "high" },
+  { run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.72, started_at: h(8), completed_at: h(7.9), parent_run_id: null, risk_level: "limited" },
+  { run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", status: "completed", total_cost_usd: 1.35, started_at: h(12), completed_at: h(11.8), parent_run_id: null, risk_level: "minimal" },
+  { run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.98, started_at: h(18), completed_at: h(17.9), parent_run_id: null, risk_level: "limited" },
+  { run_id: "a1b2c3d4-8888-4000-8000-000000000008", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 2.16, started_at: h(24), completed_at: h(23.8), parent_run_id: null, risk_level: "high" },
+  { run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", status: "failed", total_cost_usd: 0.29, started_at: h(30), completed_at: h(29.9), parent_run_id: null, risk_level: "minimal" },
+  { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.87, started_at: h(36), completed_at: h(35.8), parent_run_id: null, risk_level: "limited" },
+  { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.54, started_at: h(48), completed_at: h(47.5), parent_run_id: null, risk_level: "minimal" },
+  { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.97, started_at: h(60), completed_at: h(59.8), parent_run_id: null, risk_level: "high" },
 ];
 
 const MOCK_STEPS: MockStep[] = [
@@ -5648,6 +5648,64 @@ const MOCK_COMMUNITY_COLLECTIONS = [
   },
 ];
 
+// Compliance mock data
+const MOCK_COMPLIANCE_STATUS = {
+  mode: "eu_ai_act",
+  active: true,
+  features: {
+    audit_trail: true,
+    risk_classification: true,
+    privacy_router: true,
+    emergency_stop: true,
+    input_prompt_logging: true,
+  },
+};
+
+const MOCK_AUDIT_EVENTS = [
+  { id: "aud-001", event_type: "workflow.started", actor: "api-key:sc_live_abc1", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { input_hash: "sha256:a3f9...", pii_detected: false }, timestamp: h(0.5), hash: "sha256:e3b0c44298fc1c149afb" },
+  { id: "aud-002", event_type: "step.executed", actor: "system", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { step_id: "scrape", model: "claude-sonnet-4-20250514", cost_usd: 0.52 }, timestamp: h(0.49), hash: "sha256:9f86d081884c7d659a2f" },
+  { id: "aud-003", event_type: "workflow.completed", actor: "system", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { total_cost_usd: 1.84, duration_seconds: 39.2 }, timestamp: h(0.45), hash: "sha256:4e07408562bedb8b60ce" },
+  { id: "aud-004", event_type: "privacy.pii_redacted", actor: "privacy-router", run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", risk_level: "limited", metadata: { patterns_matched: ["email", "phone"], redacted_count: 3 }, timestamp: h(0.15), hash: "sha256:2c624232cdd221771294" },
+  { id: "aud-005", event_type: "workflow.started", actor: "api-key:sc_live_def2", run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", risk_level: "limited", metadata: { input_hash: "sha256:b7c2...", pii_detected: true }, timestamp: h(0.1), hash: "sha256:19ca14e7ea6328a42e0e" },
+  { id: "aud-006", event_type: "risk.classified", actor: "compliance-engine", run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", risk_level: "high", metadata: { previous_level: "limited", reason: "PII processing volume exceeds threshold" }, timestamp: h(5.1), hash: "sha256:84bc3da1b3e33a18e8d5" },
+  { id: "aud-007", event_type: "workflow.failed", actor: "system", run_id: "a1b2c3d4-4444-4000-8000-000000000004", workflow_name: "lead-enrichment", risk_level: "high", metadata: { step_id: "enrich", error: "Timeout after 300s", attempts: 3 }, timestamp: h(4.95), hash: "sha256:1f3870be274f6c49b3e6" },
+  { id: "aud-008", event_type: "emergency_stop.triggered", actor: "admin:operator", run_id: null, workflow_name: null, risk_level: null, metadata: { reason: "Manual safety check", scope: "all_high_risk", affected_runs: 2 }, timestamp: h(4), hash: "sha256:d2ddea18f00665ce8623" },
+  { id: "aud-009", event_type: "emergency_stop.cleared", actor: "admin:operator", run_id: null, workflow_name: null, risk_level: null, metadata: { reason: "Safety check passed", cleared_at: h(3.5) }, timestamp: h(3.5), hash: "sha256:a87ff679a2f3e71d9181" },
+  { id: "aud-010", event_type: "transparency_report.generated", actor: "api-key:sc_live_abc1", run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", risk_level: "limited", metadata: { report_version: "annex_iv_v1", pages: 4 }, timestamp: h(7.8), hash: "sha256:e4da3b7fbbce2345d777" },
+];
+
+const MOCK_TRANSPARENCY_REPORT = {
+  run_id: "a1b2c3d4-1111-4000-8000-000000000001",
+  workflow_name: "lead-enrichment",
+  generated_at: h(0.4),
+  report_version: "annex_iv_v1",
+  eu_ai_act: {
+    risk_level: "minimal",
+    risk_category: "General Purpose AI - Minimal Risk",
+    article_references: ["Art. 6(3)", "Art. 52(1)"],
+    compliance_status: "compliant",
+  },
+  system_description: "Automated lead enrichment workflow that scrapes target company websites, enriches data via third-party APIs, and produces a scored lead record. No automated decisions with legal or similarly significant effects.",
+  data_processing: {
+    personal_data_processed: false,
+    data_categories: ["company_info", "public_web_content"],
+    retention_days: 30,
+    pii_redacted: false,
+  },
+  model_usage: [
+    { step_id: "scrape", model: "claude-sonnet-4-20250514", provider: "Anthropic", purpose: "Web content extraction", cost_usd: 0.52 },
+    { step_id: "enrich", model: "claude-sonnet-4-20250514", provider: "Anthropic", purpose: "Data enrichment and structuring", cost_usd: 0.89 },
+    { step_id: "score", model: "claude-haiku-4-20250514", provider: "Anthropic", purpose: "Lead scoring classification", cost_usd: 0.43 },
+  ],
+  performance_metrics: {
+    total_cost_usd: 1.84,
+    duration_seconds: 39.2,
+    steps_completed: 3,
+    steps_failed: 0,
+  },
+  audit_trail_hash: "sha256:4e07408562bedb8b60ce941c7f66d8c7a4a9c5b9",
+};
+
 // Route matcher
 type MockRoute = {
   match: RegExp;
@@ -6448,6 +6506,42 @@ const routes: MockRoute[] = [
     handler: (params) => {
       const decisions = MOCK_OPTIMIZER_DECISIONS as Array<Record<string, unknown>>;
       return decisions.find((d) => d.run_id === params._1) || null;
+    },
+  },
+  // GET /compliance/status
+  {
+    match: /^\/compliance\/status$/,
+    method: "GET",
+    handler: () => MOCK_COMPLIANCE_STATUS,
+  },
+  // GET /audit
+  {
+    match: /^\/audit$/,
+    method: "GET",
+    handler: (params) => {
+      const offset = Number(params.offset || 0);
+      const limit = Number(params.limit || 20);
+      const sliced = MOCK_AUDIT_EVENTS.slice(offset, offset + limit);
+      return { _data: sliced, _meta: { total: MOCK_AUDIT_EVENTS.length, limit, offset } };
+    },
+  },
+  // GET /runs/{id}/transparency-report
+  {
+    match: /^\/runs\/([^/]+)\/transparency-report$/,
+    method: "GET",
+    handler: (params) => {
+      const run = MOCK_RUNS.find((r) => r.run_id === params._1);
+      if (!run) return null;
+      return { ...MOCK_TRANSPARENCY_REPORT, run_id: params._1, workflow_name: run.workflow_name, risk_level: run.risk_level };
+    },
+  },
+  // POST /compliance/emergency-stop
+  {
+    match: /^\/compliance\/emergency-stop$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { action?: string; reason?: string } | undefined;
+      return { success: true, action: b?.action || "stop", reason: b?.reason || "Manual trigger", timestamp: new Date().toISOString() };
     },
   },
 ];
