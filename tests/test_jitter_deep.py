@@ -648,6 +648,7 @@ class TestDeadLetterQueueWithJitteredRetries:
                 return_value=mock_session,
             ),
             patch("sandcastle.models.db.DeadLetterItem") as MockDLQItem,
+            patch("sandcastle.engine.executor._emit_audit_event", new_callable=AsyncMock),
         ):
             MockDLQItem.return_value = mock_item
             ok = await _send_to_dead_letter(
