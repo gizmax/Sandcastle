@@ -14,7 +14,7 @@ import { ScoreRing } from "@/components/advisor/ScoreRing";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { cn, formatCost, formatDuration } from "@/lib/utils";
+import { cn, formatCost } from "@/lib/utils";
 import type { Insight, Severity } from "@/lib/insights";
 
 // ---------------------------------------------------------------------------

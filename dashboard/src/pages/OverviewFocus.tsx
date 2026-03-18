@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
-import { ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { api } from "@/api/client";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -306,7 +306,7 @@ export default function OverviewFocus({
   // Projected monthly cost (approximate from avg daily rate * 30)
   const historicalDays = stats?.runs_by_day ?? [];
   const avgDailyCost = historicalDays.length > 0
-    ? historicalDays.reduce((s, d) => {
+    ? historicalDays.reduce((s, _) => {
         // We don't have per-day cost in runs_by_day, so derive from total_cost_today
         return s;
       }, totalCost) / Math.max(historicalDays.length, 1)
