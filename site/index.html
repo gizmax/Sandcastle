@@ -1701,6 +1701,79 @@
         width: auto;
       }
     }
+
+    /* Timeline */
+    .timeline {
+      position: relative;
+      padding-left: 40px;
+      margin-top: 40px;
+    }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 15px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--accent), var(--border));
+    }
+    .timeline-item {
+      position: relative;
+      margin-bottom: 36px;
+      padding-left: 24px;
+    }
+    .timeline-item:last-child {
+      margin-bottom: 0;
+    }
+    .timeline-badge {
+      position: absolute;
+      left: -40px;
+      top: 2px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+    .timeline-item.latest .timeline-badge {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+    }
+    .timeline-content h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .timeline-tag {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--accent);
+      color: var(--bg);
+      padding: 2px 8px;
+      border-radius: 100px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .timeline-content p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .timeline-content p:last-child {
+      margin-bottom: 0;
+    }
   </style>
 </head>
 <body>
@@ -1840,6 +1913,48 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
           No OpenAI Required - Agent Memory runs on Anthropic Claude + local embeddings (fastembed/ONNX)
         </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- What's New -->
+  <section id="whats-new" class="fade-in">
+    <div class="container">
+      <div class="section-label">What's New</div>
+      <h2 class="section-title">Three releases. Six weeks. Zero slowdowns.</h2>
+
+      <div class="timeline">
+        <div class="timeline-item latest">
+          <div class="timeline-badge">v0.24</div>
+          <div class="timeline-content">
+            <h3>Ecosystem <span class="timeline-tag">latest</span></h3>
+            <p>Your workflows are now APIs. One click to publish, one curl to call. Your customers hit the endpoint, you see every run in a living dashboard that updates itself - real metrics, real anomalies, zero demo data.</p>
+            <p>Built a great workflow? Put it on the Marketplace. Others install it in seconds. And when one task is too big for one agent, let it delegate - agents calling agents, tracked all the way down.</p>
+            <p>Oh, and your workflows accept file uploads now. Drop a PDF, get results.</p>
+          </div>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-badge">v0.23</div>
+          <div class="timeline-content">
+            <h3>Enterprise Trust</h3>
+            <p>EU AI Act deadline is August 2026. Sandcastle is ready today. Risk classification, tamper-evident audit trail with SHA-256 hash chains, transparency reports, PII redaction with 7 pattern types, and a global emergency stop that halts everything in one API call.</p>
+          </div>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-badge">v0.22</div>
+          <div class="timeline-content">
+            <h3>Reliability &amp; Cost</h3>
+            <p>Know what your AI costs before you run it. Pre-run cost estimation, secret scrubbing that catches credential URLs and PEM keys, and an eval framework that detects quality regressions down to 0.01 percentage points. 63 integrations. 8,700+ tests.</p>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align:center; margin-top:40px;">
+        <code style="font-size:15px; color:var(--accent);">pip install sandcastle-ai</code>
+        <span style="color:var(--text-dim); margin:0 12px;">-</span>
+        <span style="color:var(--text-muted); font-size:14px;">you're three commands from production.</span>
       </div>
     </div>
   </section>
