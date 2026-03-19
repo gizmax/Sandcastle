@@ -6728,7 +6728,7 @@ const routes: MockRoute[] = [
   },
   // POST /api/v1/{name} - execute published workflow
   {
-    match: /^\/api\/v1\/([^/]+)$/,
+    match: /^\/v1\/([^/]+)$/,
     method: "POST",
     handler: (params) => {
       const name = params._1 || "unknown";
@@ -6748,7 +6748,7 @@ const routes: MockRoute[] = [
   },
   // GET /api/v1/{name}/spec
   {
-    match: /^\/api\/v1\/([^/]+)\/spec$/,
+    match: /^\/v1\/([^/]+)\/spec$/,
     method: "GET",
     handler: (params) => {
       const name = params._1 || "unknown";
@@ -6767,7 +6767,7 @@ const routes: MockRoute[] = [
   },
   // GET /api/v1/{name}/usage - workflow API usage stats
   {
-    match: /^\/api\/v1\/([^/]+)\/usage$/,
+    match: /^\/v1\/([^/]+)\/usage$/,
     method: "GET",
     handler: (params) => {
       const name = params._1 || "unknown";

@@ -6671,7 +6671,7 @@ async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
     )
 
 
-@router.post("/api/v1/{workflow_name}")
+@router.post("/v1/{workflow_name}")
 async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
     """Execute a published workflow via its public API endpoint.
 
@@ -6920,7 +6920,7 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
     )
 
 
-@router.get("/api/v1/{workflow_name}/spec")
+@router.get("/v1/{workflow_name}/spec")
 async def get_workflow_api_spec(workflow_name: str) -> ApiResponse:
     """Return an OpenAPI-compatible spec for a published workflow API endpoint.
 
@@ -6975,7 +6975,7 @@ async def get_workflow_api_spec(workflow_name: str) -> ApiResponse:
     )
 
 
-@router.get("/api/v1/{workflow_name}/usage")
+@router.get("/v1/{workflow_name}/usage")
 async def get_workflow_api_usage(
     workflow_name: str,
     req: Request,
