@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>What's New - Sandcastle</title>
+  <meta name="description" content="Sandcastle release history. Every version documented - Workflow as API, Living Dashboard, EU AI Act compliance, audit trail, PII redaction, cost estimation, and more.">
+  <meta name="author" content="Tomas Pflanzer @gizmax">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="What's New - Sandcastle">
+  <meta property="og:description" content="Every release, documented. Every feature, explained. From v0.22 reliability to v0.24 Ecosystem - see what Sandcastle ships.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew">
+  <meta property="og:type" content="website">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="What's New - Sandcastle">
+  <meta name="twitter:description" content="Every release, documented. Every feature, explained. From v0.22 reliability to v0.24 Ecosystem.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-hover: #1a1a1a;
+      --border: #262626;
+      --border-light: #333;
+      --text: #f5f5f5;
+      --text-muted: #a3a3a3;
+      --text-dim: #737373;
+      --accent: #f59e0b;
+      --accent-hover: #fbbf24;
+      --accent-dim: rgba(245, 158, 11, 0.15);
+      --green: #22c55e;
+      --green-dim: rgba(34, 197, 94, 0.12);
+      --blue: #3b82f6;
+      --blue-dim: rgba(59, 130, 246, 0.12);
+      --purple: #a855f7;
+      --purple-dim: rgba(168, 85, 247, 0.12);
+      --code-bg: #0d0d0d;
+      --radius: 8px;
+      --radius-sm: 4px;
+      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+    }
+
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }
+    a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: var(--accent-hover); }
+    code, pre, .mono { font-family: var(--font-mono); }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Fade-in */
+    .fade-in { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+
+    /* Nav */
+    nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .nav-brand { font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a { font-size: 14px; font-weight: 500; color: var(--text-muted); }
+    .nav-links a:hover { color: var(--text); }
+
+    /* Hero */
+    .hero { padding: 140px 0 80px; text-align: center; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; font-size: 13px; font-weight: 500; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 100px; margin-bottom: 32px; }
+    .hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
+    .hero h1 .accent { color: var(--accent); }
+    .hero p { font-size: clamp(16px, 2vw, 19px); color: var(--text-muted); max-width: 640px; margin: 0 auto; line-height: 1.7; }
+
+    /* Footer */
+    footer { border-top: 1px solid var(--border); padding: 48px 0; margin-top: 80px; }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
+    .footer-left { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+    .footer-left a { color: var(--text-muted); }
+    .footer-left a:hover { color: var(--accent); }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a { font-size: 14px; color: var(--text-muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--accent); }
+
+    /* Release layout */
+    .releases { padding: 0 0 80px; }
+    .release { margin-bottom: 64px; }
+    .release:last-child { margin-bottom: 0; }
+
+    /* Release header */
+    .release-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .release-version { font-family: var(--font-mono); font-size: 28px; font-weight: 700; color: var(--text); }
+    .release-name { font-size: 20px; font-weight: 600; color: var(--text-muted); }
+    .release-date { font-size: 13px; color: var(--text-dim); margin-left: auto; font-family: var(--font-mono); }
+    .badge-latest { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; background: var(--accent); color: #0a0a0a; padding: 3px 10px; border-radius: 100px; margin-left: 8px; vertical-align: middle; }
+
+    /* Feature grid */
+    .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .feature-card { padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; }
+    .feature-card:hover { border-color: var(--border-light); transform: translateY(-2px); }
+    .feature-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
+    .feature-card p { font-size: 14px; color: var(--text-muted); line-height: 1.65; }
+    .feature-card p + p { margin-top: 8px; }
+    .feature-card .feature-tag { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 100px; margin-bottom: 12px; }
+    .feature-tag.green { background: var(--green-dim); color: var(--green); }
+    .feature-tag.blue { background: var(--blue-dim); color: var(--blue); }
+    .feature-tag.amber { background: var(--accent-dim); color: var(--accent); }
+    .feature-tag.purple { background: var(--purple-dim); color: var(--purple); }
+
+    /* Code block */
+    .feature-card pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      margin-top: 14px;
+      color: var(--text-muted);
+    }
+    .feature-card pre .hl { color: var(--accent); }
+
+    /* Wide card (spans 2 cols when grid allows) */
+    .feature-card.wide { grid-column: span 2; }
+
+    /* Inline code */
+    .feature-card code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); font-family: var(--font-mono); }
+
+    /* Stat row inside a card */
+    .stat-row { display: flex; gap: 24px; margin-top: 14px; }
+    .stat-item .stat-num { font-size: 22px; font-weight: 700; font-family: var(--font-mono); color: var(--accent); }
+    .stat-item .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .release-header { flex-wrap: wrap; gap: 8px; }
+      .release-date { margin-left: 0; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .feature-card.wide { grid-column: span 1; }
+      .nav-links a span { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container nav-inner">
+      <a href="/" class="nav-brand">Sandcastle</a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/hub/">Hub</a>
+        <a href="/security/">Security</a>
+        <a href="/pricing/">Pricing</a>
+        <a href="/" style="padding:8px 16px; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); color:var(--text-muted);">Back to Home</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero fade-in">
+    <div class="container">
+      <div class="hero-badge">Changelog</div>
+      <h1>What's New in <span class="accent">Sandcastle</span></h1>
+      <p>Every release, documented. Every feature, explained.</p>
+    </div>
+  </header>
+
+  <main>
+    <div class="container releases">
+
+      <!-- v0.24.0 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.24.0</span>
+          <span class="release-name">Ecosystem <span class="badge-latest">Latest</span></span>
+          <span class="release-date">March 19, 2026</span>
+        </div>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">New</span>
+            <h4>Workflow as API</h4>
+            <p>Your workflows are now production APIs. One click to publish, one curl to call. Your customers hit the endpoint, you see every run in the dashboard.</p>
+            <pre><span class="hl">curl</span> -X POST "https://api.example.com/api/v1/lead-enrichment" \
+  -H "Authorization: Bearer $SANDCASTLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"company": "Acme Corp", "domain": "acme.com"}'</pre>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Living Dashboard</h4>
+            <p>The dashboard shows real data now. Real-time sparklines update on every run. Anomaly detection catches cost spikes and error streaks automatically.</p>
+            <p>Heatmap shows 6 months of activity - click any day to drill down into individual runs.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">New</span>
+            <h4>Agent Marketplace</h4>
+            <p>Publish your workflows to the community hub. Others rate them, install them, remix them.</p>
+            <p>Think npm for AI agents. One command to publish, one click to install.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Multi-Agent Delegation</h4>
+            <p>Agents that call other agents. Dynamic routing: the output of one step picks which workflow runs next.</p>
+            <p>Full depth tracking, real-time progress events at every level of delegation.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">New</span>
+            <h4>File Upload</h4>
+            <p>Workflows accept real documents now. Drop a PDF, CSV, or image into the run modal.</p>
+            <p>Text files are inlined into prompts. Binary files are passed as references to your agent steps.</p>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- v0.23.0 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.23.0</span>
+          <span class="release-name">Enterprise Trust</span>
+          <span class="release-date">March 18, 2026</span>
+        </div>
+
+        <div class="feature-grid">
+
+          <div class="feature-card">
+            <span class="feature-tag green">Compliance</span>
+            <h4>EU AI Act Compliance</h4>
+            <p>Risk classification per EU AI Act categories. Compliance mode that blocks high-risk workflows without human approval.</p>
+            <p>Transparency reports (Article 13), Annex IV technical documentation, global emergency stop.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Security</span>
+            <h4>Tamper-Evident Audit Trail</h4>
+            <p>SHA-256 hash chain on every event. Each entry links to the previous - if anyone modifies a record, the chain breaks.</p>
+            <p>Verify integrity via API. 7 executor hooks + 9 admin action hooks. 3 query endpoints.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">Privacy</span>
+            <h4>Privacy Router</h4>
+            <p>7 PII patterns: email, phone, SSN, credit card, IP address, IBAN, date of birth.</p>
+            <p>Per-workflow or per-server config. Redact sensitive data before it touches your LLM, or run in audit-only mode.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Infrastructure</span>
+            <h4>Browser Modes</h4>
+            <p>LightPanda (10x faster CDP, zero memory bloat) and Browserbase (cloud, zero cold-start) join E2B, Docker, and local as sandbox options.</p>
+            <p>Playwright pre-baked in the Dockerfile. Switch backends with one env var.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">Observability</span>
+            <h4>OpenTelemetry</h4>
+            <p>Workflow and step-level OTLP spans. Cost, duration, and token counts on every trace. Compatible with Jaeger, Tempo, Honeycomb, Datadog.</p>
+            <p><code>pip install sandcastle-ai[otel]</code></p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Integrations</span>
+            <h4>5 New Connectors</h4>
+            <p>Langfuse (LLM observability), Qdrant (vector search), GCS (Google Cloud Storage), Azure Blob Storage, and Exa (semantic web search).</p>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">63</div>
+                <div class="stat-label">Total connectors</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- v0.22.0 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.22.0</span>
+          <span class="release-name">Reliability &amp; Cost</span>
+          <span class="release-date">March 17, 2026</span>
+        </div>
+
+        <div class="feature-grid">
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Cost</span>
+            <h4>Cost Estimation</h4>
+            <p><code>POST /runs/estimate</code> tells you what a workflow will cost before you run it. Per-step breakdown with model pricing baked in.</p>
+            <p>Set budget guardrails. Workflows that would exceed the budget are blocked before a single token is spent.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">Security</span>
+            <h4>Secret Scrubber</h4>
+            <p>Catches credential URLs, PEM keys, Azure AccountKey, and JSON-quoted secrets before they reach logs or LLM context.</p>
+            <p>Two-layer defense. Idempotent - safe to run multiple times on the same payload.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Quality</span>
+            <h4>Eval Framework</h4>
+            <p>Detects quality regressions with IEEE 754-safe integer basis points. No more floating-point false positives that cause flaky CI.</p>
+            <p>Define expected outputs, run evals on every commit, catch regressions at 0.01 percentage point precision.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Integrations</span>
+            <h4>Composio Integration</h4>
+            <p>500+ business app actions through a single step type. Gmail, Slack, Notion, Salesforce, HubSpot, and more - all wired in via the Composio connector.</p>
+            <p>One auth flow, any tool, zero custom code.</p>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div class="footer-left">
+        Sandcastle &middot; Built by <a href="https://github.com/gizmax">Tomas Pflanzer</a>
+      </div>
+      <div class="footer-links">
+        <a href="/">Back to Home</a>
+        <a href="/hub/">Community Hub</a>
+        <a href="/security/">Security</a>
+        <a href="https://github.com/gizmax/Sandcastle">GitHub</a>
+        <a href="https://pypi.org/project/sandcastle-ai/">PyPI</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var targets = document.querySelectorAll('.fade-in');
+      if (!('IntersectionObserver' in window)) {
+        targets.forEach(function (el) { el.classList.add('visible'); });
+        return;
+      }
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.1 });
+      targets.forEach(function (el) { observer.observe(el); });
+    });
+  </script>
+
+</body>
+</html>
