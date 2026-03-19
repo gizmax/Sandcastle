@@ -6621,6 +6621,7 @@ async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
             )
             .order_by(WorkflowVersion.version.desc())
             .limit(1)
+            .with_for_update()
         )
         result = await session.execute(stmt)
         wv = result.scalar_one_or_none()
@@ -6641,6 +6642,22 @@ async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
 
         wv.is_public = True
         await session.commit()
+
+    # Audit trail for EU AI Act compliance
+    try:
+        from sandcastle.engine.audit import append_audit_event
+        async with async_session() as audit_session:
+            await append_audit_event(
+                audit_session,
+                event_type="workflow.published",
+                run_id=None,
+                actor_id=get_tenant_id(req),
+                payload={"workflow_name": name, "version": wv.version},
+                actor_key_prefix=req.headers.get("X-API-Key", "")[:8],
+                source_ip=req.client.host if req.client else None,
+            )
+    except Exception:
+        logger.warning("Failed to emit audit event for workflow.published", exc_info=True)
 
     base_url = str(req.base_url).rstrip("/")
     endpoint_url = f"{base_url}/api/v1/{name}"

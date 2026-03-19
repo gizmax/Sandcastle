@@ -5607,7 +5607,8 @@ async def _resolve_file_input(value: str, storage: StorageBackend) -> str:
 
     file_id = value[len("@upload:"):]
     if not file_id:
-        return value
+        logger.warning("Empty @upload: file_id in workflow input - returning empty string")
+        return ""
 
     # Try to read from the uploads/ prefix in storage
     # storage.read() returns str | None; for local storage it reads from disk.
