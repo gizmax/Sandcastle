@@ -6608,6 +6608,19 @@ const routes: MockRoute[] = [
       return { success: true, action: b?.action || "stop", reason: b?.reason || "Manual trigger", timestamp: new Date().toISOString() };
     },
   },
+  // POST /upload - file upload for workflow inputs
+  {
+    match: /^\/upload$/,
+    method: "POST",
+    handler: () => ({
+      file_id: `upload_${Date.now().toString(36)}`,
+      filename: "uploaded-file.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1234567,
+      storage: "local",
+      url: null,
+    }),
+  },
 ];
 
 export function mockFetch(

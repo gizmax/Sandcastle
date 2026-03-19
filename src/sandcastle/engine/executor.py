@@ -5585,6 +5585,70 @@ async def _prepare_and_run_step(
         context.step_outputs[step_id] = result.output
 
 
+# Text file extensions that should be inlined as plain text content
+_TEXT_EXTENSIONS = frozenset(
+    {".txt", ".csv", ".json", ".yaml", ".yml", ".md", ".html", ".xml", ".log"}
+)
+
+
+async def _resolve_file_input(value: str, storage: StorageBackend) -> str:
+    """Resolve ``@upload:file_id`` references to file content.
+
+    For text files (CSV, TXT, JSON, YAML, etc.) the raw content is returned as
+    a UTF-8 string so it can be inlined directly into a prompt.  For binary
+    files (PDF, images, Office documents) an ``@file:`` reference is returned
+    so that the existing @file: handler in the sandbox runtime can read and
+    convert the content appropriately.
+
+    Non-@upload: values are returned unchanged (passthrough).
+    """
+    if not isinstance(value, str) or not value.startswith("@upload:"):
+        return value
+
+    file_id = value[len("@upload:"):]
+    if not file_id:
+        return value
+
+    # Try to read from the uploads/ prefix in storage
+    # storage.read() returns str | None; for local storage it reads from disk.
+    # We construct the storage key pattern that matches dest_name set in routes.py.
+    # Since we only have the file_id (uuid hex prefix), list storage to locate it.
+    try:
+        all_keys = await storage.list("uploads/")
+        matching = [k for k in all_keys if Path(k).name.startswith(file_id)]
+    except Exception as exc:
+        logger.warning("Could not list uploads to resolve @upload:%s: %s", file_id, exc)
+        return value
+
+    if not matching:
+        logger.warning("No upload found for file_id '%s'", file_id)
+        return value
+
+    # Use the first match (should be unique by uuid prefix)
+    key = matching[0]
+    suffix = Path(key).suffix.lower()
+
+    if suffix in _TEXT_EXTENSIONS:
+        # Inline text content directly
+        try:
+            content = await storage.read(key)
+            if content is None:
+                logger.warning("Upload '%s' read returned None", key)
+                return value
+            return content
+        except Exception as exc:
+            logger.warning("Failed to read upload '%s': %s", key, exc)
+            return value
+    else:
+        # Return @file: reference for binary files - existing handler will process it
+        from sandcastle.config import settings as _file_settings
+
+        local_path = (
+            Path(_file_settings.data_dir).expanduser().resolve() / key
+        )
+        return f"@file:{local_path}"
+
+
 async def execute_workflow(
     workflow: WorkflowDefinition,
     plan: ExecutionPlan,
@@ -5677,6 +5741,19 @@ async def execute_workflow(
             if "default" in prop:
                 merged_input[key] = prop["default"]
     merged_input.update(input_data)
+
+    # Resolve @upload:file_id references - expand uploaded files into content
+    for key, val in list(merged_input.items()):
+        if isinstance(val, str) and val.startswith("@upload:"):
+            try:
+                merged_input[key] = await _resolve_file_input(val, storage)
+            except Exception as _file_exc:
+                logger.warning(
+                    "Failed to resolve file input '%s' for key '%s': %s",
+                    val,
+                    key,
+                    _file_exc,
+                )
 
     context = RunContext(
         run_id=run_id,

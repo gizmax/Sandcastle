@@ -6,6 +6,8 @@ export interface InputSchemaProperty {
   default?: unknown;
   enum?: string[];
   format?: string;
+  /** For type: "file" - accepted file extensions (e.g. ".pdf,.csv,.xlsx") */
+  accept?: string;
 }
 
 export interface InputSchema {

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { JsonEditor } from "@/components/shared/JsonEditor";
 import { FilePathInput } from "@/components/shared/FilePathInput";
+import { FileUploadInput } from "@/components/shared/FileUploadInput";
 import type { InputSchema } from "@/types/inputSchema";
 
 interface RunWorkflowModalProps {
@@ -189,7 +190,14 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                       <p className="mb-1.5 text-xs text-muted-foreground">{prop.description}</p>
                     )}
 
-                    {prop.format === "file-path" ? (
+                    {prop.type === "file" ? (
+                      <FileUploadInput
+                        value={fieldValues[key] || ""}
+                        onChange={(v) => setFieldValues((prev) => ({ ...prev, [key]: v }))}
+                        accept={prop.accept}
+                        required={requiredFields.has(key)}
+                      />
+                    ) : prop.format === "file-path" ? (
                       <FilePathInput
                         value={fieldValues[key] || ""}
                         onChange={(v) => setFieldValues((prev) => ({ ...prev, [key]: v }))}

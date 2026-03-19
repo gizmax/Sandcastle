@@ -403,6 +403,45 @@ class ApiClient {
     }
   }
 
+  /** Upload a file for use as a workflow input field.
+   *
+   * Returns a file_id that can be stored as a field value (prefixed with @upload:).
+   * Do NOT set Content-Type header - the browser sets the multipart boundary automatically.
+   */
+  async upload(file: File): Promise<ApiResponse<{ file_id: string; filename: string; content_type: string; size_bytes: number; storage: string; url: string | null }>> {
+    await this.ensureInit();
+    if (this.useMock) {
+      return {
+        data: {
+          file_id: `upload_${Date.now().toString(36)}`,
+          filename: file.name,
+          content_type: file.type || "application/octet-stream",
+          size_bytes: file.size,
+          storage: "local",
+          url: null,
+        },
+        error: null,
+      };
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const headers: HeadersInit = {};
+      if (this.apiKey) headers["X-API-Key"] = this.apiKey;
+      // Do NOT set Content-Type - browser sets multipart boundary automatically
+      const res = await fetch(`${this.baseUrl}/upload`, {
+        method: "POST",
+        headers,
+        body: formData,
+        signal: AbortSignal.timeout(60_000),
+      });
+      return this.handleResponse(res);
+    } catch {
+      return { data: null, error: { code: "NETWORK_ERROR", message: "Upload failed" } };
+    }
+  }
+
   /**
    * Build an SSE URL with token query parameter for auth.
    * @deprecated Use fetch() with authHeaders() instead. This method puts the
