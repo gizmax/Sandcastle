@@ -148,6 +148,15 @@ export default function TemplatesPage() {
   // Installed community template slugs
   const [installedSlugs, setInstalledSlugs] = useState<Set<string>>(new Set());
 
+  // Publish-to-Hub modal state
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [publishYaml, setPublishYaml] = useState("");
+  const [publishDescription, setPublishDescription] = useState("");
+  const [publishCategory, setPublishCategory] = useState("general_ai");
+  const [publishTags, setPublishTags] = useState("");
+  const [publishLoading, setPublishLoading] = useState(false);
+  const [publishSuccess, setPublishSuccess] = useState<string | null>(null);
+
   // ---- Fetch templates ----
 
   useEffect(() => {
@@ -622,6 +631,39 @@ export default function TemplatesPage() {
       .finally(() => setCommunityLoading(false));
   }, []);
 
+  // ---- Publish-to-Hub handlers ----
+
+  const openPublishModal = useCallback(() => {
+    setPublishYaml("");
+    setPublishDescription("");
+    setPublishCategory("general_ai");
+    setPublishTags("");
+    setPublishSuccess(null);
+    setPublishModalOpen(true);
+  }, []);
+
+  const handlePublishSubmit = useCallback(async () => {
+    if (!publishYaml.trim() || !publishDescription.trim()) return;
+    setPublishLoading(true);
+    const tags = publishTags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const res = await api.post<{ slug: string; status: string }>("/hub/submit", {
+      yaml_content: publishYaml,
+      description: publishDescription,
+      category: publishCategory,
+      tags,
+    });
+    setPublishLoading(false);
+    if (res.error) {
+      toast.error(`Submit failed: ${res.error.message}`);
+    } else if (res.data) {
+      const slug = (res.data as Record<string, unknown>).slug as string;
+      setPublishSuccess(slug);
+    }
+  }, [publishYaml, publishDescription, publishCategory, publishTags]);
+
   // ---- Render ----
 
   if (loading) {
@@ -816,15 +858,14 @@ export default function TemplatesPage() {
                 </p>
               )}
             </div>
-            <a
-              href={HUB_CONTRIB_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+            <button
+              type="button"
+              onClick={openPublishModal}
+              className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/5 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 transition-colors"
             >
               <Plus className="h-3.5 w-3.5" />
-              Submit Workflow
-            </a>
+              Publish to Hub
+            </button>
           </div>
 
           {/* Collections row */}
@@ -1129,6 +1170,158 @@ export default function TemplatesPage() {
           onClose={handleInstallClose}
           onComplete={handleInstallComplete}
         />
+      )}
+
+      {/* Publish-to-Hub modal */}
+      {publishModalOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[60] bg-black/40"
+            onClick={() => !publishLoading && setPublishModalOpen(false)}
+          />
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-accent" />
+                  Publish Workflow to Hub
+                </h2>
+                <button
+                  onClick={() => setPublishModalOpen(false)}
+                  disabled={publishLoading}
+                  className="rounded-lg p-1 text-muted hover:text-foreground disabled:opacity-50"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {publishSuccess ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 rounded-lg bg-success/10 border border-success/30 p-3">
+                    <Check className="h-5 w-5 text-success shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-success">Submitted for review!</p>
+                      <p className="text-xs text-muted mt-0.5">
+                        Your workflow was submitted as{" "}
+                        <code className="font-mono text-foreground">{publishSuccess}</code>.
+                        It will appear in the community hub once approved.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPublishModalOpen(false)}
+                    className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all shadow-sm"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted">
+                      Workflow YAML <span className="text-error">*</span>
+                    </label>
+                    <textarea
+                      value={publishYaml}
+                      onChange={(e) => setPublishYaml(e.target.value)}
+                      placeholder="Paste your workflow YAML here..."
+                      rows={8}
+                      className={cn(
+                        "w-full rounded-lg border border-border bg-background p-3 font-mono text-xs text-foreground",
+                        "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                        "resize-y"
+                      )}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted">
+                      Description <span className="text-error">*</span>
+                    </label>
+                    <textarea
+                      value={publishDescription}
+                      onChange={(e) => setPublishDescription(e.target.value)}
+                      placeholder="Describe what this workflow does..."
+                      rows={2}
+                      className={cn(
+                        "w-full rounded-lg border border-border bg-background p-3 text-sm text-foreground",
+                        "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                        "resize-none"
+                      )}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted">Category</label>
+                      <select
+                        value={publishCategory}
+                        onChange={(e) => setPublishCategory(e.target.value)}
+                        className={cn(
+                          "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground",
+                          "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        )}
+                      >
+                        <option value="general_ai">General AI</option>
+                        <option value="marketing">Marketing</option>
+                        <option value="devops">DevOps</option>
+                        <option value="data_engineering">Data Engineering</option>
+                        <option value="customer_success">Customer Success</option>
+                        <option value="sales">Sales</option>
+                        <option value="finance">Finance</option>
+                        <option value="hr">HR</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted">
+                        Tags <span className="text-muted-foreground">(comma-separated)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={publishTags}
+                        onChange={(e) => setPublishTags(e.target.value)}
+                        placeholder="automation, ai, llm"
+                        className={cn(
+                          "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground",
+                          "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        )}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={handlePublishSubmit}
+                      disabled={publishLoading || !publishYaml.trim() || !publishDescription.trim()}
+                      className={cn(
+                        "flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2",
+                        "text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all shadow-sm",
+                        (publishLoading || !publishYaml.trim() || !publishDescription.trim()) &&
+                          "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      {publishLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <Globe className="h-4 w-4" />
+                          Submit for Review
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setPublishModalOpen(false)}
+                      disabled={publishLoading}
+                      className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
