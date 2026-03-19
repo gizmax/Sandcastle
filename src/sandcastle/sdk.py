@@ -1106,7 +1106,7 @@ class SandcastleClient:
         if callback_url:
             headers["X-Callback-URL"] = callback_url
         resp = self._client.post(
-            f"/api/api/v1/{workflow_name}",
+            f"/api/v1/{workflow_name}",
             json=input_data,
             headers=headers,
         )
@@ -1123,7 +1123,7 @@ class SandcastleClient:
         Returns:
             dict with input_schema, endpoint_url, auth_method, etc.
         """
-        resp = self._client.get(f"/api/api/v1/{workflow_name}/spec")
+        resp = self._client.get(f"/api/v1/{workflow_name}/spec")
         return _extract_data(resp)
 
     def get_workflow_api_usage(
@@ -1140,7 +1140,7 @@ class SandcastleClient:
             avg_duration_seconds, runs_by_day.
         """
         resp = self._client.get(
-            f"/api/api/v1/{workflow_name}/usage", params={"days": days}
+            f"/api/v1/{workflow_name}/usage", params={"days": days}
         )
         return _extract_data(resp)
 
@@ -1820,7 +1820,7 @@ class AsyncSandcastleClient:
         if callback_url:
             headers["X-Callback-URL"] = callback_url
         resp = await self._client.post(
-            f"/api/api/v1/{workflow_name}",
+            f"/api/v1/{workflow_name}",
             json=input_data,
             headers=headers,
         )
@@ -1837,7 +1837,7 @@ class AsyncSandcastleClient:
         Returns:
             dict with input_schema, endpoint_url, auth_method, etc.
         """
-        resp = await self._client.get(f"/api/api/v1/{workflow_name}/spec")
+        resp = await self._client.get(f"/api/v1/{workflow_name}/spec")
         return _extract_data(resp)
 
     async def get_workflow_api_usage(
@@ -1854,6 +1854,6 @@ class AsyncSandcastleClient:
             avg_duration_seconds, runs_by_day.
         """
         resp = await self._client.get(
-            f"/api/api/v1/{workflow_name}/usage", params={"days": days}
+            f"/api/v1/{workflow_name}/usage", params={"days": days}
         )
         return _extract_data(resp)

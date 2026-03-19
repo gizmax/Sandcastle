@@ -211,7 +211,7 @@ class TestCallPublishedWorkflowApi:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             ms.default_max_cost_usd = None
-            resp = client.post(f"/api/api/v1/{name}", json={"topic": "hello"})
+            resp = client.post(f"/api/v1/{name}", json={"topic": "hello"})
 
         assert resp.status_code == 404
         data = resp.json()
@@ -236,7 +236,7 @@ class TestCallPublishedWorkflowApi:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             ms.default_max_cost_usd = None
-            resp = client.post(f"/api/api/v1/{name}", json={"topic": "world"})
+            resp = client.post(f"/api/v1/{name}", json={"topic": "world"})
 
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
@@ -266,7 +266,7 @@ class TestCallPublishedWorkflowApi:
             ms.workflows_dir = str(tmp_path)
             ms.default_max_cost_usd = None
             resp = client.post(
-                f"/api/api/v1/{name}",
+                f"/api/v1/{name}",
                 json={"topic": "async test"},
                 headers={"Prefer": "respond-async"},
             )
@@ -294,7 +294,7 @@ class TestCallPublishedWorkflowApi:
             ms.workflows_dir = str(tmp_path)
             ms.default_max_cost_usd = None
             # Missing required "topic" field
-            resp = client.post(f"/api/api/v1/{name}", json={})
+            resp = client.post(f"/api/v1/{name}", json={})
 
         assert resp.status_code == 400
         data = resp.json()
@@ -306,7 +306,7 @@ class TestCallPublishedWorkflowApi:
             ms.auth_required = False
             ms.is_local_mode = True
             ms.default_max_cost_usd = None
-            resp = client.post("/api/api/v1/../secret", json={})
+            resp = client.post("/api/v1/../secret", json={})
         # FastAPI will either 404, 400, 422, or 405 for path traversal attempts
         # The URL may be normalized (../ removed) before reaching our validation
         assert resp.status_code in (400, 404, 405, 422)
@@ -388,7 +388,7 @@ class TestScopedApiKeys:
             _app.middleware_stack = None  # Reset cached stack
             with patch("sandcastle.api.auth.auth_middleware", side_effect=_patch_state):
                 scoped_resp = client.post(
-                    f"/api/api/v1/{name_b}",
+                    f"/api/v1/{name_b}",
                     json={"topic": "test"},
                 )
 
@@ -419,7 +419,7 @@ class TestWorkflowApiSpec:
             ms.auth_required = False
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
-            resp = client.get(f"/api/api/v1/{name}/spec")
+            resp = client.get(f"/api/v1/{name}/spec")
 
         assert resp.status_code == 404
         data = resp.json()
@@ -436,7 +436,7 @@ class TestWorkflowApiSpec:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             client.post(f"/api/workflows/{name}/publish")
-            resp = client.get(f"/api/api/v1/{name}/spec")
+            resp = client.get(f"/api/v1/{name}/spec")
 
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
@@ -459,7 +459,7 @@ class TestWorkflowApiSpec:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             client.post(f"/api/workflows/{name}/publish")
-            resp = client.get(f"/api/api/v1/{name}/spec")
+            resp = client.get(f"/api/v1/{name}/spec")
 
         assert resp.status_code == 200
         body = resp.json()["data"]
@@ -485,7 +485,7 @@ class TestWorkflowApiUsage:
             ms.auth_required = False
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
-            resp = client.get(f"/api/api/v1/{name}/usage")
+            resp = client.get(f"/api/v1/{name}/usage")
 
         assert resp.status_code == 404
         data = resp.json()
@@ -502,7 +502,7 @@ class TestWorkflowApiUsage:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             client.post(f"/api/workflows/{name}/publish")
-            resp = client.get(f"/api/api/v1/{name}/usage")
+            resp = client.get(f"/api/v1/{name}/usage")
 
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
@@ -525,7 +525,7 @@ class TestWorkflowApiUsage:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             client.post(f"/api/workflows/{name}/publish")
-            resp = client.get(f"/api/api/v1/{name}/usage?days=7")
+            resp = client.get(f"/api/v1/{name}/usage?days=7")
 
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
@@ -554,7 +554,7 @@ class TestWorkflowApiUsage:
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
             ms.default_max_cost_usd = None
-            client.post(f"/api/api/v1/{name}", json={"topic": "test usage tracking"})
+            client.post(f"/api/v1/{name}", json={"topic": "test usage tracking"})
 
         # Check usage - the run may or may not have api_key_id depending on auth mode
         # In no-auth mode, api_key_id is None so usage count = 0
@@ -562,7 +562,7 @@ class TestWorkflowApiUsage:
             ms.auth_required = False
             ms.is_local_mode = True
             ms.workflows_dir = str(tmp_path)
-            resp = client.get(f"/api/api/v1/{name}/usage")
+            resp = client.get(f"/api/v1/{name}/usage")
 
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
