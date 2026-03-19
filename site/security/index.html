@@ -11,7 +11,7 @@
   <meta property="og:title" content="Security - Sandcastle">
   <meta property="og:description" content="Defense-in-depth security for AI agent workflows. Sandbox isolation, HMAC auth, PII redaction, SSRF prevention, and more.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
-  <meta property="og:url" content="https://gizmax.cz/sandcastle/security">
+  <meta property="og:url" content="https://sandcastle-ai.eu/security">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
@@ -180,11 +180,113 @@
     .bottom-cta-card p { font-size: 16px; color: var(--text-muted); max-width: 540px; margin: 0 auto 28px; }
     .bottom-cta-card .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 
+    /* EU AI Act hero */
+    .euai-hero {
+      background: linear-gradient(135deg, #064e3b 0%, #0a0a0a 60%);
+      border: 1px solid #065f46;
+      border-radius: 16px;
+      padding: 48px;
+      margin-bottom: 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .euai-hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .euai-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16,185,129,0.15);
+      border: 1px solid rgba(16,185,129,0.3);
+      border-radius: 100px;
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #10b981;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 20px;
+    }
+    .euai-badge::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+    }
+
+    /* Feature cards */
+    .feature-card {
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover { border-color: var(--border-light); transform: translateY(-2px); }
+    .feature-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+    .feature-card p { font-size: 14px; color: var(--text-muted); line-height: 1.65; margin-bottom: 12px; }
+    .feature-card code {
+      display: inline-block;
+      font-size: 12px;
+      background: var(--code-bg);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      color: var(--accent);
+      font-family: var(--font-mono);
+    }
+    .feature-card pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      overflow-x: auto;
+    }
+    .feature-card pre code {
+      display: block;
+      background: none;
+      padding: 0;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    /* Grids */
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+
+    /* Table wrapper */
+    .table-wrapper { overflow-x: auto; }
+    .table-wrapper table { width: 100%; border-collapse: collapse; }
+    .table-wrapper th { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    .table-wrapper td { font-size: 13px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+    .table-wrapper tr:hover td { background: var(--surface-hover); }
+    .table-wrapper code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); font-family: var(--font-mono); }
+
+    /* Audit endpoints table */
+    .audit-table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+    .audit-table th { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    .audit-table td { font-size: 13px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+    .audit-table tr:hover td { background: var(--surface-hover); }
+    .audit-table code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); font-family: var(--font-mono); }
+    .method-badge { display: inline-block; font-size: 11px; font-weight: 700; font-family: var(--font-mono); padding: 2px 8px; border-radius: var(--radius-sm); }
+    .method-get { background: var(--blue-dim); color: var(--blue); }
+    .method-post { background: var(--green-dim); color: var(--green); }
+
     /* Responsive */
     @media (max-width: 900px) {
       .layer-grid { grid-template-columns: 1fr; }
       .arch-layer { flex-direction: column; align-items: flex-start; gap: 8px; }
       .arch-layer-label { width: auto; }
+      .grid-3 { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 600px) {
       .hero { padding: 110px 0 60px; }
@@ -194,6 +296,9 @@
       .compliance-grid { grid-template-columns: 1fr 1fr; }
       .improve-grid { grid-template-columns: 1fr; }
       .bottom-cta-card { padding: 32px 20px; }
+      .grid-3 { grid-template-columns: 1fr; }
+      .grid-2 { grid-template-columns: 1fr; }
+      .euai-hero { padding: 28px 20px; }
     }
   </style>
 </head>
@@ -206,6 +311,8 @@
       <div class="nav-links">
         <a href="#architecture"><span>Architecture</span></a>
         <a href="#features"><span>Features</span></a>
+        <a href="#eu-ai-act"><span>EU AI Act</span></a>
+        <a href="#privacy-router"><span>Privacy</span></a>
         <a href="#compliance"><span>Compliance</span></a>
         <a href="/sandcastle" class="btn-secondary" style="padding:8px 16px;font-size:13px;">Back to Home</a>
       </div>
@@ -520,13 +627,16 @@
             <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></div>
             <h3>Audit Trail</h3>
           </div>
-          <p>Every policy violation, approval decision, and API key usage is recorded in the database with timestamps and context.</p>
+          <p>SHA-256 hash chain audit trail. Every event links to the previous via cryptographic hash - tamper-evident and independently verifiable.</p>
           <ul class="detail-list">
+            <li><strong>Hash chain</strong> - each AuditEvent stores <code>entry_hash</code> (SHA-256 of payload) and <code>prev_hash</code> linking to previous event</li>
+            <li><strong>7 executor hooks</strong> - workflow_started, step_started, step_completed, step_failed, workflow_completed, workflow_failed, approval_requested</li>
+            <li><strong>9 admin hooks</strong> - emergency_stop, emergency_reset, api_key_created, api_key_rotated, api_key_revoked, credential_stored, credential_deleted, config_changed, compliance_mode_changed</li>
+            <li><code>GET /audit/runs/{run_id}</code> - full event log for a run</li>
+            <li><code>GET /audit/verify/{run_id}</code> - verify chain integrity, returns broken links</li>
+            <li><code>GET /audit/admin</code> - paginated admin action log</li>
             <li><strong>PolicyViolation</strong> - run_id, step_id, policy_id, severity, trigger_details, action_taken</li>
-            <li><strong>ApprovalRequest</strong> - status, reviewer_id, reviewer_comment, request/response data</li>
-            <li><strong>ApiKey</strong> - created_at, last_used_at, key_prefix, tenant_id</li>
-            <li><strong>RunStep</strong> - policy_violations_count, policy_actions, attempt counter</li>
-            <li><strong>Run</strong> - full timeline (created, started, completed), tenant_id, idempotency_key</li>
+            <li><strong>ApprovalRequest</strong> - status, reviewer_id, reviewer_comment, full request/response data</li>
           </ul>
         </div>
 
@@ -538,15 +648,15 @@
   <section>
     <div class="container fade-in">
       <div class="section-label">Credential Detection</div>
-      <h2 class="section-title">Automatic secret redaction</h2>
-      <p class="section-subtitle">The policy engine automatically detects and redacts credentials from 30+ services in step outputs. Patterns are applied before data reaches storage or webhooks.</p>
+      <h2 class="section-title">Automatic secret scrubber</h2>
+      <p class="section-subtitle">The policy engine automatically detects and redacts credentials from 30+ services in step outputs. Two-layer defense: PEM key blocks first, then token regex. Idempotent - safe to run twice. Patterns applied before data reaches storage, webhooks, or logs.</p>
 
       <table class="cred-table">
         <thead>
           <tr>
             <th>Category</th>
-            <th>Services</th>
-            <th>Pattern Examples</th>
+            <th>Services / Patterns</th>
+            <th>Examples</th>
           </tr>
         </thead>
         <tbody>
@@ -590,8 +700,127 @@
             <td>Email, Phone, SSN, Credit Card</td>
             <td>Regex patterns for common PII formats</td>
           </tr>
+          <tr>
+            <td>Connection URLs</td>
+            <td>PostgreSQL, Redis, MySQL, MongoDB connection strings</td>
+            <td><code>postgres://user:pass@host</code> <code>redis://:pass@host</code></td>
+          </tr>
+          <tr>
+            <td>PEM Private Keys</td>
+            <td>RSA, EC, DSA, ENCRYPTED private key blocks</td>
+            <td><code>-----BEGIN RSA PRIVATE KEY-----</code></td>
+          </tr>
+          <tr>
+            <td>Cloud Credentials</td>
+            <td>Azure Storage AccountKey, AWS compound keywords</td>
+            <td><code>AccountKey=...</code> <code>aws_secret_access_key</code></td>
+          </tr>
+          <tr>
+            <td>JSON Secrets</td>
+            <td>JSON-quoted key/value pairs containing secrets</td>
+            <td><code>"password": "value"</code> <code>"secret": "..."</code></td>
+          </tr>
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- EU AI Act -->
+  <section id="eu-ai-act">
+    <div class="container fade-in">
+      <div class="section-label">EU AI Act</div>
+      <h2 class="section-title">EU AI Act compliance - built in</h2>
+      <p class="section-subtitle">Deadline: August 2, 2026. Sandcastle is the first AI orchestrator with native EU AI Act support.</p>
+
+      <div class="euai-hero">
+        <div class="euai-badge">EU AI Act Ready</div>
+        <h3 style="font-size: 24px; margin-bottom: 16px;">Full compliance toolkit in every workflow</h3>
+        <p style="color: var(--text-muted); max-width: 600px; line-height: 1.7;">
+          Risk classification, tamper-evident audit trail, transparency reports,
+          technical documentation generation, PII redaction, and emergency stop -
+          all configured in YAML, enforced at runtime.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <div class="feature-card">
+          <h4>Risk Classification</h4>
+          <p>Classify workflows as minimal, limited, high, or unacceptable per EU AI Act Annex III. High-risk workflows require human approval gates.</p>
+          <code>risk_level: high</code>
+        </div>
+        <div class="feature-card">
+          <h4>Tamper-Evident Audit Trail</h4>
+          <p>SHA-256 hash chain on every event. Each entry links to the previous via cryptographic hash. Chain integrity verifiable via API.</p>
+          <code>GET /audit/verify/{run_id}</code>
+        </div>
+        <div class="feature-card">
+          <h4>Transparency Reports</h4>
+          <p>Article 13 compliant reports generated per-run. AI models used, human oversight, policy violations, cost breakdown.</p>
+          <code>GET /runs/{id}/transparency-report</code>
+        </div>
+        <div class="feature-card">
+          <h4>Annex IV Documentation</h4>
+          <p>Auto-generated technical documentation stubs covering intended purpose, AI models, risk classification, testing evidence, and data handling.</p>
+          <code>GET /workflows/{name}/annex-iv</code>
+        </div>
+        <div class="feature-card">
+          <h4>Global Emergency Stop</h4>
+          <p>One API call halts all running and queued workflows. In-memory + Redis flag checked by executor before every step.</p>
+          <code>POST /admin/emergency-stop</code>
+        </div>
+        <div class="feature-card">
+          <h4>Compliance Mode</h4>
+          <p>Set COMPLIANCE_MODE=eu_ai_act to enforce: high-risk workflows without approval steps are blocked, not just warned.</p>
+          <code>compliance_mode: eu_ai_act</code>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy Router -->
+  <section id="privacy-router">
+    <div class="container fade-in">
+      <div class="section-label">Privacy</div>
+      <h2 class="section-title">Privacy Router - PII redaction at every boundary</h2>
+      <p class="section-subtitle">7 PII patterns detected and redacted before data leaves your infrastructure.</p>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Pattern</th>
+              <th>Example</th>
+              <th>Redacted As</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Email</td><td>user@company.com</td><td><code>[EMAIL]</code></td></tr>
+            <tr><td>Phone</td><td>+1 (555) 123-4567</td><td><code>[PHONE]</code></td></tr>
+            <tr><td>SSN</td><td>123-45-6789</td><td><code>[SSN]</code></td></tr>
+            <tr><td>Credit Card</td><td>4111 1111 1111 1111</td><td><code>[CREDIT_CARD]</code></td></tr>
+            <tr><td>IP Address</td><td>192.168.1.1</td><td><code>[IP_ADDRESS]</code></td></tr>
+            <tr><td>IBAN</td><td>DE89 3704 0044 0532</td><td><code>[IBAN]</code></td></tr>
+            <tr><td>Date of Birth</td><td>15/03/1990</td><td><code>[DOB]</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-2" style="margin-top: 32px;">
+        <div class="feature-card">
+          <h4>Per-Workflow Config</h4>
+          <pre><code>privacy:
+  enabled: true
+  mode: redact
+  entities: [email, phone, ssn]
+  apply_to: [outputs, webhooks]</code></pre>
+        </div>
+        <div class="feature-card">
+          <h4>Per-Server Config</h4>
+          <pre><code>PRIVACY_ENABLED=true
+PRIVACY_ENTITIES=email,phone,ssn,credit_card
+PRIVACY_APPLY_TO=outputs,webhooks</code></pre>
+        </div>
+      </div>
     </div>
   </section>
 
