@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-03-19
+
+### Added
+- **Workflow as API** - publish workflows as REST endpoints via `POST /workflows/{name}/publish`. Call with `POST /api/v1/{name}`, get OpenAPI spec from `GET /api/v1/{name}/spec`, track usage via `GET /api/v1/{name}/usage`. Supports sync and async execution (Prefer: respond-async header), webhook callbacks, and scoped API keys (allowed_workflows field).
+- **Living Dashboard** - real-time sparklines from `GET /stats/sparklines`, 26-week heatmap from `GET /stats/heatmap`, z-score anomaly detection from `GET /stats/anomalies`. SSE auto-refresh on run.completed/failed events. Heatmap drill-down navigates to filtered runs.
+- **Agent Marketplace MVP** - `POST /hub/submit` for community template submissions with YAML validation and slug generation. `GET /hub/community` for paginated listings. `POST /hub/templates/{slug}/rate` for 1-5 star ratings. `POST /hub/templates/{slug}/download` for download tracking. "Publish to Hub" modal in dashboard.
+- **Multi-agent delegation polish** - dynamic sub-workflow name resolution via template variables (`workflow: "{steps.router.output}"`). Progress events for delegate steps (step.progress with sub_run_id). Detailed error messages with sub-workflow name, sub-run ID, and depth info.
+- **File upload for workflow inputs** - `POST /upload` now works in both local and S3 mode. New `type: file` in input_schema with drag-and-drop FileUploadInput component. `@upload:file_id` resolved in executor (text inlined, binary as @file: reference).
+- **SDK methods** - `call_api()`, `publish_workflow()`, `get_workflow_api_spec()`, `get_workflow_api_usage()` in both sync and async clients.
+- **HubSubmission DB model** for community template storage with status tracking (pending/approved/rejected).
+
+### Fixed
+- React error #310 on RunDetailPage - 3 hooks called after conditional returns (Rules of Hooks violation)
+- API route paths doubled as /api/api/v1/ instead of /api/v1/ (router mount prefix)
+- Heatmap day-of-week double offset (Mon displayed as Wed)
+- Anomaly run_id typed as non-nullable but backend can emit empty string
+- Emergency stop dashboard button posted to wrong endpoint (/compliance/ vs /admin/)
+- Empty @upload: file_id no longer leaks raw token to LLM prompt
+- Missing audit event on workflow publish action
+- Race condition on concurrent publish calls (added with_for_update)
+
+### Changed
+- Dashboard dist/ removed from git tracking - CI builds in GitHub Actions
+- Node.js upgraded from 20 to 22 in GitHub Actions (deprecation June 2026)
+- Overview page uses only Bento layout (Focus and Classic variants removed)
+
 ## [0.23.0] - 2026-03-18
 
 ### Added
