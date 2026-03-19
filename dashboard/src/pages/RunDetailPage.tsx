@@ -80,9 +80,28 @@ export default function RunDetailPage() {
   const [transparencyReport, setTransparencyReport] = useState<Record<string, unknown> | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [flamegraphExpanded, setFlamegraphExpanded] = useState(true);
+  const [anomaliesExpanded, setAnomaliesExpanded] = useState(false);
   const { notifyRunComplete } = useNotifications();
   const prevStatusRef = useRef<string | null>(null);
   const celebratedRef = useRef(false);
+
+  // Must be called unconditionally (Rules of Hooks) - workflow is empty string until run loads
+  const { runs: siblingRuns } = useRuns({
+    workflow: run?.workflow_name ?? "",
+    limit: 50,
+    autoPoll: false,
+  });
+
+  // Must be called unconditionally (Rules of Hooks) - run may be null before data loads
+  const anomalies = useMemo<Anomaly[]>(() => {
+    if (!run) return [];
+    const result = detectAnomalies(run, siblingRuns);
+    if (run.steps) {
+      const retryAnomaly = detectRetryHeavy(run.steps);
+      if (retryAnomaly) result.push(retryAnomaly);
+    }
+    return result;
+  }, [run, siblingRuns]);
 
   const fetchRun = useCallback(async (cancelled?: { current: boolean }) => {
     if (!id) return;
@@ -385,23 +404,6 @@ export default function RunDetailPage() {
       : run.started_at && isRunning
         ? (Date.now() - parseUTC(run.started_at).getTime()) / 1000
         : null;
-
-  const { runs: siblingRuns } = useRuns({
-    workflow: run.workflow_name,
-    limit: 50,
-    autoPoll: false,
-  });
-
-  const anomalies = useMemo<Anomaly[]>(() => {
-    const result = detectAnomalies(run, siblingRuns);
-    if (run.steps) {
-      const retryAnomaly = detectRetryHeavy(run.steps);
-      if (retryAnomaly) result.push(retryAnomaly);
-    }
-    return result;
-  }, [run, siblingRuns]);
-
-  const [anomaliesExpanded, setAnomaliesExpanded] = useState(false);
 
   return (
     <div className="space-y-4 sm:space-y-6">
