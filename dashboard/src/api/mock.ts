@@ -6621,6 +6621,97 @@ const routes: MockRoute[] = [
       url: null,
     }),
   },
+  // --- Workflow as API ---
+  // POST /workflows/{name}/publish
+  {
+    match: /^\/workflows\/([^/]+)\/publish$/,
+    method: "POST",
+    handler: (params) => {
+      const name = params._1;
+      const workflow = MOCK_WORKFLOWS.find((w) => w.file_name.replace(".yaml", "") === name);
+      if (!workflow) return null;
+      return {
+        workflow_name: name,
+        version: 1,
+        endpoint_url: `/api/v1/${name}`,
+        spec_url: `/api/v1/${name}/spec`,
+        example_curl: `curl -X POST "/api/v1/${name}" -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" -d '{...input_data...}'`,
+        example_sdk: `from sandcastle import SandcastleClient\nclient = SandcastleClient(api_key="YOUR_KEY")\nresult = client.call_api("${name}", input_data={...})`,
+        is_public: true,
+      };
+    },
+  },
+  // POST /api/v1/{name} - execute published workflow
+  {
+    match: /^\/api\/v1\/([^/]+)$/,
+    method: "POST",
+    handler: (params, body) => {
+      const name = params._1;
+      const workflow = MOCK_WORKFLOWS.find((w) => w.file_name.replace(".yaml", "") === name);
+      if (!workflow) return null;
+      return {
+        run_id: `run_${Date.now().toString(36)}`,
+        workflow_name: name,
+        status: "completed",
+        outputs: { result: { text: `Processed: ${JSON.stringify(body)}` } },
+        total_cost_usd: 0.005,
+        started_at: new Date(Date.now() - 2000).toISOString(),
+        completed_at: new Date().toISOString(),
+      };
+    },
+  },
+  // GET /api/v1/{name}/spec - workflow API spec
+  {
+    match: /^\/api\/v1\/([^/]+)\/spec$/,
+    method: "GET",
+    handler: (params) => {
+      const name = params._1;
+      const workflow = MOCK_WORKFLOWS.find((w) => w.file_name.replace(".yaml", "") === name);
+      if (!workflow) return null;
+      return {
+        workflow_name: name,
+        version: 1,
+        endpoint_url: `/api/v1/${name}`,
+        method: "POST",
+        auth_method: "X-API-Key header or Authorization: Bearer <key>",
+        input_schema: {
+          type: "object",
+          required: ["input"],
+          properties: {
+            input: { type: "string", description: "Primary workflow input" },
+          },
+        },
+        output_description: "Workflow outputs keyed by step ID",
+        async_header: "Set Prefer: respond-async to get run_id instead of waiting for result",
+      };
+    },
+  },
+  // GET /api/v1/{name}/usage - workflow API usage stats
+  {
+    match: /^\/api\/v1\/([^/]+)\/usage$/,
+    method: "GET",
+    handler: (params) => {
+      const name = params._1;
+      const workflow = MOCK_WORKFLOWS.find((w) => w.file_name.replace(".yaml", "") === name);
+      if (!workflow) return null;
+      const totalRuns = MOCK_RUNS.filter((r) => r.workflow_name === name).length;
+      const successRuns = MOCK_RUNS.filter((r) => r.workflow_name === name && r.status === "completed").length;
+      return {
+        workflow_name: name,
+        period_days: 30,
+        total_runs: totalRuns,
+        successful_runs: successRuns,
+        failed_runs: totalRuns - successRuns,
+        total_cost_usd: +(totalRuns * 0.007).toFixed(4),
+        avg_duration_seconds: totalRuns > 0 ? 3.2 : null,
+        runs_by_day: Array.from({ length: 7 }, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - (6 - i));
+          return { date: d.toISOString().slice(0, 10), count: Math.floor(Math.random() * 5) };
+        }),
+      };
+    },
+  },
 ];
 
 export function mockFetch(

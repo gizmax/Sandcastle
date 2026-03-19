@@ -1063,6 +1063,87 @@ class SandcastleClient:
         data = _extract_data(resp)
         return _parse_stats(data)
 
+    # --- Workflow as API ---
+
+    def publish_workflow(self, workflow_name: str) -> dict[str, Any]:
+        """Publish a workflow as a public API endpoint.
+
+        Sets is_public=True on the production version so it can be called
+        via :meth:`call_api`. Admin only.
+
+        Args:
+            workflow_name: Name of the workflow to publish.
+
+        Returns:
+            dict with endpoint_url, spec_url, example_curl, example_sdk, version.
+        """
+        resp = self._client.post(f"/api/workflows/{workflow_name}/publish")
+        return _extract_data(resp)
+
+    def call_api(
+        self,
+        workflow_name: str,
+        input_data: dict[str, Any],
+        *,
+        callback_url: str | None = None,
+        async_mode: bool = False,
+    ) -> dict[str, Any]:
+        """Call a published workflow via its public API endpoint.
+
+        Args:
+            workflow_name: Name of the published workflow.
+            input_data: Input data dict to pass to the workflow.
+            callback_url: Optional webhook URL for async completion notification.
+            async_mode: If True, returns immediately with run_id (enqueues).
+                        If False (default), waits for the run to complete.
+
+        Returns:
+            dict with run result (sync) or run_id (async).
+        """
+        headers: dict[str, str] = {}
+        if async_mode:
+            headers["Prefer"] = "respond-async"
+        if callback_url:
+            headers["X-Callback-URL"] = callback_url
+        resp = self._client.post(
+            f"/api/api/v1/{workflow_name}",
+            json=input_data,
+            headers=headers,
+        )
+        return _extract_data(resp)
+
+    def get_workflow_api_spec(self, workflow_name: str) -> dict[str, Any]:
+        """Get the OpenAPI-compatible spec for a published workflow.
+
+        This is a public endpoint - no API key required.
+
+        Args:
+            workflow_name: Name of the published workflow.
+
+        Returns:
+            dict with input_schema, endpoint_url, auth_method, etc.
+        """
+        resp = self._client.get(f"/api/api/v1/{workflow_name}/spec")
+        return _extract_data(resp)
+
+    def get_workflow_api_usage(
+        self, workflow_name: str, days: int = 30
+    ) -> dict[str, Any]:
+        """Get usage statistics for a published workflow API. Admin only.
+
+        Args:
+            workflow_name: Name of the published workflow.
+            days: Number of days to include in the report (default 30).
+
+        Returns:
+            dict with total_runs, successful_runs, failed_runs, total_cost_usd,
+            avg_duration_seconds, runs_by_day.
+        """
+        resp = self._client.get(
+            f"/api/api/v1/{workflow_name}/usage", params={"days": days}
+        )
+        return _extract_data(resp)
+
 
 # ---------------------------------------------------------------------------
 # Async client
@@ -1695,3 +1776,84 @@ class AsyncSandcastleClient:
         resp = await self._client.get("/api/stats")
         data = _extract_data(resp)
         return _parse_stats(data)
+
+    # --- Workflow as API ---
+
+    async def publish_workflow(self, workflow_name: str) -> dict[str, Any]:
+        """Publish a workflow as a public API endpoint.
+
+        Sets is_public=True on the production version so it can be called
+        via :meth:`call_api`. Admin only.
+
+        Args:
+            workflow_name: Name of the workflow to publish.
+
+        Returns:
+            dict with endpoint_url, spec_url, example_curl, example_sdk, version.
+        """
+        resp = await self._client.post(f"/api/workflows/{workflow_name}/publish")
+        return _extract_data(resp)
+
+    async def call_api(
+        self,
+        workflow_name: str,
+        input_data: dict[str, Any],
+        *,
+        callback_url: str | None = None,
+        async_mode: bool = False,
+    ) -> dict[str, Any]:
+        """Call a published workflow via its public API endpoint.
+
+        Args:
+            workflow_name: Name of the published workflow.
+            input_data: Input data dict to pass to the workflow.
+            callback_url: Optional webhook URL for async completion notification.
+            async_mode: If True, returns immediately with run_id (enqueues).
+                        If False (default), waits for the run to complete.
+
+        Returns:
+            dict with run result (sync) or run_id (async).
+        """
+        headers: dict[str, str] = {}
+        if async_mode:
+            headers["Prefer"] = "respond-async"
+        if callback_url:
+            headers["X-Callback-URL"] = callback_url
+        resp = await self._client.post(
+            f"/api/api/v1/{workflow_name}",
+            json=input_data,
+            headers=headers,
+        )
+        return _extract_data(resp)
+
+    async def get_workflow_api_spec(self, workflow_name: str) -> dict[str, Any]:
+        """Get the OpenAPI-compatible spec for a published workflow.
+
+        This is a public endpoint - no API key required.
+
+        Args:
+            workflow_name: Name of the published workflow.
+
+        Returns:
+            dict with input_schema, endpoint_url, auth_method, etc.
+        """
+        resp = await self._client.get(f"/api/api/v1/{workflow_name}/spec")
+        return _extract_data(resp)
+
+    async def get_workflow_api_usage(
+        self, workflow_name: str, days: int = 30
+    ) -> dict[str, Any]:
+        """Get usage statistics for a published workflow API. Admin only.
+
+        Args:
+            workflow_name: Name of the published workflow.
+            days: Number of days to include in the report (default 30).
+
+        Returns:
+            dict with total_runs, successful_runs, failed_runs, total_cost_usd,
+            avg_duration_seconds, runs_by_day.
+        """
+        resp = await self._client.get(
+            f"/api/api/v1/{workflow_name}/usage", params={"days": days}
+        )
+        return _extract_data(resp)

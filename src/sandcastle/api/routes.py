@@ -95,11 +95,12 @@ from sandcastle.api.schemas import (
     WorkflowRunRequest,
     WorkflowSaveRequest,
     WorkflowStepInfo,
+    WorkflowApiSpecResponse,
+    WorkflowApiUsageResponse,
+    WorkflowPublishResponse,
     WorkflowVersionDiffResponse,
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
-    AuditEventResponse,
-    AuditVerifyResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -356,7 +357,7 @@ async def _resolve_budget(request_budget: float | None, tenant_id: str | None) -
         except Exception as e:
             logger.warning("Budget check failed, using default: %s", e)
     # 3. Env-level default
-    if settings.default_max_cost_usd > 0:
+    if settings.default_max_cost_usd and settings.default_max_cost_usd > 0:
         return settings.default_max_cost_usd
     return None
 
@@ -5041,6 +5042,7 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
                 tenant_id=request.tenant_id,
                 name=request.name,
                 max_cost_per_run_usd=request.max_cost_per_run_usd,
+                allowed_workflows=request.allowed_workflows,
             )
             session.add(db_key)
             await session.commit()
@@ -5053,6 +5055,7 @@ async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiRespo
                     tenant_id=db_key.tenant_id,
                     name=db_key.name,
                     key=plaintext_key,
+                    allowed_workflows=db_key.allowed_workflows,
                 )
             )
     except Exception as e:
@@ -5099,6 +5102,7 @@ async def list_api_keys(
             max_cost_per_run_usd=k.max_cost_per_run_usd,
             expires_at=k.expires_at,
             allowed_cidrs=k.allowed_cidrs,
+            allowed_workflows=k.allowed_workflows,
             created_at=k.created_at,
             last_used_at=k.last_used_at,
         )
@@ -6330,6 +6334,486 @@ async def rollback_workflow(req: Request, name: str, request: WorkflowRollbackRe
             "rolled_back_to_version": target.version,
             "status": "production",
         }
+    )
+
+
+# --- Workflow as API ---
+
+
+@router.post("/workflows/{name}/publish")
+async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
+    """Publish a workflow as a public API endpoint.
+
+    Sets is_public=True on the latest production version so it can be
+    called via POST /api/v1/{name}. Admin only.
+    """
+    _require_admin(req)
+
+    async with async_session() as session:
+        stmt = (
+            select(WorkflowVersion)
+            .where(
+                WorkflowVersion.workflow_name == name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+            )
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        wv = result.scalar_one_or_none()
+
+        if not wv:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=(
+                            f"No production version found for workflow '{name}'. "
+                            "Promote the workflow to production first."
+                        ),
+                    )
+                ).model_dump(),
+            )
+
+        wv.is_public = True
+        await session.commit()
+
+    base_url = str(req.base_url).rstrip("/")
+    endpoint_url = f"{base_url}/api/v1/{name}"
+    spec_url = f"{base_url}/api/v1/{name}/spec"
+
+    example_curl = (
+        f'curl -X POST "{endpoint_url}" \\\n'
+        f'  -H "X-API-Key: YOUR_KEY" \\\n'
+        f'  -H "Content-Type: application/json" \\\n'
+        f"  -d '{{...input_data...}}'"
+    )
+    example_sdk = (
+        "from sandcastle import SandcastleClient\n"
+        f'client = SandcastleClient(api_key="YOUR_KEY")\n'
+        f'result = client.call_api("{name}", input_data={{...}})'
+    )
+
+    return ApiResponse(
+        data=WorkflowPublishResponse(
+            workflow_name=name,
+            version=wv.version,
+            endpoint_url=endpoint_url,
+            spec_url=spec_url,
+            example_curl=example_curl,
+            example_sdk=example_sdk,
+            is_public=True,
+        )
+    )
+
+
+@router.post("/api/v1/{workflow_name}")
+async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
+    """Execute a published workflow via its public API endpoint.
+
+    This is the externally-facing API that customers embed in their products.
+    Requires an API key with access to this workflow.
+
+    Set header Prefer: respond-async to return a run_id immediately
+    instead of waiting for the result.
+    Set header X-Callback-URL for async webhook notification on completion.
+    """
+    await execution_limiter.check(req)
+    tenant_id = get_tenant_id(req)
+
+    if not workflow_name or ".." in workflow_name or "/" in workflow_name:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
+
+    # Workflow-scoped API key check
+    allowed_workflows = getattr(req.state, "allowed_workflows", None)
+    if allowed_workflows is not None and workflow_name not in allowed_workflows:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message=f"API key is not authorized to call workflow '{workflow_name}'",
+                )
+            ).model_dump(),
+        )
+
+    api_key_id = getattr(req.state, "api_key_id", None)
+
+    async with async_session() as session:
+        pub_stmt = (
+            select(WorkflowVersion)
+            .where(
+                WorkflowVersion.workflow_name == workflow_name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+                WorkflowVersion.is_public.is_(True),
+            )
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        pub_result = await session.execute(pub_stmt)
+        wv_pub = pub_result.scalar_one_or_none()
+
+    if not wv_pub:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Workflow '{workflow_name}' is not published as a public API",
+                )
+            ).model_dump(),
+        )
+
+    try:
+        body = await req.json()
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object")
+    except Exception:
+        body = {}
+
+    callback_url = req.headers.get("X-Callback-URL")
+    if callback_url:
+        try:
+            from sandcastle.webhooks.dispatcher import validate_callback_url
+            validate_callback_url(callback_url)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_CALLBACK_URL", message=str(e))
+                ).model_dump(),
+            )
+
+    try:
+        workflow = parse_yaml_string(wv_pub.yaml_content)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW", message=str(e))
+            ).model_dump(),
+        )
+
+    errors = validate(workflow)
+    if errors:
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="VALIDATION_ERROR", message="; ".join(errors))
+            ).model_dump(),
+        )
+
+    input_data = dict(body)
+    validation_errors = _validate_workflow_input(input_data, workflow.input_schema)
+    if validation_errors:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_INPUT", message="; ".join(validation_errors))
+            ).model_dump(),
+        )
+
+    budget = await _resolve_budget(None, tenant_id)
+    run_id = str(uuid.uuid4())
+
+    prefer_async = req.headers.get("Prefer", "").strip().lower() == "respond-async"
+
+    if prefer_async:
+        try:
+            async with async_session() as session:
+                db_run = Run(
+                    id=uuid.UUID(run_id),
+                    workflow_name=workflow.name,
+                    status=RunStatus.QUEUED,
+                    input_data=input_data,
+                    callback_url=callback_url,
+                    tenant_id=tenant_id,
+                    max_cost_usd=budget,
+                    workflow_version=wv_pub.version,
+                    risk_level=getattr(workflow, "risk_level", "minimal"),
+                    api_key_id=api_key_id,
+                )
+                session.add(db_run)
+                await session.commit()
+        except Exception as e:
+            logger.error("Could not create run in database (api/v1 async): %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="DB_ERROR", message="Could not create run")
+                ).model_dump(),
+            )
+
+        try:
+            await enqueue_workflow(wv_pub.yaml_content, input_data, run_id)
+        except Exception as e:
+            try:
+                async with async_session() as session:
+                    db_run = await session.get(Run, uuid.UUID(run_id))
+                    if db_run:
+                        db_run.status = RunStatus.FAILED
+                        db_run.error = f"Failed to enqueue: {e}"
+                        db_run.completed_at = datetime.now(timezone.utc)
+                        await session.commit()
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=500,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="QUEUE_ERROR", message="Could not enqueue job")
+                ).model_dump(),
+            )
+
+        return ApiResponse(data={"run_id": run_id, "status": "queued"})
+
+    # Sync execution
+    try:
+        async with async_session() as session:
+            db_run = Run(
+                id=uuid.UUID(run_id),
+                workflow_name=workflow.name,
+                status=RunStatus.RUNNING,
+                input_data=input_data,
+                callback_url=callback_url,
+                tenant_id=tenant_id,
+                max_cost_usd=budget,
+                workflow_version=wv_pub.version,
+                started_at=datetime.now(timezone.utc),
+                risk_level=getattr(workflow, "risk_level", "minimal"),
+                api_key_id=api_key_id,
+            )
+            session.add(db_run)
+            await session.commit()
+    except Exception as e:
+        logger.error("Failed to create run record for api/v1 sync: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=ApiResponse(
+                error=ErrorResponse(code="DB_UNAVAILABLE", message="Database unavailable")
+            ).model_dump(),
+        )
+
+    try:
+        plan = build_plan(workflow)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="PLAN_ERROR", message=str(e))
+            ).model_dump(),
+        )
+
+    storage = create_storage()
+    result = await execute_workflow(
+        workflow=workflow,
+        plan=plan,
+        input_data=input_data,
+        run_id=run_id,
+        storage=storage,
+        max_cost_usd=budget,
+    )
+
+    status_map = {
+        "completed": RunStatus.COMPLETED,
+        "failed": RunStatus.FAILED,
+        "cancelled": RunStatus.CANCELLED,
+        "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
+        "awaiting_approval": RunStatus.AWAITING_APPROVAL,
+    }
+
+    try:
+        async with async_session() as session:
+            db_run = await session.get(Run, uuid.UUID(run_id))
+            if db_run:
+                db_run.status = status_map.get(result.status, RunStatus.FAILED)
+                db_run.output_data = result.outputs
+                db_run.total_cost_usd = result.total_cost_usd
+                if result.status != "awaiting_approval":
+                    db_run.completed_at = result.completed_at
+                db_run.error = result.error
+                await session.commit()
+    except Exception:
+        logger.error("Failed to update run %s result (api/v1)", run_id, exc_info=True)
+
+    return ApiResponse(
+        data=RunStatusResponse(
+            run_id=result.run_id,
+            workflow_name=workflow.name,
+            status=result.status,
+            input_data=input_data,
+            outputs=result.outputs,
+            total_cost_usd=result.total_cost_usd,
+            max_cost_usd=budget,
+            started_at=result.started_at,
+            completed_at=result.completed_at,
+            error=result.error,
+        )
+    )
+
+
+@router.get("/api/v1/{workflow_name}/spec")
+async def get_workflow_api_spec(workflow_name: str) -> ApiResponse:
+    """Return an OpenAPI-compatible spec for a published workflow API endpoint.
+
+    Public endpoint - no authentication required.
+    """
+    if not workflow_name or ".." in workflow_name or "/" in workflow_name:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = (
+            select(WorkflowVersion)
+            .where(
+                WorkflowVersion.workflow_name == workflow_name,
+                WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+                WorkflowVersion.is_public.is_(True),
+            )
+            .order_by(WorkflowVersion.version.desc())
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        wv = result.scalar_one_or_none()
+
+    if not wv:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Workflow '{workflow_name}' is not published as a public API",
+                )
+            ).model_dump(),
+        )
+
+    try:
+        workflow = parse_yaml_string(wv.yaml_content)
+        input_schema = workflow.input_schema
+    except Exception:
+        input_schema = None
+
+    return ApiResponse(
+        data=WorkflowApiSpecResponse(
+            workflow_name=workflow_name,
+            version=wv.version,
+            endpoint_url=f"/api/v1/{workflow_name}",
+            input_schema=input_schema,
+        )
+    )
+
+
+@router.get("/api/v1/{workflow_name}/usage")
+async def get_workflow_api_usage(
+    workflow_name: str,
+    req: Request,
+    days: int = Query(30, ge=1, le=365),
+) -> ApiResponse:
+    """Return usage statistics for a published workflow API endpoint.
+
+    Returns run count, total cost, and average duration for the given period.
+    Admin only.
+    """
+    _require_admin(req)
+
+    if not workflow_name or ".." in workflow_name or "/" in workflow_name:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW_NAME", message="Invalid workflow name")
+            ).model_dump(),
+        )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with async_session() as session:
+        pub_stmt = select(WorkflowVersion.id).where(
+            WorkflowVersion.workflow_name == workflow_name,
+            WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+            WorkflowVersion.is_public.is_(True),
+        )
+        pub_result = await session.execute(pub_stmt)
+        if pub_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Workflow '{workflow_name}' is not published as a public API",
+                    )
+                ).model_dump(),
+            )
+
+        base_stmt = select(
+            func.count(Run.id).label("total"),
+            func.sum(case((Run.status == RunStatus.COMPLETED, 1), else_=0)).label("successful"),
+            func.sum(case((Run.status == RunStatus.FAILED, 1), else_=0)).label("failed"),
+            func.sum(Run.total_cost_usd).label("total_cost"),
+        ).where(
+            Run.workflow_name == workflow_name,
+            Run.api_key_id.is_not(None),
+            Run.created_at >= cutoff,
+        )
+        agg = (await session.execute(base_stmt)).one()
+
+        dur_expr = _duration_seconds_expr()
+        dur_stmt = select(dur_expr).where(
+            Run.workflow_name == workflow_name,
+            Run.api_key_id.is_not(None),
+            Run.status == RunStatus.COMPLETED,
+            Run.created_at >= cutoff,
+            Run.started_at.is_not(None),
+            Run.completed_at.is_not(None),
+        )
+        avg_dur = await session.scalar(dur_stmt)
+
+        day_stmt = (
+            select(
+                _trunc_day(Run.created_at).label("day"),
+                func.count(Run.id).label("total"),
+                func.sum(case((Run.status == RunStatus.COMPLETED, 1), else_=0)).label("completed"),
+                func.sum(case((Run.status == RunStatus.FAILED, 1), else_=0)).label("failed"),
+            )
+            .where(
+                Run.workflow_name == workflow_name,
+                Run.api_key_id.is_not(None),
+                Run.created_at >= cutoff,
+            )
+            .group_by(_trunc_day(Run.created_at))
+            .order_by(_trunc_day(Run.created_at))
+        )
+        day_rows = (await session.execute(day_stmt)).all()
+
+    runs_by_day = [
+        {
+            "date": str(row.day),
+            "total": row.total or 0,
+            "completed": row.completed or 0,
+            "failed": row.failed or 0,
+        }
+        for row in day_rows
+    ]
+
+    return ApiResponse(
+        data=WorkflowApiUsageResponse(
+            workflow_name=workflow_name,
+            period_days=days,
+            total_runs=agg.total or 0,
+            successful_runs=agg.successful or 0,
+            failed_runs=agg.failed or 0,
+            total_cost_usd=float(agg.total_cost or 0.0),
+            avg_duration_seconds=float(avg_dur) if avg_dur is not None else None,
+            runs_by_day=runs_by_day,
+        )
     )
 
 
