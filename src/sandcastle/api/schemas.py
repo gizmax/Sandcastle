@@ -296,12 +296,29 @@ class ApiKeyCreateRequest(BaseModel):
     )
     name: str = Field(..., description="Description for the key", min_length=1, max_length=200)
     max_cost_per_run_usd: float | None = Field(None, description="Default cost limit per run", ge=0)
+    allowed_workflows: list[str] | None = Field(
+        None,
+        description="Workflow names this key may call via /api/v1/. Null = all workflows.",
+        max_length=500,
+    )
 
     @field_validator("name")
     @classmethod
     def name_must_not_be_whitespace(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("name must not be whitespace-only")
+        return v
+
+    @field_validator("allowed_workflows")
+    @classmethod
+    def validate_allowed_workflows(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        for wf in v:
+            if not isinstance(wf, str) or not wf.strip():
+                raise ValueError("Each allowed_workflow entry must be a non-empty string")
+            if len(wf) > 200:
+                raise ValueError(f"Workflow name too long (max 200 chars): {wf[:50]}...")
         return v
 
 
@@ -641,6 +658,7 @@ class ApiKeyResponse(BaseModel):
     max_cost_per_run_usd: float | None = None
     expires_at: datetime | None = None
     allowed_cidrs: list[str] | None = None
+    allowed_workflows: list[str] | None = None
     created_at: datetime | None = None
     last_used_at: datetime | None = None
 
@@ -653,6 +671,7 @@ class ApiKeyCreatedResponse(BaseModel):
     tenant_id: str | None = None
     name: str
     key: str = Field(..., description="Plaintext API key - shown only once")
+    allowed_workflows: list[str] | None = None
 
 
 class DeadLetterItemResponse(BaseModel):
@@ -1169,6 +1188,47 @@ class ComplianceStatusResponse(BaseModel):
     mode: str
     active: bool
     features: dict[str, bool] = Field(default_factory=dict)
+
+
+# --- Workflow as API schemas ---
+
+
+class WorkflowPublishResponse(BaseModel):
+    """Response after publishing a workflow as a public API endpoint."""
+
+    workflow_name: str
+    version: int
+    endpoint_url: str = Field(..., description="Public API endpoint URL")
+    spec_url: str = Field(..., description="OpenAPI spec URL for this endpoint")
+    example_curl: str = Field(..., description="Example curl command")
+    example_sdk: str = Field(..., description="Example SDK snippet")
+    is_public: bool = True
+
+
+class WorkflowApiSpecResponse(BaseModel):
+    """OpenAPI-compatible spec for a published workflow API endpoint."""
+
+    workflow_name: str
+    version: int
+    endpoint_url: str
+    method: str = "POST"
+    auth_method: str = "X-API-Key header or Authorization: Bearer <key>"
+    input_schema: dict[str, Any] | None = None
+    output_description: str = "Workflow outputs keyed by step ID"
+    async_header: str = "Set Prefer: respond-async to get run_id instead of waiting for result"
+
+
+class WorkflowApiUsageResponse(BaseModel):
+    """Usage statistics for a published workflow API endpoint."""
+
+    workflow_name: str
+    period_days: int = 30
+    total_runs: int = Field(0, ge=0)
+    successful_runs: int = Field(0, ge=0)
+    failed_runs: int = Field(0, ge=0)
+    total_cost_usd: float = Field(0.0, ge=0)
+    avg_duration_seconds: float | None = None
+    runs_by_day: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # Fix forward reference for ApiResponse.meta

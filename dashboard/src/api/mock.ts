@@ -5822,6 +5822,92 @@ const routes: MockRoute[] = [
     },
   },
   {
+    match: /^\/stats\/sparklines$/,
+    method: "GET",
+    handler: () => {
+      const today = new Date();
+      const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 7;
+      let s = seed | 0;
+      const rng = () => {
+        s = (s + 0x6d2b79f5) | 0;
+        let t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const mkSeries = (base: number, variance: number): number[] =>
+        Array.from({ length: 7 }, () => Math.max(0, base + (rng() - 0.5) * 2 * variance));
+      const trendPct = (vals: number[]): number => {
+        const prev = vals[vals.length - 2];
+        const cur = vals[vals.length - 1];
+        if (prev === 0) return 0;
+        return +((( cur - prev) / prev) * 100).toFixed(1);
+      };
+      const runsVals = mkSeries(24, 12);
+      const rateVals = mkSeries(0.92, 0.08).map((v) => Math.min(1, Math.max(0, v)));
+      const costVals = mkSeries(7.5, 3.5).map((v) => +v.toFixed(2));
+      const durVals = mkSeries(42, 12).map((v) => +v.toFixed(1));
+      return {
+        runs: { values: runsVals, trend_percent: trendPct(runsVals) },
+        rate: { values: rateVals, trend_percent: trendPct(rateVals) },
+        cost: { values: costVals, trend_percent: trendPct(costVals) },
+        duration: { values: durVals, trend_percent: trendPct(durVals) },
+      };
+    },
+  },
+  {
+    match: /^\/stats\/heatmap$/,
+    method: "GET",
+    handler: () => {
+      const today = new Date();
+      const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 99;
+      let s = seed | 0;
+      const rng = () => {
+        s = (s + 0x6d2b79f5) | 0;
+        let t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      return Array.from({ length: 182 }, (_, idx) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() - (181 - idx));
+        const dayOfWeek = (d.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+        const isWeekend = dayOfWeek >= 5;
+        const maxRuns = isWeekend ? 8 : 30;
+        return {
+          date: d.toISOString().slice(0, 10),
+          count: Math.floor(rng() * maxRuns),
+          day_of_week: dayOfWeek,
+        };
+      });
+    },
+  },
+  {
+    match: /^\/stats\/anomalies$/,
+    method: "GET",
+    handler: () => {
+      return [
+        {
+          type: "cost_spike",
+          severity: "warning",
+          workflow: "data-pipeline",
+          message: "Cost spike in 'data-pipeline': $0.2341 vs avg $0.0821 (z=2.8)",
+          run_id: "demo-run-001",
+          value: 0.2341,
+          threshold: 0.1652,
+        },
+        {
+          type: "error_streak",
+          severity: "warning",
+          workflow: "email-digest",
+          message: "Error streak in 'email-digest': 3 consecutive failures",
+          run_id: "demo-run-002",
+          value: 3,
+          threshold: 3,
+        },
+      ];
+    },
+  },
+  {
     match: /^\/workflows$/,
     method: "GET",
     handler: () => MOCK_WORKFLOWS,
@@ -6620,6 +6706,89 @@ const routes: MockRoute[] = [
       storage: "local",
       url: null,
     }),
+  },
+  // --- Workflow as API ---
+  // POST /workflows/{name}/publish
+  {
+    match: /^\/workflows\/([^/]+)\/publish$/,
+    method: "POST",
+    handler: (params) => {
+      const name = params._1 || "unknown";
+      const baseUrl = "http://localhost:8080";
+      return {
+        workflow_name: name,
+        version: 1,
+        endpoint_url: `${baseUrl}/api/v1/${name}`,
+        spec_url: `${baseUrl}/api/v1/${name}/spec`,
+        example_curl: `curl -X POST "${baseUrl}/api/v1/${name}" \\\n  -H "X-API-Key: YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"...": "input_data"}'`,
+        example_sdk: `from sandcastle import SandcastleClient\nclient = SandcastleClient(api_key="YOUR_KEY")\nresult = client.call_api("${name}", input_data={...})`,
+        is_public: true,
+      };
+    },
+  },
+  // POST /api/v1/{name} - execute published workflow
+  {
+    match: /^\/api\/v1\/([^/]+)$/,
+    method: "POST",
+    handler: (params) => {
+      const name = params._1 || "unknown";
+      return {
+        run_id: `api-${Date.now().toString(36)}`,
+        workflow_name: name,
+        status: "completed",
+        input_data: {},
+        outputs: { result: `Workflow '${name}' executed via public API` },
+        total_cost_usd: 0.42,
+        max_cost_usd: null,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        error: null,
+      };
+    },
+  },
+  // GET /api/v1/{name}/spec
+  {
+    match: /^\/api\/v1\/([^/]+)\/spec$/,
+    method: "GET",
+    handler: (params) => {
+      const name = params._1 || "unknown";
+      const wf = MOCK_WORKFLOWS.find((w) => w.file_name.replace(".yaml", "") === name || w.name.toLowerCase().replace(/\s+/g, "-") === name);
+      return {
+        workflow_name: name,
+        version: 1,
+        endpoint_url: `/api/v1/${name}`,
+        method: "POST",
+        auth_method: "X-API-Key header or Authorization: Bearer <key>",
+        input_schema: wf?.input_schema ?? null,
+        output_description: "Workflow outputs keyed by step ID",
+        async_header: "Set Prefer: respond-async to get run_id instead of waiting for result",
+      };
+    },
+  },
+  // GET /api/v1/{name}/usage - workflow API usage stats
+  {
+    match: /^\/api\/v1\/([^/]+)\/usage$/,
+    method: "GET",
+    handler: (params) => {
+      const name = params._1 || "unknown";
+      const days = Number(params.days || 30);
+      const relevantRuns = MOCK_RUNS.filter((r) => r.workflow_name === name);
+      return {
+        workflow_name: name,
+        period_days: days,
+        total_runs: relevantRuns.length,
+        successful_runs: relevantRuns.filter((r) => r.status === "completed").length,
+        failed_runs: relevantRuns.filter((r) => r.status === "failed").length,
+        total_cost_usd: Number(relevantRuns.reduce((s, r) => s + r.total_cost_usd, 0).toFixed(2)),
+        avg_duration_seconds: 42.3,
+        runs_by_day: Array.from({ length: Math.min(days, 7) }, (_, i) => ({
+          date: d(6 - i),
+          total: (i % 3) + 1,
+          completed: (i % 3) + 1,
+          failed: i % 4 === 0 ? 1 : 0,
+        })),
+      };
+    },
   },
 ];
 

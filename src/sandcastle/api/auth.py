@@ -30,6 +30,9 @@ PUBLIC_PATHS = {
 # Path prefixes that don't require authentication
 PUBLIC_PREFIXES = ("/api/templates",)
 
+# Path suffixes that don't require authentication (e.g. workflow API spec)
+PUBLIC_SUFFIXES = ("/spec",)
+
 # Pepper for HMAC key hashing - falls back to a stable default for dev/local mode.
 # In production, set API_KEY_PEPPER as an environment variable.
 _API_KEY_PEPPER = os.getenv("API_KEY_PEPPER", "sandcastle-default-pepper-change-in-production")
@@ -74,6 +77,8 @@ async def auth_middleware(request: Request, call_next):
     # Skip auth if not required
     if not settings.auth_required:
         request.state.tenant_id = None
+        request.state.api_key_id = None
+        request.state.allowed_workflows = None
         request.state._auth_checked = True
         return await call_next(request)
 
@@ -95,6 +100,13 @@ async def auth_middleware(request: Request, call_next):
 
     # Skip auth for public path prefixes (e.g. /api/templates)
     if any(request.url.path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
+        request.state._auth_checked = True
+        return await call_next(request)
+
+    # Skip auth for public path suffixes on /api/v1/ routes (e.g. workflow API spec)
+    if "/api/v1/" in request.url.path and any(
+        request.url.path.endswith(suffix) for suffix in PUBLIC_SUFFIXES
+    ):
         request.state._auth_checked = True
         return await call_next(request)
 
@@ -176,6 +188,8 @@ async def auth_middleware(request: Request, call_next):
 
     # Set tenant context on request
     request.state.tenant_id = db_key.tenant_id
+    request.state.api_key_id = db_key.id
+    request.state.allowed_workflows = db_key.allowed_workflows
     request.state._auth_checked = True
 
     # Update last_used_at

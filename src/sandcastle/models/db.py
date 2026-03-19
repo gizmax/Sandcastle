@@ -77,6 +77,7 @@ class Run(Base):
         Index("ix_runs_workflow_name", "workflow_name"),
         Index("ix_runs_tenant_status_created", "tenant_id", "status", "created_at"),
         Index("ix_runs_parent_run_id", "parent_run_id"),
+        Index("ix_runs_api_key_id", "api_key_id"),
         CheckConstraint("total_cost_usd >= 0", name="ck_runs_total_cost_non_negative"),
         CheckConstraint("depth >= 0", name="ck_runs_depth_non_negative"),
     )
@@ -107,6 +108,9 @@ class Run(Base):
     workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0)
     risk_level: Mapped[str | None] = mapped_column(String(50), nullable=True, default="minimal")
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -211,6 +215,7 @@ class ApiKey(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     allowed_cidrs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    allowed_workflows: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -619,6 +624,7 @@ class WorkflowVersion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class AuditEvent(Base):
