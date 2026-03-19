@@ -1231,5 +1231,57 @@ class WorkflowApiUsageResponse(BaseModel):
     runs_by_day: list[dict[str, Any]] = Field(default_factory=list)
 
 
+# --- Hub Marketplace ---
+
+
+class HubSubmitRequest(BaseModel):
+    """Request to submit a workflow template to the community hub."""
+
+    yaml_content: str = Field(
+        ..., description="Workflow YAML content", min_length=1, max_length=500000
+    )
+    description: str = Field(
+        ..., description="Human-readable description", min_length=1, max_length=2000
+    )
+    category: str = Field("general_ai", description="Template category", max_length=100)
+    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str]) -> list[str]:
+        if len(v) > 20:
+            raise ValueError("Maximum 20 tags allowed")
+        for tag in v:
+            if len(tag) > 100:
+                raise ValueError(f"Tag too long (max 100 chars): {tag[:40]}...")
+        return v
+
+
+class HubSubmissionResponse(BaseModel):
+    """Response for a hub submission record."""
+
+    id: str
+    slug: str
+    name: str
+    description: str | None = None
+    category: str
+    tags: list[str] = Field(default_factory=list)
+    author: str
+    status: str
+    step_count: int = Field(0, ge=0)
+    models_used: list[str] = Field(default_factory=list)
+    tools_used: list[str] = Field(default_factory=list)
+    downloads: int = Field(0, ge=0)
+    rating: float | None = None
+    rating_count: int = Field(0, ge=0)
+    created_at: datetime | None = None
+
+
+class HubRateRequest(BaseModel):
+    """Request to rate a hub template (1-5 stars)."""
+
+    rating: int = Field(..., description="Star rating 1-5", ge=1, le=5)
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()
