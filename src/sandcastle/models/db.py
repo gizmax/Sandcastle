@@ -658,6 +658,46 @@ class AuditEvent(Base):
     run: Mapped[Run | None] = relationship(foreign_keys=[run_id])
 
 
+class HubSubmission(Base):
+    """Community-submitted workflow template pending review."""
+
+    __tablename__ = "hub_submissions"
+    __table_args__ = (
+        Index("ix_hub_submissions_status", "status"),
+        Index("ix_hub_submissions_category", "category"),
+        Index("ix_hub_submissions_author", "author"),
+        Index("ix_hub_submissions_created_at", "created_at"),
+        CheckConstraint("downloads >= 0", name="ck_hub_submissions_downloads_non_negative"),
+        CheckConstraint(
+            "rating IS NULL OR (rating >= 1.0 AND rating <= 5.0)",
+            name="ck_hub_submissions_rating_range",
+        ),
+        CheckConstraint("step_count >= 0", name="ck_hub_submissions_step_count_non_negative"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    slug: Mapped[str] = mapped_column(String(500), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    yaml_content: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False, default="general_ai")
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    author: Mapped[str] = mapped_column(String(255), nullable=False)
+    # pending | approved | rejected
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    models_used: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    tools_used: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    downloads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Running average rating (1-5); null until first rating is submitted
+    rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Number of ratings received (used for running average computation)
+    rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 # Database engine and session factory
 
 def _build_engine_url() -> str:

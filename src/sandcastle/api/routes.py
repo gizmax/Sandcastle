@@ -101,6 +101,9 @@ from sandcastle.api.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
+    HubSubmitRequest,
+    HubSubmissionResponse,
+    HubRateRequest,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -118,6 +121,7 @@ from sandcastle.models.db import (
     EvalRun,
     EvalRunStatus,
     ExperimentStatus,
+    HubSubmission,
     PolicyViolation,
     RoutingDecision,
     Run,
@@ -125,7 +129,6 @@ from sandcastle.models.db import (
     RunStatus,
     Schedule,
     Setting,
-    AuditEvent,
     ToolConnection,
     WorkflowVersion,
     WorkflowVersionStatus,
@@ -1305,6 +1308,305 @@ async def list_installed_hub_templates() -> ApiResponse:
         )
 
     return ApiResponse(data=installed)
+
+
+# ---------------------------------------------------------------------------
+# Hub Marketplace: community submit / list / rate / download tracking
+# ---------------------------------------------------------------------------
+
+
+def _slugify(text: str) -> str:
+    """Convert a name into a URL-safe slug fragment."""
+    slug = text.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-{2,}", "-", slug)
+    return slug.strip("-")[:100]
+
+
+def _extract_yaml_metadata(yaml_content: str) -> dict[str, Any]:
+    """Parse YAML and extract workflow metadata fields."""
+    import yaml as pyyaml
+
+    try:
+        data = pyyaml.safe_load(yaml_content) or {}
+    except Exception:
+        return {}
+
+    steps = data.get("steps") or []
+    step_count = len(steps) if isinstance(steps, list) else 0
+
+    models_used: list[str] = []
+    tools_used: list[str] = []
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            model = step.get("model")
+            if model and isinstance(model, str) and model not in models_used:
+                models_used.append(model)
+            tool = step.get("tool")
+            if tool and isinstance(tool, str) and tool not in tools_used:
+                tools_used.append(tool)
+
+    return {
+        "name": str(data.get("name") or "").strip(),
+        "step_count": step_count,
+        "models_used": models_used,
+        "tools_used": tools_used,
+    }
+
+
+@router.post("/hub/submit")
+async def submit_to_hub(req: Request) -> ApiResponse:
+    """Submit a workflow template to the community hub.
+
+    Validates the YAML, extracts metadata, assigns a slug, and stores
+    a HubSubmission record with status='pending'.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_JSON", message="Invalid JSON body")
+            ).model_dump(),
+        )
+
+    try:
+        submit_req = HubSubmitRequest(**body)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="VALIDATION_ERROR", message=str(exc))
+            ).model_dump(),
+        )
+
+    try:
+        import yaml as pyyaml
+        parsed = pyyaml.safe_load(submit_req.yaml_content)
+        if not isinstance(parsed, dict):
+            raise ValueError("YAML must parse to a mapping")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_YAML", message=f"Invalid workflow YAML: {exc}")
+            ).model_dump(),
+        )
+
+    meta = _extract_yaml_metadata(submit_req.yaml_content)
+    workflow_name = meta.get("name") or "workflow"
+
+    author = get_tenant_id(req) or "community"
+    base_slug = f"{_slugify(author)}/{_slugify(workflow_name)}"
+
+    async with async_session() as session:
+        slug = base_slug
+        suffix = 0
+        while True:
+            existing = await session.execute(
+                select(HubSubmission).where(HubSubmission.slug == slug)
+            )
+            if existing.scalar_one_or_none() is None:
+                break
+            suffix += 1
+            slug = f"{base_slug}-{suffix}"
+
+        submission = HubSubmission(
+            slug=slug,
+            name=workflow_name,
+            description=submit_req.description,
+            yaml_content=submit_req.yaml_content,
+            category=submit_req.category,
+            tags=submit_req.tags,
+            author=author,
+            status="pending",
+            models_used=meta.get("models_used", []),
+            tools_used=meta.get("tools_used", []),
+            step_count=meta.get("step_count", 0),
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(submission)
+
+    logger.info("New hub submission: slug=%s author=%s", slug, author)
+
+    return ApiResponse(
+        data=HubSubmissionResponse(
+            id=str(submission.id),
+            slug=submission.slug,
+            name=submission.name,
+            description=submission.description,
+            category=submission.category,
+            tags=submission.tags or [],
+            author=submission.author,
+            status=submission.status,
+            step_count=submission.step_count,
+            models_used=submission.models_used or [],
+            tools_used=submission.tools_used or [],
+            downloads=submission.downloads,
+            rating=submission.rating,
+            rating_count=submission.rating_count,
+            created_at=submission.created_at,
+        ).model_dump()
+    )
+
+
+@router.get("/hub/community")
+async def list_community_templates(
+    status: str = "approved",
+    category: str | None = None,
+    limit: int = Query(50, le=100),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List community-submitted templates.
+
+    Defaults to status='approved' so only reviewed templates are shown.
+    """
+    valid_statuses = {"pending", "approved", "rejected"}
+    if status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_STATUS",
+                    message=f"status must be one of: {', '.join(sorted(valid_statuses))}",
+                )
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        query = select(HubSubmission).where(HubSubmission.status == status)
+        if category:
+            query = query.where(HubSubmission.category == category)
+        query = query.order_by(HubSubmission.created_at.desc()).limit(limit).offset(offset)
+
+        result = await session.execute(query)
+        submissions = result.scalars().all()
+
+        count_query = select(func.count()).select_from(HubSubmission).where(
+            HubSubmission.status == status
+        )
+        if category:
+            count_query = count_query.where(HubSubmission.category == category)
+        total_result = await session.execute(count_query)
+        total = total_result.scalar_one() or 0
+
+    items = [
+        HubSubmissionResponse(
+            id=str(s.id),
+            slug=s.slug,
+            name=s.name,
+            description=s.description,
+            category=s.category,
+            tags=s.tags or [],
+            author=s.author,
+            status=s.status,
+            step_count=s.step_count,
+            models_used=s.models_used or [],
+            tools_used=s.tools_used or [],
+            downloads=s.downloads,
+            rating=s.rating,
+            rating_count=s.rating_count,
+            created_at=s.created_at,
+        ).model_dump()
+        for s in submissions
+    ]
+
+    return ApiResponse(
+        data=items,
+        meta=PaginationMeta(total=total, limit=limit, offset=offset),
+    )
+
+
+@router.post("/hub/templates/{slug:path}/rate")
+async def rate_template(slug: str, req: Request) -> ApiResponse:
+    """Rate a community template (1-5 stars).
+
+    Updates a running average rating on the HubSubmission record.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_JSON", message="Invalid JSON body")
+            ).model_dump(),
+        )
+
+    try:
+        rate_req = HubRateRequest(**body)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="VALIDATION_ERROR", message=str(exc))
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(HubSubmission).where(HubSubmission.slug == slug)
+        )
+        submission = result.scalar_one_or_none()
+        if submission is None:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Template '{slug}' not found",
+                    )
+                ).model_dump(),
+            )
+
+        old_count = submission.rating_count or 0
+        old_avg = submission.rating or 0.0
+        new_count = old_count + 1
+        new_avg = (old_avg * old_count + rate_req.rating) / new_count
+
+        submission.rating = round(new_avg, 2)
+        submission.rating_count = new_count
+        await session.commit()
+        await session.refresh(submission)
+
+    return ApiResponse(
+        data={
+            "slug": submission.slug,
+            "rating": submission.rating,
+            "rating_count": submission.rating_count,
+        }
+    )
+
+
+@router.post("/hub/templates/{slug:path}/download")
+async def track_download(slug: str) -> ApiResponse:
+    """Track a template download. Increments the download counter."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(HubSubmission).where(HubSubmission.slug == slug)
+        )
+        submission = result.scalar_one_or_none()
+        if submission is None:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Template '{slug}' not found",
+                    )
+                ).model_dump(),
+            )
+
+        submission.downloads = (submission.downloads or 0) + 1
+        await session.commit()
+        await session.refresh(submission)
+
+    return ApiResponse(data={"slug": submission.slug, "downloads": submission.downloads})
 
 
 @router.get("/workflows/{name}/export")

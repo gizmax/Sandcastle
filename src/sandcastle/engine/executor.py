@@ -2081,7 +2081,13 @@ async def _execute_sub_workflow_step(
         from pathlib import Path
 
         workflows_dir = Path(settings.workflows_dir).resolve()
-        wf_name = step.sub_workflow.workflow
+
+        # Resolve dynamic workflow name via template variables
+        raw_wf_name = step.sub_workflow.workflow
+        if "{" in raw_wf_name:
+            wf_name = resolve_templates(raw_wf_name, context, step.depends_on)
+        else:
+            wf_name = raw_wf_name
 
         # Path traversal prevention for sub-workflow names
         if ".." in wf_name or "/" in wf_name or "\\" in wf_name:
@@ -3897,8 +3903,14 @@ async def _execute_delegate_step(
                 else Path("workflows")
             ).resolve()
 
+            # Resolve dynamic workflow name via template variables
+            raw_wf_name = cfg.workflow
+            if "{" in raw_wf_name:
+                wf_name = resolve_templates(raw_wf_name, context, step.depends_on)
+            else:
+                wf_name = raw_wf_name
+
             # Path traversal guard
-            wf_name = cfg.workflow
             if ".." in wf_name or "/" in wf_name or "\\" in wf_name:
                 raise ValueError(
                     f"Delegate workflow name '{wf_name}'"
@@ -3917,7 +3929,21 @@ async def _execute_delegate_step(
                     run_id=sub_run_id,
                     input={**context.input, "task_description": task_description},
                     step_outputs={},
-                    workflow_name=cfg.workflow,
+                    workflow_name=wf_name,
+                )
+
+                # Emit progress: sub-run created and delegated
+                event_bus.publish(
+                    "step.progress",
+                    {
+                        "run_id": context.run_id,
+                        "step_id": step.id,
+                        "step_name": step.id,
+                        "sub_run_id": sub_run_id,
+                        "status": "delegated",
+                        "workflow": wf_name,
+                        "depth": depth,
+                    },
                 )
 
                 sub_result = await execute_workflow(
@@ -3929,14 +3955,42 @@ async def _execute_delegate_step(
                     depth=depth + 1,
                 )
 
+                # Emit progress: sub-run finished
+                event_bus.publish(
+                    "step.progress",
+                    {
+                        "run_id": context.run_id,
+                        "step_id": step.id,
+                        "step_name": step.id,
+                        "sub_run_id": sub_run_id,
+                        "status": "sub_completed",
+                        "workflow": wf_name,
+                        "sub_status": sub_result.status,
+                        "depth": depth,
+                    },
+                )
+
                 duration = time.monotonic() - started_at
+                if sub_result.status != "completed":
+                    sub_error = sub_result.error or "unknown error"
+                    return StepResult(
+                        step_id=step.id,
+                        output=sub_result.outputs,
+                        cost_usd=sub_result.total_cost_usd,
+                        duration_seconds=duration,
+                        status="failed",
+                        error=(
+                            f"Delegate sub-workflow '{wf_name}' (sub_run={sub_run_id}, "
+                            f"depth={depth + 1}) failed: {sub_error}"
+                        ),
+                    )
                 return StepResult(
                     step_id=step.id,
                     output=sub_result.outputs,
                     cost_usd=sub_result.total_cost_usd,
                     duration_seconds=duration,
-                    status="completed" if sub_result.status == "completed" else "failed",
-                    error=sub_result.error,
+                    status="completed",
+                    error=None,
                 )
         except Exception as exc:
             logger.warning("Delegate step '%s' failed to execute sub-workflow: %s", step.id, exc)
@@ -3955,14 +4009,20 @@ async def _execute_delegate_step(
             cost_usd=0.0,
             duration_seconds=duration,
             status="failed",
-            error=f"Sub-workflow '{cfg.workflow}' not found or failed to load",
+            error=(
+                f"Delegate sub-workflow '{cfg.workflow}' not found or failed to load "
+                f"(depth={depth + 1})"
+            ),
         )
     except Exception as e:
         duration = time.monotonic() - started_at
         return StepResult(
             step_id=step.id,
             status="failed",
-            error=str(e),
+            error=(
+                f"Delegate step failed (workflow='{cfg.workflow if cfg else 'unknown'}', "
+                f"depth={depth + 1}): {e}"
+            ),
             duration_seconds=duration,
         )
 
