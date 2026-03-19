@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Play, AlertTriangle, BarChart3, Star, GitBranch,
   CheckCircle2, ArrowRight, Activity, DollarSign, CheckCircle,
-  Castle,
+  Castle, Timer,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
@@ -12,6 +12,7 @@ import { CostChart } from "@/components/overview/CostChart";
 import { CostForecast } from "@/components/overview/CostForecast";
 import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
+import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCost, formatRelativeTime } from "@/lib/utils";
 import type { Insight, Severity } from "@/lib/insights";
@@ -39,7 +40,29 @@ interface RunItem {
 
 interface SparklineData {
   values: number[];
+  /** Backend returns trend_percent; we normalise to trendPercent in the fetch. */
   trendPercent: number;
+}
+
+interface ApiSparklineData {
+  values: number[];
+  trend_percent: number;
+}
+
+interface HeatmapApiCell {
+  date: string;
+  count: number;
+  day_of_week: number;
+}
+
+interface AnomalyItem {
+  type: string;
+  severity: "warning" | "critical";
+  workflow: string;
+  message: string;
+  run_id: string;
+  value: number;
+  threshold: number;
 }
 
 interface LayoutSwitcherProps {
@@ -47,66 +70,23 @@ interface LayoutSwitcherProps {
   setLayout: (l: string) => void;
 }
 
-// ---------------------------------------------------------------------------
-// Mock data helpers
-// ---------------------------------------------------------------------------
-
-function seededRandom(seed: number): () => number {
-  let s = seed | 0;
-  return () => {
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function generateMockSparklines(): Record<string, SparklineData> {
-  const today = new Date();
-  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-  const rng = seededRandom(seed);
-  const mkSeries = (base: number, variance: number): number[] =>
-    Array.from({ length: 7 }, () => Math.max(0, base + (rng() - 0.5) * 2 * variance));
-
-  const runsValues = mkSeries(24, 12);
-  const rateValues = mkSeries(0.92, 0.08);
-  const costValues = mkSeries(1.5, 0.8);
-
-  const trendPct = (vals: number[]) => {
-    const yesterday = vals[vals.length - 2];
-    const todayVal = vals[vals.length - 1];
-    if (yesterday === 0) return 0;
-    return ((todayVal - yesterday) / yesterday) * 100;
-  };
-
-  return {
-    runs: { values: runsValues, trendPercent: trendPct(runsValues) },
-    rate: { values: rateValues, trendPercent: trendPct(rateValues) },
-    cost: { values: costValues, trendPercent: trendPct(costValues) },
-  };
-}
-
 interface HeatmapCell {
   date: string;
   count: number;
+  /** 0=Monday ... 6=Sunday (matches backend day_of_week) */
   dayOfWeek: number;
 }
 
-function generateMockHeatmap(): HeatmapCell[] {
-  const today = new Date();
-  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 99;
-  const rng = seededRandom(seed);
-  const cells: HeatmapCell[] = [];
-  for (let i = 181; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dayOfWeek = d.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const maxRuns = isWeekend ? 8 : 30;
-    const count = Math.floor(rng() * maxRuns);
-    cells.push({ date: d.toISOString().slice(0, 10), count, dayOfWeek });
-  }
-  return cells;
+// ---------------------------------------------------------------------------
+// Helpers for normalising API response shapes
+// ---------------------------------------------------------------------------
+
+function normaliseSparkline(raw: ApiSparklineData): SparklineData {
+  return { values: raw.values, trendPercent: raw.trend_percent };
+}
+
+function normaliseHeatmapCell(raw: HeatmapApiCell): HeatmapCell {
+  return { date: raw.date, count: raw.count, dayOfWeek: raw.day_of_week };
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +385,7 @@ function getHeatmapIntensityClass(count: number, maxCount: number): string {
 }
 
 function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
+  const navigate = useNavigate();
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
   const weeks: (HeatmapCell | null)[][] = [];
@@ -486,9 +467,13 @@ function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
                   <div
                     key={row}
                     className={cn(
-                      "h-[14px] rounded-[3px] transition-colors duration-100 cursor-default",
+                      "h-[14px] rounded-[3px] transition-colors duration-100",
+                      cell ? "cursor-pointer" : "cursor-default",
                       cell ? getHeatmapIntensityClass(cell.count, maxCount) : "bg-transparent"
                     )}
+                    onClick={() => {
+                      if (cell) navigate(`/runs?date=${cell.date}`);
+                    }}
                     onMouseEnter={(e) => {
                       if (!cell) return;
                       const rect = e.currentTarget.getBoundingClientRect();
@@ -579,6 +564,50 @@ function BentoRecentRuns({ runs }: { runs: RunItem[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Anomaly badges
+// ---------------------------------------------------------------------------
+
+function BentoAnomalies({ anomalies }: { anomalies: AnomalyItem[] }) {
+  const navigate = useNavigate();
+  if (anomalies.length === 0) return null;
+  return (
+    <div className={cn(
+      "bg-surface rounded-2xl shadow-sm border border-border",
+      "hover:border-accent/30 transition-all duration-300",
+      "p-6 flex flex-col gap-3"
+    )}>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        Anomalies Detected
+      </p>
+      <div className="flex flex-col gap-2">
+        {anomalies.slice(0, 5).map((a, i) => (
+          <button
+            key={`${a.run_id}-${i}`}
+            onClick={() => a.run_id ? navigate(`/runs/${a.run_id}`) : undefined}
+            className={cn(
+              "flex items-start gap-2.5 rounded-xl px-3 py-2 text-left w-full",
+              "border transition-colors duration-150",
+              a.severity === "critical"
+                ? "border-error/30 bg-error/5 hover:bg-error/10"
+                : "border-warning/30 bg-warning/5 hover:bg-warning/10"
+            )}
+          >
+            <AlertTriangle className={cn(
+              "h-4 w-4 shrink-0 mt-0.5",
+              a.severity === "critical" ? "text-error" : "text-warning"
+            )} />
+            <span className="flex-1 text-sm text-foreground">{a.message}</span>
+            {a.run_id && (
+              <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0 mt-1" />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Layout switcher (shared)
 // ---------------------------------------------------------------------------
 
@@ -642,22 +671,59 @@ export default function OverviewBento() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [sparklines, setSparklines] = useState<Record<string, SparklineData> | null>(null);
+  const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
+  const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
   const advisor = useAdvisorContext();
-  const mockSparklines = useMemo(() => generateMockSparklines(), []);
-  const mockHeatmap = useMemo(() => generateMockHeatmap(), []);
+  const { subscribe } = useEventStreamContext();
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchSparklines = useCallback(async () => {
+    const res = await api.get<Record<string, ApiSparklineData>>("/stats/sparklines");
+    if (res.data) {
+      const normalised: Record<string, SparklineData> = {};
+      for (const [key, val] of Object.entries(res.data)) {
+        normalised[key] = normaliseSparkline(val);
+      }
+      setSparklines(normalised);
+    }
+  }, []);
+
+  const fetchStats = useCallback(async () => {
+    const [statsRes, runsRes] = await Promise.all([
+      api.get<Stats>("/stats"),
+      api.get<RunItem[]>("/runs", { limit: "5" }),
+    ]);
+    if (statsRes.data) setStats(statsRes.data);
+    if (runsRes.data) setRecentRuns(runsRes.data);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     const fetchData = async () => {
       try {
         setError(null);
-        const [statsRes, runsRes] = await Promise.all([
+        const [statsRes, runsRes, sparklinesRes, heatmapRes, anomaliesRes] = await Promise.all([
           api.get<Stats>("/stats"),
           api.get<RunItem[]>("/runs", { limit: "5" }),
+          api.get<Record<string, ApiSparklineData>>("/stats/sparklines"),
+          api.get<HeatmapApiCell[]>("/stats/heatmap"),
+          api.get<AnomalyItem[]>("/stats/anomalies"),
         ]);
         if (cancelled) return;
         if (statsRes.data) setStats(statsRes.data);
         if (runsRes.data) setRecentRuns(runsRes.data);
+        if (sparklinesRes.data) {
+          const normalised: Record<string, SparklineData> = {};
+          for (const [key, val] of Object.entries(sparklinesRes.data)) {
+            normalised[key] = normaliseSparkline(val);
+          }
+          setSparklines(normalised);
+        }
+        if (heatmapRes.data) {
+          setHeatmapCells(heatmapRes.data.map(normaliseHeatmapCell));
+        }
+        if (anomaliesRes.data) setAnomalies(anomaliesRes.data);
       } catch {
         if (cancelled) return;
         setError("Could not connect to the API server");
@@ -668,6 +734,23 @@ export default function OverviewBento() {
     void fetchData();
     return () => { cancelled = true; };
   }, [retryCount]);
+
+  // Refresh sparklines + stats when run.completed or run.failed SSE events arrive
+  useEffect(() => {
+    const unsub = subscribe("*", (event) => {
+      if (["run.completed", "run.failed"].includes(event.type)) {
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(() => {
+          void fetchSparklines();
+          void fetchStats();
+        }, 1000);
+      }
+    });
+    return () => {
+      unsub();
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, [subscribe, fetchSparklines, fetchStats]);
 
   if (loading) {
     return (
@@ -741,16 +824,16 @@ export default function OverviewBento() {
         </div>
       </div>
 
-      {/* Row 2: 3 stat cards */}
+      {/* Row 2: 4 stat cards */}
       {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           <BentoStatCard
             label="Runs Today"
             value={String(totalRuns)}
             icon={Activity}
             iconColor="text-accent"
             iconBg="bg-accent/10"
-            spark={mockSparklines.runs}
+            spark={sparklines?.runs}
             positiveIsGood={true}
           />
           <BentoStatCard
@@ -759,7 +842,7 @@ export default function OverviewBento() {
             icon={CheckCircle}
             iconColor="text-success"
             iconBg="bg-success/10"
-            spark={mockSparklines.rate}
+            spark={sparklines?.rate}
             positiveIsGood={true}
           />
           <BentoStatCard
@@ -768,14 +851,26 @@ export default function OverviewBento() {
             icon={DollarSign}
             iconColor="text-running"
             iconBg="bg-running/10"
-            spark={mockSparklines.cost}
+            spark={sparklines?.cost}
+            positiveIsGood={false}
+          />
+          <BentoStatCard
+            label="Avg Duration"
+            value={avgDuration > 0 ? `${Math.round(avgDuration)}s` : "n/a"}
+            icon={Timer}
+            iconColor="text-muted-foreground"
+            iconBg="bg-border"
+            spark={sparklines?.duration}
             positiveIsGood={false}
           />
         </div>
       )}
 
       {/* Row 3: Activity Heatmap (full width) */}
-      <BentoActivityHeatmap cells={mockHeatmap} />
+      <BentoActivityHeatmap cells={heatmapCells} />
+
+      {/* Row 3.5: Anomalies (shown only when present) */}
+      {anomalies.length > 0 && <BentoAnomalies anomalies={anomalies} />}
 
       {/* Row 4: Cost Forecast (2/3) + Recent Runs (1/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">

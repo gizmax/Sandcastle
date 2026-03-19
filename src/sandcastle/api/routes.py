@@ -1524,6 +1524,269 @@ async def get_cost_forecast(request: Request) -> ApiResponse:
     )
 
 
+@router.get("/stats/sparklines")
+async def get_sparklines(request: Request) -> ApiResponse:
+    """Return 7-day sparkline data for runs, success rate, cost, and duration."""
+    tenant_id = get_tenant_id(request)
+    now = datetime.now(timezone.utc)
+    seven_days_ago = now - timedelta(days=7)
+
+    async with async_session() as session:
+        daily_q = (
+            select(
+                _trunc_day(Run.created_at).label("day"),
+                func.count(Run.id).label("total"),
+                func.count(case(
+                    (Run.status == RunStatus.COMPLETED, Run.id),
+                    else_=None,
+                )).label("completed"),
+                func.count(case(
+                    (Run.status.in_([
+                        RunStatus.COMPLETED,
+                        RunStatus.FAILED,
+                        RunStatus.PARTIAL,
+                    ]), Run.id),
+                    else_=None,
+                )).label("finished"),
+                func.coalesce(func.sum(Run.total_cost_usd), 0.0).label("cost"),
+            )
+            .where(Run.created_at >= seven_days_ago)
+            .group_by("day")
+            .order_by("day")
+        )
+        daily_q = _apply_tenant_filter(daily_q, tenant_id, Run.tenant_id)
+        rows = (await session.execute(daily_q)).all()
+
+        # Duration query - separate to avoid NULL issues
+        dur_q = (
+            select(
+                _trunc_day(Run.created_at).label("day"),
+                _duration_seconds_expr().label("avg_dur"),
+            )
+            .where(
+                Run.created_at >= seven_days_ago,
+                Run.completed_at.isnot(None),
+                Run.started_at.isnot(None),
+            )
+            .group_by("day")
+            .order_by("day")
+        )
+        dur_q = _apply_tenant_filter(dur_q, tenant_id, Run.tenant_id)
+        dur_rows = (await session.execute(dur_q)).all()
+
+    # Build day-keyed maps
+    db_stats: dict[str, dict] = {}
+    for row in rows:
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day)
+        db_stats[day_str] = {
+            "total": int(row.total),
+            "completed": int(row.completed),
+            "finished": int(row.finished),
+            "cost": float(row.cost),
+        }
+
+    db_dur: dict[str, float] = {}
+    for row in dur_rows:
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day)
+        db_dur[day_str] = float(row.avg_dur or 0.0)
+
+    # Build zero-filled 7-day arrays
+    days: list[str] = []
+    for i in range(6, -1, -1):
+        days.append((now - timedelta(days=i)).strftime("%Y-%m-%d"))
+
+    runs_vals: list[float] = []
+    rate_vals: list[float] = []
+    cost_vals: list[float] = []
+    dur_vals: list[float] = []
+
+    for day in days:
+        s = db_stats.get(day, {"total": 0, "completed": 0, "finished": 0, "cost": 0.0})
+        runs_vals.append(float(s["total"]))
+        rate_vals.append(
+            (s["completed"] / s["finished"]) if s["finished"] else 0.0
+        )
+        cost_vals.append(round(s["cost"], 4))
+        dur_vals.append(round(db_dur.get(day, 0.0), 1))
+
+    def _trend(vals: list[float]) -> float:
+        if len(vals) < 2:
+            return 0.0
+        yesterday = vals[-2]
+        today_val = vals[-1]
+        if yesterday == 0:
+            return 0.0
+        return round(((today_val - yesterday) / yesterday) * 100, 1)
+
+    return ApiResponse(
+        data={
+            "runs": {"values": runs_vals, "trend_percent": _trend(runs_vals)},
+            "rate": {"values": rate_vals, "trend_percent": _trend(rate_vals)},
+            "cost": {"values": cost_vals, "trend_percent": _trend(cost_vals)},
+            "duration": {"values": dur_vals, "trend_percent": _trend(dur_vals)},
+        }
+    )
+
+
+@router.get("/stats/heatmap")
+async def get_heatmap(request: Request) -> ApiResponse:
+    """Return daily run counts for the last 26 weeks (182 days)."""
+    tenant_id = get_tenant_id(request)
+    now = datetime.now(timezone.utc)
+    start_date = now - timedelta(days=181)
+
+    async with async_session() as session:
+        daily_q = (
+            select(
+                _trunc_day(Run.created_at).label("day"),
+                func.count(Run.id).label("count"),
+            )
+            .where(Run.created_at >= start_date)
+            .group_by("day")
+            .order_by("day")
+        )
+        daily_q = _apply_tenant_filter(daily_q, tenant_id, Run.tenant_id)
+        rows = (await session.execute(daily_q)).all()
+
+    db_counts: dict[str, int] = {}
+    for row in rows:
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day)
+        db_counts[day_str] = int(row.count)
+
+    # Zero-fill all 182 days
+    cells = []
+    for i in range(181, -1, -1):
+        d = now - timedelta(days=i)
+        day_str = d.strftime("%Y-%m-%d")
+        cells.append({
+            "date": day_str,
+            "count": db_counts.get(day_str, 0),
+            "day_of_week": d.weekday(),  # 0=Monday ... 6=Sunday
+        })
+
+    return ApiResponse(data=cells)
+
+
+@router.get("/stats/anomalies")
+async def get_anomalies(request: Request) -> ApiResponse:
+    """Detect anomalies in recent workflow runs (cost spikes, duration spikes, error streaks)."""
+    import math
+
+    tenant_id = get_tenant_id(request)
+
+    async with async_session() as session:
+        q = (
+            select(Run)
+            .order_by(Run.created_at.desc())
+            .limit(100)
+        )
+        q = _apply_tenant_filter(q, tenant_id, Run.tenant_id)
+        runs = (await session.execute(q)).scalars().all()
+
+    anomalies: list[dict] = []
+
+    # Group by workflow for per-workflow stats
+    workflow_runs: dict[str, list[Run]] = {}
+    for run in runs:
+        workflow_runs.setdefault(run.workflow_name, []).append(run)
+
+    for wf_name, wf_runs in workflow_runs.items():
+        costs = [r.total_cost_usd for r in wf_runs if r.total_cost_usd > 0]
+        durations: list[float] = []
+        for r in wf_runs:
+            if r.started_at and r.completed_at:
+                dur = (r.completed_at - r.started_at).total_seconds()
+                if dur > 0:
+                    durations.append(dur)
+
+        # Cost anomaly: z-score > 2.5 => spike
+        if len(costs) >= 3:
+            avg_cost = sum(costs) / len(costs)
+            variance = sum((c - avg_cost) ** 2 for c in costs) / len(costs)
+            std_cost = math.sqrt(variance) if variance > 0 else 0.0
+            for run in wf_runs:
+                if run.total_cost_usd <= 0 or std_cost == 0:
+                    continue
+                z = (run.total_cost_usd - avg_cost) / std_cost
+                if z >= 2.5:
+                    severity = "critical" if z >= 3.5 else "warning"
+                    anomalies.append({
+                        "type": "cost_spike",
+                        "severity": severity,
+                        "workflow": wf_name,
+                        "message": (
+                            f"Cost spike in '{wf_name}': "
+                            f"${run.total_cost_usd:.4f} vs avg ${avg_cost:.4f} "
+                            f"(z={z:.1f})"
+                        ),
+                        "run_id": str(run.id),
+                        "value": round(run.total_cost_usd, 4),
+                        "threshold": round(avg_cost + 2.5 * std_cost, 4),
+                    })
+
+        # Duration anomaly: z-score > 2.5
+        if len(durations) >= 3:
+            avg_dur = sum(durations) / len(durations)
+            variance = sum((d - avg_dur) ** 2 for d in durations) / len(durations)
+            std_dur = math.sqrt(variance) if variance > 0 else 0.0
+            for run in wf_runs:
+                if not run.started_at or not run.completed_at or std_dur == 0:
+                    continue
+                dur = (run.completed_at - run.started_at).total_seconds()
+                if dur <= 0:
+                    continue
+                z = (dur - avg_dur) / std_dur
+                if z >= 2.5:
+                    severity = "critical" if z >= 3.5 else "warning"
+                    anomalies.append({
+                        "type": "slow_run",
+                        "severity": severity,
+                        "workflow": wf_name,
+                        "message": (
+                            f"Slow run in '{wf_name}': "
+                            f"{dur:.0f}s vs avg {avg_dur:.0f}s "
+                            f"(z={z:.1f})"
+                        ),
+                        "run_id": str(run.id),
+                        "value": round(dur, 1),
+                        "threshold": round(avg_dur + 2.5 * std_dur, 1),
+                    })
+
+        # Error streak: >= 3 consecutive failed runs (most recent first)
+        sorted_runs = sorted(
+            wf_runs,
+            key=lambda r: r.created_at,
+            reverse=True,
+        )
+        streak = 0
+        streak_run_id: str | None = None
+        for run in sorted_runs:
+            if run.status in (RunStatus.FAILED,):
+                streak += 1
+                if streak_run_id is None:
+                    streak_run_id = str(run.id)
+            else:
+                break
+        if streak >= 3:
+            severity = "critical" if streak >= 5 else "warning"
+            anomalies.append({
+                "type": "error_streak",
+                "severity": severity,
+                "workflow": wf_name,
+                "message": (
+                    f"Error streak in '{wf_name}': "
+                    f"{streak} consecutive failures"
+                ),
+                "run_id": streak_run_id or "",
+                "value": streak,
+                "threshold": 3,
+            })
+
+    # Sort: critical first, then warning; limit to 20
+    anomalies.sort(key=lambda a: (0 if a["severity"] == "critical" else 1))
+    return ApiResponse(data=anomalies[:20])
+
+
 @router.post("/runs/estimate")
 async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     """Estimate cost of a workflow run before execution."""
