@@ -700,34 +700,49 @@ async def browse_directory(
     )
 
 
-# --- Upload (file system) ---
+# --- Upload (file system / S3) ---
 
 _UPLOAD_ALLOWED_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg",
     ".pdf", ".txt", ".csv", ".json", ".yaml", ".yml",
+    ".xlsx", ".docx", ".pptx",
 }
-_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+# 50 MB for S3/production, 10 MB for local
+_UPLOAD_MAX_BYTES_S3 = 50 * 1024 * 1024
+_UPLOAD_MAX_BYTES_LOCAL = 10 * 1024 * 1024
+
+# Map common extensions to MIME types for S3 uploads
+_EXTENSION_CONTENT_TYPES: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 
 
 @router.post("/upload")
 async def upload_file(file: UploadFile) -> ApiResponse:
-    """Upload a file to the server and return its absolute disk path.
+    """Upload a file and return a file_id for use as workflow input.
 
-    Only available in local mode. The file is saved under
-    ``{data_dir}/uploads/{uuid8}_{filename}`` so that workflow steps
-    (e.g. nano-banana) can read it directly from disk.
+    In local mode the file is saved under ``{data_dir}/uploads/{uuid8}_{filename}``.
+    In S3 mode the file is uploaded to ``uploads/{uuid8}_{filename}`` in the
+    configured bucket. The returned ``file_id`` can be used as a workflow input
+    value (prefixed with ``@upload:``) and will be resolved to file content at
+    execution time.
     """
-    if not settings.is_local_mode:
-        raise HTTPException(
-            status_code=403,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="FORBIDDEN",
-                    message="File upload is only available in local mode",
-                )
-            ).model_dump(),
-        )
-
     if not file.filename:
         raise HTTPException(
             status_code=400,
@@ -759,24 +774,85 @@ async def upload_file(file: UploadFile) -> ApiResponse:
             ).model_dump(),
         )
 
+    is_s3 = settings.storage_backend == "s3"
+    max_bytes = _UPLOAD_MAX_BYTES_S3 if is_s3 else _UPLOAD_MAX_BYTES_LOCAL
+
     # Read file into memory and enforce size limit
     contents = await file.read()
-    if len(contents) > _UPLOAD_MAX_BYTES:
+    if len(contents) > max_bytes:
         raise HTTPException(
             status_code=400,
             detail=ApiResponse(
                 error=ErrorResponse(
                     code="BAD_REQUEST",
-                    message=f"File too large ({len(contents)} bytes). Maximum is {_UPLOAD_MAX_BYTES} bytes.",
+                    message=f"File too large ({len(contents)} bytes). Maximum is {max_bytes} bytes.",
                 )
             ).model_dump(),
         )
 
-    # Save to {data_dir}/uploads/{uuid8}_{filename}
+    file_id = uuid.uuid4().hex[:8]
+    dest_name = f"{file_id}_{safe_name}"
+    content_type = _EXTENSION_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+    if is_s3:
+        # Upload to S3 as raw bytes via a dedicated binary write
+        try:
+            from sandcastle.engine.storage import S3Storage
+
+            s3_storage = S3Storage(
+                bucket=settings.storage_bucket,
+                endpoint_url=settings.storage_endpoint or None,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+            )
+            # S3Storage.write() expects a string; for binary files we use
+            # a raw aioboto3 call so we can pass bytes and set ContentType.
+            import aioboto3
+
+            session = aioboto3.Session(
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+            )
+            s3_key = f"uploads/{dest_name}"
+            async with session.client(
+                "s3", endpoint_url=settings.storage_endpoint or None
+            ) as s3:
+                await s3.put_object(
+                    Bucket=settings.storage_bucket,
+                    Key=s3_key,
+                    Body=contents,
+                    ContentType=content_type,
+                )
+            url = f"s3://{settings.storage_bucket}/{s3_key}"
+        except Exception as exc:
+            logger.error("S3 upload failed for '%s': %s", dest_name, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="UPLOAD_FAILED",
+                        message="Failed to upload file to S3",
+                    )
+                ).model_dump(),
+            )
+
+        return ApiResponse(
+            data={
+                "file_id": file_id,
+                "filename": safe_name,
+                "content_type": content_type,
+                "size_bytes": len(contents),
+                "storage": "s3",
+                "url": url,
+                # Legacy field kept for backward compatibility
+                "path": s3_key,
+            }
+        )
+
+    # --- Local storage ---
     uploads_dir = Path(settings.data_dir).expanduser().resolve() / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
-    dest_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
     dest_path = (uploads_dir / dest_name).resolve()
 
     # Defense-in-depth: ensure final path is within uploads dir
@@ -792,9 +868,14 @@ async def upload_file(file: UploadFile) -> ApiResponse:
 
     return ApiResponse(
         data={
-            "path": str(dest_path),
+            "file_id": file_id,
             "filename": safe_name,
-            "size": len(contents),
+            "content_type": content_type,
+            "size_bytes": len(contents),
+            "storage": "local",
+            "url": None,
+            # Legacy field kept for backward compatibility
+            "path": str(dest_path),
         }
     )
 
