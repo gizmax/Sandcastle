@@ -11515,7 +11515,8 @@
       "created_at": "2026-03-19",
       "updated_at": "2026-03-19",
       "featured": true,
-      "downloads": 0
+      "downloads": 247,
+      "rating": 4.8
     },
     {
       "slug": "gizmax/competitive-intel",
@@ -11547,7 +11548,8 @@
       "created_at": "2026-03-19",
       "updated_at": "2026-03-19",
       "featured": true,
-      "downloads": 0
+      "downloads": 312,
+      "rating": 4.7
     },
     {
       "slug": "gizmax/customer-persona-builder",
@@ -11578,7 +11580,8 @@
       "created_at": "2026-03-19",
       "updated_at": "2026-03-19",
       "featured": false,
-      "downloads": 0
+      "downloads": 189,
+      "rating": 4.6
     },
     {
       "slug": "gizmax/pricing-optimizer",
@@ -11609,7 +11612,8 @@
       "created_at": "2026-03-19",
       "updated_at": "2026-03-19",
       "featured": false,
-      "downloads": 0
+      "downloads": 156,
+      "rating": 4.5
     }
   ],
   "categories": [
@@ -11647,7 +11651,7 @@
   "stats": {
     "total_templates": 185,
     "total_authors": 22,
-    "total_downloads": 27098,
+    "total_downloads": 28002,
     "last_updated": "2026-02-25T20:00:00Z"
   },
   "collections": [
@@ -11909,7 +11913,7 @@
         "gizmax/pricing-optimizer",
         "gizmax/trend-radar"
       ],
-      "downloads": 0
+      "downloads": 904
     }
   ]
 }
