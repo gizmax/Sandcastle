@@ -129,7 +129,7 @@ export default function CompliancePage() {
 
   const handleEmergencyStop = useCallback(async () => {
     setEmergencyStopping(true);
-    const res = await api.post("/compliance/emergency-stop", {
+    const res = await api.post("/admin/emergency-stop", {
       action: "stop",
       reason: "Manual emergency stop triggered from dashboard",
     });
