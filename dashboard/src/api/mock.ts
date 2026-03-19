@@ -6599,9 +6599,9 @@ const routes: MockRoute[] = [
       return { ...MOCK_TRANSPARENCY_REPORT, run_id: params._1, workflow_name: run.workflow_name, risk_level: run.risk_level };
     },
   },
-  // POST /compliance/emergency-stop
+  // POST /admin/emergency-stop
   {
-    match: /^\/compliance\/emergency-stop$/,
+    match: /^\/admin\/emergency-stop$/,
     method: "POST",
     handler: (_params, body) => {
       const b = body as { action?: string; reason?: string } | undefined;
