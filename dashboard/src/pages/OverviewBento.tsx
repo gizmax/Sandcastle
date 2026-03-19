@@ -60,7 +60,8 @@ interface AnomalyItem {
   severity: "warning" | "critical";
   workflow: string;
   message: string;
-  run_id: string;
+  /** May be empty string or null when anomaly is not linked to a specific run. */
+  run_id: string | null;
   value: number;
   threshold: number;
 }
@@ -373,7 +374,7 @@ function BentoQuickActions() {
 // Activity Heatmap
 // ---------------------------------------------------------------------------
 
-const DAY_LABELS = ["", "M", "", "W", "", "F", ""];
+const DAY_LABELS = ["M", "", "W", "", "F", "", ""];
 
 function getHeatmapIntensityClass(count: number, maxCount: number): string {
   if (count === 0) return "bg-border";
@@ -392,7 +393,8 @@ function BentoActivityHeatmap({ cells }: { cells: HeatmapCell[] }) {
   let currentWeek: (HeatmapCell | null)[] = Array(7).fill(null);
 
   for (const cell of cells) {
-    const row = (cell.dayOfWeek + 6) % 7;
+    // dayOfWeek is already 0=Mon...6=Sun (matches backend weekday())
+    const row = cell.dayOfWeek;
     if (row === 0 && currentWeek.some((c) => c !== null)) {
       weeks.push(currentWeek);
       currentWeek = Array(7).fill(null);
@@ -582,7 +584,7 @@ function BentoAnomalies({ anomalies }: { anomalies: AnomalyItem[] }) {
       <div className="flex flex-col gap-2">
         {anomalies.slice(0, 5).map((a, i) => (
           <button
-            key={`${a.run_id}-${i}`}
+            key={`${a.type}-${a.workflow}-${i}`}
             onClick={() => a.run_id ? navigate(`/runs/${a.run_id}`) : undefined}
             className={cn(
               "flex items-start gap-2.5 rounded-xl px-3 py-2 text-left w-full",
