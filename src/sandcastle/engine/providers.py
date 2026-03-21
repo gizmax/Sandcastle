@@ -55,6 +55,19 @@ PROVIDER_REGISTRY: dict[str, ModelInfo] = {
         "openai", "codex", "runner-openai.mjs",
         "OPENAI_API_KEY", "https://api.openai.com/v1", 1.25, 10.0,
     ),
+    # Mistral (EU - French AI lab)
+    "mistral/large": ModelInfo(
+        "mistral", "mistral-large-latest", "runner-openai.mjs",
+        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 2.0, 6.0,
+    ),
+    "mistral/small": ModelInfo(
+        "mistral", "mistral-small-latest", "runner-openai.mjs",
+        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 0.10, 0.30,
+    ),
+    "mistral/codestral": ModelInfo(
+        "mistral", "codestral-latest", "runner-openai.mjs",
+        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 0.30, 0.90,
+    ),
     # Google Gemini via OpenRouter
     "google/gemini-2.5-pro": ModelInfo(
         "google", "google/gemini-2.5-pro", "runner-openai.mjs",
