@@ -17,6 +17,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Star,
   X,
 } from "lucide-react";
@@ -68,6 +69,7 @@ const navSections: NavSection[] = [
       { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" },
       { to: "/evaluations", icon: ClipboardCheck, label: "Evaluations" },
       { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
+      { to: "/evolution", icon: Sparkles, label: "Evolution" },
       { to: "/violations", icon: ShieldAlert, label: "Violations" },
       { to: "/compliance", icon: Shield, label: "Compliance" },
       { to: "/optimizer", icon: Gauge, label: "Optimizer" },
