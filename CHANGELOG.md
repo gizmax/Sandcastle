@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-03-21 — "UI Finetuning"
+
+### Changed
+- **Bell simplified** - removed Health tab, micro ScoreRing, advisor props. Bell = notifications only. Health info lives in overview.
+- **AI Assistant** - merged "AI Generate" and "Edit with AI" into single "AI Assistant" button. Empty builder = generate, existing workflow = edit. Context decides.
+- **Health hero** - score ring is now clickable (links to /system-health). Shows "All systems healthy" pill when score >= 80.
+
+### Fixed
+- EvolutionPage Recharts formatter type compatibility for CI builds
+
 ## [0.25.0] - 2026-03-20 — "Evolution"
 
 ### Added
