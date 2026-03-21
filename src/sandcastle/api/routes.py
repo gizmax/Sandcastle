@@ -104,6 +104,11 @@ from sandcastle.api.schemas import (
     HubSubmitRequest,
     HubSubmissionResponse,
     HubRateRequest,
+    EvolutionStartRequest,
+    EvolutionIterationResponse,
+    EvolutionStatusResponse,
+    EvolutionAcceptRequest,
+    EvolutionStatsResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -120,6 +125,7 @@ from sandcastle.models.db import (
     DeadLetterItem,
     EvalRun,
     EvalRunStatus,
+    EvolutionIteration,
     ExperimentStatus,
     HubSubmission,
     PolicyViolation,
@@ -130,6 +136,7 @@ from sandcastle.models.db import (
     Schedule,
     Setting,
     ToolConnection,
+    WorkflowEvolution,
     WorkflowVersion,
     WorkflowVersionStatus,
     async_session,
@@ -8775,5 +8782,303 @@ async def get_compliance_status() -> ApiResponse:
             mode=mode if mode else "disabled",
             active=active,
             features=features,
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Workflow Evolution endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/evolution/start")
+async def start_evolution(req: Request) -> ApiResponse:
+    """Start a workflow evolution experiment.
+
+    Runs iterative mutation + eval loop to improve the workflow.
+    Body: {workflow_name, eval_suite_yaml, max_iterations, optimize_for, budget_limit_usd}
+    """
+    body = await req.json()
+    try:
+        parsed = EvolutionStartRequest(**body)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    tenant_id = await get_tenant_id(req)
+
+    from sandcastle.engine.evolution import run_evolution
+
+    result = await run_evolution(
+        workflow_name=parsed.workflow_name,
+        eval_suite_yaml=parsed.eval_suite_yaml,
+        max_iterations=parsed.max_iterations,
+        optimize_for=parsed.optimize_for,
+        budget_limit=parsed.budget_limit_usd,
+        tenant_id=tenant_id,
+    )
+
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=400, detail=result.get("error", "Evolution failed"))
+
+    return ApiResponse(data=result)
+
+
+@router.get("/evolution/{workflow_name}/status")
+async def get_evolution_status(workflow_name: str) -> ApiResponse:
+    """Get current evolution status and iteration history for a workflow."""
+    async with async_session() as session:
+        stmt = (
+            select(WorkflowEvolution)
+            .where(WorkflowEvolution.workflow_name == workflow_name)
+            .order_by(WorkflowEvolution.created_at.desc())
+        )
+        result = await session.execute(stmt)
+        ev = result.scalar_one_or_none()
+
+        if ev is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No evolution found for workflow '{workflow_name}'",
+            )
+
+        iter_stmt = (
+            select(EvolutionIteration)
+            .where(EvolutionIteration.evolution_id == ev.id)
+            .order_by(EvolutionIteration.iteration_number)
+        )
+        iter_result = await session.execute(iter_stmt)
+        iterations = iter_result.scalars().all()
+
+        iter_responses = [
+            EvolutionIterationResponse(
+                id=str(it.id),
+                iteration_number=it.iteration_number,
+                mutation_type=it.mutation_type,
+                mutation_description=it.mutation_description,
+                mutation_diff=it.mutation_diff,
+                score=it.score,
+                quality=it.quality,
+                cost_usd=it.cost_usd,
+                duration_seconds=it.duration_seconds,
+                eval_pass_rate=it.eval_pass_rate,
+                status=it.status,
+                created_at=it.created_at,
+            )
+            for it in iterations
+        ]
+
+        return ApiResponse(
+            data=EvolutionStatusResponse(
+                evolution_id=str(ev.id),
+                workflow_name=ev.workflow_name,
+                status=ev.status,
+                optimize_for=ev.optimize_for,
+                baseline_score=ev.baseline_score,
+                baseline_quality=ev.baseline_quality,
+                baseline_cost=ev.baseline_cost,
+                best_score=ev.best_score,
+                best_quality=ev.best_quality,
+                best_cost=ev.best_cost,
+                max_iterations=ev.max_iterations,
+                current_iteration=ev.current_iteration,
+                total_keeps=ev.total_keeps,
+                total_discards=ev.total_discards,
+                budget_limit_usd=ev.budget_limit_usd,
+                created_at=ev.created_at,
+                completed_at=ev.completed_at,
+                iterations=iter_responses,
+            )
+        )
+
+
+@router.post("/evolution/{workflow_name}/accept")
+async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
+    """Accept the best evolution variant and promote it to production."""
+    body = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+
+    notes = body.get("notes", "")
+
+    async with async_session() as session:
+        stmt = (
+            select(WorkflowEvolution)
+            .where(WorkflowEvolution.workflow_name == workflow_name)
+            .order_by(WorkflowEvolution.created_at.desc())
+        )
+        result = await session.execute(stmt)
+        ev = result.scalar_one_or_none()
+
+        if ev is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No evolution found for workflow '{workflow_name}'",
+            )
+
+        if not ev.best_variant_yaml:
+            raise HTTPException(
+                status_code=400,
+                detail="No best variant available to accept",
+            )
+
+        if ev.status not in ("completed", "running"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Evolution is in '{ev.status}' state - cannot accept",
+            )
+
+        best_yaml = ev.best_variant_yaml
+        best_score = ev.best_score
+        best_quality = ev.best_quality
+
+    try:
+        from sandcastle.engine.dag import parse_yaml_string
+        import hashlib
+
+        parsed_wf = parse_yaml_string(best_yaml)
+        checksum = hashlib.sha256(best_yaml.encode()).hexdigest()
+
+        async with async_session() as session:
+            from sqlalchemy import func as sqlfunc
+
+            max_ver_stmt = select(sqlfunc.max(WorkflowVersion.version)).where(
+                WorkflowVersion.workflow_name == workflow_name
+            )
+            max_ver = await session.scalar(max_ver_stmt)
+            next_version = (max_ver or 0) + 1
+
+            wv = WorkflowVersion(
+                workflow_name=workflow_name,
+                version=next_version,
+                status=WorkflowVersionStatus.PRODUCTION,
+                yaml_content=best_yaml,
+                description=f"Promoted by evolution engine. Score={best_score:.2f}. {notes}".strip(),
+                steps_count=len(parsed_wf.steps),
+                checksum=checksum,
+                created_by="evolution-engine",
+                promoted_by="evolution-engine",
+                promoted_at=datetime.now(timezone.utc),
+            )
+            session.add(wv)
+            await session.commit()
+
+        return ApiResponse(
+            data={
+                "workflow_name": workflow_name,
+                "accepted": True,
+                "version": next_version,
+                "best_score": best_score,
+                "best_quality": best_quality,
+                "message": f"Best evolution variant promoted to version {next_version}",
+            }
+        )
+    except Exception as exc:
+        logger.error("Failed to accept evolution for '%s': %s", workflow_name, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to promote variant: {exc}")
+
+
+@router.post("/evolution/{workflow_name}/cancel")
+async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
+    """Cancel a running evolution experiment."""
+    async with async_session() as session:
+        stmt = (
+            select(WorkflowEvolution)
+            .where(
+                WorkflowEvolution.workflow_name == workflow_name,
+                WorkflowEvolution.status == "running",
+            )
+            .order_by(WorkflowEvolution.created_at.desc())
+        )
+        result = await session.execute(stmt)
+        ev = result.scalar_one_or_none()
+
+        if ev is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No running evolution found for workflow '{workflow_name}'",
+            )
+
+        ev.status = "cancelled"
+        ev.completed_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    return ApiResponse(
+        data={
+            "workflow_name": workflow_name,
+            "cancelled": True,
+            "message": "Evolution cancelled",
+        }
+    )
+
+
+@router.get("/evolution/stats")
+async def get_evolution_stats(req: Request) -> ApiResponse:
+    """Get aggregated evolution statistics across all workflows."""
+    async with async_session() as session:
+        count_stmt = (
+            select(WorkflowEvolution.status, func.count(WorkflowEvolution.id).label("cnt"))
+            .group_by(WorkflowEvolution.status)
+        )
+        count_result = await session.execute(count_stmt)
+        counts_by_status = {row.status: row.cnt for row in count_result.all()}
+
+        total = sum(counts_by_status.values())
+        active = counts_by_status.get("running", 0)
+        completed = counts_by_status.get("completed", 0)
+
+        improv_stmt = select(
+            func.count(WorkflowEvolution.id)
+        ).where(
+            WorkflowEvolution.best_score > WorkflowEvolution.baseline_score,
+            WorkflowEvolution.status == "completed",
+        )
+        improvements = (await session.scalar(improv_stmt)) or 0
+
+        avg_stmt = select(
+            func.avg(WorkflowEvolution.best_score - WorkflowEvolution.baseline_score)
+        ).where(
+            WorkflowEvolution.status == "completed",
+            WorkflowEvolution.baseline_score.is_not(None),
+            WorkflowEvolution.best_score.is_not(None),
+        )
+        avg_improvement = await session.scalar(avg_stmt)
+
+        top_stmt = (
+            select(
+                WorkflowEvolution.workflow_name,
+                func.max(
+                    WorkflowEvolution.best_score - WorkflowEvolution.baseline_score
+                ).label("max_improvement"),
+                func.count(WorkflowEvolution.id).label("runs"),
+            )
+            .where(WorkflowEvolution.status == "completed")
+            .group_by(WorkflowEvolution.workflow_name)
+            .order_by(
+                func.max(
+                    WorkflowEvolution.best_score - WorkflowEvolution.baseline_score
+                ).desc()
+            )
+            .limit(10)
+        )
+        top_result = await session.execute(top_stmt)
+        top_workflows = [
+            {
+                "workflow_name": row.workflow_name,
+                "max_improvement": float(row.max_improvement or 0),
+                "runs": row.runs,
+            }
+            for row in top_result.all()
+        ]
+
+    return ApiResponse(
+        data=EvolutionStatsResponse(
+            total_evolutions=total,
+            active_evolutions=active,
+            completed_evolutions=completed,
+            total_improvements=improvements,
+            avg_improvement=float(avg_improvement) if avg_improvement is not None else None,
+            top_workflows=top_workflows,
         )
     )

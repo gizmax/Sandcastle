@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-03-20 — "Evolution"
+
+### Added
+- **Workflow Evolution** - autonomous workflow optimization using autoresearch principles. Set an eval suite, click "Evolve", and Sandcastle autonomously mutates prompts, swaps models, and simplifies steps - keeping only changes that improve your composite score.
+- **Composite Scoring** - `quality * confidence - cost_penalty - latency_penalty`. Four optimization modes: quality, cost, latency, balanced. Confidence scales with eval run count.
+- **3 Mutation Operators** - prompt refinement (LLM-guided analysis of eval failures), model swapping (haiku/sonnet/opus ladder based on cost/quality), simplification (reduce max_turns, remove tools, prune leaf steps).
+- **Evolution Orchestrator** - async loop: load baseline, eval, mutate, eval, keep/discard. Tracks iterations, persists to DB, returns best variant.
+- **Evolution API** - `POST /evolution/start`, `GET /evolution/{name}/status`, `POST /evolution/{name}/accept`, `POST /evolution/{name}/cancel`, `GET /evolution/stats`.
+- **Evolution Dashboard** - experiment tracking with score evolution chart, iteration table (mutation type, description, score, keep/discard), baseline vs best comparison, Start Evolution modal with workflow selector and eval suite editor.
+- **"Evolve" button** on Workflow Detail page for one-click evolution start.
+- **DB models** - WorkflowEvolution (experiment tracking) and EvolutionIteration (per-mutation results with lineage).
+- 61 new tests for evolution engine.
+
 ## [0.24.1] - 2026-03-20 — "The Mother of All Tests"
 
 ### Fixed
