@@ -6966,6 +6966,21 @@ const routes: MockRoute[] = [
       return { provider: b?.provider || "anthropic", model: b?.model || null, data_residency: b?.data_residency || null, status: "configured" };
     },
   },
+  // POST /advisor/test-connection
+  {
+    match: /^\/advisor\/test-connection$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { provider?: string } | undefined;
+      const provider = b?.provider ?? "anthropic";
+      // In mock mode, simulate configured providers as "ok" and unconfigured as "error"
+      const configured = ["anthropic", "mistral"].includes(provider);
+      if (configured) {
+        return { status: "ok", provider, latency_ms: Math.floor(Math.random() * 300 + 80) };
+      }
+      return { status: "error", provider, message: `Provider '${provider}' is not configured` };
+    },
+  },
   // GET /advisor/cost-estimate
   {
     match: /^\/advisor\/cost-estimate$/,

@@ -2547,6 +2547,30 @@ async def advisor_status() -> ApiResponse:
 @router.post("/advisor/configure")
 async def advisor_configure(request: AdvisorConfigureRequest) -> ApiResponse:
     """Configure which provider powers the advisor (informational - returns ack)."""
+    # Item 6: When EU mode is enabled, verify at least one EU/local provider is configured
+    if request.data_residency == "eu":
+        mistral_configured = bool(settings.mistral_api_key)
+        # Detect Ollama
+        ollama_running = False
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as _client:
+                _r = await _client.get("http://localhost:11434/api/tags")
+                ollama_running = _r.status_code == 200
+        except Exception:
+            pass
+        if not mistral_configured and not ollama_running:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="EU_PROVIDER_REQUIRED",
+                        message=(
+                            "EU Data Residency requires at least one EU provider (Mistral) "
+                            "or local provider (Ollama) to be configured."
+                        ),
+                    )
+                ).model_dump(),
+            )
     return ApiResponse(
         data={
             "provider": request.provider,
@@ -2555,6 +2579,75 @@ async def advisor_configure(request: AdvisorConfigureRequest) -> ApiResponse:
             "status": "configured",
         }
     )
+
+
+@router.post("/advisor/test-connection")
+async def advisor_test_connection(req: Request) -> ApiResponse:
+    """Test connectivity to a specific advisor provider."""
+    import time as _time
+
+    body = await req.json()
+    provider = body.get("provider", "anthropic")
+
+    from sandcastle.engine.generator import _PROVIDER_CONFIGS, _build_request_body, _parse_response_text
+
+    cfg = _PROVIDER_CONFIGS.get(provider)
+    if cfg is None:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="UNKNOWN_PROVIDER", message=f"Unknown provider: {provider}")
+            ).model_dump(),
+        )
+
+    import os
+    key_env = cfg.get("api_key_env", "")
+    api_key = os.environ.get(key_env, "") if key_env else "ollama-no-key"
+
+    if not api_key and provider != "ollama":
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_CONFIGURED",
+                    message=f"Provider '{provider}' is not configured (missing {key_env})",
+                )
+            ).model_dump(),
+        )
+
+    api_url = cfg["api_url"]
+    model = cfg["model"]
+    headers = cfg["headers_fn"](api_key)
+    body_payload = _build_request_body(
+        model,
+        "You are a helpful assistant.",
+        [{"role": "user", "content": "ping"}],
+        max_tokens=1,
+    )
+
+    t0 = _time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(api_url, json=body_payload, headers=headers)
+            resp.raise_for_status()
+        latency_ms = int((_time.monotonic() - t0) * 1000)
+        return ApiResponse(data={"status": "ok", "provider": provider, "latency_ms": latency_ms})
+    except httpx.ConnectError as exc:
+        return ApiResponse(
+            data={"status": "error", "provider": provider, "message": f"Connection refused: {exc}"}
+        )
+    except httpx.HTTPStatusError as exc:
+        return ApiResponse(
+            data={
+                "status": "error",
+                "provider": provider,
+                "message": f"HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+            }
+        )
+    except Exception as exc:
+        return ApiResponse(
+            data={"status": "error", "provider": provider, "message": str(exc)}
+        )
 
 
 @router.get("/advisor/cost-estimate")

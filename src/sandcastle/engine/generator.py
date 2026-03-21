@@ -364,6 +364,20 @@ _PROVIDER_CONFIGS = {
         "region": "local",
         "headers_fn": lambda _: {"Content-Type": "application/json"},
     },
+    "google": {
+        "api_url": "https://openrouter.ai/api/v1/chat/completions",
+        "model": "google/gemini-2.5-pro",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "region": "us",
+        "headers_fn": lambda key: {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    },
+    "minimax": {
+        "api_url": "https://api.minimaxi.chat/v1/chat/completions",
+        "model": "MiniMax-M2.5",
+        "api_key_env": "MINIMAX_API_KEY",
+        "region": "us",
+        "headers_fn": lambda key: {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    },
 }
 
 
@@ -537,10 +551,54 @@ async def _call_advisor_llm(
     provider_name = _resolve_provider_name()
     provider_region = cfg.get("region", "us")
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(api_url, json=body, headers=headers)
-        resp.raise_for_status()
-        result_text = _parse_response_text(resp.json())
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(api_url, json=body, headers=headers)
+            resp.raise_for_status()
+            result_text = _parse_response_text(resp.json())
+    except httpx.ConnectError as exc:
+        if provider_name == "ollama":
+            # Ollama not reachable - try cloud fallback (respect data residency)
+            import os
+            from sandcastle.config import settings as _settings
+            residency = _settings.data_residency
+            # Pick fallback: prefer EU providers if residency=eu, else anthropic
+            if residency == "eu":
+                fallback_providers = ["mistral"]
+            else:
+                fallback_providers = ["anthropic", "mistral", "openai"]
+            fallback_used = False
+            for fb_provider in fallback_providers:
+                fb_cfg = _PROVIDER_CONFIGS.get(fb_provider, {})
+                fb_key_env = fb_cfg.get("api_key_env", "")
+                fb_key = os.environ.get(fb_key_env, "") if fb_key_env else ""
+                if fb_key:
+                    logger.warning(
+                        "Ollama not reachable, falling back to cloud provider '%s'", fb_provider
+                    )
+                    fb_url = fb_cfg["api_url"]
+                    fb_model = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "") or fb_cfg["model"]
+                    fb_headers = fb_cfg["headers_fn"](fb_key)
+                    fb_body = _build_request_body(
+                        fb_model, system, [{"role": "user", "content": user}], max_tokens
+                    )
+                    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                        resp = await client.post(fb_url, json=fb_body, headers=fb_headers)
+                        resp.raise_for_status()
+                        result_text = _parse_response_text(resp.json())
+                    provider_name = fb_provider
+                    model = fb_model
+                    cfg = fb_cfg
+                    provider_region = fb_cfg.get("region", "us")
+                    fallback_used = True
+                    break
+            if not fallback_used:
+                raise RuntimeError(
+                    "Ollama is not reachable and no cloud fallback provider is configured. "
+                    "Set ANTHROPIC_API_KEY, MISTRAL_API_KEY, or OPENAI_API_KEY as fallback."
+                ) from exc
+        else:
+            raise
 
     # Emit provider audit event (best-effort - never block generation)
     try:

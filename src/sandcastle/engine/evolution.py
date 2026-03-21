@@ -424,10 +424,25 @@ async def run_evolution(
     """
     from sandcastle.engine.dag import parse_yaml_string
     from sandcastle.engine.eval import parse_eval_suite_string, run_eval_suite
+    from sandcastle.engine.generator import _get_advisor_config
     from sandcastle.models.db import EvolutionIteration, WorkflowEvolution, async_session
 
     evolution_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
+
+    # Lock advisor config at start of evolution - do not re-read env vars mid-loop
+    try:
+        locked_config = _get_advisor_config()
+        logger.info(
+            "Evolution %s: advisor locked to provider=%s model=%s region=%s",
+            evolution_id,
+            locked_config.get("model", "unknown"),
+            locked_config.get("api_key_env", ""),
+            locked_config.get("region", "us"),
+        )
+    except Exception as exc:
+        logger.warning("Evolution %s: could not lock advisor config: %s", evolution_id, exc)
+        locked_config = None
 
     # --- Load baseline workflow ---
     try:

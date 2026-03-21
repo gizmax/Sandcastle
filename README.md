@@ -613,6 +613,57 @@ Automatic failover: if a provider returns 429 or 5xx, Sandcastle retries with th
 
 ---
 
+### Universal Advisor
+
+All AI-powered features (workflow generation, evolution, quality evaluation, error explanation)
+use a configurable advisor LLM. By default, Sandcastle uses Claude - but you can switch to
+any supported provider:
+
+| Provider | Region | Env Vars |
+|----------|--------|----------|
+| Anthropic (Claude) | US | `ANTHROPIC_API_KEY` |
+| Mistral | EU | `MISTRAL_API_KEY` |
+| OpenAI | US | `OPENAI_API_KEY` |
+| Google (via OpenRouter) | US | `OPENROUTER_API_KEY` |
+| MiniMax | US | `MINIMAX_API_KEY` |
+| Ollama (local) | Local | None required |
+
+```bash
+# Switch to Mistral (EU data residency)
+export SANDCASTLE_ADVISOR_PROVIDER=mistral
+export SANDCASTLE_ADVISOR_MODEL=mistral-large-latest
+export MISTRAL_API_KEY=your-key
+
+# Switch to local Ollama (100% private, no cloud)
+export SANDCASTLE_ADVISOR_PROVIDER=ollama
+export SANDCASTLE_ADVISOR_MODEL=llama3.2
+```
+
+#### EU Data Residency Mode
+
+Enforce that all AI processing stays within EU borders:
+
+```bash
+export DATA_RESIDENCY=eu
+```
+
+When active, only EU-region providers (Mistral) and local providers (Ollama) are allowed.
+Attempts to use US providers will fail with a clear error message.
+
+#### OpenRouter (100+ Models)
+
+Access 100+ models from all major providers through a single API key:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+This enables Google Gemini, Meta Llama, Cohere, and many more through the
+unified OpenRouter API. See [openrouter.ai/models](https://openrouter.ai/models)
+for the full list.
+
+---
+
 ## 63 Built-in Integrations
 
 <p align="center">
@@ -1918,6 +1969,12 @@ MAX_CONCURRENT_SANDBOXES=5     # rate limiter for parallel execution
 # OPENAI_API_KEY=sk-...
 # MINIMAX_API_KEY=...
 # OPENROUTER_API_KEY=sk-or-... # for Google Gemini via OpenRouter
+
+# Universal Advisor (AI provider for generation, evolution, evaluation)
+# SANDCASTLE_ADVISOR_PROVIDER=anthropic  # anthropic|openai|mistral|ollama|google|minimax (default: anthropic)
+# SANDCASTLE_ADVISOR_MODEL=              # override default model for advisor
+# MISTRAL_API_KEY=...                    # Mistral AI API key (EU region)
+# DATA_RESIDENCY=                        # eu|local|"" (empty = no restriction)
 
 # E2B custom template (pre-built sandbox with SDK installed)
 # E2B_TEMPLATE=sandcastle-runner

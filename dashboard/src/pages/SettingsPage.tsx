@@ -20,6 +20,8 @@ import {
   Moon,
   Sun,
   Cpu,
+  X,
+  Wifi,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -282,8 +284,31 @@ export default function SettingsPage() {
     }
   }, [selectedProvider, advisorModel, euMode]);
 
-  // -- Connection test ------------------------------------------------------
+  // -- Connection test -------------------------------------------------------
 
+  type TestState = "idle" | "testing" | "ok" | "error";
+  const [testStates, setTestStates] = useState<Record<string, TestState>>({});
+  const [testMessages, setTestMessages] = useState<Record<string, string>>({});
+
+  const handleTestConnection = useCallback(async (providerId: string) => {
+    setTestStates((prev) => ({ ...prev, [providerId]: "testing" }));
+    setTestMessages((prev) => ({ ...prev, [providerId]: "" }));
+    const res = await api.post<{ status: string; latency_ms?: number; message?: string }>(
+      "/advisor/test-connection",
+      { provider: providerId }
+    );
+    if (res.error) {
+      setTestStates((prev) => ({ ...prev, [providerId]: "error" }));
+      setTestMessages((prev) => ({ ...prev, [providerId]: res.error!.message }));
+    } else if (res.data?.status === "ok") {
+      setTestStates((prev) => ({ ...prev, [providerId]: "ok" }));
+      setTestMessages((prev) => ({ ...prev, [providerId]: `${res.data!.latency_ms ?? "?"}ms` }));
+      setTimeout(() => setTestStates((prev) => ({ ...prev, [providerId]: "idle" })), 3000);
+    } else {
+      setTestStates((prev) => ({ ...prev, [providerId]: "error" }));
+      setTestMessages((prev) => ({ ...prev, [providerId]: res.data?.message ?? "Connection failed" }));
+    }
+  }, []);
 
   // -- Render ---------------------------------------------------------------
 
@@ -351,31 +376,56 @@ export default function SettingsPage() {
             <>
               {/* Provider cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {advisorStatus.available_providers.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedProvider(p.id)}
-                    className={cn(
-                      "rounded-lg border p-4 text-center transition-all cursor-pointer",
-                      selectedProvider === p.id
-                        ? "border-accent bg-accent/10"
-                        : "border-border hover:border-accent/50"
-                    )}
-                  >
-                    <div className="text-sm font-semibold text-foreground">{p.name}</div>
-                    <div className="text-xs text-muted mt-0.5">{REGION_LABEL[p.region] ?? p.region}</div>
+                {advisorStatus.available_providers.map((p) => {
+                  const ts = testStates[p.id] ?? "idle";
+                  const tm = testMessages[p.id] ?? "";
+                  return (
                     <div
+                      key={p.id}
                       className={cn(
-                        "text-xs mt-1.5 font-medium",
-                        p.status === "ok" || p.status === "running"
-                          ? "text-success"
-                          : "text-muted-foreground"
+                        "rounded-lg border p-4 text-center transition-all",
+                        selectedProvider === p.id
+                          ? "border-accent bg-accent/10"
+                          : "border-border hover:border-accent/50"
                       )}
                     >
-                      {PROVIDER_STATUS_LABEL[p.status] ?? p.status}
+                      <button
+                        className="w-full cursor-pointer"
+                        onClick={() => setSelectedProvider(p.id)}
+                      >
+                        <div className="text-sm font-semibold text-foreground">{p.name}</div>
+                        <div className="text-xs text-muted mt-0.5">{REGION_LABEL[p.region] ?? p.region}</div>
+                        <div
+                          className={cn(
+                            "text-xs mt-1.5 font-medium",
+                            p.status === "ok" || p.status === "running"
+                              ? "text-success"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {PROVIDER_STATUS_LABEL[p.status] ?? p.status}
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void handleTestConnection(p.id); }}
+                        disabled={ts === "testing"}
+                        className={cn(
+                          "mt-2 flex w-full items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer",
+                          ts === "ok" ? "bg-success/15 text-success" :
+                          ts === "error" ? "bg-error/15 text-error" :
+                          "bg-border/60 text-muted-foreground hover:bg-border"
+                        )}
+                        title={tm || "Test connection"}
+                      >
+                        {ts === "testing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                        {ts === "ok" && <CheckCircle2 className="h-2.5 w-2.5" />}
+                        {ts === "error" && <X className="h-2.5 w-2.5" />}
+                        {ts === "idle" && <Wifi className="h-2.5 w-2.5" />}
+                        {ts === "ok" ? tm : ts === "error" ? "Failed" : ts === "testing" ? "Testing..." : "Test"}
+                      </button>
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Model override */}
