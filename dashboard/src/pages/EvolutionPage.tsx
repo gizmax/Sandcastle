@@ -462,8 +462,8 @@ function EvolutionDetail({
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    formatter={(value: number, name: string) => [
-                      value.toFixed(1),
+                    formatter={(value: number | undefined, name: string) => [
+                      (value ?? 0).toFixed(1),
                       name === "score" ? "Score" : "Baseline",
                     ]}
                   />
