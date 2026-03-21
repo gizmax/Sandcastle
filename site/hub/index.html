@@ -4163,7 +4163,8 @@
     });
 
     // Theme toggle
-    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+    var themeBtn = document.getElementById('theme-toggle');
+    if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 
     // Keyboard shortcut: "/" to focus search
     document.addEventListener('keydown', function(e) {
