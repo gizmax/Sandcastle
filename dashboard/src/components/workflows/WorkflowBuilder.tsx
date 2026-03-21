@@ -942,31 +942,22 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         </button>
 
         <button
-          onClick={() => { setEditWithAiYaml(undefined); setGenerateModalOpen(true); }}
+          onClick={() => {
+            if (steps.length > 0) {
+              setEditWithAiYaml(generateYaml(workflowName, steps, edges, defaultTools));
+            } else {
+              setEditWithAiYaml(undefined);
+            }
+            setGenerateModalOpen(true);
+          }}
           className={cn(
             "mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-accent/40 px-3 py-2.5",
             "text-xs font-medium text-accent/70 hover:border-accent hover:text-accent transition-colors"
           )}
         >
           <Wand2 className="h-3.5 w-3.5" />
-          AI Generate
+          AI Assistant
         </button>
-
-        {steps.length > 0 && (
-          <button
-            onClick={() => {
-              setEditWithAiYaml(generateYaml(workflowName, steps, edges, defaultTools));
-              setGenerateModalOpen(true);
-            }}
-            className={cn(
-              "mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-accent/40 px-3 py-2.5",
-              "text-xs font-medium text-accent/70 hover:border-accent hover:text-accent transition-colors"
-            )}
-          >
-            <Wand2 className="h-3.5 w-3.5" />
-            Edit with AI
-          </button>
-        )}
 
         <div className="mt-6">
           <label className="mb-1 block text-xs font-medium text-muted">Workflow Name</label>
@@ -1075,8 +1066,16 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
         <Layers className="h-4 w-4" />
       </button>
       <button
-        onClick={() => { setEditWithAiYaml(undefined); setGenerateModalOpen(true); }}
+        onClick={() => {
+          if (steps.length > 0) {
+            setEditWithAiYaml(generateYaml(workflowName, steps, edges, defaultTools));
+          } else {
+            setEditWithAiYaml(undefined);
+          }
+          setGenerateModalOpen(true);
+        }}
         className="absolute left-[6.25rem] top-12 z-10 flex h-9 w-9 items-center justify-center rounded-lg border border-accent/40 bg-surface shadow-sm text-accent/70 hover:text-accent hover:border-accent transition-colors lg:hidden"
+        title="AI Assistant"
       >
         <Wand2 className="h-4 w-4" />
       </button>
