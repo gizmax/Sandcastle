@@ -698,6 +698,96 @@ class HubSubmission(Base):
     )
 
 
+class WorkflowEvolution(Base):
+    """A workflow evolution experiment - iteratively improves a workflow via mutations."""
+
+    __tablename__ = "workflow_evolutions"
+    __table_args__ = (
+        Index("ix_workflow_evolutions_workflow_name", "workflow_name"),
+        Index("ix_workflow_evolutions_status", "status"),
+        Index("ix_workflow_evolutions_tenant_id", "tenant_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="running")
+    # running, completed, failed, cancelled
+    strategy: Mapped[str] = mapped_column(String(50), default="autoresearch")
+    # autoresearch, manual
+    optimize_for: Mapped[str] = mapped_column(String(50), default="quality")
+    # quality, cost, latency, balanced
+
+    # Baseline metrics
+    baseline_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_quality: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Best achieved
+    best_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_quality: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_variant_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Config
+    eval_suite_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+    max_iterations: Mapped[int] = mapped_column(Integer, default=20)
+    budget_limit_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Progress
+    current_iteration: Mapped[int] = mapped_column(Integer, default=0)
+    total_keeps: Mapped[int] = mapped_column(Integer, default=0)
+    total_discards: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    iterations: Mapped[list[EvolutionIteration]] = relationship(
+        back_populates="evolution", cascade="all, delete-orphan"
+    )
+
+
+class EvolutionIteration(Base):
+    """A single mutation iteration within a workflow evolution experiment."""
+
+    __tablename__ = "evolution_iterations"
+    __table_args__ = (
+        Index("ix_evolution_iterations_evolution_id", "evolution_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    evolution_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workflow_evolutions.id", ondelete="CASCADE"), nullable=False
+    )
+    iteration_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # What was changed
+    mutation_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # prompt, model, tools, step_order, simplify
+    mutation_description: Mapped[str] = mapped_column(String(500), nullable=False)
+    mutation_diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # [{step_id, field, from, to}]
+
+    # Results
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quality: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eval_pass_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    # pending, keep, discard, crash
+    variant_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    evolution: Mapped[WorkflowEvolution] = relationship(back_populates="iterations")
+
+
 # Database engine and session factory
 
 def _build_engine_url() -> str:

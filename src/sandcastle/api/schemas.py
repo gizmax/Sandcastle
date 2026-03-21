@@ -1283,5 +1283,75 @@ class HubRateRequest(BaseModel):
     rating: int = Field(..., description="Star rating 1-5", ge=1, le=5)
 
 
+# --- Workflow Evolution schemas ---
+
+
+class EvolutionStartRequest(BaseModel):
+    """Request to start a workflow evolution experiment."""
+
+    workflow_name: str = Field(..., min_length=1, max_length=200)
+    eval_suite_yaml: str = Field(..., min_length=1, max_length=500000)
+    max_iterations: int = Field(20, ge=1, le=100)
+    optimize_for: str = Field("balanced", pattern="^(quality|cost|latency|balanced)$")
+    budget_limit_usd: float | None = Field(None, ge=0)
+
+
+class EvolutionIterationResponse(BaseModel):
+    """Response for a single evolution iteration record."""
+
+    id: str
+    iteration_number: int
+    mutation_type: str
+    mutation_description: str
+    mutation_diff: list[dict[str, Any]] | None = None
+    score: float | None = None
+    quality: float | None = None
+    cost_usd: float | None = None
+    duration_seconds: float | None = None
+    eval_pass_rate: float | None = None
+    status: str
+    created_at: datetime | None = None
+
+
+class EvolutionStatusResponse(BaseModel):
+    """Response for evolution status + history."""
+
+    evolution_id: str
+    workflow_name: str
+    status: str
+    optimize_for: str
+    baseline_score: float | None = None
+    baseline_quality: float | None = None
+    baseline_cost: float | None = None
+    best_score: float | None = None
+    best_quality: float | None = None
+    best_cost: float | None = None
+    max_iterations: int
+    current_iteration: int
+    total_keeps: int
+    total_discards: int
+    budget_limit_usd: float | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    iterations: list[EvolutionIterationResponse] = Field(default_factory=list)
+
+
+class EvolutionAcceptRequest(BaseModel):
+    """Request to accept and promote the best evolution variant."""
+
+    notes: str | None = Field(None, max_length=500)
+
+
+class EvolutionStatsResponse(BaseModel):
+    """Aggregated evolution statistics."""
+
+    total_evolutions: int = 0
+    active_evolutions: int = 0
+    completed_evolutions: int = 0
+    total_improvements: int = 0
+    avg_improvement: float | None = None
+    top_workflows: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()
