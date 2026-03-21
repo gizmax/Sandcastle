@@ -4183,7 +4183,20 @@
     });
 
     /* ========== Init ========== */
+    // Timeout fallback - if loading takes too long, show error
+    var loadTimer = setTimeout(function() {
+      var grid = document.getElementById('template-grid');
+      if (grid && grid.querySelector('.loading')) {
+        grid.innerHTML =
+          '<div class="error-state">' +
+            '<h3>Loading timed out</h3>' +
+            '<p>Try refreshing the page. <a href="https://github.com/gizmax/Sandcastle/tree/main/site/hub" target="_blank" rel="noopener">View on GitHub</a></p>' +
+          '</div>';
+      }
+    }, 10000);
+
     fetchRegistry().then(function() {
+      clearTimeout(loadTimer);
       // Check for ?template= deep link
       var params = new URLSearchParams(window.location.search);
       var tplSlug = params.get('template');
@@ -4191,6 +4204,9 @@
         var found = registry.templates.find(function(t) { return t.slug === tplSlug; });
         if (found) showDetail(found.slug);
       }
+    }).catch(function(err) {
+      clearTimeout(loadTimer);
+      console.error('Init error:', err);
     });
   </script>
 </body>
