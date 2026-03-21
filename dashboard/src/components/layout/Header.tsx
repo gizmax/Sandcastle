@@ -7,7 +7,6 @@ import {
   NotificationCenter,
   type Notification,
 } from "@/components/layout/NotificationCenter";
-import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -54,7 +53,6 @@ export function Header({
   onClickNotification,
 }: HeaderProps) {
   const location = useLocation();
-  const advisor = useAdvisorContext();
 
   const pageTitle = getPageTitle(location.pathname);
 
@@ -109,14 +107,6 @@ export function Header({
           notifications={notifications}
           onMarkAllRead={onMarkAllRead}
           onClickNotification={onClickNotification}
-          score={advisor.score}
-          previousScore={advisor.previousScore}
-          deductions={advisor.deductions}
-          insights={advisor.activeInsights}
-          advisorLoading={advisor.loading}
-          lastChecked={advisor.lastChecked}
-          onRefresh={advisor.refresh}
-          onDismiss={advisor.dismiss}
         />
       </div>
     </header>
