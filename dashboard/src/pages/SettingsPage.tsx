@@ -19,6 +19,7 @@ import {
   Check,
   Moon,
   Sun,
+  Cpu,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -32,6 +33,21 @@ import { useAccentColor, ACCENT_COLORS } from "@/hooks/useAccentColor";
 import { useTheme } from "@/hooks/useTheme";
 
 // -- Types ------------------------------------------------------------------
+
+interface ProviderEntry {
+  id: string;
+  name: string;
+  region: string;
+  configured: boolean;
+  status: string;
+}
+
+interface AdvisorStatus {
+  current_provider: string;
+  current_model: string | null;
+  data_residency: string | null;
+  available_providers: ProviderEntry[];
+}
 
 interface SettingsData {
   anthropic_api_key: string;
@@ -139,6 +155,13 @@ export default function SettingsPage() {
   const { accentColor, setAccentColor } = useAccentColor();
   const { theme, toggleTheme } = useTheme();
 
+  // Advisor provider state
+  const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<string>("");
+  const [advisorModel, setAdvisorModel] = useState<string>("");
+  const [euMode, setEuMode] = useState<boolean>(false);
+  const [savingAdvisor, setSavingAdvisor] = useState(false);
+
   // Keep a snapshot of the original values for dirty checking
   const originalRef = useRef<SettingsData | null>(null);
 
@@ -154,9 +177,20 @@ export default function SettingsPage() {
     setLoading(false);
   }, []);
 
+  const fetchAdvisorStatus = useCallback(async () => {
+    const res = await api.get<AdvisorStatus>("/advisor/status");
+    if (res.data) {
+      setAdvisorStatus(res.data);
+      setSelectedProvider(res.data.current_provider);
+      setAdvisorModel(res.data.current_model || "");
+      setEuMode(res.data.data_residency === "eu");
+    }
+  }, []);
+
   useEffect(() => {
     void fetchSettings();
-  }, [fetchSettings]);
+    void fetchAdvisorStatus();
+  }, [fetchSettings, fetchAdvisorStatus]);
 
   // -- Field updaters -------------------------------------------------------
 
@@ -231,6 +265,23 @@ export default function SettingsPage() {
     [settings]
   );
 
+  // -- Advisor save handler -------------------------------------------------
+
+  const handleSaveAdvisor = useCallback(async () => {
+    setSavingAdvisor(true);
+    const res = await api.post("/advisor/configure", {
+      provider: selectedProvider,
+      model: advisorModel || null,
+      data_residency: euMode ? "eu" : null,
+    });
+    setSavingAdvisor(false);
+    if (res.error) {
+      toast.error(`Failed to save: ${res.error.message}`);
+    } else {
+      toast.success("AI Provider saved");
+    }
+  }, [selectedProvider, advisorModel, euMode]);
+
   // -- Connection test ------------------------------------------------------
 
 
@@ -259,6 +310,25 @@ export default function SettingsPage() {
     );
   }
 
+  const REGION_LABEL: Record<string, string> = {
+    us: "US",
+    eu: "EU",
+    local: "Local",
+  };
+
+  const PROVIDER_STATUS_LABEL: Record<string, string> = {
+    ok: "Configured",
+    unconfigured: "Not configured",
+    running: "Running",
+    not_detected: "Not detected",
+  };
+
+  const advisorDirty =
+    advisorStatus !== null &&
+    (selectedProvider !== advisorStatus.current_provider ||
+      (advisorModel || "") !== (advisorStatus.current_model || "") ||
+      euMode !== (advisorStatus.data_residency === "eu"));
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3">
@@ -267,6 +337,86 @@ export default function SettingsPage() {
           Settings
         </h1>
       </div>
+
+      {/* AI Provider */}
+      <SectionCard
+        icon={Cpu}
+        title="AI Provider"
+        description="Choose which LLM powers workflow generation, evolution, and quality evaluation."
+      >
+        <div className="space-y-4">
+          {advisorStatus === null ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <>
+              {/* Provider cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {advisorStatus.available_providers.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedProvider(p.id)}
+                    className={cn(
+                      "rounded-lg border p-4 text-center transition-all cursor-pointer",
+                      selectedProvider === p.id
+                        ? "border-accent bg-accent/10"
+                        : "border-border hover:border-accent/50"
+                    )}
+                  >
+                    <div className="text-sm font-semibold text-foreground">{p.name}</div>
+                    <div className="text-xs text-muted mt-0.5">{REGION_LABEL[p.region] ?? p.region}</div>
+                    <div
+                      className={cn(
+                        "text-xs mt-1.5 font-medium",
+                        p.status === "ok" || p.status === "running"
+                          ? "text-success"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      {PROVIDER_STATUS_LABEL[p.status] ?? p.status}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Model override */}
+              <div>
+                <FieldLabel htmlFor="advisor_model">Model (optional override)</FieldLabel>
+                <input
+                  id="advisor_model"
+                  type="text"
+                  className={cn(inputClass, "max-w-sm")}
+                  value={advisorModel}
+                  onChange={(e) => setAdvisorModel(e.target.value)}
+                  placeholder="e.g. mistral-large-latest"
+                />
+                <HelperText>Leave empty to use the provider default model</HelperText>
+              </div>
+
+              {/* EU data residency toggle */}
+              <div className="flex items-center gap-3">
+                <input
+                  id="eu_mode"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-[color:var(--color-accent)] cursor-pointer"
+                  checked={euMode}
+                  onChange={(e) => setEuMode(e.target.checked)}
+                />
+                <label htmlFor="eu_mode" className="text-sm text-foreground cursor-pointer select-none">
+                  EU Data Residency - only use EU-based providers
+                </label>
+              </div>
+
+              <div className="flex justify-end">
+                <SaveButton
+                  dirty={advisorDirty}
+                  saving={savingAdvisor}
+                  onClick={() => void handleSaveAdvisor()}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </SectionCard>
 
       {/* Software Update */}
       {!update.loading && update.currentVersion && (

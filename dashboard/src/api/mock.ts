@@ -6941,6 +6941,64 @@ const routes: MockRoute[] = [
       };
     },
   },
+  // GET /advisor/status
+  {
+    match: /^\/advisor\/status$/,
+    method: "GET",
+    handler: () => ({
+      current_provider: "mistral",
+      current_model: "mistral-large-latest",
+      data_residency: "eu",
+      available_providers: [
+        { id: "anthropic", name: "Anthropic (Claude)", region: "us", configured: true, status: "ok" },
+        { id: "mistral", name: "Mistral", region: "eu", configured: true, status: "ok" },
+        { id: "openai", name: "OpenAI", region: "us", configured: false, status: "unconfigured" },
+        { id: "ollama", name: "Ollama (Local)", region: "local", configured: false, status: "not_detected" },
+      ],
+    }),
+  },
+  // POST /advisor/configure
+  {
+    match: /^\/advisor\/configure$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { provider?: string; model?: string; data_residency?: string } | undefined;
+      return { provider: b?.provider || "anthropic", model: b?.model || null, data_residency: b?.data_residency || null, status: "configured" };
+    },
+  },
+  // GET /advisor/cost-estimate
+  {
+    match: /^\/advisor\/cost-estimate$/,
+    method: "GET",
+    handler: () => ({
+      current: { provider: "mistral", model: "mistral-large", estimated_cost: 0.008 },
+      alternatives: [
+        { provider: "anthropic", model: "claude-sonnet-4-20250514", estimated_cost: 0.045 },
+        { provider: "openai", model: "gpt-4o", estimated_cost: 0.030 },
+        { provider: "ollama", model: "llama3.2", estimated_cost: 0.000 },
+      ],
+    }),
+  },
+  // GET /compliance/privacy-notice
+  {
+    match: /^\/compliance\/privacy-notice$/,
+    method: "GET",
+    handler: (params) => {
+      const workflowName = params.workflow_name || null;
+      const label = workflowName || "all workflows";
+      const today = new Date().toISOString().slice(0, 10);
+      return {
+        workflow_name: workflowName,
+        provider: "Mistral AI",
+        data_residency: "European Union (France)",
+        pii_redaction: true,
+        retention_days: 90,
+        audit_trail: true,
+        generated_at: new Date().toISOString(),
+        notice: `## Privacy Notice - Sandcastle Data Processing\n\n**Effective date:** ${today}\n\n### Data Controller\nSandcastle instance operator.\n\n### Processing Purpose\nWorkflow automation for **${label}**.\n\n### AI Provider\nData submitted to workflow steps is processed by **Mistral AI**.\nData residency: **European Union (France)**.\n\n### PII Redaction\nPII redaction is **enabled**. Personal identifiers (email, phone, SSN, credit card) are automatically redacted before processing.\n\n### Data Retention\nWorkflow run results and audit events are retained for **90 days** before automatic deletion.\n\n### Audit Trail\nAll workflow executions are recorded in a tamper-evident audit log with SHA-256 hash chaining.\n\n### Your Rights (GDPR Art. 15-22)\nYou have the right to access, rectify, erase, restrict, and port your personal data.\n\n### Legal Basis\nProcessing is performed under legitimate interest (Art. 6(1)(f) GDPR) for workflow automation tasks.`,
+      };
+    },
+  },
 ];
 
 export function mockFetch(
