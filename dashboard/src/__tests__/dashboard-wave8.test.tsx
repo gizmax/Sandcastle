@@ -734,17 +734,6 @@ describe("WorkflowCard", () => {
 import { NotificationCenter, type Notification } from "@/components/layout/NotificationCenter";
 
 describe("NotificationCenter", () => {
-  const defaultAdvisorProps = {
-    score: 100,
-    previousScore: null as number | null,
-    deductions: [] as { category: "health" | "operations" | "quality" | "adoption"; label: string; points: number }[],
-    insights: [] as { id: string; severity: "critical" | "warning" | "optimize" | "discover"; title: string; description: string; link: string; icon: string }[],
-    advisorLoading: false,
-    lastChecked: null as Date | null,
-    onRefresh: vi.fn(),
-    onDismiss: vi.fn(),
-  };
-
   const makeNotification = (id: string, overrides?: Partial<Notification>): Notification => ({
     id,
     type: "info",
@@ -760,7 +749,7 @@ describe("NotificationCenter", () => {
         notifications={[]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     expect(screen.getByRole("button", { name: /Command center/ })).toBeInTheDocument();
@@ -772,7 +761,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1"), makeNotification("2")]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     expect(screen.getByText("2")).toBeInTheDocument();
@@ -784,7 +773,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1", { read: true })]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     // aria-label should not mention unread
@@ -797,7 +786,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1")]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
@@ -810,7 +799,7 @@ describe("NotificationCenter", () => {
         notifications={[]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
@@ -823,7 +812,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1")]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
@@ -840,7 +829,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1")]}
         onMarkAllRead={onMarkAllRead}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
 
     );
@@ -855,7 +844,7 @@ describe("NotificationCenter", () => {
         notifications={[makeNotification("1", { read: true })]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
@@ -870,7 +859,7 @@ describe("NotificationCenter", () => {
         notifications={[notification]}
         onMarkAllRead={vi.fn()}
         onClickNotification={onClickNotification}
-        {...defaultAdvisorProps}
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
@@ -892,7 +881,7 @@ describe("NotificationCenter", () => {
         notifications={notifications}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Command center/ }));
@@ -908,7 +897,7 @@ describe("NotificationCenter", () => {
         notifications={[]}
         onMarkAllRead={vi.fn()}
         onClickNotification={vi.fn()}
-        {...defaultAdvisorProps}
+
       />
     );
     const btn = screen.getByRole("button", { name: /Command center/ });

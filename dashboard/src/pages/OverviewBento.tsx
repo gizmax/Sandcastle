@@ -207,18 +207,22 @@ function BentoHealthHero({
       "hover:border-accent/30 transition-all duration-300",
       "p-6 flex flex-col gap-4 h-full relative"
     )}>
-      {/* Health badge - top right */}
+      {/* Health badge - top right, clickable to /system-health */}
       <div className="absolute top-5 right-5">
         {loading ? (
           <div className="h-14 w-14 rounded-full bg-border animate-pulse" />
         ) : (
-          <div className={cn(
-            "flex items-center justify-center w-14 h-14 rounded-full",
-            "text-xl font-bold",
-            score >= 80 ? "bg-success/20 text-success" : score >= 50 ? "bg-warning/20 text-warning" : "bg-error/20 text-error"
-          )}>
+          <Link
+            to="/system-health"
+            title="View system health details"
+            className={cn(
+              "flex items-center justify-center w-14 h-14 rounded-full",
+              "text-xl font-bold transition-opacity hover:opacity-80",
+              score >= 80 ? "bg-success/20 text-success" : score >= 50 ? "bg-warning/20 text-warning" : "bg-error/20 text-error"
+            )}
+          >
             {score}
-          </div>
+          </Link>
         )}
       </div>
 
@@ -249,11 +253,18 @@ function BentoHealthHero({
         </span>
       </div>
 
-      {/* Status */}
+      {/* Status - healthy pill when score is good and no actionable insights */}
       {!loading && actionable.length === 0 && (
-        <div className="flex items-center gap-1.5 text-success">
-          <CheckCircle2 className="h-4 w-4" />
-          <span className="text-sm font-medium">All systems operational - {scoreLabel}</span>
+        <div className="flex items-center gap-2">
+          <span className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold",
+            score >= 80
+              ? "bg-success/10 border border-success/20 text-success"
+              : "bg-warning/10 border border-warning/20 text-warning"
+          )}>
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {score >= 80 ? "All systems healthy" : scoreLabel}
+          </span>
         </div>
       )}
 
