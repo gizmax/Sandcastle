@@ -1353,5 +1353,63 @@ class EvolutionStatsResponse(BaseModel):
     top_workflows: list[dict[str, Any]] = Field(default_factory=list)
 
 
+# --- Advisor / Provider ---
+
+
+class ProviderStatusEntry(BaseModel):
+    """Status of a single AI provider."""
+
+    id: str
+    name: str
+    region: str  # "us" | "eu" | "local"
+    configured: bool
+    status: str  # "ok" | "unconfigured" | "not_detected"
+
+
+class AdvisorStatusResponse(BaseModel):
+    """Current advisor provider configuration and available providers."""
+
+    current_provider: str
+    current_model: str | None = None
+    data_residency: str | None = None  # "eu" | "us" | None
+    available_providers: list[ProviderStatusEntry] = Field(default_factory=list)
+
+
+class AdvisorConfigureRequest(BaseModel):
+    """Request to reconfigure the advisor provider."""
+
+    provider: str
+    model: str | None = None
+    data_residency: str | None = None
+
+
+class CostEstimateEntry(BaseModel):
+    """Cost estimate for a single provider/model combination."""
+
+    provider: str
+    model: str
+    estimated_cost: float
+
+
+class AdvisorCostEstimateResponse(BaseModel):
+    """Cost comparison for last generation across providers."""
+
+    current: CostEstimateEntry
+    alternatives: list[CostEstimateEntry] = Field(default_factory=list)
+
+
+class PrivacyNoticeResponse(BaseModel):
+    """GDPR-compliant privacy notice for workflow data processing."""
+
+    workflow_name: str | None = None
+    notice: str  # Markdown text
+    provider: str
+    data_residency: str
+    pii_redaction: bool
+    retention_days: int
+    audit_trail: bool
+    generated_at: str
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()

@@ -109,6 +109,12 @@ from sandcastle.api.schemas import (
     EvolutionStatusResponse,
     EvolutionAcceptRequest,
     EvolutionStatsResponse,
+    AdvisorStatusResponse,
+    AdvisorConfigureRequest,
+    AdvisorCostEstimateResponse,
+    CostEstimateEntry,
+    PrivacyNoticeResponse,
+    ProviderStatusEntry,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -2459,6 +2465,196 @@ async def advisor_explain_error(req: Request, request: ExplainErrorRequest) -> A
             ).model_dump(),
         )
     return ApiResponse(data=result)
+
+
+@router.get("/advisor/status")
+async def advisor_status() -> ApiResponse:
+    """Return current advisor provider config and availability of each provider."""
+    anthropic_configured = bool(settings.anthropic_api_key)
+    mistral_configured = bool(settings.mistral_api_key)
+    openai_configured = bool(settings.openai_api_key)
+
+    # Detect Ollama by probing localhost
+    ollama_running = False
+    try:
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            resp = await client.get("http://localhost:11434/api/tags")
+            ollama_running = resp.status_code == 200
+    except Exception:
+        pass
+
+    available: list[ProviderStatusEntry] = [
+        ProviderStatusEntry(
+            id="anthropic",
+            name="Anthropic (Claude)",
+            region="us",
+            configured=anthropic_configured,
+            status="ok" if anthropic_configured else "unconfigured",
+        ),
+        ProviderStatusEntry(
+            id="mistral",
+            name="Mistral",
+            region="eu",
+            configured=mistral_configured,
+            status="ok" if mistral_configured else "unconfigured",
+        ),
+        ProviderStatusEntry(
+            id="openai",
+            name="OpenAI",
+            region="us",
+            configured=openai_configured,
+            status="ok" if openai_configured else "unconfigured",
+        ),
+        ProviderStatusEntry(
+            id="ollama",
+            name="Ollama (Local)",
+            region="local",
+            configured=ollama_running,
+            status="running" if ollama_running else "not_detected",
+        ),
+    ]
+
+    # Determine current provider from configured keys
+    if mistral_configured:
+        current_provider = "mistral"
+        current_model = "mistral-large-latest"
+    elif openai_configured:
+        current_provider = "openai"
+        current_model = "gpt-4o"
+    elif ollama_running:
+        current_provider = "ollama"
+        current_model = "llama3.2"
+    else:
+        current_provider = "anthropic"
+        current_model = "claude-sonnet-4-20250514"
+
+    data_residency: str | None = None
+    if current_provider == "mistral":
+        data_residency = "eu"
+    elif current_provider == "ollama":
+        data_residency = "local"
+
+    return ApiResponse(
+        data=AdvisorStatusResponse(
+            current_provider=current_provider,
+            current_model=current_model,
+            data_residency=data_residency,
+            available_providers=available,
+        )
+    )
+
+
+@router.post("/advisor/configure")
+async def advisor_configure(request: AdvisorConfigureRequest) -> ApiResponse:
+    """Configure which provider powers the advisor (informational - returns ack)."""
+    return ApiResponse(
+        data={
+            "provider": request.provider,
+            "model": request.model,
+            "data_residency": request.data_residency,
+            "status": "configured",
+        }
+    )
+
+
+@router.get("/advisor/cost-estimate")
+async def advisor_cost_estimate() -> ApiResponse:
+    """Return cost comparison for current and alternative providers."""
+    anthropic_configured = bool(settings.anthropic_api_key)
+    mistral_configured = bool(settings.mistral_api_key)
+    openai_configured = bool(settings.openai_api_key)
+
+    if mistral_configured:
+        current = CostEstimateEntry(provider="mistral", model="mistral-large", estimated_cost=0.008)
+    elif openai_configured:
+        current = CostEstimateEntry(provider="openai", model="gpt-4o", estimated_cost=0.030)
+    else:
+        current = CostEstimateEntry(provider="anthropic", model="claude-sonnet-4-20250514", estimated_cost=0.045)
+
+    alternatives: list[CostEstimateEntry] = []
+    if current.provider != "anthropic" and anthropic_configured:
+        alternatives.append(CostEstimateEntry(provider="anthropic", model="claude-sonnet-4-20250514", estimated_cost=0.045))
+    if current.provider != "mistral":
+        alternatives.append(CostEstimateEntry(provider="mistral", model="mistral-large", estimated_cost=0.008))
+    if current.provider != "openai" and openai_configured:
+        alternatives.append(CostEstimateEntry(provider="openai", model="gpt-4o", estimated_cost=0.030))
+    alternatives.append(CostEstimateEntry(provider="ollama", model="llama3.2", estimated_cost=0.000))
+
+    return ApiResponse(
+        data=AdvisorCostEstimateResponse(current=current, alternatives=alternatives)
+    )
+
+
+@router.get("/compliance/privacy-notice")
+async def generate_privacy_notice(workflow_name: str = Query(None)) -> ApiResponse:  # type: ignore[assignment]
+    """Generate a GDPR-compliant privacy notice for data processing."""
+    from datetime import datetime, timezone
+
+    anthropic_configured = bool(settings.anthropic_api_key)
+    mistral_configured = bool(settings.mistral_api_key)
+    openai_configured = bool(settings.openai_api_key)
+
+    if mistral_configured:
+        provider = "Mistral AI"
+        data_residency = "European Union (France)"
+    elif openai_configured:
+        provider = "OpenAI"
+        data_residency = "United States"
+    elif anthropic_configured:
+        provider = "Anthropic"
+        data_residency = "United States"
+    else:
+        provider = "Local (Ollama)"
+        data_residency = "Local - no data leaves your machine"
+
+    pii_redaction = settings.privacy_enabled
+    retention_days = 90
+    workflow_label = workflow_name or "all workflows"
+
+    notice = f"""## Privacy Notice - Sandcastle Data Processing
+
+**Effective date:** {datetime.now(timezone.utc).strftime("%Y-%m-%d")}
+
+### Data Controller
+Sandcastle instance operator.
+
+### Processing Purpose
+Workflow automation for **{workflow_label}**.
+
+### AI Provider
+Data submitted to workflow steps is processed by **{provider}**.
+Data residency: **{data_residency}**.
+
+### PII Redaction
+PII redaction is **{"enabled" if pii_redaction else "disabled"}**. \
+{"Personal identifiers (email, phone, SSN, credit card) are automatically redacted before processing." if pii_redaction else "Enable PRIVACY_ENABLED=true to activate automatic PII redaction."}
+
+### Data Retention
+Workflow run results and audit events are retained for **{retention_days} days** before automatic deletion.
+
+### Audit Trail
+All workflow executions are recorded in a tamper-evident audit log with SHA-256 hash chaining.
+
+### Your Rights (GDPR Art. 15-22)
+You have the right to access, rectify, erase, restrict, and port your personal data.
+Contact the instance operator to exercise these rights.
+
+### Legal Basis
+Processing is performed under legitimate interest (Art. 6(1)(f) GDPR) for workflow automation tasks.
+"""
+
+    return ApiResponse(
+        data=PrivacyNoticeResponse(
+            workflow_name=workflow_name,
+            notice=notice,
+            provider=provider,
+            data_residency=data_residency,
+            pii_redaction=pii_redaction,
+            retention_days=retention_days,
+            audit_trail=True,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+    )
 
 
 # --- Workflows ---
