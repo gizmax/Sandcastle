@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,8 @@ import httpx
 from sandcastle.engine.dag import parse_yaml_string, validate
 from sandcastle.engine.providers import KNOWN_MODELS
 from sandcastle.engine.tools.registry import TOOL_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -459,9 +462,18 @@ def _build_request_body(
     system: str,
     messages: list[dict],
     max_tokens: int = 4096,
+    *,
+    is_anthropic: bool | None = None,
 ) -> dict:
-    """Build provider-specific request body."""
-    if _is_anthropic_provider():
+    """Build provider-specific request body.
+
+    When *is_anthropic* is None the current global provider is inspected.
+    Pass an explicit bool when building a body for a specific provider in the
+    failover loop to avoid touching global state.
+    """
+    if is_anthropic is None:
+        is_anthropic = _is_anthropic_provider()
+    if is_anthropic:
         return {
             "model": model,
             "max_tokens": max_tokens,
@@ -476,9 +488,16 @@ def _build_request_body(
     }
 
 
-def _parse_response_text(data: dict) -> str:
-    """Extract text from provider-specific response format."""
-    if _is_anthropic_provider():
+def _parse_response_text(data: dict, *, is_anthropic: bool | None = None) -> str:
+    """Extract text from provider-specific response format.
+
+    When *is_anthropic* is None the current global provider is inspected.
+    Pass an explicit bool when parsing a response for a specific provider in
+    the failover loop to avoid touching global state.
+    """
+    if is_anthropic is None:
+        is_anthropic = _is_anthropic_provider()
+    if is_anthropic:
         return data["content"][0]["text"]
     # OpenAI/Ollama format
     return data["choices"][0]["message"]["content"]
@@ -514,6 +533,71 @@ _MAX_TOKENS = 4096
 _TIMEOUT = 60
 
 
+def _resolve_provider_name() -> str:
+    """Return the current advisor provider name (e.g. 'anthropic', 'mistral')."""
+    import os
+    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
+    if provider not in _PROVIDER_CONFIGS:
+        return "anthropic"
+    return provider
+
+
+def _resolve_api_key_for_provider(provider_name: str) -> str:
+    """Resolve the API key for a specific provider name.
+
+    Returns an empty string when no key is available.
+    """
+    import os
+
+    cfg = _PROVIDER_CONFIGS.get(provider_name, {})
+    key_env = cfg.get("api_key_env", "")
+
+    # Providers that do not need a key (e.g. Ollama)
+    if not key_env:
+        return "no-key-required"
+
+    api_key = os.environ.get(key_env, "")
+    if not api_key:
+        from sandcastle.config import settings
+
+        attr_map = {
+            "ANTHROPIC_API_KEY": "anthropic_api_key",
+            "OPENAI_API_KEY": "openai_api_key",
+            "MISTRAL_API_KEY": "mistral_api_key",
+            "OPENROUTER_API_KEY": "openrouter_api_key",
+            "MINIMAX_API_KEY": "minimax_api_key",
+        }
+        attr = attr_map.get(key_env)
+        if attr:
+            api_key = getattr(settings, attr, "") or ""
+    return api_key
+
+
+def _build_providers_to_try(primary: str, residency: str) -> list[str]:
+    """Return an ordered list of providers to attempt, starting with *primary*.
+
+    Fallback providers are added when they have a configured API key and
+    satisfy the *residency* constraint (empty = no constraint).
+
+    Ollama is always included as a fallback even without a key (it needs no
+    key) but only when residency allows it ("local" or "").
+    """
+    providers_to_try: list[str] = [primary]
+    for name, cfg in _PROVIDER_CONFIGS.items():
+        if name == primary:
+            continue
+        provider_region = cfg.get("region", "us")
+        # Respect data residency
+        if residency and provider_region != residency:
+            continue
+        # Check key availability
+        key = _resolve_api_key_for_provider(name)
+        if not key:
+            continue
+        providers_to_try.append(name)
+    return providers_to_try
+
+
 async def _call_advisor_llm(
     system: str,
     user: str,
@@ -522,12 +606,15 @@ async def _call_advisor_llm(
     purpose: str = "generation",
     run_id: str | None = None,
 ) -> str:
-    """Call the configured advisor LLM (any provider) with a system + user message.
+    """Call the configured advisor LLM with automatic failover across providers.
 
-    Uses the SANDCASTLE_ADVISOR_PROVIDER/MODEL env vars. Works with
-    Anthropic, OpenAI, Mistral, and Ollama (local).
+    On rate-limit (429), server error (5xx), or network failure the call is
+    transparently retried with the next available provider. The user never
+    sees the error; the audit log records which provider was ultimately used
+    and whether a failover occurred.
 
-    After a successful call, emits a provider audit event (best-effort).
+    Only 4xx client errors other than 429 are not retried (they indicate a
+    problem with the request itself, not the provider).
 
     Args:
         system: System prompt.
@@ -537,79 +624,107 @@ async def _call_advisor_llm(
         run_id: Optional run ID to associate with the audit event.
 
     Returns:
-        The response text string.
+        The response text string from the first provider that succeeds.
+
+    Raises:
+        RuntimeError: When all available providers have been exhausted.
+        httpx.HTTPStatusError: When a non-retryable 4xx error is returned by
+            any provider.
     """
-    import httpx
+    from sandcastle.config import settings
 
-    api_key = _resolve_api_key()
-    api_url = _get_api_url()
-    model = _get_model()
-    headers = _get_headers(api_key)
-    body = _build_request_body(model, system, [{"role": "user", "content": user}], max_tokens)
+    primary = _resolve_provider_name()
+    residency = settings.data_residency
+    providers_to_try = _build_providers_to_try(primary, residency)
 
-    cfg = _get_advisor_config()
-    provider_name = _resolve_provider_name()
-    provider_region = cfg.get("region", "us")
+    last_error: BaseException | None = None
+    failover_provider: str | None = None  # the provider that ultimately succeeded
+    failover_reason: str | None = None    # error that caused the failover
 
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(api_url, json=body, headers=headers)
-            resp.raise_for_status()
-            result_text = _parse_response_text(resp.json())
-    except httpx.ConnectError as exc:
-        if provider_name == "ollama":
-            # Ollama not reachable - try cloud fallback (respect data residency)
-            import os
-            from sandcastle.config import settings as _settings
-            residency = _settings.data_residency
-            # Pick fallback: prefer EU providers if residency=eu, else anthropic
-            if residency == "eu":
-                fallback_providers = ["mistral"]
+    for i, provider_name in enumerate(providers_to_try):
+        cfg = dict(_PROVIDER_CONFIGS[provider_name])
+        model = cfg["model"]
+        api_url = cfg["api_url"]
+        provider_region = cfg.get("region", "us")
+        is_anthropic = cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
+
+        api_key = _resolve_api_key_for_provider(provider_name)
+        headers = cfg["headers_fn"](api_key)
+        body = _build_request_body(
+            model, system, [{"role": "user", "content": user}], max_tokens,
+            is_anthropic=is_anthropic,
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(api_url, json=body, headers=headers)
+                resp.raise_for_status()
+                result_text = _parse_response_text(resp.json(), is_anthropic=is_anthropic)
+
+            # Success - record failover info if we switched providers
+            if i > 0:
+                failover_provider = provider_name
+                logger.info(
+                    "Advisor failover succeeded: %s -> %s (attempt %d, purpose=%s)",
+                    primary,
+                    provider_name,
+                    i + 1,
+                    purpose,
+                )
+
+            break  # Exit loop on success
+
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            last_error = exc
+            if status == 429:
+                logger.warning(
+                    "Advisor '%s' rate-limited (429), trying next provider...",
+                    provider_name,
+                )
+                if i == 0 and len(providers_to_try) > 1:
+                    failover_reason = f"429 rate-limit from {provider_name}"
+                continue
+            elif status >= 500:
+                logger.warning(
+                    "Advisor '%s' server error (%d), trying next provider...",
+                    provider_name,
+                    status,
+                )
+                if i == 0 and len(providers_to_try) > 1:
+                    failover_reason = f"{status} server error from {provider_name}"
+                continue
             else:
-                fallback_providers = ["anthropic", "mistral", "openai"]
-            fallback_used = False
-            for fb_provider in fallback_providers:
-                fb_cfg = _PROVIDER_CONFIGS.get(fb_provider, {})
-                fb_key_env = fb_cfg.get("api_key_env", "")
-                fb_key = os.environ.get(fb_key_env, "") if fb_key_env else ""
-                if fb_key:
-                    logger.warning(
-                        "Ollama not reachable, falling back to cloud provider '%s'", fb_provider
-                    )
-                    fb_url = fb_cfg["api_url"]
-                    fb_model = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "") or fb_cfg["model"]
-                    fb_headers = fb_cfg["headers_fn"](fb_key)
-                    fb_body = _build_request_body(
-                        fb_model, system, [{"role": "user", "content": user}], max_tokens
-                    )
-                    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                        resp = await client.post(fb_url, json=fb_body, headers=fb_headers)
-                        resp.raise_for_status()
-                        result_text = _parse_response_text(resp.json())
-                    provider_name = fb_provider
-                    model = fb_model
-                    cfg = fb_cfg
-                    provider_region = fb_cfg.get("region", "us")
-                    fallback_used = True
-                    break
-            if not fallback_used:
-                raise RuntimeError(
-                    "Ollama is not reachable and no cloud fallback provider is configured. "
-                    "Set ANTHROPIC_API_KEY, MISTRAL_API_KEY, or OPENAI_API_KEY as fallback."
-                ) from exc
-        else:
-            raise
+                # 4xx client errors (except 429) are not retryable
+                raise
+
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            last_error = exc
+            logger.warning(
+                "Advisor '%s' unreachable (%s), trying next provider...",
+                provider_name,
+                type(exc).__name__,
+            )
+            if i == 0 and len(providers_to_try) > 1:
+                failover_reason = f"{type(exc).__name__} from {provider_name}"
+            continue
+
+    else:
+        # Loop exhausted without a break - all providers failed
+        raise RuntimeError(
+            f"All advisor providers failed. Tried: {', '.join(providers_to_try)}. "
+            f"Last error: {last_error}"
+        )
 
     # Emit provider audit event (best-effort - never block generation)
     try:
         from sandcastle.models.db import async_session
         from sandcastle.engine.audit import append_audit_event
+        from sandcastle.engine.providers import PROVIDER_REGISTRY
 
         # Rough cost estimate based on token counts (approximation)
         input_tokens_approx = len(user) // 4 + len(system) // 4
         output_tokens_approx = len(result_text) // 4
-        # Use pricing from PROVIDER_REGISTRY if available, else 0
-        from sandcastle.engine.providers import PROVIDER_REGISTRY
         cost_estimate = 0.0
         for info in PROVIDER_REGISTRY.values():
             if info.provider == provider_name or provider_name in info.provider:
@@ -625,6 +740,9 @@ async def _call_advisor_llm(
             "region": provider_region,
             "purpose": purpose,
             "cost_estimate_usd": round(cost_estimate, 6),
+            "attempt": i + 1,
+            "failover_from": primary if failover_provider is not None else None,
+            "failover_reason": failover_reason if failover_provider is not None else None,
         }
         async with async_session() as session:
             await append_audit_event(
@@ -639,15 +757,6 @@ async def _call_advisor_llm(
         pass  # Never break generation for audit
 
     return result_text
-
-
-def _resolve_provider_name() -> str:
-    """Return the current advisor provider name (e.g. 'anthropic', 'mistral')."""
-    import os
-    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
-    if provider not in _PROVIDER_CONFIGS:
-        return "anthropic"
-    return provider
 
 
 async def generate_workflow(
