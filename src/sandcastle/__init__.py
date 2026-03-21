@@ -1,6 +1,6 @@
 """Sandcastle - Production-ready workflow orchestrator for AI agents."""
 
-__version__ = "0.24.1"
+__version__ = "0.25.0"
 
 from sandcastle.sdk import AsyncSandcastleClient, SandcastleClient
 
