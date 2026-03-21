@@ -2669,14 +2669,16 @@
         var res = await fetch('./registry.json?v=' + Date.now());
         if (!res.ok) throw new Error('HTTP ' + res.status);
         registry = await res.json();
-        animateStats(registry.stats);
-        renderCollections();
+        try { animateStats(registry.stats); } catch(e) { console.warn('animateStats error:', e); }
+        try { renderCollections(); } catch(e) { console.warn('renderCollections error:', e); }
         renderTemplates();
       } catch (err) {
-        document.getElementById('template-grid').innerHTML =
+        console.error('fetchRegistry error:', err);
+        var grid = document.getElementById('template-grid');
+        if (grid) grid.innerHTML =
           '<div class="error-state">' +
             '<h3>Could not load workflows</h3>' +
-            '<p>Failed to fetch registry.json - <a href="https://github.com/gizmax/Sandcastle/tree/main/site/hub" target="_blank" rel="noopener">view on GitHub</a></p>' +
+            '<p>' + (err.message || 'Unknown error') + ' - <a href="https://github.com/gizmax/Sandcastle/tree/main/site/hub" target="_blank" rel="noopener">view on GitHub</a></p>' +
           '</div>';
       }
     }
