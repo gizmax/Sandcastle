@@ -582,6 +582,88 @@ const MOCK_AUTOPILOT_STATS = {
   total_cost_savings_usd: 1.24,
 };
 
+const MOCK_EVOLUTIONS = [
+  {
+    id: "evo-001",
+    workflow_name: "lead-enrichment",
+    status: "completed",
+    optimize_for: "balanced",
+    baseline_score: 45.2,
+    best_score: 78.6,
+    baseline_quality: 0.72,
+    best_quality: 0.94,
+    baseline_cost: 1.84,
+    best_cost: 0.92,
+    max_iterations: 20,
+    current_iteration: 20,
+    total_keeps: 7,
+    total_discards: 13,
+    created_at: h(48),
+    completed_at: h(46),
+  },
+  {
+    id: "evo-002",
+    workflow_name: "competitor-monitor",
+    status: "running",
+    optimize_for: "cost",
+    baseline_score: 52.0,
+    best_score: 61.3,
+    baseline_quality: 0.85,
+    best_quality: 0.87,
+    baseline_cost: 2.10,
+    best_cost: 1.45,
+    max_iterations: 15,
+    current_iteration: 8,
+    total_keeps: 3,
+    total_discards: 5,
+    created_at: h(2),
+    completed_at: null,
+  },
+];
+
+const MOCK_ITERATIONS_EVO_001 = [
+  { iteration_number: 1, mutation_type: "model", mutation_description: "Step 'scrape': sonnet -> haiku", score: 42.1, quality: 0.68, cost_usd: 0.95, status: "discard" },
+  { iteration_number: 2, mutation_type: "prompt", mutation_description: "Step 'enrich': refined extraction prompt with examples", score: 51.3, quality: 0.79, cost_usd: 1.72, status: "keep" },
+  { iteration_number: 3, mutation_type: "simplify", mutation_description: "Reduced max_turns 5 -> 3 on 'score' step", score: 53.8, quality: 0.78, cost_usd: 1.41, status: "keep" },
+  { iteration_number: 4, mutation_type: "prompt", mutation_description: "Step 'score': added structured output schema", score: 57.2, quality: 0.80, cost_usd: 1.38, status: "keep" },
+  { iteration_number: 5, mutation_type: "model", mutation_description: "Step 'enrich': sonnet -> haiku for cost reduction", score: 48.5, quality: 0.74, cost_usd: 0.89, status: "discard" },
+  { iteration_number: 6, mutation_type: "prompt", mutation_description: "Step 'enrich': added chain-of-thought reasoning", score: 61.4, quality: 0.83, cost_usd: 1.36, status: "keep" },
+  { iteration_number: 7, mutation_type: "simplify", mutation_description: "Removed redundant validation step", score: 63.0, quality: 0.83, cost_usd: 1.18, status: "keep" },
+  { iteration_number: 8, mutation_type: "prompt", mutation_description: "Step 'scrape': improved URL parsing instructions", score: 59.1, quality: 0.80, cost_usd: 1.20, status: "discard" },
+  { iteration_number: 9, mutation_type: "model", mutation_description: "Step 'score': sonnet -> haiku-3", score: 65.7, quality: 0.84, cost_usd: 1.04, status: "keep" },
+  { iteration_number: 10, mutation_type: "prompt", mutation_description: "Step 'enrich': few-shot examples with edge cases", score: 69.2, quality: 0.88, cost_usd: 1.06, status: "keep" },
+  { iteration_number: 11, mutation_type: "simplify", mutation_description: "Parallel scrape steps collapsed to single batch", score: 66.8, quality: 0.86, cost_usd: 0.98, status: "discard" },
+  { iteration_number: 12, mutation_type: "prompt", mutation_description: "Step 'enrich': role framing as data analyst", score: 71.5, quality: 0.90, cost_usd: 1.03, status: "keep" },
+  { iteration_number: 13, mutation_type: "model", mutation_description: "Step 'enrich': haiku for non-critical sub-fields", score: 68.9, quality: 0.88, cost_usd: 0.94, status: "discard" },
+  { iteration_number: 14, mutation_type: "prompt", mutation_description: "Step 'score': clearer scoring rubric 1-100", score: 73.4, quality: 0.91, cost_usd: 1.00, status: "keep" },
+  { iteration_number: 15, mutation_type: "simplify", mutation_description: "Removed duplicate dedup step", score: 74.8, quality: 0.92, cost_usd: 0.97, status: "keep" },
+  { iteration_number: 16, mutation_type: "prompt", mutation_description: "Step 'enrich': added negative examples to prompt", score: 72.1, quality: 0.90, cost_usd: 0.97, status: "discard" },
+  { iteration_number: 17, mutation_type: "prompt", mutation_description: "Step 'enrich': output validation added inline", score: 76.3, quality: 0.93, cost_usd: 0.95, status: "keep" },
+  { iteration_number: 18, mutation_type: "simplify", mutation_description: "Inlined constant lookup table", score: 75.9, quality: 0.93, cost_usd: 0.93, status: "discard" },
+  { iteration_number: 19, mutation_type: "prompt", mutation_description: "Step 'score': calibration examples from real data", score: 77.4, quality: 0.93, cost_usd: 0.94, status: "keep" },
+  { iteration_number: 20, mutation_type: "prompt", mutation_description: "Final tune: concise system prompt across all steps", score: 78.6, quality: 0.94, cost_usd: 0.92, status: "keep" },
+];
+
+const MOCK_ITERATIONS_EVO_002 = [
+  { iteration_number: 1, mutation_type: "model", mutation_description: "Step 'fetch-competitors': sonnet -> haiku", score: 55.1, quality: 0.82, cost_usd: 1.80, status: "keep" },
+  { iteration_number: 2, mutation_type: "prompt", mutation_description: "Step 'analyze': cost-focused extraction prompt", score: 57.3, quality: 0.84, cost_usd: 1.70, status: "keep" },
+  { iteration_number: 3, mutation_type: "simplify", mutation_description: "Reduced output length limit on 'summarize'", score: 54.0, quality: 0.80, cost_usd: 1.60, status: "discard" },
+  { iteration_number: 4, mutation_type: "model", mutation_description: "Step 'analyze': haiku for secondary checks", score: 58.8, quality: 0.85, cost_usd: 1.55, status: "keep" },
+  { iteration_number: 5, mutation_type: "prompt", mutation_description: "Step 'summarize': shorter template output", score: 59.5, quality: 0.85, cost_usd: 1.52, status: "keep" },
+  { iteration_number: 6, mutation_type: "simplify", mutation_description: "Batched competitor fetch into single call", score: 57.2, quality: 0.83, cost_usd: 1.50, status: "discard" },
+  { iteration_number: 7, mutation_type: "model", mutation_description: "Step 'format-report': haiku instead of sonnet", score: 60.4, quality: 0.86, cost_usd: 1.47, status: "keep" },
+  { iteration_number: 8, mutation_type: "prompt", mutation_description: "Step 'analyze': removed verbose instructions", score: 61.3, quality: 0.87, cost_usd: 1.45, status: "keep" },
+];
+
+const MOCK_EVOLUTION_STATS = {
+  total_evolutions: 2,
+  running_evolutions: 1,
+  completed_evolutions: 1,
+  avg_score_improvement: 28.4,
+  avg_cost_savings_pct: 31.2,
+  total_iterations_run: 28,
+};
+
 const MOCK_VIOLATIONS = [
   {
     id: "vio-001",
@@ -6027,6 +6109,75 @@ const routes: MockRoute[] = [
   {
     match: /^\/autopilot\/stats$/,
     handler: () => MOCK_AUTOPILOT_STATS,
+  },
+  // GET /evolution
+  {
+    match: /^\/evolution$/,
+    method: "GET",
+    handler: () => MOCK_EVOLUTIONS,
+  },
+  // GET /evolution/stats
+  {
+    match: /^\/evolution\/stats$/,
+    method: "GET",
+    handler: () => MOCK_EVOLUTION_STATS,
+  },
+  // POST /evolution/start
+  {
+    match: /^\/evolution\/start$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { workflow_name?: string; optimize_for?: string; max_iterations?: number } | undefined;
+      return {
+        id: `evo-${Date.now().toString(36)}`,
+        workflow_name: b?.workflow_name ?? "unknown",
+        status: "running",
+        optimize_for: b?.optimize_for ?? "balanced",
+        baseline_score: 0,
+        best_score: 0,
+        baseline_quality: 0,
+        best_quality: 0,
+        baseline_cost: 0,
+        best_cost: 0,
+        max_iterations: b?.max_iterations ?? 20,
+        current_iteration: 0,
+        total_keeps: 0,
+        total_discards: 0,
+        created_at: new Date().toISOString(),
+        completed_at: null,
+      };
+    },
+  },
+  // GET /evolution/{name}/status
+  {
+    match: /^\/evolution\/([^/]+)\/status$/,
+    method: "GET",
+    handler: (params) => {
+      const evo = MOCK_EVOLUTIONS.find((e) => e.id === params._1 || e.workflow_name === params._1);
+      if (!evo) return null;
+      const iterations = evo.id === "evo-001" ? MOCK_ITERATIONS_EVO_001 : MOCK_ITERATIONS_EVO_002;
+      return { ...evo, iterations };
+    },
+  },
+  // POST /evolution/{name}/accept
+  {
+    match: /^\/evolution\/([^/]+)\/accept$/,
+    method: "POST",
+    handler: (params) => {
+      const evo = MOCK_EVOLUTIONS.find((e) => e.id === params._1 || e.workflow_name === params._1);
+      if (!evo) return null;
+      return { ...evo, status: "accepted" };
+    },
+  },
+  // POST /evolution/{name}/cancel
+  {
+    match: /^\/evolution\/([^/]+)\/cancel$/,
+    method: "POST",
+    handler: (params) => {
+      const evo = MOCK_EVOLUTIONS.find((e) => e.id === params._1 || e.workflow_name === params._1);
+      if (!evo) return null;
+      return { ...evo, status: "cancelled" };
+    },
   },
   {
     match: /^\/violations$/,

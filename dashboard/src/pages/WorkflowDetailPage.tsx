@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { GitCompare, RotateCcw, Upload, X, Download, Loader2, Copy, ArrowLeft } from "lucide-react";
+import { GitCompare, RotateCcw, Sparkles, Upload, X, Download, Loader2, Copy, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { VersionHistory } from "@/components/workflows/VersionHistory";
@@ -181,6 +181,17 @@ export default function WorkflowDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/evolution", { state: { workflow: data.workflow_name } })}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
+                "text-sm font-medium text-accent",
+                "hover:bg-accent/10 transition-colors"
+              )}
+            >
+              <Sparkles className="h-4 w-4" />
+              Evolve
+            </button>
             <button
               onClick={handleShare}
               className={cn(

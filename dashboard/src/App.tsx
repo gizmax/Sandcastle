@@ -26,6 +26,7 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
 const IntegrationsPage = lazy(() => import("@/pages/IntegrationsPage"));
 const EvaluationsPage = lazy(() => import("@/pages/EvaluationsPage"));
+const EvolutionPage = lazy(() => import("@/pages/EvolutionPage"));
 const SystemHealthPage = lazy(() => import("@/pages/SystemHealthPage"));
 const CompliancePage = lazy(() => import("@/pages/CompliancePage"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
@@ -94,6 +95,7 @@ export default function App() {
               <Route path="/approvals" element={<PageBoundary name="approvals"><ApprovalsPage /></PageBoundary>} />
               <Route path="/evaluations" element={<PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary>} />
               <Route path="/autopilot" element={<PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary>} />
+              <Route path="/evolution" element={<PageBoundary name="evolution"><EvolutionPage /></PageBoundary>} />
               <Route path="/violations" element={<PageBoundary name="violations"><ViolationsPage /></PageBoundary>} />
               <Route path="/optimizer" element={<PageBoundary name="optimizer"><OptimizerPage /></PageBoundary>} />
               <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
