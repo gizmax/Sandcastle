@@ -181,35 +181,29 @@ def _evaluate_schema_completeness(output: Any, schema: dict | None) -> float:
 
 
 async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
-    """Use an LLM to judge output quality (via Sandshore haiku)."""
+    """Use the configured advisor LLM to judge output quality.
+
+    Uses SANDCASTLE_ADVISOR_PROVIDER/MODEL - works with Anthropic, OpenAI,
+    Mistral, or Ollama (local).
+    """
     try:
-        from sandcastle.config import settings
-        from sandcastle.engine.sandshore import get_sandshore_runtime
+        from sandcastle.engine.generator import _call_advisor_llm
 
         criteria = config.evaluation.criteria if config.evaluation else "overall quality"
         output_str = str(output)[:2000]  # Truncate for efficiency
 
-        prompt = (
+        user_msg = (
             f"Rate the following output on a scale of 0.0 to 1.0 based on: {criteria}\n\n"
             f"Output:\n{output_str}\n\n"
             "Respond with ONLY a number between 0.0 and 1.0."
         )
 
-        client = get_sandshore_runtime(
-            anthropic_api_key=settings.anthropic_api_key,
-            e2b_api_key=settings.e2b_api_key,
-            sandbox_backend=settings.sandbox_backend,
-            docker_image=settings.docker_image,
-            docker_url=settings.docker_url or None,
-            cloudflare_worker_url=settings.cloudflare_worker_url,
+        result = await _call_advisor_llm(
+            system="You are a quality evaluator. Respond with only a number between 0.0 and 1.0.",
+            user=user_msg,
+            max_tokens=16,
         )
-        result = await client.query({
-            "prompt": prompt,
-            "model": "haiku",
-            "max_turns": 1,
-            "timeout": 30,
-        })
-        score = float(result.text.strip())
+        score = float(result.strip())
         return max(0.0, min(1.0, score))
 
     except Exception as e:

@@ -136,24 +136,13 @@ async def mutate_prompt(
 
     new_prompt = target_step.prompt  # default: no change
     try:
-        from sandcastle.config import settings
-        from sandcastle.engine.sandshore import get_sandshore_runtime
+        from sandcastle.engine.generator import _get_advisor_config, _call_advisor_llm
 
-        client = get_sandshore_runtime(
-            anthropic_api_key=settings.anthropic_api_key,
-            e2b_api_key=settings.e2b_api_key,
-            sandbox_backend=settings.sandbox_backend,
-            docker_image=settings.docker_image,
-            docker_url=settings.docker_url or None,
-            cloudflare_worker_url=settings.cloudflare_worker_url,
+        response_text = await _call_advisor_llm(
+            system="You are a prompt engineering expert. Improve the given prompt based on eval failures.",
+            user=prompt_text,
         )
-        result = await client.query({
-            "prompt": prompt_text,
-            "model": "haiku",
-            "max_turns": 1,
-            "timeout": 30,
-        })
-        improved = result.text.strip()
+        improved = response_text.strip()
         if improved and improved != target_step.prompt:
             new_prompt = improved
         else:

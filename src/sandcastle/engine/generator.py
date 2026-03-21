@@ -345,6 +345,15 @@ _PROVIDER_CONFIGS = {
             "Content-Type": "application/json",
         },
     },
+    "mistral": {
+        "api_url": "https://api.mistral.ai/v1/chat/completions",
+        "model": "mistral-large-latest",
+        "api_key_env": "MISTRAL_API_KEY",
+        "headers_fn": lambda key: {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+    },
     "ollama": {
         "api_url": "http://localhost:11434/v1/chat/completions",
         "model": "llama3.2",
@@ -461,6 +470,28 @@ _API_URL = "https://api.anthropic.com/v1/messages"
 _MODEL = "claude-sonnet-4-20250514"
 _MAX_TOKENS = 4096
 _TIMEOUT = 60
+
+
+async def _call_advisor_llm(system: str, user: str, max_tokens: int = 2048) -> str:
+    """Call the configured advisor LLM (any provider) with a system + user message.
+
+    Uses the SANDCASTLE_ADVISOR_PROVIDER/MODEL env vars. Works with
+    Anthropic, OpenAI, Mistral, and Ollama (local).
+
+    Returns the response text string.
+    """
+    import httpx
+
+    api_key = _resolve_api_key()
+    api_url = _get_api_url()
+    model = _get_model()
+    headers = _get_headers(api_key)
+    body = _build_request_body(model, system, [{"role": "user", "content": user}], max_tokens)
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.post(api_url, json=body, headers=headers)
+        resp.raise_for_status()
+        return _parse_response_text(resp.json())
 
 
 async def generate_workflow(
