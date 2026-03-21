@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # Multi-model provider keys (optional)
     minimax_api_key: str = ""
+    mistral_api_key: str = ""
     openai_api_key: str = ""
     openrouter_api_key: str = ""
 
@@ -150,6 +151,9 @@ class Settings(BaseSettings):
 
     # Compliance mode: "" = disabled, "eu_ai_act" = EU AI Act enforcement
     compliance_mode: str = ""
+
+    # Data residency: "" = no restriction, "eu" = EU only, "local" = local/on-prem only
+    data_residency: str = ""  # "", "eu", "local"
 
     # OpenTelemetry (distributed tracing)
     otel_enabled: bool = False  # Set to True to enable OTLP trace export
@@ -427,7 +431,7 @@ class Settings(BaseSettings):
     # Fields that contain secrets and must be redacted in safe_dump / logs
     _SENSITIVE_FIELDS: frozenset[str] = frozenset({
         "anthropic_api_key", "e2b_api_key", "openai_api_key",
-        "openrouter_api_key", "minimax_api_key", "sentry_dsn",
+        "openrouter_api_key", "minimax_api_key", "mistral_api_key", "sentry_dsn",
         "admin_api_key", "webhook_secret", "credential_encryption_key",
         "aws_access_key_id", "aws_secret_access_key",
         "database_url", "redis_url", "license_key",

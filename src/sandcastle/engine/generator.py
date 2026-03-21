@@ -330,6 +330,7 @@ _PROVIDER_CONFIGS = {
         "api_url": "https://api.anthropic.com/v1/messages",
         "model": "claude-sonnet-4-20250514",
         "api_key_env": "ANTHROPIC_API_KEY",
+        "region": "us",
         "headers_fn": lambda key: {
             "x-api-key": key,
             "anthropic-version": "2023-06-01",
@@ -340,6 +341,7 @@ _PROVIDER_CONFIGS = {
         "api_url": "https://api.openai.com/v1/chat/completions",
         "model": "gpt-4o",
         "api_key_env": "OPENAI_API_KEY",
+        "region": "us",
         "headers_fn": lambda key: {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
@@ -349,6 +351,7 @@ _PROVIDER_CONFIGS = {
         "api_url": "https://api.mistral.ai/v1/chat/completions",
         "model": "mistral-large-latest",
         "api_key_env": "MISTRAL_API_KEY",
+        "region": "eu",
         "headers_fn": lambda key: {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
@@ -358,6 +361,7 @@ _PROVIDER_CONFIGS = {
         "api_url": "http://localhost:11434/v1/chat/completions",
         "model": "llama3.2",
         "api_key_env": "",  # Ollama doesn't need a key
+        "region": "local",
         "headers_fn": lambda _: {"Content-Type": "application/json"},
     },
 }
@@ -366,10 +370,16 @@ _PROVIDER_CONFIGS = {
 def _get_advisor_config() -> dict:
     """Resolve advisor provider from environment variables.
 
-    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | ollama
+    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | mistral | ollama
     SANDCASTLE_ADVISOR_MODEL: override model name
+
+    When ``data_residency`` is set in settings, the chosen provider must
+    operate in the required region. If it doesn't, a ``ValueError`` is raised
+    with a clear message listing the compliant providers.
     """
     import os
+
+    from sandcastle.config import settings
 
     provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
     if provider not in _PROVIDER_CONFIGS:
@@ -379,6 +389,24 @@ def _get_advisor_config() -> dict:
     model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
     if model_override:
         config["model"] = model_override
+
+    # Enforce data residency constraint
+    residency = settings.data_residency
+    if residency:
+        provider_region = config.get("region", "us")
+        if provider_region != residency:
+            # Build list of compliant providers for the error message
+            compliant = [
+                name for name, cfg in _PROVIDER_CONFIGS.items()
+                if cfg.get("region", "us") == residency
+            ]
+            raise ValueError(
+                f"Data residency mode '{residency}' is active but advisor provider "
+                f"'{provider}' runs in region '{provider_region}'. "
+                f"Use a provider in the '{residency}' region. "
+                f"Compliant providers: {', '.join(compliant) or 'none configured'}. "
+                f"Set SANDCASTLE_ADVISOR_PROVIDER to one of these."
+            )
 
     return config
 
@@ -472,13 +500,30 @@ _MAX_TOKENS = 4096
 _TIMEOUT = 60
 
 
-async def _call_advisor_llm(system: str, user: str, max_tokens: int = 2048) -> str:
+async def _call_advisor_llm(
+    system: str,
+    user: str,
+    max_tokens: int = 2048,
+    *,
+    purpose: str = "generation",
+    run_id: str | None = None,
+) -> str:
     """Call the configured advisor LLM (any provider) with a system + user message.
 
     Uses the SANDCASTLE_ADVISOR_PROVIDER/MODEL env vars. Works with
     Anthropic, OpenAI, Mistral, and Ollama (local).
 
-    Returns the response text string.
+    After a successful call, emits a provider audit event (best-effort).
+
+    Args:
+        system: System prompt.
+        user: User message.
+        max_tokens: Maximum tokens in response.
+        purpose: Audit purpose tag - "generation", "evolution", "judge", "explain".
+        run_id: Optional run ID to associate with the audit event.
+
+    Returns:
+        The response text string.
     """
     import httpx
 
@@ -488,10 +533,63 @@ async def _call_advisor_llm(system: str, user: str, max_tokens: int = 2048) -> s
     headers = _get_headers(api_key)
     body = _build_request_body(model, system, [{"role": "user", "content": user}], max_tokens)
 
+    cfg = _get_advisor_config()
+    provider_name = _resolve_provider_name()
+    provider_region = cfg.get("region", "us")
+
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
-        return _parse_response_text(resp.json())
+        result_text = _parse_response_text(resp.json())
+
+    # Emit provider audit event (best-effort - never block generation)
+    try:
+        from sandcastle.models.db import async_session
+        from sandcastle.engine.audit import append_audit_event
+
+        # Rough cost estimate based on token counts (approximation)
+        input_tokens_approx = len(user) // 4 + len(system) // 4
+        output_tokens_approx = len(result_text) // 4
+        # Use pricing from PROVIDER_REGISTRY if available, else 0
+        from sandcastle.engine.providers import PROVIDER_REGISTRY
+        cost_estimate = 0.0
+        for info in PROVIDER_REGISTRY.values():
+            if info.provider == provider_name or provider_name in info.provider:
+                cost_estimate = (
+                    info.input_price_per_m * input_tokens_approx / 1_000_000
+                    + info.output_price_per_m * output_tokens_approx / 1_000_000
+                )
+                break
+
+        audit_payload = {
+            "provider": provider_name,
+            "model": model,
+            "region": provider_region,
+            "purpose": purpose,
+            "cost_estimate_usd": round(cost_estimate, 6),
+        }
+        async with async_session() as session:
+            await append_audit_event(
+                session,
+                event_type="advisor.llm_call",
+                run_id=run_id,
+                actor_id=f"advisor:{provider_name}",
+                payload=audit_payload,
+            )
+            await session.commit()
+    except Exception:
+        pass  # Never break generation for audit
+
+    return result_text
+
+
+def _resolve_provider_name() -> str:
+    """Return the current advisor provider name (e.g. 'anthropic', 'mistral')."""
+    import os
+    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
+    if provider not in _PROVIDER_CONFIGS:
+        return "anthropic"
+    return provider
 
 
 async def generate_workflow(

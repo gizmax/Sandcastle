@@ -561,10 +561,26 @@ class SandshoreRuntime:
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Execute with automatic model failover on retriable errors."""
-        from sandcastle.engine.providers import resolve_model
+        from sandcastle.engine.providers import PROVIDER_REGISTRY, resolve_model
 
         model_str = request.get("model", "sonnet")
         failover = get_failover()
+
+        # Enforce data residency constraint on the primary model
+        from sandcastle.config import settings as _settings
+        _residency = _settings.data_residency
+        if _residency:
+            try:
+                _model_info = resolve_model(model_str)
+                if _model_info.region != _residency:
+                    raise SandshoreError(
+                        f"Data residency mode '{_residency}' is active. "
+                        f"Model '{model_str}' runs in region '{_model_info.region}', "
+                        f"which does not satisfy the residency requirement. "
+                        f"Choose a model in the '{_residency}' region."
+                    )
+            except KeyError:
+                pass  # Unknown model - let the backend handle it
 
         # Try primary model
         try:
@@ -592,9 +608,18 @@ class SandshoreRuntime:
             except KeyError:
                 raise exc
 
-        # Try alternatives
-        alternatives = failover.get_alternatives(model_str)
+        # Try alternatives, respecting data residency if configured
+        from sandcastle.config import settings as _settings
+        _residency = _settings.data_residency
+
+        alternatives = failover.get_alternatives(model_str, data_residency=_residency)
         if not alternatives:
+            if _residency:
+                raise SandshoreError(
+                    f"Model '{model_str}' is unavailable and no alternatives "
+                    f"are available in the '{_residency}' region. "
+                    f"Data residency mode prevents cross-region failover."
+                )
             raise SandshoreError(
                 f"Model '{model_str}' is rate-limited and no "
                 f"alternatives are available"

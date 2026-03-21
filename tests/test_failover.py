@@ -64,8 +64,14 @@ class TestFailoverChains:
                 )
 
     def test_chains_are_non_empty(self) -> None:
-        """Every chain must have at least one alternative."""
+        """Every non-local chain must have at least one alternative."""
+        from sandcastle.engine.providers import PROVIDER_REGISTRY
+
         for model, chain in FAILOVER_CHAINS.items():
+            info = PROVIDER_REGISTRY.get(model)
+            # Local models (Ollama) may have empty chains - they can't failover to cloud
+            if info is not None and info.region == "local":
+                continue
             assert len(chain) >= 1, f"Chain for '{model}' is empty"
 
 
@@ -119,6 +125,7 @@ class TestProviderFailover:
                 mock_settings.anthropic_api_key = ""
                 mock_settings.e2b_api_key = ""
                 mock_settings.minimax_api_key = ""
+                mock_settings.mistral_api_key = ""
                 mock_settings.openai_api_key = ""
                 mock_settings.openrouter_api_key = ""
                 alts = pf.get_alternatives("sonnet")

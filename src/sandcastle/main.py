@@ -30,6 +30,118 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _validate_providers() -> None:
+    """Pre-flight check: verify configured LLM providers are reachable.
+
+    Checks the advisor provider and each PROVIDER_REGISTRY entry that has a
+    configured API key. Logs warnings for unreachable providers but never
+    blocks startup - this is informational only.
+    """
+    import os
+    import time
+
+    import httpx
+
+    from sandcastle.engine.generator import _PROVIDER_CONFIGS
+
+    logger.info("Running provider pre-flight checks...")
+    checked = 0
+    warnings = 0
+
+    for provider_name, cfg in _PROVIDER_CONFIGS.items():
+        key_env = cfg.get("api_key_env", "")
+        if not key_env:
+            # Ollama - check if running locally
+            start = time.monotonic()
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get("http://localhost:11434/api/tags")
+                    resp.raise_for_status()
+                latency_ms = round((time.monotonic() - start) * 1000)
+                logger.info("Provider %s: ok (%dms, region=local)", provider_name, latency_ms)
+            except Exception:
+                logger.warning(
+                    "Provider %s: not reachable (Ollama not running locally)", provider_name
+                )
+                warnings += 1
+            checked += 1
+            continue
+
+        api_key = os.environ.get(key_env, "")
+        if not api_key:
+            # Try settings
+            attr_map = {
+                "ANTHROPIC_API_KEY": "anthropic_api_key",
+                "OPENAI_API_KEY": "openai_api_key",
+                "MISTRAL_API_KEY": "mistral_api_key",
+                "MINIMAX_API_KEY": "minimax_api_key",
+                "OPENROUTER_API_KEY": "openrouter_api_key",
+            }
+            attr = attr_map.get(key_env)
+            if attr:
+                api_key = getattr(settings, attr, "") or ""
+
+        if not api_key:
+            logger.debug("Provider %s: skipped (no API key configured)", provider_name)
+            continue
+
+        checked += 1
+        start = time.monotonic()
+        try:
+            headers_fn = cfg.get("headers_fn")
+            headers = headers_fn(api_key) if headers_fn else {}
+
+            if key_env == "ANTHROPIC_API_KEY":
+                body = {
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "ping"}],
+                }
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(cfg["api_url"], json=body, headers=headers)
+                    if resp.status_code not in (200, 400, 404):
+                        resp.raise_for_status()
+            else:
+                body = {
+                    "model": cfg.get("model", "gpt-4o-mini"),
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "ping"}],
+                }
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(cfg["api_url"], json=body, headers=headers)
+                    if resp.status_code not in (200, 400, 404):
+                        resp.raise_for_status()
+
+            latency_ms = round((time.monotonic() - start) * 1000)
+            region = cfg.get("region", "us")
+            logger.info(
+                "Provider %s: ok (%dms, region=%s)", provider_name, latency_ms, region
+            )
+        except Exception as exc:
+            latency_ms = round((time.monotonic() - start) * 1000)
+            logger.warning(
+                "Provider %s: unreachable after %dms - %s",
+                provider_name,
+                latency_ms,
+                str(exc)[:200],
+            )
+            warnings += 1
+
+    if checked == 0:
+        logger.warning(
+            "No LLM providers configured. Set ANTHROPIC_API_KEY or other provider keys."
+        )
+    elif warnings:
+        logger.warning(
+            "Provider pre-flight: %d/%d provider(s) unreachable. "
+            "Failover will activate automatically when needed.",
+            warnings,
+            checked,
+        )
+    else:
+        logger.info("Provider pre-flight: all %d configured provider(s) reachable", checked)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
@@ -246,6 +358,9 @@ async def lifespan(app: FastAPI):
                 session.add(admin_key)
                 await session.commit()
                 logger.info("Admin API key bootstrapped from ADMIN_API_KEY env var")
+
+    # Pre-flight provider validation (best-effort, never blocks startup)
+    await _validate_providers()
 
     yield
 

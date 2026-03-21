@@ -532,6 +532,107 @@ async def health_check() -> ApiResponse:
     )
 
 
+@router.get("/health/providers")
+async def get_provider_health() -> ApiResponse:
+    """Check reachability of all configured LLM providers.
+
+    For each provider with a configured API key, performs a lightweight
+    connectivity check and returns status, latency, and region.
+    Results are cached for 5 minutes to avoid hammering provider APIs.
+    """
+    import os as _os
+
+    from sandcastle.engine.generator import _PROVIDER_CONFIGS
+
+    _CACHE_TTL = 300  # 5 minutes
+
+    # Check module-level cache attached to the function object
+    cached_at: float = getattr(get_provider_health, "_cache_ts", 0.0)
+    if time.monotonic() - cached_at < _CACHE_TTL:
+        cached = getattr(get_provider_health, "_cache", None)
+        if cached is not None:
+            return ApiResponse(data=cached)
+
+    async def _check_provider(provider_name: str, cfg: dict) -> dict:
+        key_env = cfg.get("api_key_env", "")
+        region = cfg.get("region", "us")
+
+        # Determine if key is configured
+        api_key = ""
+        if key_env:
+            api_key = _os.environ.get(key_env, "")
+            if not api_key:
+                from sandcastle.config import settings as _s
+                attr_map = {
+                    "ANTHROPIC_API_KEY": "anthropic_api_key",
+                    "OPENAI_API_KEY": "openai_api_key",
+                    "MISTRAL_API_KEY": "mistral_api_key",
+                    "MINIMAX_API_KEY": "minimax_api_key",
+                    "OPENROUTER_API_KEY": "openrouter_api_key",
+                }
+                attr = attr_map.get(key_env)
+                if attr:
+                    api_key = getattr(_s, attr, "") or ""
+
+        if not api_key and key_env:
+            return {"status": "unconfigured", "latency_ms": None, "region": region}
+
+        start = time.monotonic()
+        try:
+            headers_fn = cfg.get("headers_fn")
+            headers = headers_fn(api_key) if headers_fn else {}
+
+            if provider_name == "ollama":
+                # Ollama: check /api/tags (no auth needed)
+                url = "http://localhost:11434/api/tags"
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+            elif key_env == "ANTHROPIC_API_KEY":
+                # Anthropic: minimal messages call - 400 = reachable (bad request ok)
+                body = {
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "ping"}],
+                }
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(cfg["api_url"], json=body, headers=headers)
+                    if resp.status_code not in (200, 400, 404):
+                        resp.raise_for_status()
+            else:
+                # OpenAI-compatible providers
+                body = {
+                    "model": cfg.get("model", "gpt-4o-mini"),
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "ping"}],
+                }
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(cfg["api_url"], json=body, headers=headers)
+                    if resp.status_code not in (200, 400, 404):
+                        resp.raise_for_status()
+
+            latency_ms = round((time.monotonic() - start) * 1000, 1)
+            return {"status": "ok", "latency_ms": latency_ms, "region": region}
+        except Exception as exc:
+            latency_ms = round((time.monotonic() - start) * 1000, 1)
+            return {
+                "status": "down",
+                "latency_ms": latency_ms,
+                "region": region,
+                "error": str(exc)[:200],
+            }
+
+    results: dict = {}
+    for name, cfg in _PROVIDER_CONFIGS.items():
+        results[name] = await _check_provider(name, cfg)
+
+    # Store cache
+    get_provider_health._cache = results  # type: ignore[attr-defined]
+    get_provider_health._cache_ts = time.monotonic()  # type: ignore[attr-defined]
+
+    return ApiResponse(data=results)
+
+
 @router.get("/runtime")
 async def runtime_info() -> ApiResponse:
     """Return current runtime mode information."""
