@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-03-20 — "The Mother of All Tests"
+
+### Fixed
+- **18 bugs fixed** across 2 critical, 4 high, and 12 medium severity findings
+- React #310 crash on RunDetailPage (hooks called after conditional returns)
+- Environment variable exposure via template system (`{env.API_KEY}` leaked secrets to LLM)
+- Template injection via user-controlled workflow inputs
+- API route paths doubled as `/api/api/v1/` instead of `/api/v1/`
+- Heatmap day-of-week double offset (Monday displayed as Wednesday)
+- Emergency stop button posted to wrong endpoint (`/compliance/` vs `/admin/`)
+- CSP `unsafe-inline` in script-src negated XSS protection
+- CORS hardcoded localhost ports in production
+- SSE API key leaked in URL query parameter (replaced with fetch-based streaming)
+- Connection strings with credentials visible in DOM
+- Missing rate limiting on destructive endpoints (DLQ retry, cancel, approval)
+- Email regex catastrophic backtracking on large inputs (10s -> 0.68s)
+- Secret scrubber gaps: credential URLs, PEM keys, Azure AccountKey, JSON-quoted secrets
+- Eval regression false negatives from IEEE 754 floating-point edge cases
+- Missing audit event on workflow publish action
+- Race condition on concurrent publish calls (added `with_for_update`)
+- Empty `@upload:` file_id leaked raw token to LLM prompt
+- Anomaly `run_id` typed as non-nullable but backend emits empty string
+
+### Added
+- **1,100+ new tests** — branch coverage increased from 77% to 90%
+- Coverage tests for: routes (91), executor + autopilot (283), storage + pdf + eval (215), CLI (170), deep executor steps (128), dense block push (153), final gaps (131+)
+- Per-module highlights: autopilot 52% -> 94%, storage 69% -> 90%, CLI 50% -> 75%
+
+### Changed
+- Dashboard dist/ removed from git — CI builds in GitHub Actions
+- Node.js upgraded from 20 to 22 in GitHub Actions
+- Unified navigation across all 5 website pages
+- What's New moved to dedicated `/whatsnew/` subpage
+
 ## [0.24.0] - 2026-03-19
 
 ### Added
