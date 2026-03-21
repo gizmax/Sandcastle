@@ -462,10 +462,10 @@ function EvolutionDetail({
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    formatter={(value: number | undefined, name: string) => [
+                    formatter={((value: number | undefined, name: string | undefined) => [
                       (value ?? 0).toFixed(1),
                       name === "score" ? "Score" : "Baseline",
-                    ]}
+                    ]) as never}
                   />
                   <ReferenceLine
                     y={evolution.baseline_score}
