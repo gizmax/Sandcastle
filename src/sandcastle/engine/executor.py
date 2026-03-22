@@ -2690,6 +2690,110 @@ async def _execute_composio_step(
         )
 
 
+async def _execute_openclaw_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute an OpenClaw agent step via the gateway's OpenAI-compatible API."""
+    import os
+    import time
+
+    import httpx
+
+    started_at = time.monotonic()
+    cfg = step.openclaw_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing openclaw_config")
+
+    # Resolve templates in gateway URL and message
+    gateway_url = resolve_templates(cfg.gateway_url, context, step.depends_on)
+    message = resolve_templates(
+        cfg.message or step.prompt or f"openclaw step {step.id}",
+        context,
+        step.depends_on,
+    )
+
+    # Validate URL
+    if not gateway_url.startswith(("http://", "https://")):
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"OpenClaw gateway_url must use http(s), got: {gateway_url[:50]}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    # Build OpenAI-compatible request
+    payload: dict = {
+        "messages": [{"role": "user", "content": message}],
+        "model": step.model or "default",
+    }
+    if cfg.skills:
+        payload["tools"] = [{"type": "function", "function": {"name": s}} for s in cfg.skills]
+
+    # Auth headers
+    headers: dict = {"Content-Type": "application/json"}
+    token = cfg.api_token or os.environ.get("OPENCLAW_API_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=cfg.timeout_seconds) as client:
+            resp = await client.post(
+                f"{gateway_url.rstrip('/')}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Extract response
+        choices = data.get("choices", [])
+        response_text = choices[0]["message"]["content"] if choices else ""
+        usage = data.get("usage", {})
+
+        output = {
+            "response": response_text,
+            "model": data.get("model"),
+            "usage": usage,
+            "skills_used": [
+                tc.get("function", {}).get("name")
+                for tc in choices[0].get("message", {}).get("tool_calls", [])
+                if tc.get("function")
+            ] if choices else [],
+        }
+
+        return StepResult(
+            step_id=step.id,
+            status="completed",
+            output=output,
+            cost_usd=cfg.cost_per_call,
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=message,
+        )
+
+    except httpx.HTTPStatusError as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"OpenClaw gateway error: HTTP {e.response.status_code}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+    except httpx.ConnectError:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Cannot connect to OpenClaw gateway at {gateway_url}. Is it running?",
+            duration_seconds=time.monotonic() - started_at,
+        )
+    except Exception as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"OpenClaw step failed: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+
 async def _execute_code_step(
     step: StepDefinition,
     context: RunContext,
@@ -5481,7 +5585,7 @@ async def _prepare_and_run_step(
     _HYBRID_TYPES = {
         "llm", "http", "code", "condition", "classify", "loop",
         "race", "sensor", "gate", "transform", "notify", "delegate",
-        "browser", "sub_workflow", "composio",
+        "browser", "sub_workflow", "composio", "openclaw",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -5524,6 +5628,8 @@ async def _prepare_and_run_step(
             )
         if s.type == "composio":
             return await _execute_composio_step(s, ctx)
+        if s.type == "openclaw":
+            return await _execute_openclaw_step(s, ctx)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
