@@ -30,3 +30,5 @@ SANDSTORM_ANALYSIS.md
 CLAUDE_CODE_COMMAND.md
 build_template.py
 :memory:*
+.coverage
+coverage*.json
