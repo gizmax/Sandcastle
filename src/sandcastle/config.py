@@ -155,6 +155,12 @@ class Settings(BaseSettings):
     # Data residency: "" = no restriction, "eu" = EU only, "local" = local/on-prem only
     data_residency: str = ""  # "", "eu", "local"
 
+    # Advisor quality mode for SLO-aware routing:
+    #   "auto"           - pick model tier by purpose (generation=high, judge=low, etc.)
+    #   "always_best"    - always use highest-quality model regardless of purpose
+    #   "always_cheapest"- always use cheapest model regardless of purpose
+    advisor_quality_mode: str = "auto"
+
     # OpenTelemetry (distributed tracing)
     otel_enabled: bool = False  # Set to True to enable OTLP trace export
     otel_endpoint: str = ""  # OTLP HTTP endpoint, e.g. "http://localhost:4318"

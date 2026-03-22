@@ -324,6 +324,68 @@ Output ONLY the YAML content, nothing else."""
 
 
 # ---------------------------------------------------------------------------
+# SLO-aware quality tier routing
+# ---------------------------------------------------------------------------
+
+# Quality requirements per advisor purpose.
+# Higher tier = more capable (expensive) model preferred.
+ADVISOR_QUALITY_TIERS: dict[str, str] = {
+    "generation": "high",    # Workflow generation needs best quality
+    "chat": "high",          # Interactive chat needs good responses
+    "explain": "medium",     # Error explanation - good enough is fine
+    "evolution": "medium",   # Prompt mutation - creative but not critical
+    "judge": "low",          # Quality scoring - just needs a number 0-1
+}
+
+# Model capability ranking per provider (tier -> model ID).
+# "high" = best available, "medium" = balanced, "low" = cheapest.
+ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
+    "anthropic": {
+        "high": "claude-sonnet-4-20250514",
+        "medium": "claude-haiku-4-20250514",
+        "low": "claude-haiku-4-20250514",
+    },
+    "mistral": {
+        "high": "mistral-large-latest",
+        "medium": "mistral-small-latest",
+        "low": "mistral-small-latest",
+    },
+    "openai": {
+        "high": "gpt-4o",
+        "medium": "gpt-4o-mini",
+        "low": "gpt-4o-mini",
+    },
+    "ollama": {
+        "high": "llama3.2",
+        "medium": "llama3.2",
+        "low": "llama3.2",
+    },
+    "google": {
+        "high": "google/gemini-2.5-pro",
+        "medium": "google/gemini-2.5-pro",
+        "low": "google/gemini-2.5-pro",
+    },
+    "minimax": {
+        "high": "MiniMax-M2.5",
+        "medium": "MiniMax-M2.5",
+        "low": "MiniMax-M2.5",
+    },
+}
+
+
+def _resolve_model_for_tier(provider_name: str, quality_tier: str) -> str | None:
+    """Return the model ID for *provider_name* at *quality_tier*, or None if unknown.
+
+    When the provider has no tier map defined, returns None so the caller can
+    fall back to the provider's default model from ``_PROVIDER_CONFIGS``.
+    """
+    tier_map = ADVISOR_MODEL_TIERS.get(provider_name)
+    if tier_map is None:
+        return None
+    return tier_map.get(quality_tier)
+
+
+# ---------------------------------------------------------------------------
 # Core generation
 # ---------------------------------------------------------------------------
 
@@ -631,11 +693,25 @@ async def _call_advisor_llm(
         httpx.HTTPStatusError: When a non-retryable 4xx error is returned by
             any provider.
     """
+    import os as _os
+
     from sandcastle.config import settings
 
     primary = _resolve_provider_name()
     residency = settings.data_residency
     providers_to_try = _build_providers_to_try(primary, residency)
+
+    # Determine quality tier from purpose
+    quality_mode = getattr(settings, "advisor_quality_mode", "auto")
+    if quality_mode == "always_best":
+        quality_tier = "high"
+    elif quality_mode == "always_cheapest":
+        quality_tier = "low"
+    else:  # "auto" (default)
+        quality_tier = ADVISOR_QUALITY_TIERS.get(purpose, "high")
+
+    # Explicit model override wins over SLO tier selection
+    model_override = _os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
 
     last_error: BaseException | None = None
     failover_provider: str | None = None  # the provider that ultimately succeeded
@@ -643,10 +719,22 @@ async def _call_advisor_llm(
 
     for i, provider_name in enumerate(providers_to_try):
         cfg = dict(_PROVIDER_CONFIGS[provider_name])
-        model = cfg["model"]
         api_url = cfg["api_url"]
         provider_region = cfg.get("region", "us")
         is_anthropic = cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
+
+        # Select model: explicit override > SLO tier > provider default
+        if model_override:
+            model = model_override
+            model_selected_by = "user_override"
+        else:
+            tier_model = _resolve_model_for_tier(provider_name, quality_tier)
+            if tier_model:
+                model = tier_model
+                model_selected_by = "slo_routing"
+            else:
+                model = cfg["model"]
+                model_selected_by = "default"
 
         api_key = _resolve_api_key_for_provider(provider_name)
         headers = cfg["headers_fn"](api_key)
@@ -739,6 +827,8 @@ async def _call_advisor_llm(
             "model": model,
             "region": provider_region,
             "purpose": purpose,
+            "quality_tier": quality_tier,
+            "model_selected_by": model_selected_by,
             "cost_estimate_usd": round(cost_estimate, 6),
             "attempt": i + 1,
             "failover_from": primary if failover_provider is not None else None,
@@ -798,21 +888,12 @@ async def generate_workflow(
     else:
         user_msg = description
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(
-            _get_api_url(),
-            headers=_get_headers(api_key),
-            json=_build_request_body(
-                model=_get_model(),
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_msg}],
-                max_tokens=_MAX_TOKENS,
-            ),
-        )
-        resp.raise_for_status()
-
-    data = resp.json()
-    raw_text = _parse_response_text(data)
+    raw_text = await _call_advisor_llm(
+        system=system_prompt,
+        user=user_msg,
+        max_tokens=_MAX_TOKENS,
+        purpose="generation",
+    )
 
     # Strip markdown fencing if present
     yaml_content = _strip_fencing(raw_text)
@@ -1061,21 +1142,21 @@ async def generate_chat(
                 content = f"[Existing workflow]\n{effective_yaml}\n\n[User request]\n{content}"
         api_messages.append({"role": role, "content": content})
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(
-            _get_api_url(),
-            headers=_get_headers(api_key),
-            json=_build_request_body(
-                model=_get_model(),
-                system=system_prompt,
-                messages=api_messages,
-                max_tokens=_MAX_TOKENS,
-            ),
-        )
-        resp.raise_for_status()
+    # Build the full user message from the api_messages list (last user message with context)
+    # _call_advisor_llm takes a single user string, so we pass the last message content.
+    # For multi-turn, the last message already has injected YAML context from the loop above.
+    last_user_content = ""
+    for msg in reversed(api_messages):
+        if msg.get("role") == "user":
+            last_user_content = msg["content"]
+            break
 
-    data = resp.json()
-    raw_text = _parse_response_text(data)
+    raw_text = await _call_advisor_llm(
+        system=system_prompt,
+        user=last_user_content,
+        max_tokens=_MAX_TOKENS,
+        purpose="chat",
+    )
 
     # Parse JSON response
     try:
@@ -1234,29 +1315,15 @@ Prompt (first 500 chars): {scrubbed_prompt}
 ERROR:
 {scrubbed_error}"""
 
-    # Use a cheaper/faster model for explanations
-    cfg = _get_advisor_config()
-    explain_model = cfg.get("model", _MODEL)
-    # Prefer haiku for Anthropic (cheaper), otherwise use configured model
-    if cfg.get("api_key_env") == "ANTHROPIC_API_KEY":
-        explain_model = "claude-haiku-4-5-20251001"
-
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                _get_api_url(),
-                headers=_get_headers(api_key),
-                json=_build_request_body(
-                    model=explain_model,
-                    system=_EXPLAIN_SYSTEM,
-                    messages=[{"role": "user", "content": user_msg}],
-                    max_tokens=512,
-                ),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            text = _parse_response_text(data)
-            return json.loads(text)
+        # SLO routing: purpose="explain" -> medium tier model
+        text = await _call_advisor_llm(
+            system=_EXPLAIN_SYSTEM,
+            user=user_msg,
+            max_tokens=512,
+            purpose="explain",
+        )
+        return json.loads(text)
     except Exception:
         # Fallback to basic explanation
         return {

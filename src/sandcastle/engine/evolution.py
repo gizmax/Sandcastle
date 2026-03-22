@@ -141,6 +141,7 @@ async def mutate_prompt(
         response_text = await _call_advisor_llm(
             system="You are a prompt engineering expert. Improve the given prompt based on eval failures.",
             user=prompt_text,
+            purpose="evolution",
         )
         improved = response_text.strip()
         if improved and improved != target_step.prompt:

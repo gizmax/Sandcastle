@@ -202,6 +202,7 @@ async def _evaluate_llm_judge(output: Any, config: AutoPilotConfig) -> float:
             system="You are a quality evaluator. Respond with only a number between 0.0 and 1.0.",
             user=user_msg,
             max_tokens=16,
+            purpose="judge",
         )
         score = float(result.strip())
         return max(0.0, min(1.0, score))

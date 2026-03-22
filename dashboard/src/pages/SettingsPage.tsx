@@ -442,6 +442,33 @@ export default function SettingsPage() {
                 <HelperText>Leave empty to use the provider default model</HelperText>
               </div>
 
+              {/* Quality routing indicator */}
+              {!advisorModel && (
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                  <p className="text-xs font-medium text-foreground mb-1">Quality Routing: Auto</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    generation=<span className="text-success font-medium">high</span>
+                    {" - "}chat=<span className="text-success font-medium">high</span>
+                    {" - "}explain=<span className="text-warning font-medium">medium</span>
+                    {" - "}evolution=<span className="text-warning font-medium">medium</span>
+                    {" - "}judge=<span className="text-muted-foreground font-medium">low</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    High-stakes operations use the best model; cheap operations use the cheapest
+                    model that meets the quality bar. Set a model override above to disable.
+                  </p>
+                </div>
+              )}
+              {advisorModel && (
+                <div className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
+                  <p className="text-xs font-medium text-foreground mb-0.5">Quality Routing: Disabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    All advisor calls use <span className="font-mono text-accent">{advisorModel}</span> regardless of purpose.
+                    Clear the override above to re-enable automatic quality routing.
+                  </p>
+                </div>
+              )}
+
               {/* EU data residency toggle */}
               <div className="flex items-center gap-3">
                 <input
