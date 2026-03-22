@@ -1,0 +1,51 @@
+name: contract-analyzer
+description: Upload a contract, extract text, identify key clauses and risks
+input_schema:
+  required: ["contract"]
+  properties:
+    contract:
+      type: file
+      accept: ".pdf,.docx"
+      description: "Contract document to analyze"
+    focus_areas:
+      type: string
+      description: "Specific areas to focus on (e.g. 'liability, termination, IP')"
+      default: "all"
+
+steps:
+  - id: extract-text
+    type: parse
+    prompt: "{input.contract}"
+    parse_config:
+      output: markdown
+
+  - id: identify-clauses
+    prompt: |
+      Analyze this contract and identify all key clauses:
+
+      {steps.extract-text.output.text}
+
+      Focus areas: {input.focus_areas}
+
+      For each clause provide:
+      1. Clause title and section number
+      2. Summary in plain language
+      3. Risk level (low/medium/high)
+      4. Recommended action (accept/negotiate/reject)
+    model: sonnet
+    depends_on: [extract-text]
+    max_turns: 3
+
+  - id: executive-summary
+    prompt: |
+      Based on the clause analysis:
+      {steps.identify-clauses.output}
+
+      Write a one-page executive summary with:
+      - Overall risk assessment
+      - Top 3 concerns
+      - Recommended negotiation points
+      - Go/No-Go recommendation
+    model: sonnet
+    depends_on: [identify-clauses]
+    max_turns: 2

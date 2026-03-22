@@ -79,7 +79,7 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser" | "parse";
 
 export interface HttpStepConfig {
   url: string;
@@ -325,6 +325,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="notify">Notify (Alert)</option>
           <option value="delegate">Delegate (Sub-workflow)</option>
           <option value="browser">Browser (RPA)</option>
+          <option value="parse">Parse Document</option>
         </select>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
@@ -341,6 +342,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           {step.stepType === "notify" && "Send notifications via Slack, Teams, Gmail, or webhook - $0 cost."}
           {step.stepType === "delegate" && "Delegate work to another workflow as a sub-task."}
           {step.stepType === "browser" && "Browser automation via Playwright selectors or Computer Use visual AI."}
+          {step.stepType === "parse" && "Extract text from PDF, DOCX, XLSX, PPTX, CSV - $0 cost, no LLM."}
         </p>
       </div>
 

@@ -643,7 +643,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       condition: "check", classify: "route", loop: "loop",
       race: "race", sensor: "sensor", gate: "gate",
       transform: "transform", notify: "notify", delegate: "delegate",
-      browser: "browser",
+      browser: "browser", parse: "parse",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -915,6 +915,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             { type: "transform" as const, icon: Shuffle, label: "Transform", color: "text-cyan-400" },
             { type: "notify" as const, icon: Bell, label: "Notify", color: "text-pink-400" },
             { type: "delegate" as const, icon: ExternalLink, label: "Delegate", color: "text-indigo-400" },
+            { type: "parse" as const, icon: FileText, label: "Parse", color: "text-orange-400" },
           ] as const).map(({ type, icon: Icon, label, color }) => (
             <button
               key={type}

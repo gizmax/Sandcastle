@@ -2713,6 +2713,7 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     NON_LLM = {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "sub_workflow",
+        "parse",  # document parsing has no LLM cost
     }
     # classify and gate issue a single LLM call, not max_turns
     SINGLE_CALL_TYPES = {"classify", "gate"}

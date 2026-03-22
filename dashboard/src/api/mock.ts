@@ -173,6 +173,23 @@ const MOCK_WORKFLOWS = [
       },
     },
   },
+  {
+    name: "contract-analyzer",
+    description: "Upload a contract PDF, extract text, analyze clauses",
+    steps_count: 2,
+    file_name: "contract-analyzer.yaml",
+    steps: [
+      { id: "extract", model: null as unknown as string, type: "parse", depends_on: [] },
+      { id: "analyze", model: "sonnet", depends_on: ["extract"] },
+    ],
+    input_schema: {
+      required: ["contract"],
+      properties: {
+        contract: { type: "file", description: "Contract document to analyze (.pdf, .docx)" },
+        focus_areas: { type: "string", description: "Specific areas to focus on (e.g. liability, termination)", default: "all" },
+      },
+    },
+  },
 ];
 
 const MOCK_SCHEDULES = [

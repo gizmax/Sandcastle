@@ -34,7 +34,7 @@
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
 - [63 Built-in Integrations](#63-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [15 Step Types](#15-step-types)
+- [17 Step Types](#17-step-types)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
@@ -474,7 +474,7 @@ Once connected, ask your AI assistant to:
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
 | **63 built-in integrations** across 9 categories | Yes |
-| **15 step types** (standard, llm, http, code, race, sensor, gate...) | Yes |
+| **17 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -799,9 +799,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 15 Step Types
+## 17 Step Types
 
-Sandcastle supports 15 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 17 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -812,12 +812,14 @@ Sandcastle supports 15 step types for building complex workflows beyond simple L
 | **Core** | `condition` | Branch workflow based on expression evaluation |
 | **Core** | `classify` | Route to different branches based on LLM classification |
 | **Core** | `loop` | Iterate over a list, executing sub-steps for each item |
+| **Core** | `parse` | Extract text from PDF, DOCX, XLSX, PPTX, CSV - no LLM cost |
 | **Advanced** | `race` | Run parallel branches, take the first to complete |
 | **Advanced** | `sensor` | Poll a URL until a condition is met (webhook alternative) |
 | **Advanced** | `gate` | Multi-strategy approval (human, LLM judge, quorum) |
 | **Advanced** | `transform` | Jinja2 template rendering for data transformation |
 | **Advanced** | `notify` | Send alerts via Slack, Teams, email, or webhook |
 | **Advanced** | `delegate` | Spawn a sub-workflow and collect results |
+| **Advanced** | `openclaw` | Delegate to an autonomous OpenClaw agent |
 | **Built-in** | `approval` | Human approval gate with timeout and auto-action |
 | **Built-in** | `sub_workflow` | Execute another workflow as a step |
 
@@ -1272,6 +1274,31 @@ steps:
 ```
 
 Works with any output shape - dicts become columns, lists of dicts become rows, plain text goes into a `value` column. Directories are created automatically.
+
+---
+
+## Document Parsing
+
+Parse PDF, DOCX, XLSX, and CSV files directly in your workflows:
+
+```yaml
+steps:
+  - id: extract
+    type: parse
+    prompt: "{input.document}"
+    parse_config:
+      output: markdown
+      pages: "1-10"
+
+  - id: analyze
+    prompt: "Analyze: {steps.extract.output.text}"
+    depends_on: [extract]
+```
+
+Supported formats: PDF (with optional OCR), DOCX, XLSX, PPTX, CSV.
+Install parsing support: `pip install sandcastle-ai[parse]`
+
+PDFs are also auto-parsed when uploaded as workflow inputs (if pymupdf is installed).
 
 ---
 
@@ -1872,7 +1899,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 15 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 17 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
