@@ -52,6 +52,11 @@ memory = [
     "fastembed>=0.3.6,<0.4",
     "anthropic>=0.50",
 ]
+parse = [
+    "pymupdf>=1.25",
+    "python-docx>=1.0",
+    "openpyxl>=3.1",
+]
 docker = [
     "aiodocker>=0.22",
 ]

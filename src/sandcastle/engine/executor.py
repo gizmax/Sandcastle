@@ -2794,6 +2794,123 @@ async def _execute_openclaw_step(
         )
 
 
+async def _execute_parse_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Parse a document file into structured text.
+
+    Resolves file reference from prompt (@upload:file_id, @file:path, or absolute path),
+    then delegates to sandcastle.engine.docparse.parse_document. Zero LLM cost.
+    """
+    import time
+
+    from sandcastle.engine.dag import ParseConfig
+
+    started_at = time.monotonic()
+    cfg = step.parse_config or ParseConfig()
+
+    # Resolve template variables in prompt to get the file reference
+    input_text = resolve_templates(step.prompt or "", context, step.depends_on).strip()
+
+    # Determine file path from the resolved input text
+    file_path: str | None = None
+    if input_text.startswith("@upload:"):
+        # Resolve via storage to get the actual on-disk path
+        from sandcastle.config import settings as _parse_settings
+        from sandcastle.engine.storage import create_storage
+
+        _storage = create_storage()
+        file_id = input_text[len("@upload:"):]
+        try:
+            all_keys = await _storage.list("uploads/")
+            matching = [k for k in all_keys if Path(k).name.startswith(file_id)]
+        except Exception as exc:
+            logger.warning("Could not list uploads to resolve @upload:%s: %s", file_id, exc)
+            matching = []
+
+        if matching:
+            key = matching[0]
+            local_path = (
+                Path(_parse_settings.data_dir).expanduser().resolve() / key
+            )
+            file_path = str(local_path)
+        else:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"No upload found for file_id '{file_id}'",
+                duration_seconds=time.monotonic() - started_at,
+            )
+    elif input_text.startswith("@file:"):
+        file_path = input_text[len("@file:"):]
+    elif input_text.startswith("/"):
+        file_path = input_text
+    elif not input_text and step.depends_on:
+        # No prompt - check if a dependency provided a file path
+        for dep_id in step.depends_on:
+            dep_output = context.step_outputs.get(dep_id)
+            if isinstance(dep_output, str) and (
+                dep_output.startswith("/") or dep_output.startswith("@file:")
+            ):
+                file_path = dep_output.lstrip("@file:") if dep_output.startswith("@file:") else dep_output
+                break
+            elif isinstance(dep_output, dict) and "path" in dep_output:
+                file_path = dep_output["path"]
+                break
+
+    if not file_path:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                "Parse step requires a file reference: @upload:file_id, @file:path, "
+                "or an absolute path in the prompt or from depends_on output"
+            ),
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    try:
+        from sandcastle.engine.docparse import parse_document
+
+        result = parse_document(
+            path=file_path,
+            output_format=cfg.output,
+            pages=cfg.pages,
+            ocr=cfg.ocr,
+        )
+
+        output = {
+            "text": result.text,
+            "format": result.format,
+            "pages": result.pages,
+            "metadata": result.metadata,
+        }
+
+        return StepResult(
+            step_id=step.id,
+            status="completed",
+            output=output,
+            cost_usd=0.0,
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=f"parse {file_path} -> {cfg.output}",
+        )
+    except ImportError as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(e),
+            duration_seconds=time.monotonic() - started_at,
+        )
+    except Exception as e:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Document parsing failed: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+
 async def _execute_code_step(
     step: StepDefinition,
     context: RunContext,
@@ -5585,7 +5702,7 @@ async def _prepare_and_run_step(
     _HYBRID_TYPES = {
         "llm", "http", "code", "condition", "classify", "loop",
         "race", "sensor", "gate", "transform", "notify", "delegate",
-        "browser", "sub_workflow", "composio", "openclaw",
+        "browser", "sub_workflow", "composio", "openclaw", "parse",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -5630,6 +5747,8 @@ async def _prepare_and_run_step(
             return await _execute_composio_step(s, ctx)
         if s.type == "openclaw":
             return await _execute_openclaw_step(s, ctx)
+        if s.type == "parse":
+            return await _execute_parse_step(s, ctx)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
@@ -5807,6 +5926,25 @@ async def _resolve_file_input(value: str, storage: StorageBackend) -> str:
             logger.warning("Failed to read upload '%s': %s", key, exc)
             return value
     else:
+        # For PDF/DOCX/XLSX: try auto-parse if docparse is available.
+        # This gives a seamless experience - PDFs are auto-converted to text
+        # without requiring an explicit type: parse step.
+        if suffix in (".pdf", ".docx", ".xlsx"):
+            from sandcastle.config import settings as _file_settings
+
+            local_path = (
+                Path(_file_settings.data_dir).expanduser().resolve() / key
+            )
+            try:
+                from sandcastle.engine.docparse import parse_document
+
+                parse_result = parse_document(str(local_path), output_format="text")
+                return parse_result.text
+            except ImportError:
+                pass  # docparse optional - fall through to @file: reference
+            except Exception:
+                pass  # parse error - fall through to @file: reference
+
         # Return @file: reference for binary files - existing handler will process it
         from sandcastle.config import settings as _file_settings
 
