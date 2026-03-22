@@ -2669,16 +2669,26 @@
         var res = await fetch('./registry.json?v=' + Date.now());
         if (!res.ok) throw new Error('HTTP ' + res.status);
         registry = await res.json();
-        try { animateStats(registry.stats); } catch(e) { console.warn('animateStats error:', e); }
-        try { renderCollections(); } catch(e) { console.warn('renderCollections error:', e); }
-        renderTemplates();
       } catch (err) {
-        console.error('fetchRegistry error:', err);
+        console.error('fetchRegistry fetch error:', err);
         var grid = document.getElementById('template-grid');
         if (grid) grid.innerHTML =
           '<div class="error-state">' +
             '<h3>Could not load workflows</h3>' +
             '<p>' + (err.message || 'Unknown error') + ' - <a href="https://github.com/gizmax/Sandcastle/tree/main/site/hub" target="_blank" rel="noopener">view on GitHub</a></p>' +
+          '</div>';
+        return;
+      }
+      // Render - each in its own try/catch so one failure doesn't block others
+      try { animateStats(registry.stats); } catch(e) { console.warn('animateStats error:', e); }
+      try { renderCollections(); } catch(e) { console.warn('renderCollections error:', e); }
+      try { renderTemplates(); } catch(e) {
+        console.error('renderTemplates error:', e);
+        var grid = document.getElementById('template-grid');
+        if (grid) grid.innerHTML =
+          '<div class="error-state">' +
+            '<h3>Render error</h3>' +
+            '<p>' + (e.message || 'Unknown render error') + '</p>' +
           '</div>';
       }
     }
