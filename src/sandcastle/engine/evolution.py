@@ -431,18 +431,20 @@ async def run_evolution(
     evolution_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
 
-    # Lock advisor config at start of evolution - do not re-read env vars mid-loop
+    # Snapshot advisor config at start of evolution for logging - the actual
+    # provider resolution still happens inside _call_advisor_llm per call.
+    # This primarily serves as a diagnostic record in the log.
     try:
         locked_config = _get_advisor_config()
         logger.info(
-            "Evolution %s: advisor locked to provider=%s model=%s region=%s",
+            "Evolution %s: advisor config at start - provider=%s model=%s region=%s",
             evolution_id,
-            locked_config.get("model", "unknown"),
             locked_config.get("api_key_env", ""),
+            locked_config.get("model", "unknown"),
             locked_config.get("region", "us"),
         )
     except Exception as exc:
-        logger.warning("Evolution %s: could not lock advisor config: %s", evolution_id, exc)
+        logger.warning("Evolution %s: could not read advisor config: %s", evolution_id, exc)
         locked_config = None
 
     # --- Load baseline workflow ---

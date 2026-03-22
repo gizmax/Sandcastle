@@ -859,6 +859,34 @@ function RecommendationBanner({
 // ---------------------------------------------------------------------------
 
 const DISMISSED_REC_KEY = "sandcastle_dismissed_recommendation";
+// Dismissals expire after 7 days so new recommendations surface automatically.
+const DISMISSED_REC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isDismissed(title: string): boolean {
+  try {
+    const raw = localStorage.getItem(DISMISSED_REC_KEY);
+    if (!raw) return false;
+    const map: Record<string, number> = JSON.parse(raw);
+    const ts = map[title];
+    if (!ts) return false;
+    return Date.now() - ts < DISMISSED_REC_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+function dismissRec(title: string): void {
+  try {
+    const raw = localStorage.getItem(DISMISSED_REC_KEY);
+    const map: Record<string, number> = raw ? JSON.parse(raw) : {};
+    map[title] = Date.now();
+    // Prune expired entries to avoid unbounded growth
+    for (const key of Object.keys(map)) {
+      if (Date.now() - map[key] >= DISMISSED_REC_TTL_MS) delete map[key];
+    }
+    localStorage.setItem(DISMISSED_REC_KEY, JSON.stringify(map));
+  } catch { /* ignore */ }
+}
 
 export default function OverviewBento() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -872,9 +900,7 @@ export default function OverviewBento() {
   const [providerCosts, setProviderCosts] = useState<ProviderCostsData | null>(null);
   const [providerSavings, setProviderSavings] = useState<ProviderSavingsData | null>(null);
   const [topRecommendation, setTopRecommendation] = useState<ProviderRecommendation | null>(null);
-  const [recDismissed, setRecDismissed] = useState<boolean>(() => {
-    try { return !!localStorage.getItem(DISMISSED_REC_KEY); } catch { return false; }
-  });
+  const [recDismissed, setRecDismissed] = useState<boolean>(false);
   const advisor = useAdvisorContext();
   const { subscribe } = useEventStreamContext();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -931,8 +957,12 @@ export default function OverviewBento() {
         if (costsRes.data) setProviderCosts(costsRes.data);
         if (savingsRes.data) setProviderSavings(savingsRes.data);
         if (recRes.data) {
-          const high = recRes.data.recommendations?.find((r) => r.severity === "high") ?? null;
+          // Pick the first high-severity recommendation that hasn't been dismissed
+          const high = recRes.data.recommendations?.find(
+            (r) => r.severity === "high" && !isDismissed(r.title)
+          ) ?? null;
           setTopRecommendation(high);
+          setRecDismissed(high === null);
         }
       } catch {
         if (cancelled) return;
@@ -946,9 +976,9 @@ export default function OverviewBento() {
   }, [retryCount]);
 
   const dismissRecommendation = useCallback(() => {
+    if (topRecommendation) dismissRec(topRecommendation.title);
     setRecDismissed(true);
-    try { localStorage.setItem(DISMISSED_REC_KEY, "1"); } catch { /* ignore */ }
-  }, []);
+  }, [topRecommendation]);
 
   // Refresh sparklines + stats when run.completed or run.failed SSE events arrive
   useEffect(() => {

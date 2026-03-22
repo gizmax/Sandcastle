@@ -503,13 +503,14 @@ def _resolve_api_key() -> str:
 
     api_key = os.environ.get(key_env, "")
     if not api_key:
-        from sandcastle.config import settings
-
-        # Try provider-specific settings first
-        if key_env == "OPENAI_API_KEY":
-            api_key = getattr(settings, "openai_api_key", "") or ""
-        if not api_key:
-            api_key = settings.anthropic_api_key
+        # Use the provider-generic attr_map lookup so each provider only gets
+        # its own key - never fall through to anthropic_api_key for mistral etc.
+        api_key = _resolve_api_key_for_provider(_resolve_provider_name())
+        # _resolve_api_key_for_provider returns "no-key-required" for keyless
+        # providers and "" when no key is found - normalise "no-key-required"
+        # to a truthy sentinel so callers can check `if not api_key`.
+        if api_key == "no-key-required":
+            api_key = "ollama-no-key"
     return api_key
 
 
@@ -770,7 +771,8 @@ async def _call_advisor_llm(
                     "Advisor '%s' rate-limited (429), trying next provider...",
                     provider_name,
                 )
-                if i == 0 and len(providers_to_try) > 1:
+                # Record the first error that caused us to leave the primary provider
+                if failover_reason is None and len(providers_to_try) > i + 1:
                     failover_reason = f"429 rate-limit from {provider_name}"
                 continue
             elif status >= 500:
@@ -779,7 +781,7 @@ async def _call_advisor_llm(
                     provider_name,
                     status,
                 )
-                if i == 0 and len(providers_to_try) > 1:
+                if failover_reason is None and len(providers_to_try) > i + 1:
                     failover_reason = f"{status} server error from {provider_name}"
                 continue
             else:
@@ -793,7 +795,7 @@ async def _call_advisor_llm(
                 provider_name,
                 type(exc).__name__,
             )
-            if i == 0 and len(providers_to_try) > 1:
+            if failover_reason is None and len(providers_to_try) > i + 1:
                 failover_reason = f"{type(exc).__name__} from {provider_name}"
             continue
 

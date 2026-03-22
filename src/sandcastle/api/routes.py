@@ -2401,24 +2401,21 @@ async def get_provider_savings(
             "count": count,
         }
 
-    # Build alternatives: for each other provider, compute projected cost
-    # Group providers by name for summary
+    # Build alternatives: for each provider pick the cheapest model (lowest
+    # blended price per token) so savings estimates use the best-case option,
+    # not the first model encountered in dict iteration order.
     provider_savings: dict[str, dict] = {}
     for alt_model, alt_info in PROVIDER_REGISTRY.items():
         alt_provider = alt_info.provider
-        if alt_provider in provider_savings:
-            continue  # Use cheapest model per provider
-        # Calculate what current token volume would cost with this provider
+        alt_price = (alt_info.input_price_per_m * 2 + alt_info.output_price_per_m) / 3
+
+        # Calculate what current token volume would cost with this model
         projected = 0.0
         for vol in model_volumes.values():
             orig_info = vol["info"]
-            # Skip if same provider
             if orig_info.provider == alt_provider:
                 continue
-            # Compute projected cost for this volume with alt provider pricing
-            tokens_m = vol["tokens_m"]
-            alt_price = (alt_info.input_price_per_m * 2 + alt_info.output_price_per_m) / 3
-            projected += tokens_m * alt_price
+            projected += vol["tokens_m"] * alt_price
 
         # Add same-provider costs unchanged
         for vol in model_volumes.values():
@@ -2427,6 +2424,12 @@ async def get_provider_savings(
 
         savings_usd = current_total - projected
         savings_pct = (savings_usd / current_total * 100) if current_total > 0 else 0.0
+
+        # Keep this model only if it offers better savings than a previously
+        # evaluated model from the same provider (pick cheapest per provider).
+        existing = provider_savings.get(alt_provider)
+        if existing and existing["savings_percent"] >= round(max(0.0, savings_pct), 1):
+            continue
 
         # Build note
         if alt_provider == "ollama":
@@ -3074,9 +3077,15 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    import os
+    from sandcastle.engine.generator import _resolve_api_key_for_provider
+
     key_env = cfg.get("api_key_env", "")
-    api_key = os.environ.get(key_env, "") if key_env else "ollama-no-key"
+    # Use the same key resolution as _call_advisor_llm so Settings-stored keys
+    # are found even when the env var isn't set directly.
+    api_key = _resolve_api_key_for_provider(provider) if key_env else "ollama-no-key"
+    # Normalise the "no-key-required" sentinel used for Ollama
+    if api_key == "no-key-required":
+        api_key = "ollama-no-key"
 
     if not api_key and provider != "ollama":
         raise HTTPException(
@@ -3092,11 +3101,15 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
     api_url = cfg["api_url"]
     model = cfg["model"]
     headers = cfg["headers_fn"](api_key)
+    # Pass is_anthropic explicitly so the request body format matches the
+    # provider being tested, not the currently configured global provider.
+    is_anthropic_provider = cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
     body_payload = _build_request_body(
         model,
         "You are a helpful assistant.",
         [{"role": "user", "content": "ping"}],
         max_tokens=1,
+        is_anthropic=is_anthropic_provider,
     )
 
     t0 = _time.monotonic()
