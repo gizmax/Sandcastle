@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Play, AlertTriangle, BarChart3, Star, GitBranch,
   CheckCircle2, ArrowRight, Activity, DollarSign, CheckCircle,
-  Castle, Timer,
+  Castle, Timer, Sparkles, X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
@@ -64,6 +64,52 @@ interface AnomalyItem {
   run_id: string | null;
   value: number;
   threshold: number;
+}
+
+interface ProviderCostEntry {
+  provider: string;
+  model: string;
+  region: string;
+  total_cost_usd: number;
+  run_count: number;
+  avg_cost_per_run: number;
+  percentage: number;
+}
+
+interface ProviderSavingsAlternative {
+  provider: string;
+  model: string;
+  region: string;
+  projected_cost_usd: number;
+  savings_usd: number;
+  savings_percent: number;
+  note: string;
+}
+
+interface ProviderCostsData {
+  period_days: number;
+  total_cost_usd: number;
+  by_provider: ProviderCostEntry[];
+  advisor_costs: {
+    total_usd: number;
+    by_purpose: Array<{ purpose: string; cost_usd: number; calls: number }>;
+  };
+}
+
+interface ProviderSavingsData {
+  current_total_usd: number;
+  alternatives: ProviderSavingsAlternative[];
+}
+
+interface ProviderRecommendation {
+  type: string;
+  severity: "high" | "medium" | "info";
+  title: string;
+  description: string;
+  action: string;
+  provider: string;
+  estimated_savings_usd: number;
+  confidence: number;
 }
 
 interface LayoutSwitcherProps {
@@ -675,8 +721,144 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Provider Cost Widget
+// ---------------------------------------------------------------------------
+
+const PROVIDER_COLORS: Record<string, string> = {
+  claude: "bg-accent",
+  anthropic: "bg-accent",
+  openai: "bg-running",
+  mistral: "bg-success",
+  minimax: "bg-warning",
+  google: "bg-error",
+  ollama: "bg-muted-foreground",
+};
+
+function getProviderColor(provider: string): string {
+  return PROVIDER_COLORS[provider.toLowerCase()] ?? "bg-accent";
+}
+
+function getRegionFlag(region: string): string {
+  if (region === "eu") return " EU";
+  if (region === "local") return " Local";
+  return "";
+}
+
+function BentoProviderCosts({
+  providerCosts,
+  savings,
+}: {
+  providerCosts: ProviderCostsData | null;
+  savings: ProviderSavingsData | null;
+}) {
+  if (!providerCosts) return null;
+  const { by_provider, total_cost_usd, period_days } = providerCosts;
+  const topSaving = savings?.alternatives?.[0] ?? null;
+
+  return (
+    <div className={cn(
+      "rounded-2xl border border-border bg-surface shadow-sm",
+      "hover:border-accent/30 transition-all duration-300",
+      "p-5 flex flex-col gap-3"
+    )}>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Cost by Provider</h3>
+        <span className="text-xs text-muted-foreground">Last {period_days} days</span>
+      </div>
+
+      {by_provider.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No cost data available yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {by_provider.map((p) => (
+            <div key={`${p.provider}:${p.model}`}>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-foreground font-medium">
+                  {p.provider}
+                  <span className="text-muted-foreground font-normal ml-1">
+                    {getRegionFlag(p.region)}
+                  </span>
+                </span>
+                <span className="text-muted-foreground tabular-nums">
+                  ${p.total_cost_usd.toFixed(2)} ({p.percentage}%)
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-border overflow-hidden">
+                <div
+                  className={cn("h-full rounded-full transition-all duration-500", getProviderColor(p.provider))}
+                  style={{ width: `${p.percentage}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {p.run_count.toLocaleString()} steps - ${p.avg_cost_per_run.toFixed(4)} avg
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="pt-1 border-t border-border">
+        <p className="text-xs text-muted-foreground">
+          Total: <span className="font-semibold text-foreground">${total_cost_usd.toFixed(2)}</span>
+        </p>
+      </div>
+
+      {topSaving && topSaving.savings_percent > 10 && (
+        <div className="rounded-lg bg-accent/5 border border-accent/20 p-3">
+          <p className="text-xs font-medium text-accent">
+            {topSaving.note}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Estimated savings: ${topSaving.savings_usd.toFixed(0)}/month ({topSaving.savings_percent}%)
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation Banner
+// ---------------------------------------------------------------------------
+
+function RecommendationBanner({
+  recommendation,
+  onDismiss,
+}: {
+  recommendation: ProviderRecommendation;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className={cn(
+      "rounded-2xl border border-accent/30 bg-accent/5",
+      "p-4 flex items-center gap-3"
+    )}>
+      <Sparkles className="h-5 w-5 text-accent shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate">{recommendation.title}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{recommendation.description}</p>
+      </div>
+      {recommendation.estimated_savings_usd > 0 && (
+        <span className="text-xs font-semibold text-success shrink-0">
+          Save ${recommendation.estimated_savings_usd.toFixed(0)}/mo
+        </span>
+      )}
+      <button
+        onClick={onDismiss}
+        className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+        aria-label="Dismiss recommendation"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // OverviewBento page
 // ---------------------------------------------------------------------------
+
+const DISMISSED_REC_KEY = "sandcastle_dismissed_recommendation";
 
 export default function OverviewBento() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -687,6 +869,12 @@ export default function OverviewBento() {
   const [sparklines, setSparklines] = useState<Record<string, SparklineData> | null>(null);
   const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
+  const [providerCosts, setProviderCosts] = useState<ProviderCostsData | null>(null);
+  const [providerSavings, setProviderSavings] = useState<ProviderSavingsData | null>(null);
+  const [topRecommendation, setTopRecommendation] = useState<ProviderRecommendation | null>(null);
+  const [recDismissed, setRecDismissed] = useState<boolean>(() => {
+    try { return !!localStorage.getItem(DISMISSED_REC_KEY); } catch { return false; }
+  });
   const advisor = useAdvisorContext();
   const { subscribe } = useEventStreamContext();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -716,12 +904,15 @@ export default function OverviewBento() {
     const fetchData = async () => {
       try {
         setError(null);
-        const [statsRes, runsRes, sparklinesRes, heatmapRes, anomaliesRes] = await Promise.all([
+        const [statsRes, runsRes, sparklinesRes, heatmapRes, anomaliesRes, costsRes, savingsRes, recRes] = await Promise.all([
           api.get<Stats>("/stats"),
           api.get<RunItem[]>("/runs", { limit: "5" }),
           api.get<Record<string, ApiSparklineData>>("/stats/sparklines"),
           api.get<HeatmapApiCell[]>("/stats/heatmap"),
           api.get<AnomalyItem[]>("/stats/anomalies"),
+          api.get<ProviderCostsData>("/stats/provider-costs"),
+          api.get<ProviderSavingsData>("/stats/provider-savings"),
+          api.get<{ recommendations: ProviderRecommendation[] }>("/stats/provider-recommendation"),
         ]);
         if (cancelled) return;
         if (statsRes.data) setStats(statsRes.data);
@@ -737,6 +928,12 @@ export default function OverviewBento() {
           setHeatmapCells(heatmapRes.data.map(normaliseHeatmapCell));
         }
         if (anomaliesRes.data) setAnomalies(anomaliesRes.data);
+        if (costsRes.data) setProviderCosts(costsRes.data);
+        if (savingsRes.data) setProviderSavings(savingsRes.data);
+        if (recRes.data) {
+          const high = recRes.data.recommendations?.find((r) => r.severity === "high") ?? null;
+          setTopRecommendation(high);
+        }
       } catch {
         if (cancelled) return;
         setError("Could not connect to the API server");
@@ -747,6 +944,11 @@ export default function OverviewBento() {
     void fetchData();
     return () => { cancelled = true; };
   }, [retryCount]);
+
+  const dismissRecommendation = useCallback(() => {
+    setRecDismissed(true);
+    try { localStorage.setItem(DISMISSED_REC_KEY, "1"); } catch { /* ignore */ }
+  }, []);
 
   // Refresh sparklines + stats when run.completed or run.failed SSE events arrive
   useEffect(() => {
@@ -819,6 +1021,14 @@ export default function OverviewBento() {
         {/* Layout switcher removed - bento is the only layout */}
       </div>
 
+      {/* Recommendation Banner - shown only when high severity and not dismissed */}
+      {topRecommendation && !recDismissed && (
+        <RecommendationBanner
+          recommendation={topRecommendation}
+          onDismiss={dismissRecommendation}
+        />
+      )}
+
       {/* Row 1: Command Center (2/3) + Quick Actions (1/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <div className="lg:col-span-2">
@@ -884,6 +1094,50 @@ export default function OverviewBento() {
 
       {/* Row 3.5: Anomalies (shown only when present) */}
       {anomalies.length > 0 && <BentoAnomalies anomalies={anomalies} />}
+
+      {/* Row 3.6: Provider Cost card + savings (shown when cost data available) */}
+      {providerCosts && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+          <div className="lg:col-span-2">
+            <BentoProviderCosts
+              providerCosts={providerCosts}
+              savings={providerSavings}
+            />
+          </div>
+          {providerSavings && providerSavings.alternatives.length > 0 && (
+            <div className={cn(
+              "rounded-2xl border border-border bg-surface shadow-sm",
+              "hover:border-accent/30 transition-all duration-300",
+              "p-5 flex flex-col gap-3"
+            )}>
+              <h3 className="text-sm font-semibold text-foreground">Savings Opportunities</h3>
+              <div className="space-y-3">
+                {providerSavings.alternatives.slice(0, 3).map((alt) => (
+                  <div key={alt.provider} className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground">
+                        {alt.provider.charAt(0).toUpperCase() + alt.provider.slice(1)}
+                        {alt.region === "eu" && (
+                          <span className="ml-1 text-[10px] font-semibold text-success bg-success/10 rounded-full px-1.5 py-0.5">EU</span>
+                        )}
+                        {alt.region === "local" && (
+                          <span className="ml-1 text-[10px] font-semibold text-muted-foreground bg-border rounded-full px-1.5 py-0.5">Local</span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        ${alt.projected_cost_usd.toFixed(2)} projected
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-success shrink-0">
+                      -{alt.savings_percent}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Row 4: Cost Forecast (2/3) + Recent Runs (1/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">

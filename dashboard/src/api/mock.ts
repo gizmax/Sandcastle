@@ -5989,6 +5989,129 @@ const routes: MockRoute[] = [
       ];
     },
   },
+  // GET /stats/provider-costs
+  {
+    match: /^\/stats\/provider-costs$/,
+    method: "GET",
+    handler: (params) => {
+      const days = Number(params.days || 30);
+      return {
+        period_days: days,
+        total_cost_usd: 245.67,
+        by_provider: [
+          {
+            provider: "claude",
+            model: "sonnet",
+            region: "us",
+            total_cost_usd: 198.50,
+            run_count: 1250,
+            avg_cost_per_run: 0.1588,
+            percentage: 80.8,
+          },
+          {
+            provider: "mistral",
+            model: "mistral/large",
+            region: "eu",
+            total_cost_usd: 47.17,
+            run_count: 890,
+            avg_cost_per_run: 0.053,
+            percentage: 19.2,
+          },
+        ],
+        advisor_costs: {
+          total_usd: 12.34,
+          by_purpose: [
+            { purpose: "generation", cost_usd: 8.50, calls: 120 },
+            { purpose: "judge", cost_usd: 1.20, calls: 450 },
+            { purpose: "evolution", cost_usd: 2.64, calls: 80 },
+          ],
+        },
+      };
+    },
+  },
+  // GET /stats/provider-savings
+  {
+    match: /^\/stats\/provider-savings$/,
+    method: "GET",
+    handler: (params) => {
+      const days = Number(params.days || 30);
+      void days;
+      return {
+        current_total_usd: 245.67,
+        alternatives: [
+          {
+            provider: "mistral",
+            model: "mistral/large",
+            region: "eu",
+            projected_cost_usd: 98.27,
+            savings_usd: 147.40,
+            savings_percent: 60.0,
+            note: "Switch to Mistral for 60% savings with EU data residency",
+          },
+          {
+            provider: "minimax",
+            model: "minimax/m2.5",
+            region: "us",
+            projected_cost_usd: 24.57,
+            savings_usd: 221.10,
+            savings_percent: 90.0,
+            note: "Switch to MiniMax for 90% cost savings",
+          },
+          {
+            provider: "ollama",
+            model: "ollama",
+            region: "local",
+            projected_cost_usd: 0.0,
+            savings_usd: 245.67,
+            savings_percent: 100.0,
+            note: "Switch to local Ollama for zero cloud costs (hardware required)",
+          },
+        ],
+      };
+    },
+  },
+  // GET /stats/provider-recommendation
+  {
+    match: /^\/stats\/provider-recommendation$/,
+    method: "GET",
+    handler: () => ({
+      recommendations: [
+        {
+          type: "cost_saving",
+          severity: "high",
+          title: "Switch to Mistral for 60% savings",
+          description:
+            "Your workflows spent $198.50 on Claude last month. Mistral would cost approximately $79.40 for equivalent workloads. EU data residency included.",
+          action: "Switch advisor to Mistral",
+          provider: "mistral",
+          estimated_savings_usd: 119.10,
+          confidence: 0.85,
+        },
+        {
+          type: "quality_upgrade",
+          severity: "medium",
+          title: "Upgrade judge model for better eval accuracy",
+          description:
+            "Your AutoPilot quality scores have high variance (stddev 0.28). Using a higher-tier model for judging could reduce variance and improve experiment reliability.",
+          action: "Set advisor_quality_mode=always_best for judge purpose",
+          provider: "anthropic",
+          estimated_savings_usd: 0.0,
+          confidence: 0.65,
+        },
+        {
+          type: "data_residency",
+          severity: "info",
+          title: "Consider enabling EU Data Residency",
+          description:
+            "85% of your advisor calls are processed outside the EU. Enabling data_residency=eu ensures all AI processing stays within EU borders (GDPR compliance).",
+          action: "Enable EU mode in Settings -> Data Residency",
+          provider: "mistral",
+          estimated_savings_usd: 0.0,
+          confidence: 0.70,
+        },
+      ],
+    }),
+  },
   {
     match: /^\/workflows$/,
     method: "GET",

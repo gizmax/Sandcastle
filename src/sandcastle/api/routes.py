@@ -2203,6 +2203,480 @@ async def get_anomalies(request: Request) -> ApiResponse:
     return ApiResponse(data=anomalies[:20])
 
 
+def _map_model_to_provider(model_name: str | None) -> str | None:
+    """Map a model string to its provider using PROVIDER_REGISTRY.
+
+    Returns None if the model is not in the registry.
+    """
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+
+    if not model_name:
+        return None
+    info = PROVIDER_REGISTRY.get(model_name)
+    if info is None:
+        return None
+    return info.provider
+
+
+def _get_provider_region(provider: str) -> str:
+    """Return the region for a provider name (derived from PROVIDER_REGISTRY)."""
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+
+    for info in PROVIDER_REGISTRY.values():
+        if info.provider == provider:
+            return info.region
+    return "us"
+
+
+@router.get("/stats/provider-costs")
+async def get_provider_costs(
+    days: int = Query(30, ge=1, le=365),
+    request: Request = None,
+) -> ApiResponse:
+    """Cost breakdown per provider for the last N days.
+
+    Queries RunStep for workflow execution costs grouped by model,
+    and AuditEvent for advisor LLM call costs.
+    """
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+    from sandcastle.models.db import RunStep
+
+    tenant_id = get_tenant_id(request) if request else None
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    async with async_session() as session:
+        # --- Workflow execution costs: group by model in RunStep ---
+        step_q = (
+            select(
+                RunStep.model,
+                func.coalesce(func.sum(RunStep.cost_usd), 0.0).label("total_cost"),
+                func.count(RunStep.id).label("step_count"),
+            )
+            .join(Run, RunStep.run_id == Run.id)
+            .where(Run.created_at >= since)
+            .group_by(RunStep.model)
+        )
+        if settings.auth_required and tenant_id is not None:
+            step_q = step_q.where(Run.tenant_id == tenant_id)
+        step_rows = (await session.execute(step_q)).all()
+
+        # --- Advisor costs: from AuditEvent where event_type = advisor.llm_call ---
+        advisor_q = (
+            select(
+                AuditEvent.payload,
+            )
+            .where(
+                AuditEvent.event_type == "advisor.llm_call",
+                AuditEvent.created_at >= since,
+            )
+        )
+        advisor_rows = (await session.execute(advisor_q)).scalars().all()
+
+    # Build provider cost aggregation from RunStep data
+    provider_map: dict[str, dict] = {}
+    for row in step_rows:
+        model = row.model or "unknown"
+        info = PROVIDER_REGISTRY.get(model)
+        provider = info.provider if info else "unknown"
+        region = info.region if info else "us"
+
+        key = f"{provider}:{model}"
+        if key not in provider_map:
+            provider_map[key] = {
+                "provider": provider,
+                "model": model,
+                "region": region,
+                "total_cost_usd": 0.0,
+                "run_count": 0,
+            }
+        provider_map[key]["total_cost_usd"] += float(row.total_cost)
+        provider_map[key]["run_count"] += int(row.step_count)
+
+    total_workflow_cost = sum(v["total_cost_usd"] for v in provider_map.values())
+
+    by_provider = []
+    for entry in sorted(provider_map.values(), key=lambda x: -x["total_cost_usd"]):
+        pct = (entry["total_cost_usd"] / total_workflow_cost * 100) if total_workflow_cost > 0 else 0.0
+        avg = (entry["total_cost_usd"] / entry["run_count"]) if entry["run_count"] > 0 else 0.0
+        by_provider.append({
+            "provider": entry["provider"],
+            "model": entry["model"],
+            "region": entry["region"],
+            "total_cost_usd": round(entry["total_cost_usd"], 4),
+            "run_count": entry["run_count"],
+            "avg_cost_per_run": round(avg, 6),
+            "percentage": round(pct, 1),
+        })
+
+    # Aggregate advisor costs by purpose
+    advisor_by_purpose: dict[str, dict] = {}
+    advisor_total = 0.0
+    for payload in advisor_rows:
+        if not payload:
+            continue
+        purpose = payload.get("purpose", "unknown")
+        cost = float(payload.get("cost_estimate_usd", 0.0))
+        if purpose not in advisor_by_purpose:
+            advisor_by_purpose[purpose] = {"purpose": purpose, "cost_usd": 0.0, "calls": 0}
+        advisor_by_purpose[purpose]["cost_usd"] += cost
+        advisor_by_purpose[purpose]["calls"] += 1
+        advisor_total += cost
+
+    advisor_costs = {
+        "total_usd": round(advisor_total, 6),
+        "by_purpose": [
+            {
+                "purpose": v["purpose"],
+                "cost_usd": round(v["cost_usd"], 6),
+                "calls": v["calls"],
+            }
+            for v in sorted(advisor_by_purpose.values(), key=lambda x: -x["cost_usd"])
+        ],
+    }
+
+    return ApiResponse(data={
+        "period_days": days,
+        "total_cost_usd": round(total_workflow_cost, 4),
+        "by_provider": by_provider,
+        "advisor_costs": advisor_costs,
+    })
+
+
+@router.get("/stats/provider-savings")
+async def get_provider_savings(
+    days: int = Query(30, ge=1, le=365),
+    request: Request = None,
+) -> ApiResponse:
+    """Calculate potential savings if workflows used different providers.
+
+    Compares current model costs against alternative provider pricing.
+    """
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+    from sandcastle.models.db import RunStep
+
+    tenant_id = get_tenant_id(request) if request else None
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    async with async_session() as session:
+        step_q = (
+            select(
+                RunStep.model,
+                func.coalesce(func.sum(RunStep.cost_usd), 0.0).label("total_cost"),
+                func.count(RunStep.id).label("step_count"),
+            )
+            .join(Run, RunStep.run_id == Run.id)
+            .where(Run.created_at >= since)
+            .group_by(RunStep.model)
+        )
+        if settings.auth_required and tenant_id is not None:
+            step_q = step_q.where(Run.tenant_id == tenant_id)
+        step_rows = (await session.execute(step_q)).all()
+
+    # Total current cost
+    current_total = sum(float(r.total_cost) for r in step_rows)
+
+    # Token volume per step: reverse-engineer approximate tokens from cost
+    # Store (input_tokens_approx, output_tokens_approx, step_count) per model
+    model_volumes: dict[str, dict] = {}
+    for row in step_rows:
+        model = row.model or "unknown"
+        info = PROVIDER_REGISTRY.get(model)
+        if info is None:
+            continue
+        cost = float(row.total_cost)
+        count = int(row.step_count)
+        # Estimate total tokens (input+output) from cost and pricing
+        # Use 2:1 input:output ratio as approximation
+        total_price_per_m = (info.input_price_per_m * 2 + info.output_price_per_m) / 3
+        if total_price_per_m > 0:
+            tokens_m = cost / total_price_per_m  # millions of tokens
+        else:
+            tokens_m = 0.0
+        model_volumes[model] = {
+            "info": info,
+            "tokens_m": tokens_m,
+            "cost": cost,
+            "count": count,
+        }
+
+    # Build alternatives: for each other provider, compute projected cost
+    # Group providers by name for summary
+    provider_savings: dict[str, dict] = {}
+    for alt_model, alt_info in PROVIDER_REGISTRY.items():
+        alt_provider = alt_info.provider
+        if alt_provider in provider_savings:
+            continue  # Use cheapest model per provider
+        # Calculate what current token volume would cost with this provider
+        projected = 0.0
+        for vol in model_volumes.values():
+            orig_info = vol["info"]
+            # Skip if same provider
+            if orig_info.provider == alt_provider:
+                continue
+            # Compute projected cost for this volume with alt provider pricing
+            tokens_m = vol["tokens_m"]
+            alt_price = (alt_info.input_price_per_m * 2 + alt_info.output_price_per_m) / 3
+            projected += tokens_m * alt_price
+
+        # Add same-provider costs unchanged
+        for vol in model_volumes.values():
+            if vol["info"].provider == alt_provider:
+                projected += vol["cost"]
+
+        savings_usd = current_total - projected
+        savings_pct = (savings_usd / current_total * 100) if current_total > 0 else 0.0
+
+        # Build note
+        if alt_provider == "ollama":
+            note = "Switch to local Ollama for zero cloud costs (hardware required)"
+        elif alt_info.region == "eu":
+            note = (
+                f"Switch to {alt_provider.capitalize()} for "
+                f"{savings_pct:.0f}% savings with EU data residency"
+            )
+        else:
+            note = (
+                f"Switch to {alt_provider.capitalize()} for "
+                f"{savings_pct:.0f}% cost savings"
+            )
+
+        provider_savings[alt_provider] = {
+            "provider": alt_provider,
+            "model": alt_model,
+            "region": alt_info.region,
+            "projected_cost_usd": round(max(0.0, projected), 4),
+            "savings_usd": round(max(0.0, savings_usd), 4),
+            "savings_percent": round(max(0.0, savings_pct), 1),
+            "note": note,
+        }
+
+    # Sort by savings_percent descending, exclude same-provider entries with 0 savings
+    alternatives = [
+        v for v in sorted(provider_savings.values(), key=lambda x: -x["savings_percent"])
+        if v["savings_percent"] > 0 or v["provider"] == "ollama"
+    ]
+
+    return ApiResponse(data={
+        "current_total_usd": round(current_total, 4),
+        "alternatives": alternatives,
+    })
+
+
+@router.get("/stats/provider-recommendation")
+async def get_provider_recommendation(request: Request = None) -> ApiResponse:
+    """Proactive provider recommendations based on usage patterns (last 30 days).
+
+    Analyzes costs, quality scores, and provider usage to surface actionable
+    recommendations: cost savings, quality upgrades, data residency compliance.
+    """
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+    from sandcastle.models.db import RunStep
+
+    tenant_id = get_tenant_id(request) if request else None
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=30)
+
+    async with async_session() as session:
+        # Step costs and models
+        step_q = (
+            select(
+                RunStep.model,
+                func.coalesce(func.sum(RunStep.cost_usd), 0.0).label("total_cost"),
+                func.count(RunStep.id).label("step_count"),
+            )
+            .join(Run, RunStep.run_id == Run.id)
+            .where(Run.created_at >= since)
+            .group_by(RunStep.model)
+        )
+        if settings.auth_required and tenant_id is not None:
+            step_q = step_q.where(Run.tenant_id == tenant_id)
+        step_rows = (await session.execute(step_q)).all()
+
+        # AutoPilot quality scores (variance check)
+        quality_q = (
+            select(AutoPilotSample.quality_score)
+            .where(
+                AutoPilotSample.quality_score.isnot(None),
+                AutoPilotSample.created_at >= since,
+            )
+        )
+        quality_rows = (await session.execute(quality_q)).scalars().all()
+
+        # Advisor audit events for provider/purpose breakdown
+        advisor_q = (
+            select(AuditEvent.payload)
+            .where(
+                AuditEvent.event_type == "advisor.llm_call",
+                AuditEvent.created_at >= since,
+            )
+        )
+        advisor_rows = (await session.execute(advisor_q)).scalars().all()
+
+    recommendations: list[dict] = []
+
+    # --- Cost saving recommendation ---
+    total_cost = sum(float(r.total_cost) for r in step_rows)
+
+    # Find dominant (most expensive) provider
+    provider_costs: dict[str, float] = {}
+    for row in step_rows:
+        model = row.model or "unknown"
+        info = PROVIDER_REGISTRY.get(model)
+        if info is None:
+            continue
+        provider_costs[info.provider] = provider_costs.get(info.provider, 0.0) + float(row.total_cost)
+
+    if total_cost > 0 and provider_costs:
+        dominant_provider = max(provider_costs, key=lambda p: provider_costs[p])
+        dominant_cost = provider_costs[dominant_provider]
+        dominant_pct = dominant_cost / total_cost * 100
+
+        # Look for a significantly cheaper alternative
+        best_savings_provider: str | None = None
+        best_savings_usd = 0.0
+        best_savings_pct = 0.0
+        best_alt_info = None
+
+        # Get token volume for dominant provider
+        dominant_tokens_m = 0.0
+        for row in step_rows:
+            model = row.model or "unknown"
+            info = PROVIDER_REGISTRY.get(model)
+            if info and info.provider == dominant_provider:
+                price_per_m = (info.input_price_per_m * 2 + info.output_price_per_m) / 3
+                if price_per_m > 0:
+                    dominant_tokens_m += float(row.total_cost) / price_per_m
+
+        for alt_model, alt_info in PROVIDER_REGISTRY.items():
+            if alt_info.provider == dominant_provider:
+                continue
+            alt_price = (alt_info.input_price_per_m * 2 + alt_info.output_price_per_m) / 3
+            projected = dominant_tokens_m * alt_price
+            sav_usd = dominant_cost - projected
+            sav_pct = (sav_usd / dominant_cost * 100) if dominant_cost > 0 else 0.0
+            if sav_pct > best_savings_pct:
+                best_savings_pct = sav_pct
+                best_savings_usd = sav_usd
+                best_savings_provider = alt_info.provider
+                best_alt_info = alt_info
+
+        if best_savings_provider and best_savings_pct > 20 and dominant_pct > 50:
+            severity = "high" if best_savings_pct > 40 else "medium"
+            recommendations.append({
+                "type": "cost_saving",
+                "severity": severity,
+                "title": (
+                    f"Switch to {best_savings_provider.capitalize()} "
+                    f"for {best_savings_pct:.0f}% savings"
+                ),
+                "description": (
+                    f"Your workflows spent ${dominant_cost:.2f} on "
+                    f"{dominant_provider.capitalize()} last month. "
+                    f"{best_savings_provider.capitalize()} would cost "
+                    f"approximately ${max(0, dominant_cost - best_savings_usd):.2f} "
+                    f"for equivalent workloads."
+                    + (
+                        f" EU data residency included."
+                        if best_alt_info and best_alt_info.region == "eu"
+                        else ""
+                    )
+                ),
+                "action": f"Switch advisor to {best_savings_provider.capitalize()}",
+                "provider": best_savings_provider,
+                "estimated_savings_usd": round(max(0.0, best_savings_usd), 2),
+                "confidence": 0.85 if best_savings_pct > 50 else 0.70,
+            })
+
+    # --- Quality variance recommendation ---
+    quality_scores = [float(q) for q in quality_rows if q is not None]
+    if len(quality_scores) >= 5:
+        import math as _math
+        avg_q = sum(quality_scores) / len(quality_scores)
+        variance_q = sum((s - avg_q) ** 2 for s in quality_scores) / len(quality_scores)
+        stddev_q = _math.sqrt(variance_q)
+        if stddev_q > 0.2:
+            recommendations.append({
+                "type": "quality_upgrade",
+                "severity": "medium",
+                "title": "Upgrade judge model for better eval accuracy",
+                "description": (
+                    f"Your AutoPilot quality scores have high variance "
+                    f"(stddev {stddev_q:.2f}). Using a higher-tier model for "
+                    f"judging could reduce variance and improve experiment reliability."
+                ),
+                "action": "Set advisor_quality_mode=always_best for judge purpose",
+                "provider": "anthropic",
+                "estimated_savings_usd": 0.0,
+                "confidence": 0.65,
+            })
+
+    # --- Data residency recommendation ---
+    # Check if advisor is using a non-EU provider without data_residency set
+    non_eu_calls = 0
+    total_advisor_calls = 0
+    for payload in advisor_rows:
+        if not payload:
+            continue
+        total_advisor_calls += 1
+        region = payload.get("region", "us")
+        if region != "eu":
+            non_eu_calls += 1
+
+    if total_advisor_calls > 0:
+        non_eu_pct = non_eu_calls / total_advisor_calls
+        residency = getattr(settings, "data_residency", "") or ""
+        if non_eu_pct > 0.5 and not residency:
+            recommendations.append({
+                "type": "data_residency",
+                "severity": "info",
+                "title": "Consider enabling EU Data Residency",
+                "description": (
+                    f"{non_eu_pct * 100:.0f}% of your advisor calls are processed "
+                    f"outside the EU. Enabling data_residency=eu ensures all AI "
+                    f"processing stays within EU borders (GDPR compliance)."
+                ),
+                "action": "Enable EU mode in Settings -> Data Residency",
+                "provider": "mistral",
+                "estimated_savings_usd": 0.0,
+                "confidence": 0.70,
+            })
+
+    # --- Unused provider recommendation ---
+    configured_providers: set[str] = set()
+    for info in PROVIDER_REGISTRY.values():
+        from sandcastle.engine.providers import get_api_key
+        if get_api_key(info):
+            configured_providers.add(info.provider)
+
+    used_providers: set[str] = set()
+    for row in step_rows:
+        model = row.model or "unknown"
+        info = PROVIDER_REGISTRY.get(model)
+        if info:
+            used_providers.add(info.provider)
+
+    unused_configured = configured_providers - used_providers - {"ollama"}
+    for provider_name in sorted(unused_configured)[:1]:
+        recommendations.append({
+            "type": "unused_provider",
+            "severity": "info",
+            "title": f"Try {provider_name.capitalize()} - you have it configured",
+            "description": (
+                f"You have {provider_name.capitalize()} configured but haven't used "
+                f"it in workflows. It may offer cost or quality advantages for "
+                f"certain workflow types."
+            ),
+            "action": f"Set default_model to a {provider_name.capitalize()} model in a workflow",
+            "provider": provider_name,
+            "estimated_savings_usd": 0.0,
+            "confidence": 0.50,
+        })
+
+    return ApiResponse(data={"recommendations": recommendations})
+
+
 @router.post("/runs/estimate")
 async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     """Estimate cost of a workflow run before execution."""
