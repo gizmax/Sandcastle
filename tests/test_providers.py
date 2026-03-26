@@ -51,6 +51,9 @@ class TestProviderRegistry:
 
     def test_pricing_is_positive(self):
         for key, info in PROVIDER_REGISTRY.items():
+            # Local providers (e.g. Ollama) have zero pricing - skip them
+            if info.region == "local":
+                continue
             assert info.input_price_per_m > 0, f"{key} has non-positive input price"
             assert info.output_price_per_m > 0, f"{key} has non-positive output price"
 

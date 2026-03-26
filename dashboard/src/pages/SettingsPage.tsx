@@ -19,12 +19,20 @@ import {
   Check,
   Moon,
   Sun,
+  Cpu,
+  X,
+  Wifi,
+  ChevronDown,
+  Database,
+  HardDrive,
+  Container,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
-import { cn, inputClass, isSafeUrl, maskConnectionString } from "@/lib/utils";
+import { Link } from "react-router-dom";
+import { cn, inputClass, isSafeUrl } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -32,6 +40,21 @@ import { useAccentColor, ACCENT_COLORS } from "@/hooks/useAccentColor";
 import { useTheme } from "@/hooks/useTheme";
 
 // -- Types ------------------------------------------------------------------
+
+interface ProviderEntry {
+  id: string;
+  name: string;
+  region: string;
+  configured: boolean;
+  status: string;
+}
+
+interface AdvisorStatus {
+  current_provider: string;
+  current_model: string | null;
+  data_residency: string | null;
+  available_providers: ProviderEntry[];
+}
 
 interface SettingsData {
   anthropic_api_key: string;
@@ -73,6 +96,110 @@ type SectionName =
   | "budget"
   | "webhooks"
   | "system";
+
+// -- BackendCard component --------------------------------------------------
+
+interface BackendOption {
+  id: string;
+  label: string;
+  desc: string;
+  envHint: string;
+}
+
+function BackendCard({
+  icon: Icon,
+  label,
+  current,
+  options,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  current: string;
+  options: BackendOption[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const handleCopy = (text: string, optId: string) => {
+    void navigator.clipboard.writeText(text);
+    setCopied(optId);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-surface/50">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-3 px-4 py-3 cursor-pointer"
+      >
+        <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/15 border border-accent/30 text-accent capitalize">
+          {current}
+        </span>
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
+            expanded && "rotate-180"
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 border-t border-border/50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {options.map((opt) => {
+              const isActive = opt.id === current;
+              return (
+                <div
+                  key={opt.id}
+                  className={cn(
+                    "rounded-lg border p-3 transition-all",
+                    isActive
+                      ? "border-accent bg-accent/5"
+                      : "border-border/50 bg-surface/30"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                    {isActive && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-accent/20 text-accent uppercase tracking-wider">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{opt.desc}</p>
+                  {!isActive && (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-muted-foreground">Add to .env:</span>
+                        <button
+                          onClick={() => handleCopy(opt.envHint, opt.id)}
+                          className="flex items-center gap-1 text-[10px] text-accent hover:text-accent-hover transition-colors cursor-pointer"
+                        >
+                          {copied === opt.id ? (
+                            <><Check className="h-2.5 w-2.5" /> Copied</>
+                          ) : (
+                            <><Copy className="h-2.5 w-2.5" /> Copy</>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="text-[10px] font-mono text-muted-foreground/70 bg-border/20 rounded px-2 py-1.5 whitespace-pre-wrap break-all">
+                        {opt.envHint}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-2">
+            Changes require restarting Sandcastle to take effect.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -139,6 +266,13 @@ export default function SettingsPage() {
   const { accentColor, setAccentColor } = useAccentColor();
   const { theme, toggleTheme } = useTheme();
 
+  // Advisor provider state
+  const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<string>("");
+  const [advisorModel, setAdvisorModel] = useState<string>("");
+  const [euMode, setEuMode] = useState<boolean>(false);
+  const [savingAdvisor, setSavingAdvisor] = useState(false);
+
   // Keep a snapshot of the original values for dirty checking
   const originalRef = useRef<SettingsData | null>(null);
 
@@ -154,9 +288,20 @@ export default function SettingsPage() {
     setLoading(false);
   }, []);
 
+  const fetchAdvisorStatus = useCallback(async () => {
+    const res = await api.get<AdvisorStatus>("/advisor/status");
+    if (res.data) {
+      setAdvisorStatus(res.data);
+      setSelectedProvider(res.data.current_provider);
+      setAdvisorModel(res.data.current_model || "");
+      setEuMode(res.data.data_residency === "eu");
+    }
+  }, []);
+
   useEffect(() => {
     void fetchSettings();
-  }, [fetchSettings]);
+    void fetchAdvisorStatus();
+  }, [fetchSettings, fetchAdvisorStatus]);
 
   // -- Field updaters -------------------------------------------------------
 
@@ -231,8 +376,48 @@ export default function SettingsPage() {
     [settings]
   );
 
-  // -- Connection test ------------------------------------------------------
+  // -- Advisor save handler -------------------------------------------------
 
+  const handleSaveAdvisor = useCallback(async () => {
+    setSavingAdvisor(true);
+    const res = await api.post("/advisor/configure", {
+      provider: selectedProvider,
+      model: advisorModel || null,
+      data_residency: euMode ? "eu" : null,
+    });
+    setSavingAdvisor(false);
+    if (res.error) {
+      toast.error(`Failed to save: ${res.error.message}`);
+    } else {
+      toast.success("AI Provider saved");
+    }
+  }, [selectedProvider, advisorModel, euMode]);
+
+  // -- Connection test -------------------------------------------------------
+
+  type TestState = "idle" | "testing" | "ok" | "error";
+  const [testStates, setTestStates] = useState<Record<string, TestState>>({});
+  const [testMessages, setTestMessages] = useState<Record<string, string>>({});
+
+  const handleTestConnection = useCallback(async (providerId: string) => {
+    setTestStates((prev) => ({ ...prev, [providerId]: "testing" }));
+    setTestMessages((prev) => ({ ...prev, [providerId]: "" }));
+    const res = await api.post<{ status: string; latency_ms?: number; message?: string }>(
+      "/advisor/test-connection",
+      { provider: providerId }
+    );
+    if (res.error) {
+      setTestStates((prev) => ({ ...prev, [providerId]: "error" }));
+      setTestMessages((prev) => ({ ...prev, [providerId]: res.error!.message }));
+    } else if (res.data?.status === "ok") {
+      setTestStates((prev) => ({ ...prev, [providerId]: "ok" }));
+      setTestMessages((prev) => ({ ...prev, [providerId]: `${res.data!.latency_ms ?? "?"}ms` }));
+      setTimeout(() => setTestStates((prev) => ({ ...prev, [providerId]: "idle" })), 3000);
+    } else {
+      setTestStates((prev) => ({ ...prev, [providerId]: "error" }));
+      setTestMessages((prev) => ({ ...prev, [providerId]: res.data?.message ?? "Connection failed" }));
+    }
+  }, []);
 
   // -- Render ---------------------------------------------------------------
 
@@ -259,6 +444,25 @@ export default function SettingsPage() {
     );
   }
 
+  const REGION_LABEL: Record<string, string> = {
+    us: "US",
+    eu: "EU",
+    local: "Local",
+  };
+
+  const PROVIDER_STATUS_LABEL: Record<string, string> = {
+    ok: "Configured",
+    unconfigured: "Not configured",
+    running: "Running",
+    not_detected: "Not detected",
+  };
+
+  const advisorDirty =
+    advisorStatus !== null &&
+    (selectedProvider !== advisorStatus.current_provider ||
+      (advisorModel || "") !== (advisorStatus.current_model || "") ||
+      euMode !== (advisorStatus.data_residency === "eu"));
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3">
@@ -267,6 +471,151 @@ export default function SettingsPage() {
           Settings
         </h1>
       </div>
+
+      {/* AI Provider */}
+      <SectionCard
+        icon={Cpu}
+        title="AI Provider"
+        description="Choose which LLM powers workflow generation, evolution, and quality evaluation."
+      >
+        <div className="space-y-4">
+          {advisorStatus === null ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <>
+              {/* Provider cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {advisorStatus.available_providers.map((p) => {
+                  const ts = testStates[p.id] ?? "idle";
+                  const tm = testMessages[p.id] ?? "";
+                  return (
+                    <div
+                      key={p.id}
+                      className={cn(
+                        "rounded-lg border p-4 text-center transition-all",
+                        selectedProvider === p.id
+                          ? "border-accent bg-accent/10"
+                          : "border-border hover:border-accent/50"
+                      )}
+                    >
+                      <button
+                        className="w-full cursor-pointer"
+                        onClick={() => setSelectedProvider(p.id)}
+                      >
+                        <div className="text-sm font-semibold text-foreground">{p.name}</div>
+                        <div className="text-xs text-muted mt-0.5">{REGION_LABEL[p.region] ?? p.region}</div>
+                        <div
+                          className={cn(
+                            "text-xs mt-1.5 font-medium",
+                            p.status === "ok" || p.status === "running"
+                              ? "text-success"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {PROVIDER_STATUS_LABEL[p.status] ?? p.status}
+                        </div>
+                      </button>
+                      {p.configured ? (
+                        <div className="mt-1 flex items-center justify-center gap-1 text-[10px] text-success">
+                          <CheckCircle2 className="h-2.5 w-2.5" />
+                          Key set
+                        </div>
+                      ) : (
+                        <Link
+                          to="/api-keys"
+                          className="mt-1 flex items-center justify-center gap-1 text-[10px] text-accent hover:text-accent-hover transition-colors"
+                        >
+                          Set API key &rarr;
+                        </Link>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void handleTestConnection(p.id); }}
+                        disabled={ts === "testing"}
+                        className={cn(
+                          "mt-2 flex w-full items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer",
+                          ts === "ok" ? "bg-success/15 text-success" :
+                          ts === "error" ? "bg-error/15 text-error" :
+                          "bg-border/60 text-muted-foreground hover:bg-border"
+                        )}
+                        title={tm || "Test connection"}
+                      >
+                        {ts === "testing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                        {ts === "ok" && <CheckCircle2 className="h-2.5 w-2.5" />}
+                        {ts === "error" && <X className="h-2.5 w-2.5" />}
+                        {ts === "idle" && <Wifi className="h-2.5 w-2.5" />}
+                        {ts === "ok" ? tm : ts === "error" ? "Failed" : ts === "testing" ? "Testing..." : "Test"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Model override */}
+              <div>
+                <FieldLabel htmlFor="advisor_model">Model (optional override)</FieldLabel>
+                <input
+                  id="advisor_model"
+                  type="text"
+                  className={cn(inputClass, "max-w-sm")}
+                  value={advisorModel}
+                  onChange={(e) => setAdvisorModel(e.target.value)}
+                  placeholder="e.g. mistral-large-latest"
+                />
+                <HelperText>Leave empty to use the provider default model</HelperText>
+              </div>
+
+              {/* Quality routing indicator */}
+              {!advisorModel && (
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                  <p className="text-xs font-medium text-foreground mb-1">Quality Routing: Auto</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    generation=<span className="text-success font-medium">high</span>
+                    {" - "}chat=<span className="text-success font-medium">high</span>
+                    {" - "}explain=<span className="text-warning font-medium">medium</span>
+                    {" - "}evolution=<span className="text-warning font-medium">medium</span>
+                    {" - "}judge=<span className="text-muted-foreground font-medium">low</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    High-stakes operations use the best model; cheap operations use the cheapest
+                    model that meets the quality bar. Set a model override above to disable.
+                  </p>
+                </div>
+              )}
+              {advisorModel && (
+                <div className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
+                  <p className="text-xs font-medium text-foreground mb-0.5">Quality Routing: Disabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    All advisor calls use <span className="font-mono text-accent">{advisorModel}</span> regardless of purpose.
+                    Clear the override above to re-enable automatic quality routing.
+                  </p>
+                </div>
+              )}
+
+              {/* EU data residency toggle */}
+              <div className="flex items-center gap-3">
+                <input
+                  id="eu_mode"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-[color:var(--color-accent)] cursor-pointer"
+                  checked={euMode}
+                  onChange={(e) => setEuMode(e.target.checked)}
+                />
+                <label htmlFor="eu_mode" className="text-sm text-foreground cursor-pointer select-none">
+                  EU Data Residency - only use EU-based providers
+                </label>
+              </div>
+
+              <div className="flex justify-end">
+                <SaveButton
+                  dirty={advisorDirty}
+                  saving={savingAdvisor}
+                  onClick={() => void handleSaveAdvisor()}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </SectionCard>
 
       {/* Software Update */}
       {!update.loading && update.currentVersion && (
@@ -550,6 +899,7 @@ export default function SettingsPage() {
         icon={Shield}
         title="Security"
         description="Authentication and CORS settings"
+        readOnly
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -623,6 +973,7 @@ export default function SettingsPage() {
         icon={Webhook}
         title="Webhooks"
         description="Webhook HMAC signing configuration"
+        readOnly
       >
         <div className="space-y-3">
           <div>
@@ -714,71 +1065,89 @@ export default function SettingsPage() {
         </SectionCard>
       )}
 
-      {/* Infrastructure (read-only) */}
+      {/* Infrastructure Backends */}
       <SectionCard
         icon={Server}
         title="Infrastructure"
-        description="Runtime environment and storage configuration (read-only)"
+        description="Runtime backends and storage. Changes require a restart and are applied via environment variables."
       >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">Mode</span>
-            <span
-              className={cn(
-                "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                settings.is_local_mode
-                  ? "bg-accent/15 border border-accent/30 text-accent"
-                  : "bg-success/15 border border-success/30 text-success"
-              )}
-            >
-              {settings.is_local_mode ? "Local" : "Production"}
-            </span>
-          </div>
+        {(() => {
+          const currentSandbox = runtimeInfo?.sandbox_backend || "e2b";
+          const currentStorage = settings.storage_backend || "local";
+          const currentDb = settings.database_url ? "postgresql" : "sqlite";
+          const currentQueue = settings.redis_url ? "redis" : "in-process";
 
-          {runtimeInfo && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">Sandbox Backend</span>
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent/15 border border-accent/30 text-accent capitalize">
-                {runtimeInfo.sandbox_backend}
-              </span>
-            </div>
-          )}
+          const backends = [
+            {
+              id: "sandbox",
+              label: "Sandbox",
+              icon: Container,
+              current: currentSandbox,
+              options: [
+                { id: "e2b", label: "E2B", desc: "Managed cloud sandbox - isolated, auto-scaling, no infra to maintain", envHint: "E2B_API_KEY=...\nSANDBOX_BACKEND=e2b" },
+                { id: "docker", label: "Docker", desc: "Your own containers - full control, runs on your infra", envHint: "SANDBOX_BACKEND=docker\nDOCKER_IMAGE=sandcastle-runner:latest" },
+                { id: "local", label: "Local", desc: "Runs code directly on the host machine - dev/testing only, no isolation", envHint: "SANDBOX_BACKEND=local" },
+                { id: "cloudflare", label: "Cloudflare Workers", desc: "Edge execution - low latency, globally distributed, pay-per-request", envHint: "SANDBOX_BACKEND=cloudflare\nCLOUDFLARE_WORKER_URL=https://..." },
+              ],
+            },
+            {
+              id: "storage",
+              label: "Storage",
+              icon: HardDrive,
+              current: currentStorage,
+              options: [
+                { id: "local", label: "Local Filesystem", desc: "Files stored on disk - simple, no external deps, single machine only", envHint: "STORAGE_BACKEND=local" },
+                { id: "s3", label: "S3 / MinIO", desc: "Object storage - scalable, shared across instances (AWS S3, MinIO, Cloudflare R2)", envHint: "STORAGE_BACKEND=s3\nSTORAGE_BUCKET=sandcastle-data\nAWS_ACCESS_KEY_ID=...\nAWS_SECRET_ACCESS_KEY=..." },
+              ],
+            },
+            {
+              id: "database",
+              label: "Database",
+              icon: Database,
+              current: currentDb,
+              options: [
+                { id: "sqlite", label: "SQLite", desc: "Embedded database - zero setup, single file, good for single instance", envHint: "# Remove DATABASE_URL to use SQLite" },
+                { id: "postgresql", label: "PostgreSQL", desc: "Production database - concurrent access, backups, multi-worker support", envHint: "DATABASE_URL=postgresql://user:pass@host:5432/sandcastle" },
+              ],
+            },
+            {
+              id: "queue",
+              label: "Queue",
+              icon: Server,
+              current: currentQueue,
+              options: [
+                { id: "in-process", label: "In-process", desc: "Queue runs inside Sandcastle - zero config, but jobs are lost on restart", envHint: "# Remove REDIS_URL to use in-process queue" },
+                { id: "redis", label: "Redis", desc: "External queue - jobs survive restarts, supports multiple Sandcastle workers", envHint: "REDIS_URL=redis://localhost:6379" },
+              ],
+            },
+          ];
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Database</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.database_url ? maskConnectionString(settings.database_url) : "Not configured"}
-              </p>
+          return (
+            <div className="space-y-3">
+              {backends.map((backend) => (
+                <BackendCard
+                  key={backend.id}
+                  icon={backend.icon}
+                  label={backend.label}
+                  current={backend.current}
+                  options={backend.options}
+                />
+              ))}
+              <div className="pt-2 border-t border-border/50">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Data Directory</p>
+                    <p className="text-xs text-muted-foreground/70 font-mono truncate">{settings.data_dir || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Workflows Directory</p>
+                    <p className="text-xs text-muted-foreground/70 font-mono truncate">{settings.workflows_dir || "-"}</p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Queue</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.redis_url ? maskConnectionString(settings.redis_url) : "In-process"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Storage</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.storage_backend}
-                {settings.storage_bucket ? ` / ${settings.storage_bucket}` : ""}
-                {settings.storage_endpoint ? ` (${settings.storage_endpoint})` : ""}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Data Directory</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.data_dir || "-"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Workflows Directory</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.workflows_dir || "-"}
-              </p>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
       </SectionCard>
 
     </div>

@@ -10,7 +10,7 @@
   <!-- Open Graph -->
   <meta property="og:title" content="Sandcastle Community Hub">
   <meta property="og:description" content="118 community AI workflows for Sandcastle. Sales, marketing, support, engineering, HR, and AI templates - browse, install, remix.">
-  <meta property="og:url" content="https://gizmax.cz/sandcastle/hub/">
+  <meta property="og:url" content="https://sandcastle-ai.eu/hub/">
   <meta property="og:type" content="website">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
@@ -2669,16 +2669,26 @@
         var res = await fetch('./registry.json?v=' + Date.now());
         if (!res.ok) throw new Error('HTTP ' + res.status);
         registry = await res.json();
-        try { animateStats(registry.stats); } catch(e) { console.warn('animateStats error:', e); }
-        try { renderCollections(); } catch(e) { console.warn('renderCollections error:', e); }
-        renderTemplates();
       } catch (err) {
-        console.error('fetchRegistry error:', err);
+        console.error('fetchRegistry fetch error:', err);
         var grid = document.getElementById('template-grid');
         if (grid) grid.innerHTML =
           '<div class="error-state">' +
             '<h3>Could not load workflows</h3>' +
             '<p>' + (err.message || 'Unknown error') + ' - <a href="https://github.com/gizmax/Sandcastle/tree/main/site/hub" target="_blank" rel="noopener">view on GitHub</a></p>' +
+          '</div>';
+        return;
+      }
+      // Render - each in its own try/catch so one failure doesn't block others
+      try { animateStats(registry.stats); } catch(e) { console.warn('animateStats error:', e); }
+      try { renderCollections(); } catch(e) { console.warn('renderCollections error:', e); }
+      try { renderTemplates(); } catch(e) {
+        console.error('renderTemplates error:', e);
+        var grid = document.getElementById('template-grid');
+        if (grid) grid.innerHTML =
+          '<div class="error-state">' +
+            '<h3>Render error</h3>' +
+            '<p>' + (e.message || 'Unknown render error') + '</p>' +
           '</div>';
       }
     }
@@ -3839,7 +3849,7 @@
     /* ========== Social Share Buttons ========== */
     function renderShareButtons(t) {
       var container = document.getElementById('share-buttons');
-      var shareUrl = 'https://gizmax.cz/sandcastle/hub/?template=' + encodeURIComponent(t.slug);
+      var shareUrl = 'https://sandcastle-ai.eu/hub/?template=' + encodeURIComponent(t.slug);
       var shareText = t.name + ' - AI workflow for Sandcastle';
 
       var twitterUrl = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText) + '&url=' + encodeURIComponent(shareUrl);

@@ -9,6 +9,18 @@ import { StepApiKeysCheck } from "./StepApiKeysCheck";
 import { StepLaunch } from "./StepLaunch";
 import type { InputSchema } from "@/types/inputSchema";
 
+interface ProviderEntry {
+  id: string;
+  configured: boolean;
+  status: string;
+  region: string;
+}
+
+interface AdvisorStatus {
+  current_provider: string;
+  available_providers: ProviderEntry[];
+}
+
 /** Template selection state shared between wizard steps. */
 export interface SelectedTemplate {
   name: string;
@@ -58,6 +70,32 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
 
   const [stepKey, setStepKey] = useState(0);
 
+  // Provider detection for non-Anthropic banner
+  const [providerBanner, setProviderBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await api.get<AdvisorStatus>("/advisor/status");
+      if (!res.data) return;
+      const { available_providers, current_provider } = res.data;
+      const anthropic = available_providers.find((p) => p.id === "anthropic");
+      const mistral = available_providers.find((p) => p.id === "mistral");
+      const openai = available_providers.find((p) => p.id === "openai");
+      const ollama = available_providers.find((p) => p.id === "ollama");
+
+      if (!anthropic?.configured && mistral?.configured) {
+        setProviderBanner("Mistral detected! Your AI features will use Mistral (EU data residency).");
+      } else if (!anthropic?.configured && openai?.configured) {
+        setProviderBanner("OpenAI detected! Your AI features will use OpenAI.");
+      } else if (!anthropic?.configured && !mistral?.configured && !openai?.configured && ollama?.status === "running") {
+        setProviderBanner("Local mode! All AI features powered by Ollama. No data leaves your machine.");
+      } else if (current_provider !== "anthropic" && current_provider) {
+        const name = current_provider.charAt(0).toUpperCase() + current_provider.slice(1);
+        setProviderBanner(`${name} detected! Your AI features will use ${name}.`);
+      }
+    })();
+  }, []);
+
   const goTo = useCallback((step: number) => {
     setCurrentStep(Math.max(0, Math.min(MAX_STEP, step)));
     setStepKey((k) => k + 1);
@@ -95,6 +133,21 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
 
   return (
     <div className="flex w-full flex-col gap-8">
+      {/* Non-default provider detection banner */}
+      {providerBanner && (
+        <div className="rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-foreground flex items-start gap-2">
+          <span className="text-accent font-semibold shrink-0">AI:</span>
+          <span>{providerBanner}</span>
+          <button
+            onClick={() => setProviderBanner(null)}
+            className="ml-auto shrink-0 text-muted hover:text-foreground transition-colors"
+            aria-label="Dismiss"
+          >
+            x
+          </button>
+        </div>
+      )}
+
       {/* Progress bar */}
       <ProgressBar steps={STEP_LABELS} currentStep={currentStep} />
 

@@ -259,6 +259,27 @@ class ComposioConfig:
 
 
 @dataclass
+class OpenClawConfig:
+    """Configuration for OpenClaw agent gateway step."""
+
+    gateway_url: str = ""
+    message: str = ""
+    skills: list[str] = field(default_factory=list)
+    api_token: str = ""  # Bearer token for gateway auth
+    timeout_seconds: int = 300
+    cost_per_call: float = 0.0
+
+
+@dataclass
+class ParseConfig:
+    """Configuration for document parsing step."""
+
+    output: str = "markdown"  # text, markdown, json
+    pages: str | None = None  # "1-5,10-20" or None for all
+    ocr: bool = False
+
+
+@dataclass
 class SLOConfig:
     """Service Level Objective for optimizer-driven model selection."""
 
@@ -360,17 +381,25 @@ VALID_STEP_TYPES = frozenset(
         "delegate",
         "browser",
         "composio",
+        "openclaw",
+        "parse",
     }
 )
 
 # Types that don't need a prompt
 NON_PROMPT_TYPES = frozenset(
-    {"http", "code", "condition", "loop", "race", "sensor", "gate", "transform", "notify", "composio"}
+    {
+        "http", "code", "condition", "loop", "race", "sensor", "gate",
+        "transform", "notify", "composio", "openclaw", "parse",
+    }
 )
 
 # Types that don't use an LLM model (skip model validation)
 NON_LLM_TYPES = frozenset(
-    {"http", "code", "condition", "loop", "race", "sensor", "transform", "notify", "composio"}
+    {
+        "http", "code", "condition", "loop", "race", "sensor",
+        "transform", "notify", "composio", "openclaw", "parse",
+    }
 )
 
 
@@ -417,6 +446,8 @@ class StepDefinition:
     delegate_config: DelegateConfig | None = None
     browser_config: BrowserConfig | None = None
     composio_config: ComposioConfig | None = None
+    openclaw_config: OpenClawConfig | None = None
+    parse_config: ParseConfig | None = None
 
 
 VALID_RISK_LEVELS = frozenset({"minimal", "limited", "high", "unacceptable"})
@@ -875,6 +906,31 @@ def _parse_composio_config(data: dict | None) -> ComposioConfig | None:
     )
 
 
+def _parse_openclaw_config(data: dict | None) -> OpenClawConfig | None:
+    """Parse OpenClaw gateway configuration from YAML data."""
+    if data is None:
+        return None
+    return OpenClawConfig(
+        gateway_url=data.get("gateway_url", ""),
+        message=data.get("message", ""),
+        skills=data.get("skills", []),
+        api_token=data.get("api_token", ""),
+        timeout_seconds=data.get("timeout_seconds", 300),
+        cost_per_call=float(data.get("cost_per_call", 0.0)),
+    )
+
+
+def _parse_parse_config(data: dict | None) -> ParseConfig | None:
+    """Parse document parsing step configuration from YAML data."""
+    if data is None:
+        return None
+    return ParseConfig(
+        output=data.get("output", "markdown"),
+        pages=data.get("pages"),
+        ocr=bool(data.get("ocr", False)),
+    )
+
+
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
     if "id" not in data or not data["id"]:
@@ -939,6 +995,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         delegate_config=_parse_delegate_config(data.get("delegate_config")),
         browser_config=_parse_browser_config(data.get("browser_config")),
         composio_config=_parse_composio_config(data.get("composio_config")),
+        openclaw_config=_parse_openclaw_config(data.get("openclaw_config")),
+        parse_config=_parse_parse_config(data.get("parse_config")),
     )
 
 
@@ -1222,6 +1280,35 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Composio step '{step.id}' must have composio_config with an action"
                 )
+        elif step.type == "openclaw":
+            if not step.openclaw_config or not step.openclaw_config.gateway_url:
+                errors.append(
+                    f"OpenClaw step '{step.id}' must have openclaw_config with gateway_url"
+                )
+        elif step.type == "parse":
+            cfg = step.parse_config or ParseConfig()
+            if cfg.output not in ("text", "markdown", "json"):
+                errors.append(
+                    f"Parse step '{step.id}' has invalid output format '{cfg.output}'. "
+                    "Must be 'text', 'markdown', or 'json'"
+                )
+            # Warn when no file reference is provided (prompt is the NON_PROMPT placeholder)
+            has_file_ref = (
+                step.prompt
+                and step.prompt != "parse step"
+                and (
+                    step.prompt.startswith("@upload:")
+                    or step.prompt.startswith("@file:")
+                    or step.prompt.startswith("/")
+                    or "{" in step.prompt  # template variable
+                )
+            )
+            if not has_file_ref and not step.depends_on:
+                errors.append(
+                    f"Parse step '{step.id}' should have a prompt with a file reference "
+                    "(@upload:file_id, @file:path, or a template variable) "
+                    "or a depends_on step providing the path"
+                )
 
     # Validate sub_workflow configuration
     for step in workflow.steps:
@@ -1432,6 +1519,10 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         if isinstance(step.composio_config.params, dict):
             import json as _json
             fields.append(_json.dumps(step.composio_config.params))
+    if step.openclaw_config:
+        fields.append(step.openclaw_config.gateway_url)
+        if step.openclaw_config.message:
+            fields.append(step.openclaw_config.message)
     return fields
 
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   Sparkles,
@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Loader2,
   Ban,
+  BookOpen,
 } from "lucide-react";
 import {
   LineChart,
@@ -110,6 +111,99 @@ function ScoreDelta({ baseline, best }: { baseline: number; best: number }) {
   );
 }
 
+// --- Example eval suites ---
+
+const EXAMPLE_EVAL_SUITES: { label: string; description: string; yaml: string }[] = [
+  {
+    label: "Quality check",
+    description: "Basic pass/fail assertions",
+    yaml: `suite:
+  name: quality-check
+  description: Verify output correctness with pass/fail assertions
+  cases:
+    - name: basic-output-valid
+      input:
+        query: "Summarize the benefits of automation"
+      assertions:
+        - type: contains
+          value: "efficiency"
+        - type: min_length
+          value: 50
+    - name: no-hallucination
+      input:
+        query: "What is 2 + 2?"
+      assertions:
+        - type: equals
+          value: "4"
+        - type: max_length
+          value: 10`,
+  },
+  {
+    label: "Cost optimization",
+    description: "Output quality while minimizing cost",
+    yaml: `suite:
+  name: cost-optimization
+  description: Maintain quality while reducing token usage and cost
+  cases:
+    - name: concise-response
+      input:
+        query: "Explain quantum computing in one paragraph"
+      assertions:
+        - type: max_tokens
+          value: 200
+        - type: contains
+          value: "qubit"
+        - type: min_quality
+          value: 0.7
+    - name: efficient-extraction
+      input:
+        query: "Extract the main topic from: AI is transforming healthcare"
+      assertions:
+        - type: max_tokens
+          value: 20
+        - type: contains
+          value: "healthcare"`,
+  },
+  {
+    label: "Accuracy benchmark",
+    description: "Detailed accuracy scoring with multiple test cases",
+    yaml: `suite:
+  name: accuracy-benchmark
+  description: Multi-case accuracy evaluation with weighted scoring
+  scoring:
+    method: weighted_average
+  cases:
+    - name: factual-recall
+      weight: 2.0
+      input:
+        query: "What is the capital of France?"
+      assertions:
+        - type: equals
+          value: "Paris"
+        - type: max_latency_ms
+          value: 3000
+    - name: reasoning-task
+      weight: 3.0
+      input:
+        query: "If a train travels 60 km/h for 2.5 hours, how far does it go?"
+      assertions:
+        - type: contains
+          value: "150"
+        - type: min_quality
+          value: 0.9
+    - name: edge-case-handling
+      weight: 1.0
+      input:
+        query: ""
+      assertions:
+        - type: not_empty
+        - type: contains
+          value: "provide"`,
+  },
+];
+
+const DEFAULT_EVAL_SUITE = "suite:\n  name: my-eval\n  cases:\n    - name: baseline\n      input: {}";
+
 // --- Start Evolution Modal ---
 
 interface StartModalProps {
@@ -127,13 +221,41 @@ interface StartModalProps {
 
 function StartEvolutionModal({ initialWorkflow, onClose, onStart, workflows }: StartModalProps) {
   const [workflowName, setWorkflowName] = useState(initialWorkflow ?? "");
-  const [evalSuite, setEvalSuite] = useState(
-    "suite:\n  name: my-eval\n  cases:\n    - name: baseline\n      input: {}"
-  );
+  const [evalSuite, setEvalSuite] = useState(DEFAULT_EVAL_SUITE);
   const [optimizeFor, setOptimizeFor] = useState<"quality" | "cost" | "latency" | "balanced">("balanced");
   const [maxIterations, setMaxIterations] = useState(20);
   const [budgetLimit, setBudgetLimit] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [exampleMenuOpen, setExampleMenuOpen] = useState(false);
+  const exampleMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (exampleMenuRef.current && !exampleMenuRef.current.contains(event.target as Node)) {
+        setExampleMenuOpen(false);
+      }
+    }
+    if (exampleMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [exampleMenuOpen]);
+
+  const loadExample = (yaml: string) => {
+    const hasUserContent = evalSuite.trim() !== "" && evalSuite.trim() !== DEFAULT_EVAL_SUITE.trim();
+    if (hasUserContent) {
+      const confirmed = window.confirm(
+        "The eval suite textarea already has content. Replace it with the example?"
+      );
+      if (!confirmed) {
+        setExampleMenuOpen(false);
+        return;
+      }
+    }
+    setEvalSuite(yaml);
+    setExampleMenuOpen(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,9 +338,40 @@ function StartEvolutionModal({ initialWorkflow, onClose, onStart, workflows }: S
 
           {/* Eval suite */}
           <div>
-            <label className="block text-xs font-medium text-foreground mb-1.5">
-              Eval Suite (YAML)
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-medium text-foreground">
+                Eval Suite (YAML)
+              </label>
+              <div className="relative" ref={exampleMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setExampleMenuOpen((prev) => !prev)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md border border-border px-2 py-1",
+                    "text-[11px] font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                  )}
+                >
+                  <BookOpen className="h-3 w-3" />
+                  Load example
+                  <ChevronDown className={cn("h-3 w-3 transition-transform", exampleMenuOpen && "rotate-180")} />
+                </button>
+                {exampleMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-10 w-56 rounded-lg border border-border bg-surface shadow-lg overflow-hidden">
+                    {EXAMPLE_EVAL_SUITES.map((example) => (
+                      <button
+                        key={example.label}
+                        type="button"
+                        onClick={() => loadExample(example.yaml)}
+                        className="w-full text-left px-3 py-2 hover:bg-border/20 transition-colors"
+                      >
+                        <p className="text-xs font-medium text-foreground">{example.label}</p>
+                        <p className="text-[10px] text-muted">{example.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <textarea
               value={evalSuite}
               onChange={(e) => setEvalSuite(e.target.value)}
@@ -229,6 +382,9 @@ function StartEvolutionModal({ initialWorkflow, onClose, onStart, workflows }: S
                 "focus:outline-none focus:ring-1 focus:ring-accent/40 resize-none"
               )}
             />
+            <p className="mt-1 text-[10px] text-muted">
+              Define test cases to evaluate each mutation. Need help? Load an example above.
+            </p>
           </div>
 
           {/* Optimize for */}

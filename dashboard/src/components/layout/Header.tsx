@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Menu, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -7,6 +8,7 @@ import {
   NotificationCenter,
   type Notification,
 } from "@/components/layout/NotificationCenter";
+import { api } from "@/api/client";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -45,6 +47,32 @@ function getPageTitle(pathname: string): string {
   return "Sandcastle";
 }
 
+const PROVIDER_BADGE_LABEL: Record<string, string> = {
+  anthropic: "Claude \uD83C\uDDFA\uD83C\uDDF8",
+  mistral: "Mistral \uD83C\uDDEA\uD83C\uDDFA",
+  openai: "OpenAI \uD83C\uDDFA\uD83C\uDDF8",
+  ollama: "Ollama \uD83C\uDFE0",
+  google: "Gemini \uD83C\uDDFA\uD83C\uDDF8",
+  minimax: "MiniMax \uD83C\uDDFA\uD83C\uDDF8",
+};
+
+/** Fetch current advisor provider once and cache in module scope. */
+let _cachedProvider: string | null = null;
+
+function useAdvisorProviderBadge(): string | null {
+  const [provider, setProvider] = useState<string | null>(_cachedProvider);
+  useEffect(() => {
+    if (_cachedProvider) return;
+    api.get<{ current_provider: string }>("/advisor/status").then((res) => {
+      if (res.data?.current_provider) {
+        _cachedProvider = res.data.current_provider;
+        setProvider(res.data.current_provider);
+      }
+    }).catch(() => undefined);
+  }, []);
+  return provider;
+}
+
 export function Header({
   onMenuToggle,
   onOpenPalette,
@@ -53,6 +81,7 @@ export function Header({
   onClickNotification,
 }: HeaderProps) {
   const location = useLocation();
+  const advisorProvider = useAdvisorProviderBadge();
 
   const pageTitle = getPageTitle(location.pathname);
 
@@ -100,7 +129,12 @@ export function Header({
         </kbd>
       </button>
 
-      <div className={cn("flex items-center gap-1", "sm:ml-0 ml-auto")}>
+      <div className={cn("flex items-center gap-1 sm:gap-2", "sm:ml-0 ml-auto")}>
+        {advisorProvider && (
+          <span className="hidden sm:inline-flex rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+            {PROVIDER_BADGE_LABEL[advisorProvider] ?? advisorProvider}
+          </span>
+        )}
         <LiveIndicator />
         <ThemeToggle />
         <NotificationCenter

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,8 @@ import httpx
 from sandcastle.engine.dag import parse_yaml_string, validate
 from sandcastle.engine.providers import KNOWN_MODELS
 from sandcastle.engine.tools.registry import TOOL_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -321,6 +324,68 @@ Output ONLY the YAML content, nothing else."""
 
 
 # ---------------------------------------------------------------------------
+# SLO-aware quality tier routing
+# ---------------------------------------------------------------------------
+
+# Quality requirements per advisor purpose.
+# Higher tier = more capable (expensive) model preferred.
+ADVISOR_QUALITY_TIERS: dict[str, str] = {
+    "generation": "high",    # Workflow generation needs best quality
+    "chat": "high",          # Interactive chat needs good responses
+    "explain": "medium",     # Error explanation - good enough is fine
+    "evolution": "medium",   # Prompt mutation - creative but not critical
+    "judge": "low",          # Quality scoring - just needs a number 0-1
+}
+
+# Model capability ranking per provider (tier -> model ID).
+# "high" = best available, "medium" = balanced, "low" = cheapest.
+ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
+    "anthropic": {
+        "high": "claude-sonnet-4-20250514",
+        "medium": "claude-haiku-4-20250514",
+        "low": "claude-haiku-4-20250514",
+    },
+    "mistral": {
+        "high": "mistral-large-latest",
+        "medium": "mistral-small-latest",
+        "low": "mistral-small-latest",
+    },
+    "openai": {
+        "high": "gpt-4o",
+        "medium": "gpt-4o-mini",
+        "low": "gpt-4o-mini",
+    },
+    "ollama": {
+        "high": "llama3.2",
+        "medium": "llama3.2",
+        "low": "llama3.2",
+    },
+    "google": {
+        "high": "google/gemini-2.5-pro",
+        "medium": "google/gemini-2.5-pro",
+        "low": "google/gemini-2.5-pro",
+    },
+    "minimax": {
+        "high": "MiniMax-M2.5",
+        "medium": "MiniMax-M2.5",
+        "low": "MiniMax-M2.5",
+    },
+}
+
+
+def _resolve_model_for_tier(provider_name: str, quality_tier: str) -> str | None:
+    """Return the model ID for *provider_name* at *quality_tier*, or None if unknown.
+
+    When the provider has no tier map defined, returns None so the caller can
+    fall back to the provider's default model from ``_PROVIDER_CONFIGS``.
+    """
+    tier_map = ADVISOR_MODEL_TIERS.get(provider_name)
+    if tier_map is None:
+        return None
+    return tier_map.get(quality_tier)
+
+
+# ---------------------------------------------------------------------------
 # Core generation
 # ---------------------------------------------------------------------------
 
@@ -330,6 +395,7 @@ _PROVIDER_CONFIGS = {
         "api_url": "https://api.anthropic.com/v1/messages",
         "model": "claude-sonnet-4-20250514",
         "api_key_env": "ANTHROPIC_API_KEY",
+        "region": "us",
         "headers_fn": lambda key: {
             "x-api-key": key,
             "anthropic-version": "2023-06-01",
@@ -340,6 +406,17 @@ _PROVIDER_CONFIGS = {
         "api_url": "https://api.openai.com/v1/chat/completions",
         "model": "gpt-4o",
         "api_key_env": "OPENAI_API_KEY",
+        "region": "us",
+        "headers_fn": lambda key: {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+    },
+    "mistral": {
+        "api_url": "https://api.mistral.ai/v1/chat/completions",
+        "model": "mistral-large-latest",
+        "api_key_env": "MISTRAL_API_KEY",
+        "region": "eu",
         "headers_fn": lambda key: {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
@@ -349,7 +426,22 @@ _PROVIDER_CONFIGS = {
         "api_url": "http://localhost:11434/v1/chat/completions",
         "model": "llama3.2",
         "api_key_env": "",  # Ollama doesn't need a key
+        "region": "local",
         "headers_fn": lambda _: {"Content-Type": "application/json"},
+    },
+    "google": {
+        "api_url": "https://openrouter.ai/api/v1/chat/completions",
+        "model": "google/gemini-2.5-pro",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "region": "us",
+        "headers_fn": lambda key: {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    },
+    "minimax": {
+        "api_url": "https://api.minimaxi.chat/v1/chat/completions",
+        "model": "MiniMax-M2.5",
+        "api_key_env": "MINIMAX_API_KEY",
+        "region": "us",
+        "headers_fn": lambda key: {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     },
 }
 
@@ -357,10 +449,16 @@ _PROVIDER_CONFIGS = {
 def _get_advisor_config() -> dict:
     """Resolve advisor provider from environment variables.
 
-    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | ollama
+    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | mistral | ollama
     SANDCASTLE_ADVISOR_MODEL: override model name
+
+    When ``data_residency`` is set in settings, the chosen provider must
+    operate in the required region. If it doesn't, a ``ValueError`` is raised
+    with a clear message listing the compliant providers.
     """
     import os
+
+    from sandcastle.config import settings
 
     provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
     if provider not in _PROVIDER_CONFIGS:
@@ -370,6 +468,24 @@ def _get_advisor_config() -> dict:
     model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
     if model_override:
         config["model"] = model_override
+
+    # Enforce data residency constraint
+    residency = settings.data_residency
+    if residency:
+        provider_region = config.get("region", "us")
+        if provider_region != residency:
+            # Build list of compliant providers for the error message
+            compliant = [
+                name for name, cfg in _PROVIDER_CONFIGS.items()
+                if cfg.get("region", "us") == residency
+            ]
+            raise ValueError(
+                f"Data residency mode '{residency}' is active but advisor provider "
+                f"'{provider}' runs in region '{provider_region}'. "
+                f"Use a provider in the '{residency}' region. "
+                f"Compliant providers: {', '.join(compliant) or 'none configured'}. "
+                f"Set SANDCASTLE_ADVISOR_PROVIDER to one of these."
+            )
 
     return config
 
@@ -387,13 +503,14 @@ def _resolve_api_key() -> str:
 
     api_key = os.environ.get(key_env, "")
     if not api_key:
-        from sandcastle.config import settings
-
-        # Try provider-specific settings first
-        if key_env == "OPENAI_API_KEY":
-            api_key = getattr(settings, "openai_api_key", "") or ""
-        if not api_key:
-            api_key = settings.anthropic_api_key
+        # Use the provider-generic attr_map lookup so each provider only gets
+        # its own key - never fall through to anthropic_api_key for mistral etc.
+        api_key = _resolve_api_key_for_provider(_resolve_provider_name())
+        # _resolve_api_key_for_provider returns "no-key-required" for keyless
+        # providers and "" when no key is found - normalise "no-key-required"
+        # to a truthy sentinel so callers can check `if not api_key`.
+        if api_key == "no-key-required":
+            api_key = "ollama-no-key"
     return api_key
 
 
@@ -408,9 +525,18 @@ def _build_request_body(
     system: str,
     messages: list[dict],
     max_tokens: int = 4096,
+    *,
+    is_anthropic: bool | None = None,
 ) -> dict:
-    """Build provider-specific request body."""
-    if _is_anthropic_provider():
+    """Build provider-specific request body.
+
+    When *is_anthropic* is None the current global provider is inspected.
+    Pass an explicit bool when building a body for a specific provider in the
+    failover loop to avoid touching global state.
+    """
+    if is_anthropic is None:
+        is_anthropic = _is_anthropic_provider()
+    if is_anthropic:
         return {
             "model": model,
             "max_tokens": max_tokens,
@@ -425,9 +551,16 @@ def _build_request_body(
     }
 
 
-def _parse_response_text(data: dict) -> str:
-    """Extract text from provider-specific response format."""
-    if _is_anthropic_provider():
+def _parse_response_text(data: dict, *, is_anthropic: bool | None = None) -> str:
+    """Extract text from provider-specific response format.
+
+    When *is_anthropic* is None the current global provider is inspected.
+    Pass an explicit bool when parsing a response for a specific provider in
+    the failover loop to avoid touching global state.
+    """
+    if is_anthropic is None:
+        is_anthropic = _is_anthropic_provider()
+    if is_anthropic:
         return data["content"][0]["text"]
     # OpenAI/Ollama format
     return data["choices"][0]["message"]["content"]
@@ -461,6 +594,261 @@ _API_URL = "https://api.anthropic.com/v1/messages"
 _MODEL = "claude-sonnet-4-20250514"
 _MAX_TOKENS = 4096
 _TIMEOUT = 60
+
+
+def _resolve_provider_name() -> str:
+    """Return the current advisor provider name (e.g. 'anthropic', 'mistral')."""
+    import os
+    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
+    if provider not in _PROVIDER_CONFIGS:
+        return "anthropic"
+    return provider
+
+
+def _resolve_api_key_for_provider(provider_name: str) -> str:
+    """Resolve the API key for a specific provider name.
+
+    Returns an empty string when no key is available.
+    """
+    import os
+
+    cfg = _PROVIDER_CONFIGS.get(provider_name, {})
+    key_env = cfg.get("api_key_env", "")
+
+    # Providers that do not need a key (e.g. Ollama)
+    if not key_env:
+        return "no-key-required"
+
+    api_key = os.environ.get(key_env, "")
+    if not api_key:
+        from sandcastle.config import settings
+
+        attr_map = {
+            "ANTHROPIC_API_KEY": "anthropic_api_key",
+            "OPENAI_API_KEY": "openai_api_key",
+            "MISTRAL_API_KEY": "mistral_api_key",
+            "OPENROUTER_API_KEY": "openrouter_api_key",
+            "MINIMAX_API_KEY": "minimax_api_key",
+        }
+        attr = attr_map.get(key_env)
+        if attr:
+            api_key = getattr(settings, attr, "") or ""
+    return api_key
+
+
+def _build_providers_to_try(primary: str, residency: str) -> list[str]:
+    """Return an ordered list of providers to attempt, starting with *primary*.
+
+    Fallback providers are added when they have a configured API key and
+    satisfy the *residency* constraint (empty = no constraint).
+
+    Ollama is always included as a fallback even without a key (it needs no
+    key) but only when residency allows it ("local" or "").
+    """
+    providers_to_try: list[str] = [primary]
+    for name, cfg in _PROVIDER_CONFIGS.items():
+        if name == primary:
+            continue
+        provider_region = cfg.get("region", "us")
+        # Respect data residency
+        if residency and provider_region != residency:
+            continue
+        # Check key availability
+        key = _resolve_api_key_for_provider(name)
+        if not key:
+            continue
+        providers_to_try.append(name)
+    return providers_to_try
+
+
+async def _call_advisor_llm(
+    system: str,
+    user: str,
+    max_tokens: int = 2048,
+    *,
+    purpose: str = "generation",
+    run_id: str | None = None,
+) -> str:
+    """Call the configured advisor LLM with automatic failover across providers.
+
+    On rate-limit (429), server error (5xx), or network failure the call is
+    transparently retried with the next available provider. The user never
+    sees the error; the audit log records which provider was ultimately used
+    and whether a failover occurred.
+
+    Only 4xx client errors other than 429 are not retried (they indicate a
+    problem with the request itself, not the provider).
+
+    Args:
+        system: System prompt.
+        user: User message.
+        max_tokens: Maximum tokens in response.
+        purpose: Audit purpose tag - "generation", "evolution", "judge", "explain".
+        run_id: Optional run ID to associate with the audit event.
+
+    Returns:
+        The response text string from the first provider that succeeds.
+
+    Raises:
+        RuntimeError: When all available providers have been exhausted.
+        httpx.HTTPStatusError: When a non-retryable 4xx error is returned by
+            any provider.
+    """
+    import os as _os
+
+    from sandcastle.config import settings
+
+    primary = _resolve_provider_name()
+    residency = settings.data_residency
+    providers_to_try = _build_providers_to_try(primary, residency)
+
+    # Determine quality tier from purpose
+    quality_mode = getattr(settings, "advisor_quality_mode", "auto")
+    if quality_mode == "always_best":
+        quality_tier = "high"
+    elif quality_mode == "always_cheapest":
+        quality_tier = "low"
+    else:  # "auto" (default)
+        quality_tier = ADVISOR_QUALITY_TIERS.get(purpose, "high")
+
+    # Explicit model override wins over SLO tier selection
+    model_override = _os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
+
+    last_error: BaseException | None = None
+    failover_provider: str | None = None  # the provider that ultimately succeeded
+    failover_reason: str | None = None    # error that caused the failover
+
+    for i, provider_name in enumerate(providers_to_try):
+        cfg = dict(_PROVIDER_CONFIGS[provider_name])
+        api_url = cfg["api_url"]
+        provider_region = cfg.get("region", "us")
+        is_anthropic = cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
+
+        # Select model: explicit override > SLO tier > provider default
+        if model_override:
+            model = model_override
+            model_selected_by = "user_override"
+        else:
+            tier_model = _resolve_model_for_tier(provider_name, quality_tier)
+            if tier_model:
+                model = tier_model
+                model_selected_by = "slo_routing"
+            else:
+                model = cfg["model"]
+                model_selected_by = "default"
+
+        api_key = _resolve_api_key_for_provider(provider_name)
+        headers = cfg["headers_fn"](api_key)
+        body = _build_request_body(
+            model, system, [{"role": "user", "content": user}], max_tokens,
+            is_anthropic=is_anthropic,
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(api_url, json=body, headers=headers)
+                resp.raise_for_status()
+                result_text = _parse_response_text(resp.json(), is_anthropic=is_anthropic)
+
+            # Success - record failover info if we switched providers
+            if i > 0:
+                failover_provider = provider_name
+                logger.info(
+                    "Advisor failover succeeded: %s -> %s (attempt %d, purpose=%s)",
+                    primary,
+                    provider_name,
+                    i + 1,
+                    purpose,
+                )
+
+            break  # Exit loop on success
+
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            last_error = exc
+            if status == 429:
+                logger.warning(
+                    "Advisor '%s' rate-limited (429), trying next provider...",
+                    provider_name,
+                )
+                # Record the first error that caused us to leave the primary provider
+                if failover_reason is None and len(providers_to_try) > i + 1:
+                    failover_reason = f"429 rate-limit from {provider_name}"
+                continue
+            elif status >= 500:
+                logger.warning(
+                    "Advisor '%s' server error (%d), trying next provider...",
+                    provider_name,
+                    status,
+                )
+                if failover_reason is None and len(providers_to_try) > i + 1:
+                    failover_reason = f"{status} server error from {provider_name}"
+                continue
+            else:
+                # 4xx client errors (except 429) are not retryable
+                raise
+
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            last_error = exc
+            logger.warning(
+                "Advisor '%s' unreachable (%s), trying next provider...",
+                provider_name,
+                type(exc).__name__,
+            )
+            if failover_reason is None and len(providers_to_try) > i + 1:
+                failover_reason = f"{type(exc).__name__} from {provider_name}"
+            continue
+
+    else:
+        # Loop exhausted without a break - all providers failed
+        raise RuntimeError(
+            f"All advisor providers failed. Tried: {', '.join(providers_to_try)}. "
+            f"Last error: {last_error}"
+        )
+
+    # Emit provider audit event (best-effort - never block generation)
+    try:
+        from sandcastle.models.db import async_session
+        from sandcastle.engine.audit import append_audit_event
+        from sandcastle.engine.providers import PROVIDER_REGISTRY
+
+        # Rough cost estimate based on token counts (approximation)
+        input_tokens_approx = len(user) // 4 + len(system) // 4
+        output_tokens_approx = len(result_text) // 4
+        cost_estimate = 0.0
+        for info in PROVIDER_REGISTRY.values():
+            if info.provider == provider_name or provider_name in info.provider:
+                cost_estimate = (
+                    info.input_price_per_m * input_tokens_approx / 1_000_000
+                    + info.output_price_per_m * output_tokens_approx / 1_000_000
+                )
+                break
+
+        audit_payload = {
+            "provider": provider_name,
+            "model": model,
+            "region": provider_region,
+            "purpose": purpose,
+            "quality_tier": quality_tier,
+            "model_selected_by": model_selected_by,
+            "cost_estimate_usd": round(cost_estimate, 6),
+            "attempt": i + 1,
+            "failover_from": primary if failover_provider is not None else None,
+            "failover_reason": failover_reason if failover_provider is not None else None,
+        }
+        async with async_session() as session:
+            await append_audit_event(
+                session,
+                event_type="advisor.llm_call",
+                run_id=run_id,
+                actor_id=f"advisor:{provider_name}",
+                payload=audit_payload,
+            )
+            await session.commit()
+    except Exception:
+        pass  # Never break generation for audit
+
+    return result_text
 
 
 async def generate_workflow(
@@ -502,21 +890,12 @@ async def generate_workflow(
     else:
         user_msg = description
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(
-            _get_api_url(),
-            headers=_get_headers(api_key),
-            json=_build_request_body(
-                model=_get_model(),
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_msg}],
-                max_tokens=_MAX_TOKENS,
-            ),
-        )
-        resp.raise_for_status()
-
-    data = resp.json()
-    raw_text = _parse_response_text(data)
+    raw_text = await _call_advisor_llm(
+        system=system_prompt,
+        user=user_msg,
+        max_tokens=_MAX_TOKENS,
+        purpose="generation",
+    )
 
     # Strip markdown fencing if present
     yaml_content = _strip_fencing(raw_text)
@@ -765,21 +1144,21 @@ async def generate_chat(
                 content = f"[Existing workflow]\n{effective_yaml}\n\n[User request]\n{content}"
         api_messages.append({"role": role, "content": content})
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(
-            _get_api_url(),
-            headers=_get_headers(api_key),
-            json=_build_request_body(
-                model=_get_model(),
-                system=system_prompt,
-                messages=api_messages,
-                max_tokens=_MAX_TOKENS,
-            ),
-        )
-        resp.raise_for_status()
+    # Build the full user message from the api_messages list (last user message with context)
+    # _call_advisor_llm takes a single user string, so we pass the last message content.
+    # For multi-turn, the last message already has injected YAML context from the loop above.
+    last_user_content = ""
+    for msg in reversed(api_messages):
+        if msg.get("role") == "user":
+            last_user_content = msg["content"]
+            break
 
-    data = resp.json()
-    raw_text = _parse_response_text(data)
+    raw_text = await _call_advisor_llm(
+        system=system_prompt,
+        user=last_user_content,
+        max_tokens=_MAX_TOKENS,
+        purpose="chat",
+    )
 
     # Parse JSON response
     try:
@@ -938,29 +1317,15 @@ Prompt (first 500 chars): {scrubbed_prompt}
 ERROR:
 {scrubbed_error}"""
 
-    # Use a cheaper/faster model for explanations
-    cfg = _get_advisor_config()
-    explain_model = cfg.get("model", _MODEL)
-    # Prefer haiku for Anthropic (cheaper), otherwise use configured model
-    if cfg.get("api_key_env") == "ANTHROPIC_API_KEY":
-        explain_model = "claude-haiku-4-5-20251001"
-
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                _get_api_url(),
-                headers=_get_headers(api_key),
-                json=_build_request_body(
-                    model=explain_model,
-                    system=_EXPLAIN_SYSTEM,
-                    messages=[{"role": "user", "content": user_msg}],
-                    max_tokens=512,
-                ),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            text = _parse_response_text(data)
-            return json.loads(text)
+        # SLO routing: purpose="explain" -> medium tier model
+        text = await _call_advisor_llm(
+            system=_EXPLAIN_SYSTEM,
+            user=user_msg,
+            max_tokens=512,
+            purpose="explain",
+        )
+        return json.loads(text)
     except Exception:
         # Fallback to basic explanation
         return {

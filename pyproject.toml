@@ -1,7 +1,7 @@
 [project]
 name = "sandcastle-ai"
 dynamic = ["version"]
-description = "Production-ready workflow orchestrator for AI agents. Define pipelines in YAML, run locally with zero config, scale to production."
+description = "You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in."
 requires-python = ">=3.11"
 license = {text = "BSL-1.1"}
 readme = "README.md"
@@ -51,6 +51,11 @@ memory = [
     "mem0ai>=0.1.0",
     "fastembed>=0.3.6,<0.4",
     "anthropic>=0.50",
+]
+parse = [
+    "pymupdf>=1.25",
+    "python-docx>=1.0",
+    "openpyxl>=3.1",
 ]
 docker = [
     "aiodocker>=0.22",

@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. Every version documented - Workflow Evolution, Workflow as API, Living Dashboard, EU AI Act compliance, audit trail, PII redaction, cost estimation, and more.">
+  <meta name="description" content="Sandcastle release history. v0.2666: Universal Advisor, EU Data Residency, Smart Failover, Cost Intelligence, 20 step types. Every release documented.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle">
-  <meta property="og:description" content="Every release, documented. Every feature, explained. From v0.22 reliability to v0.25 Evolution - see what Sandcastle ships.">
+  <meta property="og:title" content="What's New - Sandcastle v0.2666">
+  <meta property="og:description" content="Your AI, Your Rules, Your Borders. 6 providers, EU data residency, smart failover, cost intelligence. See what Sandcastle ships.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
-  <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew">
+  <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle">
-  <meta name="twitter:description" content="Every release, documented. Every feature, explained. From v0.22 reliability to v0.25 Evolution.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.2666">
+  <meta name="twitter:description" content="Your AI, Your Rules, Your Borders. 6 providers, EU data residency, smart failover, cost intelligence.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
@@ -179,20 +179,108 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
-      <div class="hero-badge">Changelog</div>
+      <div class="hero-badge">v0.2666 - Your AI, Your Rules, Your Borders</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
-      <p>Every release, documented. Every feature, explained.</p>
+      <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
     </div>
   </header>
 
   <main>
     <div class="container releases">
 
+      <!-- v0.2666 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.2666</span>
+          <span class="release-name">Your AI, Your Rules, Your Borders <span class="badge-latest">Latest</span></span>
+          <span class="release-date">March 26, 2026</span>
+        </div>
+
+        <p style="max-width: 640px; color: var(--muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          The release where Sandcastle stopped being an orchestrator and became a platform. You used to choose a provider and hope for the best. Now you describe what you want and the system figures out the rest - which model, which provider, what it costs, where the data lives, and what happens when something breaks.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Universal Advisor - one setting changes everything</h4>
+            <p>Set <code>SANDCASTLE_ADVISOR_PROVIDER=mistral</code> and every AI feature - generation, evolution, evaluation, quality scoring - switches to Mistral. Tomorrow you want Claude? Change one line. Ollama on your laptop? Same line. Six providers, one setting, zero code changes.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Compliance</span>
+            <h4>EU Data Residency</h4>
+            <p>Set <code>DATA_RESIDENCY=eu</code>. That's it. All AI processing routes through EU providers or stays local. Try sending data to a US provider with EU mode on - Sandcastle won't let you. Not a promise. Enforcement.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">Reliability</span>
+            <h4>Smart Auto-Failover</h4>
+            <p>Provider hits a rate limit at 3 AM? Sandcastle switches to the next one. No error. No alert. No intervention. You wake up, check the dashboard, see "Failover activated 2x overnight. $0.12 additional cost." That's the whole story.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Intelligence</span>
+            <h4>SLO-Aware Routing</h4>
+            <p>Critical analysis gets Claude Opus. Simple formatting gets Haiku. Not because you configured 47 rules - because Sandcastle matches model quality to task importance automatically. You set the priorities. It picks the brain.</p>
+          </div>
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Cost</span>
+            <h4>Cost Intelligence - you'll finally know where the money goes</h4>
+            <p>Per-provider cost breakdown. "Last 30 days: $120 via Claude. Same workloads via Mistral: $45." One click to see the math. And proactive recommendations that actually make sense - not just data, but advice. "Switch these 3 workflows to Mistral and save $75/month with EU residency included."</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Integration</span>
+            <h4>OpenClaw Integration</h4>
+            <p>New step type: <code>type: openclaw</code>. Your workflows can now call OpenClaw agents as a step in any pipeline. One more thing you don't have to build yourself.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Document Parser</h4>
+            <p>New step type: <code>type: parse</code>. PDF, DOCX, XLSX at 576 pages per second. No external service. No API key. No monthly bill. Just <code>pip install sandcastle-ai[parse]</code> and go.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">UX</span>
+            <h4>Dashboard that gets out of your way</h4>
+            <p>Getting Started checklist for new users. Quick Run cards - jump straight to results. Collapsible sidebar. Step palette with categories. Backend configurator with copy-paste .env snippets. Lazy loading. The dashboard got simpler by getting smarter.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">6</div>
+                <div class="stat-label">AI providers</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">20</div>
+                <div class="stat-label">Step types</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">576</div>
+                <div class="stat-label">Pages/sec parsed</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">0</div>
+                <div class="stat-label">Lines to switch providers</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.25.0 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.25.0</span>
-          <span class="release-name">Evolution <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Evolution</span>
           <span class="release-date">March 20, 2026</span>
         </div>
 

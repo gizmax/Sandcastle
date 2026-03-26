@@ -55,16 +55,22 @@ class TestModelRegistryIntegrity:
             assert len(info.api_model_id) > 0, f"{key}: empty api_model_id"
 
     def test_api_key_env_naming_convention(self):
-        """API key env vars should follow UPPER_SNAKE_CASE convention."""
+        """API key env vars should follow UPPER_SNAKE_CASE convention (empty ok for keyless providers)."""
         import re
         for key, info in PROVIDER_REGISTRY.items():
+            # Keyless providers (e.g. Ollama) have empty api_key_env - that's valid
+            if not info.api_key_env:
+                continue
             assert re.match(r"^[A-Z][A-Z0-9_]+$", info.api_key_env), (
                 f"{key}: api_key_env '{info.api_key_env}' not UPPER_SNAKE_CASE"
             )
 
     def test_input_price_less_than_output_price(self):
-        """For all models, input tokens should be cheaper than output tokens."""
+        """For all paid models, input tokens should be cheaper than output tokens."""
         for key, info in PROVIDER_REGISTRY.items():
+            # Local providers (Ollama) have zero pricing - skip
+            if info.region == "local":
+                continue
             assert info.input_price_per_m < info.output_price_per_m, (
                 f"{key}: input price ({info.input_price_per_m}) >= "
                 f"output price ({info.output_price_per_m})"
@@ -91,9 +97,11 @@ class TestModelRegistryIntegrity:
                 assert info.api_base_url is not None, (
                     f"Non-Claude model '{key}' missing api_base_url"
                 )
-                assert info.api_base_url.startswith("https://"), (
-                    f"Non-Claude model '{key}' base URL not HTTPS"
-                )
+                # Local models (Ollama) use http:// - cloud models require https://
+                if info.region != "local":
+                    assert info.api_base_url.startswith("https://"), (
+                        f"Non-Claude model '{key}' base URL not HTTPS"
+                    )
 
     def test_claude_models_have_no_base_url(self):
         """Claude models should have None base URL (uses SDK default)."""
@@ -138,8 +146,11 @@ class TestModelRegistryIntegrity:
             )
 
     def test_pricing_values_are_reasonable(self):
-        """Pricing should be within reasonable bounds (0.01 to 200 per 1M tokens)."""
+        """Pricing should be within reasonable bounds (0.01 to 200 per 1M tokens) for paid models."""
         for key, info in PROVIDER_REGISTRY.items():
+            # Local providers (Ollama) have zero pricing - skip
+            if info.region == "local":
+                continue
             assert 0.01 <= info.input_price_per_m <= 200.0, (
                 f"{key}: input price {info.input_price_per_m} out of range"
             )
@@ -249,8 +260,12 @@ class TestFailoverChainStructure:
             )
 
     def test_cross_provider_coverage(self):
-        """Each model should have at least one cross-provider alternative."""
+        """Each non-local model should have at least one cross-provider alternative."""
         for model, chain in FAILOVER_CHAINS.items():
+            info = PROVIDER_REGISTRY.get(model)
+            # Local models (Ollama) may have no alternatives
+            if info is not None and info.region == "local":
+                continue
             primary_provider = PROVIDER_REGISTRY[model].provider
             cross_provider = [
                 alt for alt in chain
@@ -261,9 +276,17 @@ class TestFailoverChainStructure:
             )
 
     def test_bidirectional_failover(self):
-        """If A is in B's chain, B should be in A's chain (bidirectional)."""
+        """If A is in B's chain, B should be in A's chain (bidirectional, for non-local models)."""
         for model, chain in FAILOVER_CHAINS.items():
+            model_info = PROVIDER_REGISTRY.get(model)
+            # Skip local models - they don't need bidirectional failover
+            if model_info is not None and model_info.region == "local":
+                continue
             for alt in chain:
+                alt_info = PROVIDER_REGISTRY.get(alt)
+                # Skip local alternatives
+                if alt_info is not None and alt_info.region == "local":
+                    continue
                 alt_chain = FAILOVER_CHAINS.get(alt, [])
                 assert model in alt_chain, (
                     f"'{alt}' is in '{model}' chain but '{model}' "
@@ -271,8 +294,12 @@ class TestFailoverChainStructure:
                 )
 
     def test_chain_includes_at_least_2_alternatives(self):
-        """Each model should have at least 2 alternatives for resilience."""
+        """Each non-local model should have at least 2 alternatives for resilience."""
         for model, chain in FAILOVER_CHAINS.items():
+            info = PROVIDER_REGISTRY.get(model)
+            # Local models (Ollama) may have fewer/no alternatives
+            if info is not None and info.region == "local":
+                continue
             assert len(chain) >= 2, (
                 f"Model '{model}' has only {len(chain)} alternative(s), need >= 2"
             )
@@ -404,8 +431,10 @@ class TestProviderFailoverAlternatives:
             mock_settings.anthropic_api_key = ""
             mock_settings.e2b_api_key = ""
             mock_settings.minimax_api_key = ""
+            mock_settings.mistral_api_key = ""
             mock_settings.openai_api_key = ""
             mock_settings.openrouter_api_key = ""
+            mock_settings.data_residency = ""
             alts = pf.get_alternatives("sonnet")
             assert alts == []
 
@@ -736,8 +765,11 @@ class TestCostCalculation:
         assert math.isclose(cost, expected, rel_tol=1e-9)
 
     def test_all_models_cost_positive_for_nonzero_tokens(self):
-        """Every model should produce a positive cost for any non-zero token count."""
+        """Every paid model should produce a positive cost for any non-zero token count."""
         for key, info in PROVIDER_REGISTRY.items():
+            # Local providers (Ollama) have zero pricing - skip
+            if info.region == "local":
+                continue
             cost = (
                 1 * info.input_price_per_m / 1_000_000
                 + 1 * info.output_price_per_m / 1_000_000
@@ -1170,6 +1202,7 @@ class TestFailoverIntegration:
             }):
                 with patch("sandcastle.config.settings") as mock_settings:
                     mock_settings.failover_cooldown_seconds = 60.0
+                    mock_settings.data_residency = ""
                     async for _ in runtime._stream_backend(
                         {"model": "sonnet", "prompt": "test"}
                     ):

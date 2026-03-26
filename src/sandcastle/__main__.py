@@ -3077,6 +3077,71 @@ def _cmd_violations(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# providers - List configured AI advisor providers
+# ---------------------------------------------------------------------------
+
+
+def _cmd_providers(args: argparse.Namespace) -> None:  # noqa: ARG001
+    """List configured AI providers and their status."""
+    from sandcastle.engine.generator import _PROVIDER_CONFIGS
+
+    _load_dot_env()
+
+    provider_env = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
+    if provider_env not in _PROVIDER_CONFIGS:
+        provider_env = "anthropic"
+
+    model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
+    residency = os.environ.get("DATA_RESIDENCY", "")
+
+    print(_color("AI Providers:", _C.BOLD))
+    print()
+
+    region_flag = {"us": "\U0001f1fa\U0001f1f8", "eu": "\U0001f1ea\U0001f1fa", "local": "\U0001f3e0"}
+
+    for provider_id, cfg in _PROVIDER_CONFIGS.items():
+        key_env = cfg.get("api_key_env", "")
+        region = cfg.get("region", "us")
+        model = model_override if (provider_id == provider_env and model_override) else cfg.get("model", "")
+        flag = region_flag.get(region, "")
+
+        # Determine configured status
+        if not key_env:
+            # Ollama - check if running (best-effort socket probe)
+            import socket
+            try:
+                s = socket.create_connection(("localhost", 11434), timeout=1)
+                s.close()
+                configured = True
+                status_label = "Running"
+            except OSError:
+                configured = False
+                status_label = "Not running"
+        else:
+            api_key = os.environ.get(key_env, "")
+            configured = bool(api_key)
+            status_label = "Ready" if configured else "Not configured"
+
+        is_active = provider_id == provider_env
+        tick = _color("✓", _C.GREEN) if configured else _color("✗", _C.RED)
+        active_marker = _color("  Active", _C.CYAN) if is_active else ""
+
+        name_part = f"{provider_id:<12}"
+        region_part = f"{region.upper()} {flag}"
+        status_part = f"{status_label:<18}"
+        model_part = model
+
+        line = f"  {tick} {name_part}  {region_part:<8}  {status_part}  {model_part}{active_marker}"
+        print(line)
+
+    print()
+    if residency:
+        print(f"Data Residency: {_color(residency, _C.CYAN)}")
+    else:
+        print("Data Residency: disabled")
+
+
+# ---------------------------------------------------------------------------
 # tools - Tool/connector management
 # ---------------------------------------------------------------------------
 
@@ -3715,6 +3780,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_autopilot_deploy.add_argument("experiment_id", help="Experiment ID to deploy")
     _add_connection_args(p_autopilot_deploy)
 
+    # --- providers ---
+    subparsers.add_parser("providers", help="List configured AI advisor providers")
+
     # --- hub ---
     p_hub = subparsers.add_parser("hub", help="Community workflow hub")
     hub_sub = p_hub.add_subparsers(dest="hub_action")
@@ -3834,6 +3902,7 @@ def main() -> None:
         "violations": _cmd_violations,
         "tools": _cmd_tools,
         "autopilot": _cmd_autopilot,
+        "providers": _cmd_providers,
     }
 
     handler = dispatch.get(args.command)

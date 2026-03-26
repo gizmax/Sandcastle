@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { X, Wand2, Loader2, CheckCircle, AlertTriangle, Send, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
+import { X, Wand2, Loader2, CheckCircle, AlertTriangle, Send, ChevronDown, ChevronRight, MessageSquare, DollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
 
@@ -10,6 +10,17 @@ interface GenerateResult {
   steps_count: number;
   validation_errors: string[];
   input_schema: Record<string, unknown> | null;
+}
+
+interface CostEntry {
+  provider: string;
+  model: string;
+  estimated_cost: number;
+}
+
+interface CostEstimate {
+  current: CostEntry;
+  alternatives: CostEntry[];
 }
 
 interface GenerateChatPanelProps {
@@ -39,6 +50,7 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [latestResult, setLatestResult] = useState<GenerateResult | null>(null);
+  const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -51,6 +63,7 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
       setInput("");
       setLoading(false);
       setLatestResult(null);
+      setCostEstimate(null);
       setError(null);
     }
     prevOpenRef.current = open;
@@ -72,6 +85,7 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
     setMessages([]);
     setInput("");
     setLatestResult(null);
+    setCostEstimate(null);
     setError(null);
     onClose();
   }, [onClose]);
@@ -137,6 +151,11 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
           ...prev,
           { role: "assistant", content: data.message, yaml: yamlResult },
         ]);
+        // Fetch cost estimate after a successful generation
+        const costRes = await api.get<CostEstimate>("/advisor/cost-estimate");
+        if (costRes.data) {
+          setCostEstimate(costRes.data);
+        }
       } else {
         setMessages((prev) => [
           ...prev,
@@ -156,6 +175,7 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
     setMessages([]);
     setInput("");
     setLatestResult(null);
+    setCostEstimate(null);
     setError(null);
   }, [latestResult, onSelect]);
 
@@ -336,6 +356,33 @@ export function GenerateChatPanel({ open, onClose, onSelect, existingYaml }: Gen
           {navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+Enter to send
         </p>
       </div>
+
+      {/* Cost comparison info */}
+      {costEstimate && (
+        <div className="border-t border-border px-4 py-3 bg-background/30">
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <DollarSign className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent" />
+            <div>
+              <span className="text-foreground font-medium">
+                Generated with: {costEstimate.current.provider.charAt(0).toUpperCase() + costEstimate.current.provider.slice(1)}{" "}
+                {costEstimate.current.model} (~${costEstimate.current.estimated_cost.toFixed(3)})
+              </span>
+              {costEstimate.alternatives.length > 0 && (
+                <span className="block mt-0.5 text-muted">
+                  Alternatives:{" "}
+                  {costEstimate.alternatives.map((a, i) => (
+                    <span key={a.provider}>
+                      {i > 0 && ", "}
+                      {a.provider.charAt(0).toUpperCase() + a.provider.slice(1)} {a.model}{" "}
+                      ({a.estimated_cost === 0 ? "free" : `~$${a.estimated_cost.toFixed(3)}`})
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer with Use button */}
       {latestResult && (

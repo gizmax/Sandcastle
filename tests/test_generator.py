@@ -109,7 +109,9 @@ class TestApiKeyValidation:
     async def test_raises_without_api_key(self):
         """Should raise ValueError when no API key is configured."""
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=True), \
-             patch("sandcastle.config.settings", MagicMock(anthropic_api_key="")):
+             patch("sandcastle.config.settings", MagicMock(
+                 anthropic_api_key="", data_residency="",
+             )):
             with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
                 await generate_workflow("test description")
 

@@ -25,53 +25,59 @@ class ModelInfo:
     api_base_url: str | None  # Base URL (None = provider default)
     input_price_per_m: float  # USD per 1M input tokens
     output_price_per_m: float  # USD per 1M output tokens
+    region: str = "us"  # Data residency region: "eu", "us", "local"
 
 
 PROVIDER_REGISTRY: dict[str, ModelInfo] = {
     # Claude models (bare names for backward compatibility)
     "sonnet": ModelInfo(
         "claude", "sonnet", "runner.mjs",
-        "ANTHROPIC_API_KEY", None, 3.0, 15.0,
+        "ANTHROPIC_API_KEY", None, 3.0, 15.0, region="us",
     ),
     "opus": ModelInfo(
         "claude", "opus", "runner.mjs",
-        "ANTHROPIC_API_KEY", None, 15.0, 75.0,
+        "ANTHROPIC_API_KEY", None, 15.0, 75.0, region="us",
     ),
     "haiku": ModelInfo(
         "claude", "haiku", "runner.mjs",
-        "ANTHROPIC_API_KEY", None, 0.80, 4.0,
+        "ANTHROPIC_API_KEY", None, 0.80, 4.0, region="us",
     ),
     # MiniMax
     "minimax/m2.5": ModelInfo(
         "minimax", "MiniMax-M2.5", "runner-openai.mjs",
-        "MINIMAX_API_KEY", "https://api.minimaxi.chat/v1", 0.30, 1.20,
+        "MINIMAX_API_KEY", "https://api.minimaxi.chat/v1", 0.30, 1.20, region="us",
     ),
     # OpenAI
     "openai/codex-mini": ModelInfo(
         "openai", "codex-mini", "runner-openai.mjs",
-        "OPENAI_API_KEY", "https://api.openai.com/v1", 0.25, 2.0,
+        "OPENAI_API_KEY", "https://api.openai.com/v1", 0.25, 2.0, region="us",
     ),
     "openai/codex": ModelInfo(
         "openai", "codex", "runner-openai.mjs",
-        "OPENAI_API_KEY", "https://api.openai.com/v1", 1.25, 10.0,
+        "OPENAI_API_KEY", "https://api.openai.com/v1", 1.25, 10.0, region="us",
     ),
     # Mistral (EU - French AI lab)
     "mistral/large": ModelInfo(
         "mistral", "mistral-large-latest", "runner-openai.mjs",
-        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 2.0, 6.0,
+        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 2.0, 6.0, region="eu",
     ),
     "mistral/small": ModelInfo(
         "mistral", "mistral-small-latest", "runner-openai.mjs",
-        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 0.10, 0.30,
+        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 0.10, 0.30, region="eu",
     ),
     "mistral/codestral": ModelInfo(
         "mistral", "codestral-latest", "runner-openai.mjs",
-        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 0.30, 0.90,
+        "MISTRAL_API_KEY", "https://api.mistral.ai/v1", 0.30, 0.90, region="eu",
     ),
     # Google Gemini via OpenRouter
     "google/gemini-2.5-pro": ModelInfo(
         "google", "google/gemini-2.5-pro", "runner-openai.mjs",
-        "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", 4.0, 20.0,
+        "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", 4.0, 20.0, region="us",
+    ),
+    # Ollama (local)
+    "ollama": ModelInfo(
+        "ollama", "llama3.2", "runner-openai.mjs",
+        "", "http://localhost:11434/v1", 0.0, 0.0, region="local",
     ),
 }
 
@@ -111,6 +117,7 @@ def get_api_key(model_info: ModelInfo) -> str:
         "MINIMAX_API_KEY": "minimax_api_key",
         "OPENAI_API_KEY": "openai_api_key",
         "OPENROUTER_API_KEY": "openrouter_api_key",
+        "MISTRAL_API_KEY": "mistral_api_key",
     }
     attr = attr_map.get(model_info.api_key_env)
     if attr:
@@ -134,14 +141,17 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     "sonnet": [
         "haiku", "opus",
         "openai/codex-mini", "openai/codex", "minimax/m2.5", "google/gemini-2.5-pro",
+        "mistral/large",
     ],
     "opus": [
         "sonnet", "haiku",
         "google/gemini-2.5-pro", "openai/codex",
+        "mistral/large",
     ],
     "haiku": [
         "sonnet", "opus",
         "minimax/m2.5", "openai/codex-mini",
+        "mistral/small", "mistral/codestral",
     ],
     "minimax/m2.5": [
         "openai/codex-mini", "haiku", "sonnet", "google/gemini-2.5-pro",
@@ -149,15 +159,32 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     "openai/codex-mini": [
         "openai/codex",
         "minimax/m2.5", "haiku", "sonnet",
+        "mistral/small", "mistral/codestral",
     ],
     "openai/codex": [
         "openai/codex-mini",
         "sonnet", "opus", "google/gemini-2.5-pro",
+        "mistral/large",
     ],
     "google/gemini-2.5-pro": [
         "sonnet", "opus",
         "openai/codex", "minimax/m2.5",
     ],
+    # Mistral EU models - prefer same-provider, then cross-provider
+    "mistral/large": [
+        "mistral/small", "mistral/codestral",
+        "sonnet", "opus", "openai/codex",
+    ],
+    "mistral/small": [
+        "mistral/large", "mistral/codestral",
+        "haiku", "openai/codex-mini",
+    ],
+    "mistral/codestral": [
+        "mistral/small", "mistral/large",
+        "openai/codex-mini", "haiku",
+    ],
+    # Ollama local - no cloud alternatives in local mode
+    "ollama": [],
 }
 
 
@@ -226,13 +253,22 @@ class ProviderFailover:
         with self._lock:
             self._cooldowns.pop(api_key_env, None)
 
-    def get_alternatives(self, model_str: str) -> list[str]:
-        """Return ordered fallback models, filtered by cooldown and configured keys."""
+    def get_alternatives(self, model_str: str, *, data_residency: str = "") -> list[str]:
+        """Return ordered fallback models, filtered by cooldown and configured keys.
+
+        When *data_residency* is set (e.g. "eu" or "local"), only models whose
+        region matches the requirement are returned. If no alternatives satisfy
+        the residency constraint the caller should fail rather than cross the
+        data-border.
+        """
         chain = FAILOVER_CHAINS.get(model_str, [])
         result: list[str] = []
         for alt in chain:
             info = PROVIDER_REGISTRY.get(alt)
             if info is None:
+                continue
+            # Skip if residency constraint is active and region doesn't match
+            if data_residency and info.region != data_residency:
                 continue
             # Skip if key is on cooldown
             if not self.is_available(info.api_key_env):

@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink } from "lucide-react";
+import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink, Sparkles, Plug, ChevronDown } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -622,6 +622,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   const [generateModalOpen, setGenerateModalOpen] = useState(false);
   const [editWithAiYaml, setEditWithAiYaml] = useState<string | undefined>();
   const [toolsPaletteOpen, setToolsPaletteOpen] = useState(false);
+  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{
     name: string;
@@ -643,7 +644,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       condition: "check", classify: "route", loop: "loop",
       race: "race", sensor: "sensor", gate: "gate",
       transform: "transform", notify: "notify", delegate: "delegate",
-      browser: "browser",
+      browser: "browser", parse: "parse",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -872,6 +873,60 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     [setNodes]
   );
 
+  const toggleCategory = useCallback((cat: string) => {
+    setCollapsedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  }, []);
+
+  const stepCategories = useMemo(() => [
+    {
+      key: "ai",
+      label: "AI",
+      icon: Sparkles,
+      items: [
+        { type: "standard" as const, icon: Brain, label: "Agent", color: "text-accent" },
+        { type: "llm" as const, icon: MessageSquare, label: "LLM", color: "text-accent" },
+        { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
+      ],
+    },
+    {
+      key: "control",
+      label: "Control Flow",
+      icon: GitBranch,
+      items: [
+        { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
+        { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },
+        { type: "race" as const, icon: Zap, label: "Race", color: "text-purple-400" },
+        { type: "gate" as const, icon: ShieldCheck, label: "Gate", color: "text-red-400" },
+        { type: "approval" as const, icon: ShieldCheck, label: "Approval", color: "text-yellow-400" },
+      ],
+    },
+    {
+      key: "integration",
+      label: "Integration",
+      icon: Plug,
+      items: [
+        { type: "http" as const, icon: Globe, label: "HTTP", color: "text-emerald-400" },
+        { type: "code" as const, icon: Code, label: "Code", color: "text-amber-400" },
+        { type: "delegate" as const, icon: ExternalLink, label: "Delegate", color: "text-indigo-400" },
+        { type: "browser" as const, icon: Monitor, label: "Browser", color: "text-fuchsia-400" },
+        { type: "parse" as const, icon: FileText, label: "Parse", color: "text-orange-400" },
+        { type: "sub_workflow" as const, icon: Layers, label: "Sub-workflow", color: "text-blue-400" },
+        { type: "openclaw" as const, icon: Zap, label: "OpenClaw", color: "text-green-400" },
+        { type: "composio" as const, icon: Plug, label: "Composio", color: "text-rose-400" },
+      ],
+    },
+    {
+      key: "output",
+      label: "Output",
+      icon: Bell,
+      items: [
+        { type: "transform" as const, icon: Shuffle, label: "Transform", color: "text-cyan-400" },
+        { type: "notify" as const, icon: Bell, label: "Notify", color: "text-pink-400" },
+        { type: "sensor" as const, icon: Radio, label: "Sensor", color: "text-teal-400" },
+      ],
+    },
+  ], []);
+
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const yaml = useMemo(
     () => generateYaml(workflowName, steps, edges, defaultTools),
@@ -889,45 +944,42 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       {/* Left palette */}
       <div className="hidden lg:block w-48 shrink-0 border-r border-border bg-background/50 p-3">
         <p className="mb-3 text-xs font-semibold text-muted">PALETTE</p>
-        <button
-          onClick={() => addStep("standard")}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5",
-            "text-xs font-medium text-muted hover:border-accent hover:text-accent transition-colors"
-          )}
-        >
-          <Brain className="h-3.5 w-3.5" />
-          Agent Step
-        </button>
-
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
-          {([
-            { type: "llm" as const, icon: MessageSquare, label: "LLM", color: "text-accent" },
-            { type: "http" as const, icon: Globe, label: "HTTP", color: "text-emerald-400" },
-            { type: "code" as const, icon: Code, label: "Code", color: "text-amber-400" },
-            { type: "browser" as const, icon: Monitor, label: "Browser", color: "text-fuchsia-400" },
-            { type: "condition" as const, icon: GitBranch, label: "If/Else", color: "text-violet-400" },
-            { type: "classify" as const, icon: Tag, label: "Classify", color: "text-pink-400" },
-            { type: "loop" as const, icon: Repeat, label: "Loop", color: "text-cyan-400" },
-            { type: "race" as const, icon: Zap, label: "Race", color: "text-purple-400" },
-            { type: "sensor" as const, icon: Radio, label: "Sensor", color: "text-teal-400" },
-            { type: "gate" as const, icon: ShieldCheck, label: "Gate", color: "text-red-400" },
-            { type: "transform" as const, icon: Shuffle, label: "Transform", color: "text-cyan-400" },
-            { type: "notify" as const, icon: Bell, label: "Notify", color: "text-pink-400" },
-            { type: "delegate" as const, icon: ExternalLink, label: "Delegate", color: "text-indigo-400" },
-          ] as const).map(({ type, icon: Icon, label, color }) => (
-            <button
-              key={type}
-              onClick={() => addStep(type)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5",
-                "text-[11px] font-medium text-muted hover:border-accent hover:text-accent transition-colors"
-              )}
-            >
-              <Icon className={cn("h-3 w-3", color)} />
-              {label}
-            </button>
-          ))}
+        <div className="space-y-2">
+          {stepCategories.map(({ key, label, icon: CatIcon, items }) => {
+            const isCollapsed = !!collapsedCategories[key];
+            return (
+              <div key={key}>
+                <button
+                  onClick={() => toggleCategory(key)}
+                  className="flex w-full items-center gap-1.5 py-1 text-xs uppercase tracking-wide text-gray-500 hover:text-foreground transition-colors"
+                >
+                  <CatIcon className="h-3 w-3" />
+                  <span className="font-semibold">{label}</span>
+                  <span className="ml-auto mr-1 rounded-full bg-border px-1.5 py-px text-[10px] font-medium text-muted">
+                    {items.length}
+                  </span>
+                  <ChevronDown className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")} />
+                </button>
+                {!isCollapsed && (
+                  <div className="mt-1 grid grid-cols-2 gap-1.5">
+                    {items.map(({ type, icon: Icon, label: stepLabel, color }) => (
+                      <button
+                        key={type}
+                        onClick={() => addStep(type)}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5",
+                          "text-[11px] font-medium text-muted hover:border-accent hover:text-accent transition-colors"
+                        )}
+                      >
+                        <Icon className={cn("h-3 w-3", color)} />
+                        {stepLabel}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <button

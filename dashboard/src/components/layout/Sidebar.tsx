@@ -1,7 +1,9 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   Calendar,
   Castle,
+  ChevronRight,
   ClipboardCheck,
   FlaskConical,
   Gauge,
@@ -45,7 +47,10 @@ interface NavItem {
 interface NavSection {
   label: string;
   items: NavItem[];
+  collapsible?: boolean;
 }
+
+const STORAGE_KEY = "sandcastle-ops-expanded";
 
 const navSections: NavSection[] = [
   {
@@ -65,6 +70,7 @@ const navSections: NavSection[] = [
   },
   {
     label: "OPERATIONS",
+    collapsible: true,
     items: [
       { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" },
       { to: "/evaluations", icon: ClipboardCheck, label: "Evaluations" },
@@ -92,6 +98,50 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
   const { updateAvailable } = useUpdateCheck();
   const { pinnedWorkflows } = usePinnedWorkflows();
   const version = info?.version ?? "-";
+
+  const [opsExpanded, setOpsExpanded] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const opsContentRef = useRef<HTMLDivElement>(null);
+
+  const toggleOps = useCallback(() => {
+    setOpsExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(STORAGE_KEY, String(next));
+      } catch {
+        // storage unavailable
+      }
+      return next;
+    });
+  }, []);
+
+  // Keep max-height in sync with content for smooth animation
+  useEffect(() => {
+    const el = opsContentRef.current;
+    if (!el) return;
+    if (opsExpanded) {
+      el.style.maxHeight = el.scrollHeight + "px";
+      const onEnd = () => {
+        el.style.maxHeight = "none";
+      };
+      el.addEventListener("transitionend", onEnd, { once: true });
+      return () => el.removeEventListener("transitionend", onEnd);
+    } else {
+      // Collapse: set explicit height first so transition works
+      el.style.maxHeight = el.scrollHeight + "px";
+      // Force reflow
+      void el.offsetHeight;
+      el.style.maxHeight = "0px";
+    }
+  }, [opsExpanded]);
+
+  const opsBadgeCount = dlqCount + approvalsCount;
 
   return (
     <>
@@ -129,82 +179,122 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Sidebar">
-          {navSections.map((section, sectionIdx) => (
-            <div key={section.label}>
-              <div className={cn(sectionIdx > 0 && "mt-5")}>
-                <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-                  {section.label}
-                </p>
-                <div className="space-y-0.5">
-                  {section.items.map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      end={item.end}
-                      onClick={onClose}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                          "transition-all duration-200",
-                          isActive
-                            ? "bg-accent/10 text-accent"
-                            : "text-muted hover:bg-border/40 hover:text-foreground"
-                        )
-                      }
-                    >
-                      <item.icon className="h-[18px] w-[18px] shrink-0" />
-                      <span className="flex-1">{item.label}</span>
-                      {item.shortcut && (
-                        <span className="hidden text-[10px] font-normal text-muted-foreground/50 lg:inline">
-                          {item.shortcut}
-                        </span>
-                      )}
-                      {item.badge === "dlq" && dlqCount > 0 && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-semibold text-white">
-                          {dlqCount}
-                        </span>
-                      )}
-                      {item.badge === "approvals" && approvalsCount > 0 && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white">
-                          {approvalsCount}
-                        </span>
-                      )}
-                    </NavLink>
-                  ))}
-                </div>
+          {navSections.map((section, sectionIdx) => {
+            const renderItems = (items: NavItem[]) => (
+              <div className="space-y-0.5">
+                {items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    onClick={onClose}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
+                        "transition-all duration-200",
+                        isActive
+                          ? "bg-accent/10 text-accent"
+                          : "text-muted hover:bg-border/40 hover:text-foreground"
+                      )
+                    }
+                  >
+                    <item.icon className="h-[18px] w-[18px] shrink-0" />
+                    <span className="flex-1">{item.label}</span>
+                    {item.shortcut && (
+                      <span className="hidden text-[10px] font-normal text-muted-foreground/50 lg:inline">
+                        {item.shortcut}
+                      </span>
+                    )}
+                    {item.badge === "dlq" && dlqCount > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-semibold text-white">
+                        {dlqCount}
+                      </span>
+                    )}
+                    {item.badge === "approvals" && approvalsCount > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white">
+                        {approvalsCount}
+                      </span>
+                    )}
+                  </NavLink>
+                ))}
               </div>
+            );
 
-              {/* Pinned workflows section - rendered after MAIN */}
-              {section.label === "MAIN" && pinnedWorkflows.length > 0 && (
-                <div className="mt-5">
-                  <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-                    Pinned
-                  </p>
-                  <div className="space-y-0.5">
-                    {pinnedWorkflows.map((wfName) => (
-                      <NavLink
-                        key={`pinned-${wfName}`}
-                        to={`/workflows/${encodeURIComponent(wfName)}`}
-                        onClick={onClose}
-                        className={({ isActive }) =>
-                          cn(
-                            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                            "transition-all duration-200",
-                            isActive
-                              ? "bg-accent/10 text-accent"
-                              : "text-muted hover:bg-border/40 hover:text-foreground"
-                          )
-                        }
+            return (
+              <div key={section.label}>
+                <div className={cn(sectionIdx > 0 && "mt-5")}>
+                  {section.collapsible ? (
+                    <>
+                      <button
+                        onClick={toggleOps}
+                        className="mb-1.5 flex w-full items-center gap-1 px-3 group"
+                        aria-expanded={opsExpanded}
                       >
-                        <Star className="h-[14px] w-[14px] shrink-0 fill-current text-accent/60" />
-                        <span className="flex-1 truncate">{wfName}</span>
-                      </NavLink>
-                    ))}
-                  </div>
+                        <ChevronRight
+                          className={cn(
+                            "h-3 w-3 text-muted-foreground transition-transform duration-200",
+                            opsExpanded && "rotate-90"
+                          )}
+                        />
+                        <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground group-hover:text-foreground transition-colors">
+                          {section.label}
+                        </span>
+                        {!opsExpanded && opsBadgeCount > 0 && (
+                          <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-warning/80 px-1 text-[10px] font-semibold text-white">
+                            {opsBadgeCount}
+                          </span>
+                        )}
+                      </button>
+                      <div
+                        ref={opsContentRef}
+                        className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
+                        style={{ maxHeight: opsExpanded ? "none" : "0px" }}
+                      >
+                        {renderItems(section.items)}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                        {section.label}
+                      </p>
+                      {renderItems(section.items)}
+                    </>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Pinned workflows section - rendered after MAIN */}
+                {section.label === "MAIN" && pinnedWorkflows.length > 0 && (
+                  <div className="mt-5">
+                    <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Pinned
+                    </p>
+                    <div className="space-y-0.5">
+                      {pinnedWorkflows.map((wfName) => (
+                        <NavLink
+                          key={`pinned-${wfName}`}
+                          to={`/workflows/${encodeURIComponent(wfName)}`}
+                          onClick={onClose}
+                          className={({ isActive }) =>
+                            cn(
+                              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
+                              "transition-all duration-200",
+                              isActive
+                                ? "bg-accent/10 text-accent"
+                                : "text-muted hover:bg-border/40 hover:text-foreground"
+                            )
+                          }
+                        >
+                          <Star className="h-[14px] w-[14px] shrink-0 fill-current text-accent/60" />
+                          <span className="flex-1 truncate">{wfName}</span>
+                        </NavLink>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="border-t border-border px-5 py-4">

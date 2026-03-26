@@ -34,7 +34,7 @@
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
 - [63 Built-in Integrations](#63-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [15 Step Types](#15-step-types)
+- [20 Step Types](#20-step-types)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
@@ -474,7 +474,7 @@ Once connected, ask your AI assistant to:
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
 | **63 built-in integrations** across 9 categories | Yes |
-| **15 step types** (standard, llm, http, code, race, sensor, gate...) | Yes |
+| **20 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -613,6 +613,57 @@ Automatic failover: if a provider returns 429 or 5xx, Sandcastle retries with th
 
 ---
 
+### Universal Advisor
+
+All AI-powered features (workflow generation, evolution, quality evaluation, error explanation)
+use a configurable advisor LLM. By default, Sandcastle uses Claude - but you can switch to
+any supported provider:
+
+| Provider | Region | Env Vars |
+|----------|--------|----------|
+| Anthropic (Claude) | US | `ANTHROPIC_API_KEY` |
+| Mistral | EU | `MISTRAL_API_KEY` |
+| OpenAI | US | `OPENAI_API_KEY` |
+| Google (via OpenRouter) | US | `OPENROUTER_API_KEY` |
+| MiniMax | US | `MINIMAX_API_KEY` |
+| Ollama (local) | Local | None required |
+
+```bash
+# Switch to Mistral (EU data residency)
+export SANDCASTLE_ADVISOR_PROVIDER=mistral
+export SANDCASTLE_ADVISOR_MODEL=mistral-large-latest
+export MISTRAL_API_KEY=your-key
+
+# Switch to local Ollama (100% private, no cloud)
+export SANDCASTLE_ADVISOR_PROVIDER=ollama
+export SANDCASTLE_ADVISOR_MODEL=llama3.2
+```
+
+#### EU Data Residency Mode
+
+Enforce that all AI processing stays within EU borders:
+
+```bash
+export DATA_RESIDENCY=eu
+```
+
+When active, only EU-region providers (Mistral) and local providers (Ollama) are allowed.
+Attempts to use US providers will fail with a clear error message.
+
+#### OpenRouter (100+ Models)
+
+Access 100+ models from all major providers through a single API key:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+This enables Google Gemini, Meta Llama, Cohere, and many more through the
+unified OpenRouter API. See [openrouter.ai/models](https://openrouter.ai/models)
+for the full list.
+
+---
+
 ## 63 Built-in Integrations
 
 <p align="center">
@@ -748,9 +799,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 15 Step Types
+## 20 Step Types
 
-Sandcastle supports 15 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 20 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -761,12 +812,14 @@ Sandcastle supports 15 step types for building complex workflows beyond simple L
 | **Core** | `condition` | Branch workflow based on expression evaluation |
 | **Core** | `classify` | Route to different branches based on LLM classification |
 | **Core** | `loop` | Iterate over a list, executing sub-steps for each item |
+| **Core** | `parse` | Extract text from PDF, DOCX, XLSX, PPTX, CSV - no LLM cost |
 | **Advanced** | `race` | Run parallel branches, take the first to complete |
 | **Advanced** | `sensor` | Poll a URL until a condition is met (webhook alternative) |
 | **Advanced** | `gate` | Multi-strategy approval (human, LLM judge, quorum) |
 | **Advanced** | `transform` | Jinja2 template rendering for data transformation |
 | **Advanced** | `notify` | Send alerts via Slack, Teams, email, or webhook |
 | **Advanced** | `delegate` | Spawn a sub-workflow and collect results |
+| **Advanced** | `openclaw` | Delegate to an autonomous OpenClaw agent |
 | **Built-in** | `approval` | Human approval gate with timeout and auto-action |
 | **Built-in** | `sub_workflow` | Execute another workflow as a step |
 
@@ -1221,6 +1274,31 @@ steps:
 ```
 
 Works with any output shape - dicts become columns, lists of dicts become rows, plain text goes into a `value` column. Directories are created automatically.
+
+---
+
+## Document Parsing
+
+Parse PDF, DOCX, XLSX, and CSV files directly in your workflows:
+
+```yaml
+steps:
+  - id: extract
+    type: parse
+    prompt: "{input.document}"
+    parse_config:
+      output: markdown
+      pages: "1-10"
+
+  - id: analyze
+    prompt: "Analyze: {steps.extract.output.text}"
+    depends_on: [extract]
+```
+
+Supported formats: PDF (with optional OCR), DOCX, XLSX, PPTX, CSV.
+Install parsing support: `pip install sandcastle-ai[parse]`
+
+PDFs are also auto-parsed when uploaded as workflow inputs (if pymupdf is installed).
 
 ---
 
@@ -1821,7 +1899,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 15 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 20 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
@@ -1918,6 +1996,12 @@ MAX_CONCURRENT_SANDBOXES=5     # rate limiter for parallel execution
 # OPENAI_API_KEY=sk-...
 # MINIMAX_API_KEY=...
 # OPENROUTER_API_KEY=sk-or-... # for Google Gemini via OpenRouter
+
+# Universal Advisor (AI provider for generation, evolution, evaluation)
+# SANDCASTLE_ADVISOR_PROVIDER=anthropic  # anthropic|openai|mistral|ollama|google|minimax (default: anthropic)
+# SANDCASTLE_ADVISOR_MODEL=              # override default model for advisor
+# MISTRAL_API_KEY=...                    # Mistral AI API key (EU region)
+# DATA_RESIDENCY=                        # eu|local|"" (empty = no restriction)
 
 # E2B custom template (pre-built sandbox with SDK installed)
 # E2B_TEMPLATE=sandcastle-runner

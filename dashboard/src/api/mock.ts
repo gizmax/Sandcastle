@@ -173,6 +173,23 @@ const MOCK_WORKFLOWS = [
       },
     },
   },
+  {
+    name: "contract-analyzer",
+    description: "Upload a contract PDF, extract text, analyze clauses",
+    steps_count: 2,
+    file_name: "contract-analyzer.yaml",
+    steps: [
+      { id: "extract", model: null as unknown as string, type: "parse", depends_on: [] },
+      { id: "analyze", model: "sonnet", depends_on: ["extract"] },
+    ],
+    input_schema: {
+      required: ["contract"],
+      properties: {
+        contract: { type: "file", description: "Contract document to analyze (.pdf, .docx)" },
+        focus_areas: { type: "string", description: "Specific areas to focus on (e.g. liability, termination)", default: "all" },
+      },
+    },
+  },
 ];
 
 const MOCK_SCHEDULES = [
@@ -3359,10 +3376,11 @@ const MOCK_RUN_COMPARE = {
 
 const MOCK_SETTINGS = {
   anthropic_api_key: "****Qf8x",
-  e2b_api_key: "****mN2k",
+  mistral_api_key: "****Eu4m",
   openai_api_key: "****xK9m",
-  minimax_api_key: "****pL3n",
+  minimax_api_key: "",
   openrouter_api_key: "****qR7z",
+  e2b_api_key: "****mN2k",
   auth_required: true,
   dashboard_origin: "http://localhost:5173",
   default_max_cost_usd: 5.0,
@@ -5866,7 +5884,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.18.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.2666", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -5988,6 +6006,129 @@ const routes: MockRoute[] = [
         },
       ];
     },
+  },
+  // GET /stats/provider-costs
+  {
+    match: /^\/stats\/provider-costs$/,
+    method: "GET",
+    handler: (params) => {
+      const days = Number(params.days || 30);
+      return {
+        period_days: days,
+        total_cost_usd: 245.67,
+        by_provider: [
+          {
+            provider: "claude",
+            model: "sonnet",
+            region: "us",
+            total_cost_usd: 198.50,
+            run_count: 1250,
+            avg_cost_per_run: 0.1588,
+            percentage: 80.8,
+          },
+          {
+            provider: "mistral",
+            model: "mistral/large",
+            region: "eu",
+            total_cost_usd: 47.17,
+            run_count: 890,
+            avg_cost_per_run: 0.053,
+            percentage: 19.2,
+          },
+        ],
+        advisor_costs: {
+          total_usd: 12.34,
+          by_purpose: [
+            { purpose: "generation", cost_usd: 8.50, calls: 120 },
+            { purpose: "judge", cost_usd: 1.20, calls: 450 },
+            { purpose: "evolution", cost_usd: 2.64, calls: 80 },
+          ],
+        },
+      };
+    },
+  },
+  // GET /stats/provider-savings
+  {
+    match: /^\/stats\/provider-savings$/,
+    method: "GET",
+    handler: (params) => {
+      const days = Number(params.days || 30);
+      void days;
+      return {
+        current_total_usd: 245.67,
+        alternatives: [
+          {
+            provider: "mistral",
+            model: "mistral/large",
+            region: "eu",
+            projected_cost_usd: 98.27,
+            savings_usd: 147.40,
+            savings_percent: 60.0,
+            note: "Switch to Mistral for 60% savings with EU data residency",
+          },
+          {
+            provider: "minimax",
+            model: "minimax/m2.5",
+            region: "us",
+            projected_cost_usd: 24.57,
+            savings_usd: 221.10,
+            savings_percent: 90.0,
+            note: "Switch to MiniMax for 90% cost savings",
+          },
+          {
+            provider: "ollama",
+            model: "ollama",
+            region: "local",
+            projected_cost_usd: 0.0,
+            savings_usd: 245.67,
+            savings_percent: 100.0,
+            note: "Switch to local Ollama for zero cloud costs (hardware required)",
+          },
+        ],
+      };
+    },
+  },
+  // GET /stats/provider-recommendation
+  {
+    match: /^\/stats\/provider-recommendation$/,
+    method: "GET",
+    handler: () => ({
+      recommendations: [
+        {
+          type: "cost_saving",
+          severity: "high",
+          title: "Switch to Mistral for 60% savings",
+          description:
+            "Your workflows spent $198.50 on Claude last month. Mistral would cost approximately $79.40 for equivalent workloads. EU data residency included.",
+          action: "Switch advisor to Mistral",
+          provider: "mistral",
+          estimated_savings_usd: 119.10,
+          confidence: 0.85,
+        },
+        {
+          type: "quality_upgrade",
+          severity: "medium",
+          title: "Upgrade judge model for better eval accuracy",
+          description:
+            "Your AutoPilot quality scores have high variance (stddev 0.28). Using a higher-tier model for judging could reduce variance and improve experiment reliability.",
+          action: "Set advisor_quality_mode=always_best for judge purpose",
+          provider: "anthropic",
+          estimated_savings_usd: 0.0,
+          confidence: 0.65,
+        },
+        {
+          type: "data_residency",
+          severity: "info",
+          title: "Consider enabling EU Data Residency",
+          description:
+            "85% of your advisor calls are processed outside the EU. Enabling data_residency=eu ensures all AI processing stays within EU borders (GDPR compliance).",
+          action: "Enable EU mode in Settings -> Data Residency",
+          provider: "mistral",
+          estimated_savings_usd: 0.0,
+          confidence: 0.70,
+        },
+      ],
+    }),
   },
   {
     match: /^\/workflows$/,
@@ -6481,7 +6622,7 @@ const routes: MockRoute[] = [
   {
     match: /^\/check-update$/,
     method: "GET",
-    handler: () => ({ current_version: "0.18.0", latest_version: "0.18.0", update_available: false }),
+    handler: () => ({ current_version: "0.2666", latest_version: "0.2666", update_available: false }),
   },
   // GET /browse (template browser - same as /templates but with different shape)
   {
@@ -6938,6 +7079,81 @@ const routes: MockRoute[] = [
           completed: (i % 3) + 1,
           failed: i % 4 === 0 ? 1 : 0,
         })),
+      };
+    },
+  },
+  // GET /advisor/status
+  {
+    match: /^\/advisor\/status$/,
+    method: "GET",
+    handler: () => ({
+      current_provider: "mistral",
+      current_model: "mistral-large-latest",
+      data_residency: "eu",
+      available_providers: [
+        { id: "anthropic", name: "Anthropic (Claude)", region: "us", configured: true, status: "ok" },
+        { id: "mistral", name: "Mistral", region: "eu", configured: true, status: "ok" },
+        { id: "openai", name: "OpenAI", region: "us", configured: true, status: "ok" },
+        { id: "google", name: "Google (via OpenRouter)", region: "us", configured: true, status: "ok" },
+        { id: "minimax", name: "MiniMax", region: "us", configured: false, status: "unconfigured" },
+        { id: "ollama", name: "Ollama (Local)", region: "local", configured: false, status: "not_detected" },
+      ],
+    }),
+  },
+  // POST /advisor/configure
+  {
+    match: /^\/advisor\/configure$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { provider?: string; model?: string; data_residency?: string } | undefined;
+      return { provider: b?.provider || "anthropic", model: b?.model || null, data_residency: b?.data_residency || null, status: "configured" };
+    },
+  },
+  // POST /advisor/test-connection
+  {
+    match: /^\/advisor\/test-connection$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { provider?: string } | undefined;
+      const provider = b?.provider ?? "anthropic";
+      // In mock mode, simulate configured providers as "ok" and unconfigured as "error"
+      const configured = ["anthropic", "mistral"].includes(provider);
+      if (configured) {
+        return { status: "ok", provider, latency_ms: Math.floor(Math.random() * 300 + 80) };
+      }
+      return { status: "error", provider, message: `Provider '${provider}' is not configured` };
+    },
+  },
+  // GET /advisor/cost-estimate
+  {
+    match: /^\/advisor\/cost-estimate$/,
+    method: "GET",
+    handler: () => ({
+      current: { provider: "mistral", model: "mistral-large", estimated_cost: 0.008 },
+      alternatives: [
+        { provider: "anthropic", model: "claude-sonnet-4-20250514", estimated_cost: 0.045 },
+        { provider: "openai", model: "gpt-4o", estimated_cost: 0.030 },
+        { provider: "ollama", model: "llama3.2", estimated_cost: 0.000 },
+      ],
+    }),
+  },
+  // GET /compliance/privacy-notice
+  {
+    match: /^\/compliance\/privacy-notice$/,
+    method: "GET",
+    handler: (params) => {
+      const workflowName = params.workflow_name || null;
+      const label = workflowName || "all workflows";
+      const today = new Date().toISOString().slice(0, 10);
+      return {
+        workflow_name: workflowName,
+        provider: "Mistral AI",
+        data_residency: "European Union (France)",
+        pii_redaction: true,
+        retention_days: 90,
+        audit_trail: true,
+        generated_at: new Date().toISOString(),
+        notice: `## Privacy Notice - Sandcastle Data Processing\n\n**Effective date:** ${today}\n\n### Data Controller\nSandcastle instance operator.\n\n### Processing Purpose\nWorkflow automation for **${label}**.\n\n### AI Provider\nData submitted to workflow steps is processed by **Mistral AI**.\nData residency: **European Union (France)**.\n\n### PII Redaction\nPII redaction is **enabled**. Personal identifiers (email, phone, SSN, credit card) are automatically redacted before processing.\n\n### Data Retention\nWorkflow run results and audit events are retained for **90 days** before automatic deletion.\n\n### Audit Trail\nAll workflow executions are recorded in a tamper-evident audit log with SHA-256 hash chaining.\n\n### Your Rights (GDPR Art. 15-22)\nYou have the right to access, rectify, erase, restrict, and port your personal data.\n\n### Legal Basis\nProcessing is performed under legitimate interest (Art. 6(1)(f) GDPR) for workflow automation tasks.`,
       };
     },
   },
