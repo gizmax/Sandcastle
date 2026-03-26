@@ -107,7 +107,6 @@ from sandcastle.api.schemas import (
     EvolutionStartRequest,
     EvolutionIterationResponse,
     EvolutionStatusResponse,
-    EvolutionAcceptRequest,
     EvolutionStatsResponse,
     AdvisorStatusResponse,
     AdvisorConfigureRequest,
@@ -915,14 +914,6 @@ async def upload_file(file: UploadFile) -> ApiResponse:
     if is_s3:
         # Upload to S3 as raw bytes via a dedicated binary write
         try:
-            from sandcastle.engine.storage import S3Storage
-
-            s3_storage = S3Storage(
-                bucket=settings.storage_bucket,
-                endpoint_url=settings.storage_endpoint or None,
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
-            )
             # S3Storage.write() expects a string; for binary files we use
             # a raw aioboto3 call so we can pass bytes and set ContentType.
             import aioboto3
@@ -2581,7 +2572,7 @@ async def get_provider_recommendation(request: Request = None) -> ApiResponse:
                     f"approximately ${max(0, dominant_cost - best_savings_usd):.2f} "
                     f"for equivalent workloads."
                     + (
-                        f" EU data residency included."
+                        " EU data residency included."
                         if best_alt_info and best_alt_info.region == "eu"
                         else ""
                     )
@@ -2713,7 +2704,7 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     NON_LLM = {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "sub_workflow",
-        "parse",  # document parsing has no LLM cost
+        "openclaw", "parse",
     }
     # classify and gate issue a single LLM call, not max_turns
     SINGLE_CALL_TYPES = {"classify", "gate"}
@@ -3067,7 +3058,7 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
     body = await req.json()
     provider = body.get("provider", "anthropic")
 
-    from sandcastle.engine.generator import _PROVIDER_CONFIGS, _build_request_body, _parse_response_text
+    from sandcastle.engine.generator import _PROVIDER_CONFIGS, _build_request_body
 
     cfg = _PROVIDER_CONFIGS.get(provider)
     if cfg is None:

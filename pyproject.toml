@@ -1,7 +1,7 @@
 [project]
 name = "sandcastle-ai"
 dynamic = ["version"]
-description = "Production-ready workflow orchestrator for AI agents. Define pipelines in YAML, run locally with zero config, scale to production."
+description = "You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in."
 requires-python = ">=3.11"
 license = {text = "BSL-1.1"}
 readme = "README.md"

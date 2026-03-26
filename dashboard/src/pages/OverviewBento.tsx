@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Play, AlertTriangle, BarChart3, Star, GitBranch,
   CheckCircle2, ArrowRight, Activity, DollarSign, CheckCircle,
-  Castle, Timer, Sparkles, X,
+  Castle, Timer, Sparkles, X, Check,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
@@ -134,6 +134,53 @@ function normaliseSparkline(raw: ApiSparklineData): SparklineData {
 
 function normaliseHeatmapCell(raw: HeatmapApiCell): HeatmapCell {
   return { date: raw.date, count: raw.count, dayOfWeek: raw.day_of_week };
+}
+
+// ---------------------------------------------------------------------------
+// useLazyLoad - IntersectionObserver hook for below-fold widgets
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a ref callback to attach to a sentinel element plus a boolean
+ * indicating whether that element has ever entered the viewport. Once
+ * visible the observer disconnects so the widget stays mounted permanently.
+ */
+function useLazyLoad(rootMargin = "200px"): [React.RefCallback<HTMLDivElement>, boolean] {
+  const [visible, setVisible] = useState(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const setRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      // Disconnect any previous observer
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+      if (!node || visible) return;
+
+      observerRef.current = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            observerRef.current?.disconnect();
+            observerRef.current = null;
+          }
+        },
+        { rootMargin },
+      );
+      observerRef.current.observe(node);
+    },
+    [rootMargin, visible],
+  );
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect();
+    };
+  }, []);
+
+  return [setRef, visible];
 }
 
 // ---------------------------------------------------------------------------
@@ -855,6 +902,229 @@ function RecommendationBanner({
 }
 
 // ---------------------------------------------------------------------------
+// Empty state CTA - shown when the user has no workflows and no runs
+// ---------------------------------------------------------------------------
+
+const CHECKLIST_KEY = "sandcastle_getting_started";
+
+interface ChecklistState {
+  dismissed: boolean;
+  completed: Record<string, boolean>;
+}
+
+function getChecklistState(): ChecklistState {
+  try {
+    const raw = localStorage.getItem(CHECKLIST_KEY);
+    return raw ? JSON.parse(raw) : { dismissed: false, completed: {} };
+  } catch {
+    return { dismissed: false, completed: {} };
+  }
+}
+
+function saveChecklistState(state: ChecklistState) {
+  localStorage.setItem(CHECKLIST_KEY, JSON.stringify(state));
+}
+
+function EmptyStateCTA() {
+  const navigate = useNavigate();
+  const [cls, setCls] = useState<ChecklistState>(getChecklistState);
+
+  const missions = [
+    {
+      id: "first-run",
+      title: "Run your first workflow",
+      desc: "One click. See real output in seconds.",
+      time: "2 min",
+      action: () => navigate("/templates?tab=packs"),
+      cta: "Pick a template",
+    },
+    {
+      id: "api-key",
+      title: "Connect an AI provider",
+      desc: "Paste your API key. Test the connection.",
+      time: "1 min",
+      action: () => navigate("/settings"),
+      cta: "Open Settings",
+    },
+    {
+      id: "build-pipeline",
+      title: "Build a multi-step pipeline",
+      desc: "Chain steps together: scrape, analyze, summarize.",
+      time: "5 min",
+      action: () => navigate("/workflows/builder"),
+      cta: "Open Builder",
+    },
+  ];
+
+  const quickRuns = [
+    {
+      id: "summarize",
+      icon: "📝",
+      title: "Summarize text",
+      desc: "Paste any text, get a concise summary",
+      template: "text-summarizer",
+    },
+    {
+      id: "analyze-url",
+      icon: "🔍",
+      title: "Analyze a URL",
+      desc: "Enter a URL, get structured analysis",
+      template: "url-analyzer",
+    },
+    {
+      id: "generate-code",
+      icon: "💻",
+      title: "Generate code",
+      desc: "Describe what you need, get working code",
+      template: "code-generator",
+    },
+    {
+      id: "research",
+      icon: "📊",
+      title: "Research a topic",
+      desc: "Enter a topic, get a structured report",
+      template: "research-report",
+    },
+  ];
+
+  const completedCount = Object.values(cls.completed).filter(Boolean).length;
+  const allDone = completedCount >= missions.length;
+
+  const toggleMission = (id: string) => {
+    const next = {
+      ...cls,
+      completed: { ...cls.completed, [id]: !cls.completed[id] },
+    };
+    setCls(next);
+    saveChecklistState(next);
+  };
+
+  const dismissChecklist = () => {
+    const next = { ...cls, dismissed: true };
+    setCls(next);
+    saveChecklistState(next);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Getting Started checklist */}
+      {!cls.dismissed && (
+        <div className="bg-surface rounded-2xl shadow-sm border border-border p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10">
+                <Castle className="h-5 w-5 text-accent" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-foreground tracking-tight">
+                  Getting Started
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  {allDone ? "All done! You're ready to build." : `${completedCount}/${missions.length} completed`}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={dismissChecklist}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {missions.map((m) => {
+              const done = cls.completed[m.id];
+              return (
+                <div
+                  key={m.id}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border p-3 transition-all",
+                    done
+                      ? "border-success/30 bg-success/5"
+                      : "border-border hover:border-accent/30"
+                  )}
+                >
+                  <button
+                    onClick={() => toggleMission(m.id)}
+                    className={cn(
+                      "flex items-center justify-center w-6 h-6 rounded-full border-2 shrink-0 transition-colors cursor-pointer",
+                      done
+                        ? "bg-success border-success text-white"
+                        : "border-border hover:border-accent"
+                    )}
+                  >
+                    {done && <Check className="h-3.5 w-3.5" />}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "text-sm font-medium",
+                        done ? "text-muted-foreground line-through" : "text-foreground"
+                      )}>
+                        {m.title}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/60">{m.time}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{m.desc}</p>
+                  </div>
+                  {!done && (
+                    <button
+                      onClick={m.action}
+                      className="shrink-0 text-xs font-medium text-accent hover:text-accent-hover transition-colors cursor-pointer"
+                    >
+                      {m.cta} &rarr;
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Quick Run cards */}
+      <div className="bg-surface rounded-2xl shadow-sm border border-border p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-foreground tracking-tight">Quick Start</h2>
+            <p className="text-xs text-muted-foreground">
+              Jump straight in. Each runs a pre-built workflow.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate("/templates")}
+            className="text-xs font-medium text-accent hover:text-accent-hover transition-colors"
+          >
+            Browse all templates &rarr;
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {quickRuns.map((qr) => (
+            <button
+              key={qr.id}
+              onClick={() => navigate(`/templates?search=${qr.template}`)}
+              className={cn(
+                "text-left rounded-xl border border-border p-4",
+                "hover:border-accent/40 hover:bg-accent/5",
+                "transition-all duration-200 active:scale-[0.98] cursor-pointer group"
+              )}
+            >
+              <span className="text-2xl">{qr.icon}</span>
+              <h3 className="text-sm font-semibold text-foreground mt-2 group-hover:text-accent transition-colors">
+                {qr.title}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">{qr.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // OverviewBento page
 // ---------------------------------------------------------------------------
 
@@ -889,21 +1159,44 @@ function dismissRec(title: string): void {
 }
 
 export default function OverviewBento() {
+  // -- Above-fold state (fetched immediately on mount) --
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentRuns, setRecentRuns] = useState<RunItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [sparklines, setSparklines] = useState<Record<string, SparklineData> | null>(null);
-  const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
+  const [workflowCount, setWorkflowCount] = useState<number | null>(null);
+
+  // -- Below-fold state (fetched lazily when scrolled into view) --
+  const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
+  const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [providerCosts, setProviderCosts] = useState<ProviderCostsData | null>(null);
   const [providerSavings, setProviderSavings] = useState<ProviderSavingsData | null>(null);
   const [topRecommendation, setTopRecommendation] = useState<ProviderRecommendation | null>(null);
   const [recDismissed, setRecDismissed] = useState<boolean>(false);
+  const [belowFoldLoaded, setBelowFoldLoaded] = useState(false);
+
   const advisor = useAdvisorContext();
   const { subscribe } = useEventStreamContext();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Lazy-load sentinels for below-fold sections
+  const [heatmapRef, heatmapVisible] = useLazyLoad();
+  const [providerRef, providerVisible] = useLazyLoad();
+  const [forecastRef, forecastVisible] = useLazyLoad();
+  const [chartsRef, chartsVisible] = useLazyLoad();
+
+  // Count distinct providers from cost data to decide visibility
+  const uniqueProviderCount = useMemo(() => {
+    if (!providerCosts) return 0;
+    const providers = new Set(providerCosts.by_provider.map((p) => p.provider));
+    return providers.size;
+  }, [providerCosts]);
+
+  // Hide provider costs / savings / recommendation when <= 1 provider
+  const showProviderCosts = uniqueProviderCount >= 2;
 
   const fetchSparklines = useCallback(async () => {
     const res = await api.get<Record<string, ApiSparklineData>>("/stats/sparklines");
@@ -925,20 +1218,18 @@ export default function OverviewBento() {
     if (runsRes.data) setRecentRuns(runsRes.data);
   }, []);
 
+  // Above-fold fetch: stats, runs, sparklines, anomalies, workflow count
   useEffect(() => {
     let cancelled = false;
-    const fetchData = async () => {
+    const fetchAboveFold = async () => {
       try {
         setError(null);
-        const [statsRes, runsRes, sparklinesRes, heatmapRes, anomaliesRes, costsRes, savingsRes, recRes] = await Promise.all([
+        const [statsRes, runsRes, sparklinesRes, anomaliesRes, wfRes] = await Promise.all([
           api.get<Stats>("/stats"),
           api.get<RunItem[]>("/runs", { limit: "5" }),
           api.get<Record<string, ApiSparklineData>>("/stats/sparklines"),
-          api.get<HeatmapApiCell[]>("/stats/heatmap"),
           api.get<AnomalyItem[]>("/stats/anomalies"),
-          api.get<ProviderCostsData>("/stats/provider-costs"),
-          api.get<ProviderSavingsData>("/stats/provider-savings"),
-          api.get<{ recommendations: ProviderRecommendation[] }>("/stats/provider-recommendation"),
+          api.get<{ name: string }[]>("/workflows"),
         ]);
         if (cancelled) return;
         if (statsRes.data) setStats(statsRes.data);
@@ -950,20 +1241,8 @@ export default function OverviewBento() {
           }
           setSparklines(normalised);
         }
-        if (heatmapRes.data) {
-          setHeatmapCells(heatmapRes.data.map(normaliseHeatmapCell));
-        }
         if (anomaliesRes.data) setAnomalies(anomaliesRes.data);
-        if (costsRes.data) setProviderCosts(costsRes.data);
-        if (savingsRes.data) setProviderSavings(savingsRes.data);
-        if (recRes.data) {
-          // Pick the first high-severity recommendation that hasn't been dismissed
-          const high = recRes.data.recommendations?.find(
-            (r) => r.severity === "high" && !isDismissed(r.title)
-          ) ?? null;
-          setTopRecommendation(high);
-          setRecDismissed(high === null);
-        }
+        setWorkflowCount(Array.isArray(wfRes.data) ? wfRes.data.length : 0);
       } catch {
         if (cancelled) return;
         setError("Could not connect to the API server");
@@ -971,9 +1250,63 @@ export default function OverviewBento() {
         if (!cancelled) setLoading(false);
       }
     };
-    void fetchData();
+    void fetchAboveFold();
     return () => { cancelled = true; };
   }, [retryCount]);
+
+  // Below-fold fetch: heatmap (triggered when heatmap sentinel enters viewport)
+  useEffect(() => {
+    if (!heatmapVisible || heatmapLoaded) return;
+    let cancelled = false;
+    const fetchHeatmap = async () => {
+      try {
+        const heatmapRes = await api.get<HeatmapApiCell[]>("/stats/heatmap");
+        if (cancelled) return;
+        if (heatmapRes.data) {
+          setHeatmapCells(heatmapRes.data.map(normaliseHeatmapCell));
+        }
+      } catch {
+        // Heatmap is non-critical, fail silently
+      } finally {
+        if (!cancelled) setHeatmapLoaded(true);
+      }
+    };
+    void fetchHeatmap();
+    return () => { cancelled = true; };
+  }, [heatmapVisible, heatmapLoaded]);
+
+  // Below-fold fetch: provider costs, savings, recommendations
+  // Triggered when provider section OR forecast section scrolls into view
+  useEffect(() => {
+    if (belowFoldLoaded) return;
+    if (!providerVisible && !forecastVisible) return;
+    let cancelled = false;
+    const fetchProviderData = async () => {
+      try {
+        const [costsRes, savingsRes, recRes] = await Promise.all([
+          api.get<ProviderCostsData>("/stats/provider-costs"),
+          api.get<ProviderSavingsData>("/stats/provider-savings"),
+          api.get<{ recommendations: ProviderRecommendation[] }>("/stats/provider-recommendation"),
+        ]);
+        if (cancelled) return;
+        if (costsRes.data) setProviderCosts(costsRes.data);
+        if (savingsRes.data) setProviderSavings(savingsRes.data);
+        if (recRes.data) {
+          const high = recRes.data.recommendations?.find(
+            (r) => r.severity === "high" && !isDismissed(r.title)
+          ) ?? null;
+          setTopRecommendation(high);
+          setRecDismissed(high === null);
+        }
+      } catch {
+        // Provider data is non-critical, fail silently
+      } finally {
+        if (!cancelled) setBelowFoldLoaded(true);
+      }
+    };
+    void fetchProviderData();
+    return () => { cancelled = true; };
+  }, [providerVisible, forecastVisible, belowFoldLoaded]);
 
   const dismissRecommendation = useCallback(() => {
     if (topRecommendation) dismissRec(topRecommendation.title);
@@ -1038,6 +1371,39 @@ export default function OverviewBento() {
   const totalCost = stats?.total_cost_today ?? 0;
   const avgDuration = stats?.avg_duration_seconds ?? 0;
 
+  // Detect empty state: no workflows exist and no runs have ever been recorded
+  const isEmpty = workflowCount === 0 && totalRuns === 0 && recentRuns.length === 0;
+
+  if (isEmpty) {
+    return (
+      <div className="space-y-4 sm:space-y-5">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
+              <Castle className="h-4 w-4 text-accent-foreground" />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Overview</h1>
+          </div>
+        </div>
+
+        {/* Health Hero - kept visible, shows "No data yet" naturally */}
+        <BentoHealthHero
+          score={advisor.score}
+          activeInsights={advisor.activeInsights}
+          loading={advisor.loading}
+          totalRuns={0}
+          successRate={0}
+          totalCost={0}
+          avgDuration={0}
+        />
+
+        {/* Empty state CTA */}
+        <EmptyStateCTA />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Header */}
@@ -1051,15 +1417,15 @@ export default function OverviewBento() {
         {/* Layout switcher removed - bento is the only layout */}
       </div>
 
-      {/* Recommendation Banner - shown only when high severity and not dismissed */}
-      {topRecommendation && !recDismissed && (
+      {/* Recommendation Banner - shown only when high severity, not dismissed, and multiple providers */}
+      {topRecommendation && !recDismissed && showProviderCosts && (
         <RecommendationBanner
           recommendation={topRecommendation}
           onDismiss={dismissRecommendation}
         />
       )}
 
-      {/* Row 1: Command Center (2/3) + Quick Actions (1/3) */}
+      {/* Row 1: Command Center (2/3) + Quick Actions (1/3) - above fold */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <div className="lg:col-span-2">
           <BentoHealthHero
@@ -1077,7 +1443,7 @@ export default function OverviewBento() {
         </div>
       </div>
 
-      {/* Row 2: 4 stat cards */}
+      {/* Row 2: 4 stat cards - above fold */}
       {stats && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           <BentoStatCard
@@ -1119,91 +1485,119 @@ export default function OverviewBento() {
         </div>
       )}
 
-      {/* Row 3: Activity Heatmap (full width) */}
-      <BentoActivityHeatmap cells={heatmapCells} />
+      {/* Row 3: Activity Heatmap (full width) - lazy loaded */}
+      <div ref={heatmapRef}>
+        {!heatmapLoaded ? (
+          <Skeleton className="h-36 rounded-2xl" />
+        ) : (
+          <BentoActivityHeatmap cells={heatmapCells} />
+        )}
+      </div>
 
-      {/* Row 3.5: Anomalies (shown only when present) */}
+      {/* Row 3.5: Anomalies (shown only when present) - uses above-fold data */}
       {anomalies.length > 0 && <BentoAnomalies anomalies={anomalies} />}
 
-      {/* Row 3.6: Provider Cost card + savings (shown when cost data available) */}
-      {providerCosts && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-          <div className="lg:col-span-2">
-            <BentoProviderCosts
-              providerCosts={providerCosts}
-              savings={providerSavings}
-            />
-          </div>
-          {providerSavings && providerSavings.alternatives.length > 0 && (
-            <div className={cn(
-              "rounded-2xl border border-border bg-surface shadow-sm",
-              "hover:border-accent/30 transition-all duration-300",
-              "p-5 flex flex-col gap-3"
-            )}>
-              <h3 className="text-sm font-semibold text-foreground">Savings Opportunities</h3>
-              <div className="space-y-3">
-                {providerSavings.alternatives.slice(0, 3).map((alt) => (
-                  <div key={alt.provider} className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-foreground">
-                        {alt.provider.charAt(0).toUpperCase() + alt.provider.slice(1)}
-                        {alt.region === "eu" && (
-                          <span className="ml-1 text-[10px] font-semibold text-success bg-success/10 rounded-full px-1.5 py-0.5">EU</span>
-                        )}
-                        {alt.region === "local" && (
-                          <span className="ml-1 text-[10px] font-semibold text-muted-foreground bg-border rounded-full px-1.5 py-0.5">Local</span>
-                        )}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        ${alt.projected_cost_usd.toFixed(2)} projected
-                      </p>
+      {/* Row 3.6: Provider Cost card + savings - lazy loaded, hidden when <= 1 provider */}
+      <div ref={providerRef}>
+        {!belowFoldLoaded ? (
+          <Skeleton className="h-48 rounded-2xl" />
+        ) : showProviderCosts && providerCosts ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+            <div className="lg:col-span-2">
+              <BentoProviderCosts
+                providerCosts={providerCosts}
+                savings={providerSavings}
+              />
+            </div>
+            {providerSavings && providerSavings.alternatives.length > 0 && (
+              <div className={cn(
+                "rounded-2xl border border-border bg-surface shadow-sm",
+                "hover:border-accent/30 transition-all duration-300",
+                "p-5 flex flex-col gap-3"
+              )}>
+                <h3 className="text-sm font-semibold text-foreground">Savings Opportunities</h3>
+                <div className="space-y-3">
+                  {providerSavings.alternatives.slice(0, 3).map((alt) => (
+                    <div key={alt.provider} className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-foreground">
+                          {alt.provider.charAt(0).toUpperCase() + alt.provider.slice(1)}
+                          {alt.region === "eu" && (
+                            <span className="ml-1 text-[10px] font-semibold text-success bg-success/10 rounded-full px-1.5 py-0.5">EU</span>
+                          )}
+                          {alt.region === "local" && (
+                            <span className="ml-1 text-[10px] font-semibold text-muted-foreground bg-border rounded-full px-1.5 py-0.5">Local</span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          ${alt.projected_cost_usd.toFixed(2)} projected
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-success shrink-0">
+                        -{alt.savings_percent}%
+                      </span>
                     </div>
-                    <span className="text-xs font-semibold text-success shrink-0">
-                      -{alt.savings_percent}%
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Row 4: Cost Forecast (2/3) + Recent Runs (1/3) - lazy loaded */}
+      <div ref={forecastRef}>
+        {!forecastVisible ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+            <Skeleton className="h-56 rounded-2xl lg:col-span-2" />
+            <Skeleton className="h-56 rounded-2xl" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+            <div className="lg:col-span-2">
+              <div className={cn(
+                "bg-surface rounded-2xl shadow-sm border border-border",
+                "hover:border-accent/30 transition-all duration-300",
+                "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
+              )}>
+                <CostForecast />
+              </div>
+            </div>
+            <div>
+              <BentoRecentRuns runs={recentRuns} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Row 5: Runs chart + Cost chart - lazy loaded */}
+      {stats && stats.runs_by_day.length > 0 && (
+        <div ref={chartsRef}>
+          {!chartsVisible ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+              <Skeleton className="h-56 rounded-2xl" />
+              <Skeleton className="h-56 rounded-2xl" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+              <div className={cn(
+                "bg-surface rounded-2xl shadow-sm border border-border",
+                "hover:border-accent/30 transition-all duration-300",
+                "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
+              )}>
+                <RunsChart data={stats.runs_by_day} />
+              </div>
+              <div className={cn(
+                "bg-surface rounded-2xl shadow-sm border border-border",
+                "hover:border-accent/30 transition-all duration-300",
+                "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
+              )}>
+                {stats.cost_by_workflow && (
+                  <CostChart data={stats.cost_by_workflow} />
+                )}
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Row 4: Cost Forecast (2/3) + Recent Runs (1/3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        <div className="lg:col-span-2">
-          <div className={cn(
-            "bg-surface rounded-2xl shadow-sm border border-border",
-            "hover:border-accent/30 transition-all duration-300",
-            "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
-          )}>
-            <CostForecast />
-          </div>
-        </div>
-        <div>
-          <BentoRecentRuns runs={recentRuns} />
-        </div>
-      </div>
-
-      {/* Row 5: Runs chart + Cost chart */}
-      {stats && stats.runs_by_day.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
-          <div className={cn(
-            "bg-surface rounded-2xl shadow-sm border border-border",
-            "hover:border-accent/30 transition-all duration-300",
-            "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
-          )}>
-            <RunsChart data={stats.runs_by_day} />
-          </div>
-          <div className={cn(
-            "bg-surface rounded-2xl shadow-sm border border-border",
-            "hover:border-accent/30 transition-all duration-300",
-            "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent"
-          )}>
-            {stats.cost_by_workflow && (
-              <CostChart data={stats.cost_by_workflow} />
-            )}
-          </div>
         </div>
       )}
     </div>

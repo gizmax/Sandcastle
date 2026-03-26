@@ -22,12 +22,17 @@ import {
   Cpu,
   X,
   Wifi,
+  ChevronDown,
+  Database,
+  HardDrive,
+  Container,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
-import { cn, inputClass, isSafeUrl, maskConnectionString } from "@/lib/utils";
+import { Link } from "react-router-dom";
+import { cn, inputClass, isSafeUrl } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -91,6 +96,110 @@ type SectionName =
   | "budget"
   | "webhooks"
   | "system";
+
+// -- BackendCard component --------------------------------------------------
+
+interface BackendOption {
+  id: string;
+  label: string;
+  desc: string;
+  envHint: string;
+}
+
+function BackendCard({
+  icon: Icon,
+  label,
+  current,
+  options,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  current: string;
+  options: BackendOption[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const handleCopy = (text: string, optId: string) => {
+    void navigator.clipboard.writeText(text);
+    setCopied(optId);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-surface/50">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-3 px-4 py-3 cursor-pointer"
+      >
+        <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/15 border border-accent/30 text-accent capitalize">
+          {current}
+        </span>
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
+            expanded && "rotate-180"
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 border-t border-border/50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {options.map((opt) => {
+              const isActive = opt.id === current;
+              return (
+                <div
+                  key={opt.id}
+                  className={cn(
+                    "rounded-lg border p-3 transition-all",
+                    isActive
+                      ? "border-accent bg-accent/5"
+                      : "border-border/50 bg-surface/30"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                    {isActive && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-accent/20 text-accent uppercase tracking-wider">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{opt.desc}</p>
+                  {!isActive && (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-muted-foreground">Add to .env:</span>
+                        <button
+                          onClick={() => handleCopy(opt.envHint, opt.id)}
+                          className="flex items-center gap-1 text-[10px] text-accent hover:text-accent-hover transition-colors cursor-pointer"
+                        >
+                          {copied === opt.id ? (
+                            <><Check className="h-2.5 w-2.5" /> Copied</>
+                          ) : (
+                            <><Copy className="h-2.5 w-2.5" /> Copy</>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="text-[10px] font-mono text-muted-foreground/70 bg-border/20 rounded px-2 py-1.5 whitespace-pre-wrap break-all">
+                        {opt.envHint}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-2">
+            Changes require restarting Sandcastle to take effect.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -406,6 +515,19 @@ export default function SettingsPage() {
                           {PROVIDER_STATUS_LABEL[p.status] ?? p.status}
                         </div>
                       </button>
+                      {p.configured ? (
+                        <div className="mt-1 flex items-center justify-center gap-1 text-[10px] text-success">
+                          <CheckCircle2 className="h-2.5 w-2.5" />
+                          Key set
+                        </div>
+                      ) : (
+                        <Link
+                          to="/api-keys"
+                          className="mt-1 flex items-center justify-center gap-1 text-[10px] text-accent hover:text-accent-hover transition-colors"
+                        >
+                          Set API key &rarr;
+                        </Link>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); void handleTestConnection(p.id); }}
                         disabled={ts === "testing"}
@@ -777,6 +899,7 @@ export default function SettingsPage() {
         icon={Shield}
         title="Security"
         description="Authentication and CORS settings"
+        readOnly
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -850,6 +973,7 @@ export default function SettingsPage() {
         icon={Webhook}
         title="Webhooks"
         description="Webhook HMAC signing configuration"
+        readOnly
       >
         <div className="space-y-3">
           <div>
@@ -941,71 +1065,89 @@ export default function SettingsPage() {
         </SectionCard>
       )}
 
-      {/* Infrastructure (read-only) */}
+      {/* Infrastructure Backends */}
       <SectionCard
         icon={Server}
         title="Infrastructure"
-        description="Runtime environment and storage configuration (read-only)"
+        description="Runtime backends and storage. Changes require a restart and are applied via environment variables."
       >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">Mode</span>
-            <span
-              className={cn(
-                "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                settings.is_local_mode
-                  ? "bg-accent/15 border border-accent/30 text-accent"
-                  : "bg-success/15 border border-success/30 text-success"
-              )}
-            >
-              {settings.is_local_mode ? "Local" : "Production"}
-            </span>
-          </div>
+        {(() => {
+          const currentSandbox = runtimeInfo?.sandbox_backend || "e2b";
+          const currentStorage = settings.storage_backend || "local";
+          const currentDb = settings.database_url ? "postgresql" : "sqlite";
+          const currentQueue = settings.redis_url ? "redis" : "in-process";
 
-          {runtimeInfo && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">Sandbox Backend</span>
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent/15 border border-accent/30 text-accent capitalize">
-                {runtimeInfo.sandbox_backend}
-              </span>
-            </div>
-          )}
+          const backends = [
+            {
+              id: "sandbox",
+              label: "Sandbox",
+              icon: Container,
+              current: currentSandbox,
+              options: [
+                { id: "e2b", label: "E2B", desc: "Managed cloud sandbox - isolated, auto-scaling, no infra to maintain", envHint: "E2B_API_KEY=...\nSANDBOX_BACKEND=e2b" },
+                { id: "docker", label: "Docker", desc: "Your own containers - full control, runs on your infra", envHint: "SANDBOX_BACKEND=docker\nDOCKER_IMAGE=sandcastle-runner:latest" },
+                { id: "local", label: "Local", desc: "Runs code directly on the host machine - dev/testing only, no isolation", envHint: "SANDBOX_BACKEND=local" },
+                { id: "cloudflare", label: "Cloudflare Workers", desc: "Edge execution - low latency, globally distributed, pay-per-request", envHint: "SANDBOX_BACKEND=cloudflare\nCLOUDFLARE_WORKER_URL=https://..." },
+              ],
+            },
+            {
+              id: "storage",
+              label: "Storage",
+              icon: HardDrive,
+              current: currentStorage,
+              options: [
+                { id: "local", label: "Local Filesystem", desc: "Files stored on disk - simple, no external deps, single machine only", envHint: "STORAGE_BACKEND=local" },
+                { id: "s3", label: "S3 / MinIO", desc: "Object storage - scalable, shared across instances (AWS S3, MinIO, Cloudflare R2)", envHint: "STORAGE_BACKEND=s3\nSTORAGE_BUCKET=sandcastle-data\nAWS_ACCESS_KEY_ID=...\nAWS_SECRET_ACCESS_KEY=..." },
+              ],
+            },
+            {
+              id: "database",
+              label: "Database",
+              icon: Database,
+              current: currentDb,
+              options: [
+                { id: "sqlite", label: "SQLite", desc: "Embedded database - zero setup, single file, good for single instance", envHint: "# Remove DATABASE_URL to use SQLite" },
+                { id: "postgresql", label: "PostgreSQL", desc: "Production database - concurrent access, backups, multi-worker support", envHint: "DATABASE_URL=postgresql://user:pass@host:5432/sandcastle" },
+              ],
+            },
+            {
+              id: "queue",
+              label: "Queue",
+              icon: Server,
+              current: currentQueue,
+              options: [
+                { id: "in-process", label: "In-process", desc: "Queue runs inside Sandcastle - zero config, but jobs are lost on restart", envHint: "# Remove REDIS_URL to use in-process queue" },
+                { id: "redis", label: "Redis", desc: "External queue - jobs survive restarts, supports multiple Sandcastle workers", envHint: "REDIS_URL=redis://localhost:6379" },
+              ],
+            },
+          ];
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Database</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.database_url ? maskConnectionString(settings.database_url) : "Not configured"}
-              </p>
+          return (
+            <div className="space-y-3">
+              {backends.map((backend) => (
+                <BackendCard
+                  key={backend.id}
+                  icon={backend.icon}
+                  label={backend.label}
+                  current={backend.current}
+                  options={backend.options}
+                />
+              ))}
+              <div className="pt-2 border-t border-border/50">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Data Directory</p>
+                    <p className="text-xs text-muted-foreground/70 font-mono truncate">{settings.data_dir || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Workflows Directory</p>
+                    <p className="text-xs text-muted-foreground/70 font-mono truncate">{settings.workflows_dir || "-"}</p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Queue</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.redis_url ? maskConnectionString(settings.redis_url) : "In-process"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Storage</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.storage_backend}
-                {settings.storage_bucket ? ` / ${settings.storage_bucket}` : ""}
-                {settings.storage_endpoint ? ` (${settings.storage_endpoint})` : ""}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Data Directory</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.data_dir || "-"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Workflows Directory</p>
-              <p className="text-sm text-muted-foreground font-mono truncate">
-                {settings.workflows_dir || "-"}
-              </p>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
       </SectionCard>
 
     </div>

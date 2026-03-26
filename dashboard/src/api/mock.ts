@@ -3376,10 +3376,11 @@ const MOCK_RUN_COMPARE = {
 
 const MOCK_SETTINGS = {
   anthropic_api_key: "****Qf8x",
-  e2b_api_key: "****mN2k",
+  mistral_api_key: "****Eu4m",
   openai_api_key: "****xK9m",
-  minimax_api_key: "****pL3n",
+  minimax_api_key: "",
   openrouter_api_key: "****qR7z",
+  e2b_api_key: "****mN2k",
   auth_required: true,
   dashboard_origin: "http://localhost:5173",
   default_max_cost_usd: 5.0,
@@ -5883,7 +5884,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.18.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.2666", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -6621,7 +6622,7 @@ const routes: MockRoute[] = [
   {
     match: /^\/check-update$/,
     method: "GET",
-    handler: () => ({ current_version: "0.18.0", latest_version: "0.18.0", update_available: false }),
+    handler: () => ({ current_version: "0.2666", latest_version: "0.2666", update_available: false }),
   },
   // GET /browse (template browser - same as /templates but with different shape)
   {
@@ -7092,7 +7093,9 @@ const routes: MockRoute[] = [
       available_providers: [
         { id: "anthropic", name: "Anthropic (Claude)", region: "us", configured: true, status: "ok" },
         { id: "mistral", name: "Mistral", region: "eu", configured: true, status: "ok" },
-        { id: "openai", name: "OpenAI", region: "us", configured: false, status: "unconfigured" },
+        { id: "openai", name: "OpenAI", region: "us", configured: true, status: "ok" },
+        { id: "google", name: "Google (via OpenRouter)", region: "us", configured: true, status: "ok" },
+        { id: "minimax", name: "MiniMax", region: "us", configured: false, status: "unconfigured" },
         { id: "ollama", name: "Ollama (Local)", region: "local", configured: false, status: "not_detected" },
       ],
     }),

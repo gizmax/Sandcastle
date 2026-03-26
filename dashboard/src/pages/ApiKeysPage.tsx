@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Key, KeyRound, Plus, Loader2 } from "lucide-react";
+import { Key, Plus, Loader2, Sparkles, Server } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ApiKeyTable, type ApiKeyItem } from "@/components/api-keys/ApiKeyTable";
@@ -8,17 +8,18 @@ import { KeyRevealModal } from "@/components/api-keys/KeyRevealModal";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
+import { SectionCard, HelperText } from "@/components/ui/SectionCard";
 import { cn, inputClass } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
 
 interface SettingsData {
   anthropic_api_key: string;
-  e2b_api_key: string;
+  mistral_api_key: string;
   openai_api_key: string;
   minimax_api_key: string;
   openrouter_api_key: string;
+  e2b_api_key: string;
   [key: string]: unknown;
 }
 
@@ -38,13 +39,14 @@ export default function ApiKeysPage() {
   // and only expose an editable input when the user explicitly clicks "Change".
   // This prevents masked partial values from being written into component state
   // where they could be accidentally submitted or logged.
-  type ServiceKey = "anthropic_api_key" | "e2b_api_key" | "openai_api_key" | "minimax_api_key" | "openrouter_api_key";
+  type ServiceKey = "anthropic_api_key" | "mistral_api_key" | "openai_api_key" | "minimax_api_key" | "openrouter_api_key" | "e2b_api_key";
   const [configured, setConfigured] = useState<Record<ServiceKey, boolean>>({
     anthropic_api_key: false,
-    e2b_api_key: false,
+    mistral_api_key: false,
     openai_api_key: false,
     minimax_api_key: false,
     openrouter_api_key: false,
+    e2b_api_key: false,
   });
   // editingKeys: set of keys the user has clicked "Change" on
   const [editingKeys, setEditingKeys] = useState<Set<ServiceKey>>(new Set());
@@ -71,10 +73,11 @@ export default function ApiKeysPage() {
       // This avoids loading partial/masked secrets into editable form state.
       setConfigured({
         anthropic_api_key: Boolean(res.data.anthropic_api_key),
-        e2b_api_key: Boolean(res.data.e2b_api_key),
+        mistral_api_key: Boolean(res.data.mistral_api_key),
         openai_api_key: Boolean(res.data.openai_api_key),
         minimax_api_key: Boolean(res.data.minimax_api_key),
         openrouter_api_key: Boolean(res.data.openrouter_api_key),
+        e2b_api_key: Boolean(res.data.e2b_api_key),
       });
     }
   }, []);
@@ -233,83 +236,153 @@ export default function ApiKeysPage() {
         <ApiKeyTable keys={keys} onDeactivate={handleDeactivate} />
       )}
 
-      {/* External Services */}
+      {/* AI Provider Keys */}
       <SectionCard
-        icon={KeyRound}
-        title="External Services"
-        description="API keys for AI providers and sandbox runtimes"
+        icon={Sparkles}
+        title="AI Provider Keys"
+        description="API keys for LLM providers used by the universal advisor, evolution, and workflow generation."
       >
         <div className="space-y-4">
           {(
             [
-              { key: "anthropic_api_key" as ServiceKey, label: "Anthropic API Key", placeholder: "sk-ant-..." },
-              { key: "e2b_api_key" as ServiceKey, label: "E2B API Key", placeholder: "e2b_..." },
-              { key: "openai_api_key" as ServiceKey, label: "OpenAI API Key", placeholder: "sk-..." },
-              { key: "minimax_api_key" as ServiceKey, label: "MiniMax API Key", placeholder: "minimax-..." },
-              { key: "openrouter_api_key" as ServiceKey, label: "OpenRouter API Key", placeholder: "sk-or-..." },
+              { key: "anthropic_api_key" as ServiceKey, label: "Anthropic (Claude)", placeholder: "sk-ant-...", region: "US" },
+              { key: "mistral_api_key" as ServiceKey, label: "Mistral", placeholder: "mistral-...", region: "EU" },
+              { key: "openai_api_key" as ServiceKey, label: "OpenAI", placeholder: "sk-...", region: "US" },
+              { key: "minimax_api_key" as ServiceKey, label: "MiniMax", placeholder: "minimax-...", region: "US" },
+              { key: "openrouter_api_key" as ServiceKey, label: "OpenRouter (incl. Google Gemini)", placeholder: "sk-or-...", region: "US" },
             ] as const
-          ).map(({ key, label, placeholder }) => (
-            <div key={key}>
-              <FieldLabel htmlFor={key}>{label}</FieldLabel>
-              {editingKeys.has(key) ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    id={key}
-                    type="password"
-                    className={cn(inputClass, "flex-1")}
-                    value={newValues[key] ?? ""}
-                    onChange={(e) => setNewValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                    placeholder={placeholder}
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleCancelEditing(key)}
-                    className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 h-9">
-                  {configured[key] ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 border border-success/30 px-2.5 py-0.5 text-xs font-medium text-success">
-                      Configured
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-border/40 px-2.5 py-0.5 text-xs text-muted">
-                      Not set
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleStartEditing(key)}
-                    className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
-                  >
-                    {configured[key] ? "Change" : "Set"}
-                  </button>
-                </div>
-              )}
+          ).map(({ key, label, placeholder, region }) => (
+            <div key={key} className="flex items-center gap-3">
+              <div className="w-40 shrink-0">
+                <div className="text-sm font-medium text-foreground">{label}</div>
+                <div className="text-[10px] text-muted-foreground">{region}</div>
+              </div>
+              <div className="flex-1">
+                {editingKeys.has(key) ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      id={key}
+                      type="password"
+                      className={cn(inputClass, "flex-1")}
+                      value={newValues[key] ?? ""}
+                      onChange={(e) => setNewValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCancelEditing(key)}
+                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 h-9">
+                    {configured[key] ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 border border-success/30 px-2.5 py-0.5 text-xs font-medium text-success">
+                        Configured
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-border/40 px-2.5 py-0.5 text-xs text-muted">
+                        Not set
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditing(key)}
+                      className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                    >
+                      {configured[key] ? "Change" : "Set"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
-          <HelperText>Click "Change" to update a key. The current value is never shown.</HelperText>
-          <div className="flex justify-end">
-            <button
-              disabled={!credentialsDirty || saving}
-              onClick={() => void handleSaveCredentials()}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-                credentialsDirty
-                  ? "bg-accent text-accent-foreground hover:bg-accent-hover shadow-sm hover:shadow-md cursor-pointer"
-                  : "bg-border text-muted cursor-not-allowed"
-              )}
-            >
-              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Save
-            </button>
-          </div>
         </div>
       </SectionCard>
+
+      {/* Infrastructure Keys */}
+      <SectionCard
+        icon={Server}
+        title="Infrastructure Keys"
+        description="Credentials for sandbox runtimes, storage, and deployment targets."
+      >
+        <div className="space-y-4">
+          {(
+            [
+              { key: "e2b_api_key" as ServiceKey, label: "E2B Sandbox", placeholder: "e2b_...", desc: "Cloud sandbox for code execution" },
+            ] as const
+          ).map(({ key, label, placeholder, desc }) => (
+            <div key={key} className="flex items-center gap-3">
+              <div className="w-40 shrink-0">
+                <div className="text-sm font-medium text-foreground">{label}</div>
+                <div className="text-[10px] text-muted-foreground">{desc}</div>
+              </div>
+              <div className="flex-1">
+                {editingKeys.has(key) ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      id={key}
+                      type="password"
+                      className={cn(inputClass, "flex-1")}
+                      value={newValues[key] ?? ""}
+                      onChange={(e) => setNewValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCancelEditing(key)}
+                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 h-9">
+                    {configured[key] ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 border border-success/30 px-2.5 py-0.5 text-xs font-medium text-success">
+                        Configured
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-border/40 px-2.5 py-0.5 text-xs text-muted">
+                        Not set
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditing(key)}
+                      className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                    >
+                      {configured[key] ? "Change" : "Set"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          <HelperText>Infrastructure keys are typically set during installation via CLI. You can update them here.</HelperText>
+        </div>
+      </SectionCard>
+
+      {/* Shared save button for all credential changes */}
+      {credentialsDirty && (
+        <div className="flex justify-end">
+          <button
+            disabled={saving}
+            onClick={() => void handleSaveCredentials()}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors",
+              "bg-accent text-accent-foreground hover:bg-accent-hover shadow-sm hover:shadow-md cursor-pointer"
+            )}
+          >
+            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Save Changes
+          </button>
+        </div>
+      )}
 
       <CreateApiKeyModal
         open={createModalOpen}

@@ -685,7 +685,7 @@ describe("SystemHealthPage", () => {
     storage: "local",
     sandbox_backend: "e2b",
     data_dir: "/data",
-    version: "0.18.0",
+    version: "0.2666",
   };
   const mockStatsData = { total_runs_today: 42, success_rate: 0.95, total_cost_today: 12.34, avg_duration_seconds: 90 };
 
@@ -733,7 +733,7 @@ describe("SystemHealthPage", () => {
     });
     expect(screen.getByText("OK")).toBeInTheDocument();
     // Version appears in both Server Status and Environment cards
-    expect(screen.getAllByText("0.18.0").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("0.2666").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders runtime info card", async () => {

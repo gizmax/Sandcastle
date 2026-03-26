@@ -34,7 +34,7 @@
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
 - [63 Built-in Integrations](#63-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [17 Step Types](#17-step-types)
+- [20 Step Types](#20-step-types)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
@@ -474,7 +474,7 @@ Once connected, ask your AI assistant to:
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
 | **63 built-in integrations** across 9 categories | Yes |
-| **17 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
+| **20 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -799,9 +799,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 17 Step Types
+## 20 Step Types
 
-Sandcastle supports 17 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 20 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -1899,7 +1899,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 17 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 20 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]

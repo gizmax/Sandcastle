@@ -70,13 +70,23 @@ def compute_evolution_score(
     latency_penalty = max(0, (duration_seconds - 60) / 60) * 2
 
     if optimize_for == "quality":
-        return quality * 100 * confidence - cost_penalty - latency_penalty
+        base = quality * 100 * confidence - cost_penalty - latency_penalty
     elif optimize_for == "cost":
-        return (1 - cost_usd / max(cost_usd, 0.01)) * 50 + quality * 50 * confidence - latency_penalty
+        base = (
+            (1 - cost_usd / max(cost_usd, 0.01)) * 50
+            + quality * 50 * confidence
+            - latency_penalty
+        )
     elif optimize_for == "latency":
-        return (1 - duration_seconds / max(duration_seconds, 1)) * 50 + quality * 50 * confidence - cost_penalty
+        base = (
+            (1 - duration_seconds / max(duration_seconds, 1)) * 50
+            + quality * 50 * confidence
+            - cost_penalty
+        )
     else:  # balanced
-        return quality * 60 * confidence - cost_usd * 10 - latency_penalty * 0.5
+        base = quality * 60 * confidence - cost_usd * 10 - latency_penalty * 0.5
+
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +146,7 @@ async def mutate_prompt(
 
     new_prompt = target_step.prompt  # default: no change
     try:
-        from sandcastle.engine.generator import _get_advisor_config, _call_advisor_llm
+        from sandcastle.engine.generator import _call_advisor_llm
 
         response_text = await _call_advisor_llm(
             system="You are a prompt engineering expert. Improve the given prompt based on eval failures.",
@@ -269,8 +279,6 @@ async def mutate_simplify(
         return workflow_yaml, "workflow is already minimal"
 
     # Find candidate step: prefer steps with no dependents (leaf steps are lower impact)
-    # or steps with high max_turns
-    step_ids = {s.id for s in workflow.steps}
     steps_with_dependents = set()
     for step in workflow.steps:
         for dep in (step.depends_on or []):
@@ -613,7 +621,7 @@ async def run_evolution(
             total_discards += 1
             continue
 
-        # Run eval suite on mutated workflow - temporarily write to a temp workflow name
+        # Run eval suite on mutated workflow
         temp_workflow_name = f"__evolution_{evolution_id}_{iteration}"
         eval_result = await _run_eval_on_yaml(new_yaml, suite, temp_workflow_name)
 
@@ -778,10 +786,14 @@ async def _run_eval_on_yaml(
 
     Temporarily patches the workflow loading to use the provided YAML.
     Returns SuiteResult or None on crash.
-    """
-    from sandcastle.engine.eval import CaseResult, EvalCase, SuiteResult, run_eval_case
 
-    import asyncio
+    Args:
+        workflow_yaml: YAML string of the mutated workflow.
+        suite: parsed eval suite definition.
+        temp_name: temporary workflow name for logging.
+    """
+    from sandcastle.engine.eval import CaseResult, SuiteResult
+
 
     try:
         from sandcastle.engine.dag import parse_yaml_string
@@ -832,11 +844,10 @@ async def _run_eval_on_yaml(
 
 async def _run_case_on_workflow(case: Any, workflow: Any) -> Any:
     """Execute a single eval case against a specific workflow definition."""
-    import time
     import uuid as _uuid
 
     from sandcastle.engine.dag import build_plan
-    from sandcastle.engine.eval import AssertionDef, CaseResult, check_assertion
+    from sandcastle.engine.eval import CaseResult, check_assertion
     from sandcastle.engine.executor import execute_workflow
     from sandcastle.engine.storage import create_storage
 
@@ -865,7 +876,6 @@ async def _run_case_on_workflow(case: Any, workflow: Any) -> Any:
         final_output = result.outputs
         meta = {"cost_usd": cost, "duration_seconds": duration}
 
-        from sandcastle.engine.eval import AssertionResult
         assertion_results = []
         for assertion in case.assertions:
             ar = await check_assertion(assertion, final_output, meta, step_outputs)
