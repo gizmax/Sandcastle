@@ -322,14 +322,18 @@
   <!-- Hero -->
   <header class="hero" id="hero">
     <div class="container">
-      <div class="hero-badge">Security Whitepaper</div>
+      <div class="hero-badge">Security Whitepaper - v0.2666</div>
       <h1>Defense in depth<br><span class="accent">for AI agent workflows.</span></h1>
-      <p>Sandcastle applies layered security controls at every stage - from API authentication and sandbox isolation to PII redaction and credential management. Your workflows run in ephemeral sandboxes with zero trust by default.</p>
+      <p>Sandcastle applies layered security controls at every stage - from API authentication and sandbox isolation to EU data residency enforcement and provider audit trails. Your workflows run in ephemeral sandboxes with zero trust by default.</p>
 
       <div class="stats-bar">
         <div class="stat-item">
-          <div class="stat-num">7</div>
+          <div class="stat-num">9</div>
           <div class="stat-label">Security Layers</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">6</div>
+          <div class="stat-label">AI Providers</div>
         </div>
         <div class="stat-item">
           <div class="stat-num">4</div>
@@ -340,7 +344,7 @@
           <div class="stat-label">Credential Patterns</div>
         </div>
         <div class="stat-item">
-          <div class="stat-num">1361</div>
+          <div class="stat-num">9400+</div>
           <div class="stat-label">Passing Tests</div>
         </div>
       </div>
@@ -385,6 +389,8 @@
               <span>Secret Blocking</span>
               <span>Cost Limits</span>
               <span>Approval Gates</span>
+              <span>Data Residency</span>
+              <span>SLO Routing</span>
             </div>
           </div>
           <div class="arch-layer">
@@ -394,6 +400,7 @@
               <span>Seccomp Profiles</span>
               <span>CapDrop ALL</span>
               <span>Circuit Breaker</span>
+              <span>Auto-Failover</span>
               <span>Timeout Enforcement</span>
               <span>Resource Limits</span>
             </div>
@@ -404,6 +411,7 @@
               <span>Credential Encryption</span>
               <span>Policy Violations</span>
               <span>Approval Trail</span>
+              <span>Provider Audit Trail</span>
               <span>Run History</span>
               <span>Key Usage Tracking</span>
             </div>
@@ -722,6 +730,77 @@
           </tr>
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- v0.2666 Security Features -->
+  <section id="v0.2666">
+    <div class="container fade-in">
+      <div class="section-label">New in v0.2666</div>
+      <h2 class="section-title">Your data. Your borders. Enforced.</h2>
+      <p class="section-subtitle">v0.2666 adds hard enforcement where previous versions had soft controls. Data residency, provider failover, and cost tracking - all with full audit trail.</p>
+
+      <div class="layer-grid">
+
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+            <h3>EU Data Residency Enforcement</h3>
+          </div>
+          <p>Set <code>DATA_RESIDENCY=eu</code> and all AI processing routes through EU-based providers (Mistral) or stays local (Ollama). This is not a policy document - it's hard enforcement at the routing layer.</p>
+          <ul class="detail-list">
+            <li>Routing layer rejects non-EU providers when EU mode is active</li>
+            <li>Failover chain respects residency - only EU/local providers in the chain</li>
+            <li>Provider audit trail logs region for every AI call</li>
+            <li>Dashboard shows residency status per provider</li>
+            <li>Auto-generated GDPR privacy notice via <code>GET /compliance/privacy-notice</code></li>
+          </ul>
+        </div>
+
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <h3>Smart Auto-Failover</h3>
+          </div>
+          <p>Provider hits rate limit or returns 5xx? Sandcastle switches to the next provider in the failover chain automatically. Per-provider cooldown prevents hammering a failing endpoint.</p>
+          <ul class="detail-list">
+            <li>Triggers on HTTP 429, 5xx, and connection timeout</li>
+            <li>Per-provider cooldown (default 60s) prevents retry storms</li>
+            <li>Failover chain configurable per provider</li>
+            <li>Respects data residency constraints during failover</li>
+            <li>All failover events logged in provider audit trail</li>
+          </ul>
+        </div>
+
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
+            <h3>Provider Audit Trail</h3>
+          </div>
+          <p>Every AI call logs which provider handled it, which model was used, which region the data was processed in, and whether it was a failover event.</p>
+          <ul class="detail-list">
+            <li>Provider, model, region logged per advisor call</li>
+            <li>Failover events include original provider and reason</li>
+            <li>Cost tracked per provider for billing transparency</li>
+            <li>Integrated with existing SHA-256 hash chain audit</li>
+          </ul>
+        </div>
+
+        <div class="layer-card">
+          <div class="layer-card-header">
+            <div class="layer-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div>
+            <h3>SLO-Aware Model Routing</h3>
+          </div>
+          <p>Critical operations automatically get the most capable model. Simple tasks get the cheapest. No manual configuration - quality tier matching is automatic per task purpose.</p>
+          <ul class="detail-list">
+            <li>Quality tiers: high (generation), medium (analysis), low (formatting)</li>
+            <li>Per-provider model mapping for each tier</li>
+            <li>Override with <code>ADVISOR_QUALITY_MODE=always_best</code> or <code>always_cheapest</code></li>
+            <li>Audit trail includes quality tier selection reason</li>
+          </ul>
+        </div>
+
+      </div>
     </div>
   </section>
 
