@@ -159,23 +159,31 @@ router = APIRouter()
 # proxies / load balancers from closing idle SSE connections.
 SSE_KEEPALIVE_INTERVAL_SECONDS = 30
 
-# --- Hub registry cache (5 min TTL) ---
+# --- Hub registry cache (5 min TTL, bounded to 100 entries) ---
 
 _hub_cache: dict[str, tuple[float, Any]] = {}
 _HUB_CACHE_TTL = 300  # 5 minutes
+_HUB_CACHE_MAXSIZE = 100
 
 
-def _get_hub_cache(key: str) -> Any | None:
-    if key in _hub_cache:
-        ts, data = _hub_cache[key]
+def _get_hub_cache(key: str, tenant_id: str | None = None) -> Any | None:
+    cache_key = f"{key}:{tenant_id}" if tenant_id else key
+    if cache_key in _hub_cache:
+        ts, data = _hub_cache[cache_key]
         if time.time() - ts < _HUB_CACHE_TTL:
             return data
-        del _hub_cache[key]
+        del _hub_cache[cache_key]
     return None
 
 
-def _set_hub_cache(key: str, data: Any) -> None:
-    _hub_cache[key] = (time.time(), data)
+def _set_hub_cache(key: str, data: Any, tenant_id: str | None = None) -> None:
+    cache_key = f"{key}:{tenant_id}" if tenant_id else key
+    # Evict oldest entries when cache exceeds maxsize
+    if len(_hub_cache) >= _HUB_CACHE_MAXSIZE and cache_key not in _hub_cache:
+        # Remove the entry with the oldest timestamp
+        oldest_key = min(_hub_cache, key=lambda k: _hub_cache[k][0])
+        del _hub_cache[oldest_key]
+    _hub_cache[cache_key] = (time.time(), data)
 
 
 # --- Helpers ---
@@ -1396,7 +1404,10 @@ async def uninstall_hub_template(req: Request, slug: str) -> ApiResponse:
 
 
 @router.get("/hub/installed")
-async def list_installed_hub_templates() -> ApiResponse:
+async def list_installed_hub_templates(
+    limit: int = Query(50, le=100),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
     """List all community templates installed locally."""
     community_dir = Path(__file__).parent.parent / "templates" / "community"
     if not community_dir.exists():
@@ -1412,7 +1423,7 @@ async def list_installed_hub_templates() -> ApiResponse:
             }
         )
 
-    return ApiResponse(data=installed)
+    return ApiResponse(data=installed[offset : offset + limit])
 
 
 # ---------------------------------------------------------------------------
@@ -1801,6 +1812,7 @@ async def get_stats(request: Request) -> ApiResponse:
             .where(Run.created_at >= thirty_days_ago)
             .group_by("day", Run.status)
             .order_by("day")
+            .limit(1000)
         )
         rbd_q = _apply_tenant_filter(rbd_q, tenant_id, Run.tenant_id)
         runs_by_day_raw = (await session.execute(rbd_q)).all()
@@ -1832,6 +1844,7 @@ async def get_stats(request: Request) -> ApiResponse:
             .where(Run.created_at >= seven_days_ago)
             .group_by(Run.workflow_name)
             .order_by(func.sum(Run.total_cost_usd).desc())
+            .limit(1000)
         )
         cost_wf_q = _apply_tenant_filter(cost_wf_q, tenant_id, Run.tenant_id)
         cost_by_workflow = [
@@ -1869,6 +1882,7 @@ async def get_cost_forecast(request: Request) -> ApiResponse:
             .where(Run.created_at >= thirty_days_ago)
             .group_by("day")
             .order_by("day")
+            .limit(1000)
         )
         daily_q = _apply_tenant_filter(daily_q, tenant_id, Run.tenant_id)
         rows = (await session.execute(daily_q)).all()
@@ -1960,6 +1974,7 @@ async def get_sparklines(request: Request) -> ApiResponse:
             .where(Run.created_at >= seven_days_ago)
             .group_by("day")
             .order_by("day")
+            .limit(1000)
         )
         daily_q = _apply_tenant_filter(daily_q, tenant_id, Run.tenant_id)
         rows = (await session.execute(daily_q)).all()
@@ -1977,6 +1992,7 @@ async def get_sparklines(request: Request) -> ApiResponse:
             )
             .group_by("day")
             .order_by("day")
+            .limit(1000)
         )
         dur_q = _apply_tenant_filter(dur_q, tenant_id, Run.tenant_id)
         dur_rows = (await session.execute(dur_q)).all()
@@ -2051,6 +2067,7 @@ async def get_heatmap(request: Request) -> ApiResponse:
             .where(Run.created_at >= start_date)
             .group_by("day")
             .order_by("day")
+            .limit(1000)
         )
         daily_q = _apply_tenant_filter(daily_q, tenant_id, Run.tenant_id)
         rows = (await session.execute(daily_q)).all()
@@ -2247,6 +2264,7 @@ async def get_provider_costs(
             .join(Run, RunStep.run_id == Run.id)
             .where(Run.created_at >= since)
             .group_by(RunStep.model)
+            .limit(1000)
         )
         if settings.auth_required and tenant_id is not None:
             step_q = step_q.where(Run.tenant_id == tenant_id)
@@ -2261,6 +2279,7 @@ async def get_provider_costs(
                 AuditEvent.event_type == "advisor.llm_call",
                 AuditEvent.created_at >= since,
             )
+            .limit(1000)
         )
         advisor_rows = (await session.execute(advisor_q)).scalars().all()
 
@@ -2360,6 +2379,7 @@ async def get_provider_savings(
             .join(Run, RunStep.run_id == Run.id)
             .where(Run.created_at >= since)
             .group_by(RunStep.model)
+            .limit(1000)
         )
         if settings.auth_required and tenant_id is not None:
             step_q = step_q.where(Run.tenant_id == tenant_id)
@@ -2483,6 +2503,7 @@ async def get_provider_recommendation(request: Request = None) -> ApiResponse:
             .join(Run, RunStep.run_id == Run.id)
             .where(Run.created_at >= since)
             .group_by(RunStep.model)
+            .limit(1000)
         )
         if settings.auth_required and tenant_id is not None:
             step_q = step_q.where(Run.tenant_id == tenant_id)
@@ -2495,6 +2516,7 @@ async def get_provider_recommendation(request: Request = None) -> ApiResponse:
                 AutoPilotSample.quality_score.isnot(None),
                 AutoPilotSample.created_at >= since,
             )
+            .limit(1000)
         )
         quality_rows = (await session.execute(quality_q)).scalars().all()
 
@@ -2505,6 +2527,7 @@ async def get_provider_recommendation(request: Request = None) -> ApiResponse:
                 AuditEvent.event_type == "advisor.llm_call",
                 AuditEvent.created_at >= since,
             )
+            .limit(1000)
         )
         advisor_rows = (await session.execute(advisor_q)).scalars().all()
 

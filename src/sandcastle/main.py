@@ -34,9 +34,11 @@ async def _validate_providers() -> None:
     """Pre-flight check: verify configured LLM providers are reachable.
 
     Checks the advisor provider and each PROVIDER_REGISTRY entry that has a
-    configured API key. Logs warnings for unreachable providers but never
-    blocks startup - this is informational only.
+    configured API key. Runs all health checks in parallel via asyncio.gather
+    so startup is not blocked by slow providers. Logs warnings for unreachable
+    providers but never blocks startup - this is informational only.
     """
+    import asyncio
     import os
     import time
 
@@ -45,10 +47,11 @@ async def _validate_providers() -> None:
     from sandcastle.engine.generator import _PROVIDER_CONFIGS
 
     logger.info("Running provider pre-flight checks...")
-    checked = 0
-    warnings = 0
 
-    for provider_name, cfg in _PROVIDER_CONFIGS.items():
+    async def _check_provider(
+        provider_name: str, cfg: dict
+    ) -> tuple[str, bool]:
+        """Check a single provider. Returns (provider_name, success)."""
         key_env = cfg.get("api_key_env", "")
         if not key_env:
             # Ollama - check if running locally
@@ -59,13 +62,12 @@ async def _validate_providers() -> None:
                     resp.raise_for_status()
                 latency_ms = round((time.monotonic() - start) * 1000)
                 logger.info("Provider %s: ok (%dms, region=local)", provider_name, latency_ms)
+                return provider_name, True
             except Exception:
                 logger.warning(
                     "Provider %s: not reachable (Ollama not running locally)", provider_name
                 )
-                warnings += 1
-            checked += 1
-            continue
+                return provider_name, False
 
         api_key = os.environ.get(key_env, "")
         if not api_key:
@@ -83,9 +85,8 @@ async def _validate_providers() -> None:
 
         if not api_key:
             logger.debug("Provider %s: skipped (no API key configured)", provider_name)
-            continue
+            return provider_name, True  # Not a failure, just skipped
 
-        checked += 1
         start = time.monotonic()
         try:
             headers_fn = cfg.get("headers_fn")
@@ -117,6 +118,7 @@ async def _validate_providers() -> None:
             logger.info(
                 "Provider %s: ok (%dms, region=%s)", provider_name, latency_ms, region
             )
+            return provider_name, True
         except Exception as exc:
             latency_ms = round((time.monotonic() - start) * 1000)
             logger.warning(
@@ -125,7 +127,38 @@ async def _validate_providers() -> None:
                 latency_ms,
                 str(exc)[:200],
             )
+            return provider_name, False
+
+    # Build list of check tasks, skipping providers without API keys
+    # (the inner function handles the skip logic and logging)
+    tasks = [
+        _check_provider(name, cfg)
+        for name, cfg in _PROVIDER_CONFIGS.items()
+    ]
+
+    if not tasks:
+        logger.warning(
+            "No LLM providers configured. Set ANTHROPIC_API_KEY or other provider keys."
+        )
+        return
+
+    # Run all provider checks in parallel
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    checked = 0
+    warnings = 0
+    for result in results:
+        if isinstance(result, Exception):
+            # Should not happen since _check_provider catches all exceptions,
+            # but handle defensively
+            logger.warning("Provider check raised unexpected error: %s", result)
             warnings += 1
+            checked += 1
+        else:
+            _name, success = result
+            checked += 1
+            if not success:
+                warnings += 1
 
     if checked == 0:
         logger.warning(

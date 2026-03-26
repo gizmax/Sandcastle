@@ -21,12 +21,27 @@ logger = logging.getLogger(__name__)
 # Model upgrade/downgrade ladder
 MODEL_LADDER = ["haiku", "sonnet", "opus"]
 
-# Default cost estimates per model (USD per run, approximate)
-MODEL_COST_ESTIMATES = {
-    "haiku": 0.005,
-    "sonnet": 0.05,
-    "opus": 0.25,
-}
+# Per-run cost estimates derived from provider pricing (assumes ~1K tokens/run).
+# Single source of truth is PROVIDER_REGISTRY in providers.py.
+_TOKENS_PER_RUN = 1000  # approximate tokens per typical evolution run
+
+
+def _build_cost_estimates() -> dict[str, float]:
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+
+    estimates: dict[str, float] = {}
+    for name in MODEL_LADDER:
+        info = PROVIDER_REGISTRY.get(name)
+        if info:
+            # Blended cost: 2:1 input:output ratio, per 1M tokens -> per 1K tokens
+            blended_per_m = (info.input_price_per_m * 2 + info.output_price_per_m) / 3
+            estimates[name] = round(blended_per_m * _TOKENS_PER_RUN / 1_000_000, 6)
+        else:
+            estimates[name] = 0.0
+    return estimates
+
+
+MODEL_COST_ESTIMATES: dict[str, float] = _build_cost_estimates()
 
 
 # ---------------------------------------------------------------------------

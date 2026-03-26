@@ -148,6 +148,13 @@ class S3Storage:
         self.endpoint_url = endpoint_url
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
+        # Reuse a single session across all operations to avoid resource leaks
+        import aioboto3
+
+        self._session = aioboto3.Session(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+        )
 
     @staticmethod
     def _safe_key(key: str) -> str:
@@ -168,13 +175,8 @@ class S3Storage:
         return normalized
 
     def _get_session(self):
-        """Create an aioboto3 session."""
-        import aioboto3
-
-        return aioboto3.Session(
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-        )
+        """Return the shared aioboto3 session."""
+        return self._session
 
     async def read(self, path: str) -> str | None:
         """Read content from S3."""

@@ -812,6 +812,12 @@ def _build_engine_kwargs(url: str | None = None) -> dict:
     kwargs: dict = {"echo": False}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+    else:
+        # PostgreSQL pool tuning for production multi-tenant workloads
+        kwargs["pool_size"] = 20
+        kwargs["max_overflow"] = 10
+        kwargs["pool_pre_ping"] = True
+        kwargs["pool_recycle"] = 3600
     return kwargs
 
 

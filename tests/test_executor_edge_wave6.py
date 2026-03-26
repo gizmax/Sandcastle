@@ -314,18 +314,18 @@ class TestEscapeBracesConsistency:
         result = resolve_templates("Memories: {memory}", c)
         assert "{{injection}}" in result or "{injection}" not in result.replace("{{injection}}", "")
 
-    def test_input_value_not_escaped(self):
-        """Input values are trusted and should NOT have braces escaped."""
+    def test_input_value_escaped(self):
+        """Input values must be escaped to prevent template injection."""
         c = ctx(input={"data": {"key": "value"}})
         result = resolve_templates("{input.data}", c)
-        # JSON braces should be preserved as-is for input values
-        assert result == '{"key": "value"}'
+        # JSON braces are escaped to prevent re-resolution of user input
+        assert result == '{{"key": "value"}}'
 
-    def test_input_string_with_braces_preserved(self):
-        """Input string values with braces are preserved (trusted source)."""
+    def test_input_string_with_braces_escaped(self):
+        """Input string values with braces are escaped (untrusted user input)."""
         c = ctx(input={"name": "test {value} here"})
         result = resolve_templates("Name: {input.name}", c)
-        assert "test {value} here" in result
+        assert "test {{value}} here" in result
 
     def test_auto_injected_deps_escaped(self):
         """Auto-injected dependency outputs should have braces escaped."""

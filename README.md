@@ -1834,6 +1834,30 @@ First-run guided setup that walks new users through API key configuration, sandb
 | `GET` | `/api/templates` | List all built-in workflow templates |
 | `GET` | `/api/templates/{id}` | Get template detail with YAML |
 
+### Evolution
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/evolution/start` | Start workflow evolution |
+| `GET` | `/api/evolution/{name}/status` | Evolution status |
+| `POST` | `/api/evolution/{name}/accept` | Accept best variant |
+
+### Agent Memory
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/memory/add` | Store memory entry |
+| `POST` | `/api/memory/search` | Semantic search |
+| `DELETE` | `/api/memories/{id}` | Delete memory |
+
+### Advisor
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/advisor/status` | Current provider config |
+| `POST` | `/api/advisor/configure` | Switch provider |
+| `GET` | `/api/advisor/cost-estimate` | Cost comparison |
+
 ### Events & System
 
 | Method | Endpoint | Description |

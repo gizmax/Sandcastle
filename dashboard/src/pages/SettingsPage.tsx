@@ -38,6 +38,7 @@ import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAccentColor, ACCENT_COLORS } from "@/hooks/useAccentColor";
 import { useTheme } from "@/hooks/useTheme";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
 // -- Types ------------------------------------------------------------------
 
@@ -1066,6 +1067,7 @@ export default function SettingsPage() {
       )}
 
       {/* Infrastructure Backends */}
+      <ErrorBoundary name="SettingsPage-Infrastructure">
       <SectionCard
         icon={Server}
         title="Infrastructure"
@@ -1149,6 +1151,7 @@ export default function SettingsPage() {
           );
         })()}
       </SectionCard>
+      </ErrorBoundary>
 
     </div>
   );

@@ -273,10 +273,10 @@ def resolve_templates(
             raw = json.dumps(value)
         else:
             raw = str(value)
-        # Escape braces in step outputs and memory values to prevent
-        # template injection from LLM-generated content. Input values
-        # and built-in variables (run_id, date) are trusted sources.
-        if var_path.startswith("steps.") or var_path == "memory":
+        # Escape braces in user-provided input values, step outputs, and
+        # memory values to prevent template injection. Only built-in
+        # variables (run_id, date) and env vars are trusted sources.
+        if var_path.startswith(("steps.", "input.")) or var_path == "memory":
             return _escape_braces(raw)
         return raw
 
@@ -316,6 +316,30 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
         result = result.replace(match.group(0), replacement, 1)
 
     return result
+
+
+def _enforce_data_residency(model_info: Any) -> None:
+    """Raise if data_residency setting prohibits the model's region.
+
+    When settings.data_residency is "eu", only models with region "eu" or
+    "local" are allowed. When "local", only region "local" is allowed.
+    No-op when data_residency is empty (no restriction).
+    """
+    from sandcastle.config import settings
+
+    residency = settings.data_residency
+    if not residency:
+        return
+    allowed = {"eu": {"eu", "local"}, "local": {"local"}}
+    ok_regions = allowed.get(residency)
+    if ok_regions is None:
+        return  # Unknown residency value - no restriction
+    if model_info.region not in ok_regions:
+        raise ValueError(
+            f"Data residency violation: model '{model_info.api_model_id}' "
+            f"(region={model_info.region}) is not allowed under "
+            f"data_residency='{residency}'. Use an EU or local model."
+        )
 
 
 def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
@@ -1048,18 +1072,22 @@ async def execute_step_with_retry(
                 except Exception as e:
                     logger.warning(f"AutoPilot sample recording failed: {e}")
 
-            # Write CSV output if configured
+            # Write CSV output if configured (blocking I/O offloaded to thread)
             if step.csv_output:
                 try:
-                    _write_csv_output(step, result.output, context.run_id)
+                    await asyncio.to_thread(
+                        _write_csv_output, step, result.output, context.run_id
+                    )
                 except Exception as e:
                     logger.warning(f"CSV export failed for step '{step.id}': {e}")
 
-            # Generate PDF report if configured
+            # Generate PDF report if configured (blocking I/O offloaded to thread)
             pdf_path = None
             if step.pdf_report:
                 try:
-                    pdf_path = _write_pdf_report(step, result.output, context.run_id)
+                    pdf_path = await asyncio.to_thread(
+                        _write_pdf_report, step, result.output, context.run_id
+                    )
                 except Exception as e:
                     logger.warning(f"PDF report failed for step '{step.id}': {e}")
 
@@ -2256,6 +2284,7 @@ async def _execute_llm_step(
 
     started_at = time.monotonic()
     model_info = resolve_model(step.model)
+    _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 
     # Don't pass depends_on - auto-inject can append huge outputs (e.g. base64
@@ -3212,6 +3241,7 @@ async def _execute_classify_step(
         input_text = await resolve_storage_refs(input_text, storage)
 
         model_info = resolve_model(cfg.model)
+        _enforce_data_residency(model_info)
         api_key = get_api_key(model_info)
 
         categories_str = ", ".join(cfg.categories)
@@ -3760,6 +3790,7 @@ async def _execute_gate_step(
 
                 model_name = strategy_config.get("model", "haiku")
                 model_info = resolve_model(model_name)
+                _enforce_data_residency(model_info)
                 api_key = get_api_key(model_info)
 
                 if model_info.provider == "claude":
@@ -4739,6 +4770,7 @@ async def _browser_computer_use_mode(
         replay_screenshots = []
 
     model_info = resolve_model(step.model)
+    _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 
     runtime = get_sandshore_runtime()

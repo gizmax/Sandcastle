@@ -32,6 +32,7 @@ import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
 import { GenerateChatPanel } from "@/components/workflows/GenerateChatPanel";
 import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
 const nodeTypes: NodeTypes = {
   step: StepNode,
@@ -1139,21 +1140,23 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
           "flex-1 min-w-0 pt-8 lg:pt-0 transition-all duration-300",
           generateModalOpen ? "lg:w-[60%]" : "w-full"
         )}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            nodeTypes={nodeTypes}
-            onNodeClick={(_, node) => setSelectedStepId(node.id)}
-            onPaneClick={() => setSelectedStepId(null)}
-            fitView
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={16} size={1} color="var(--color-border)" />
-            <Controls showInteractive={false} className="!bg-surface !border-border !shadow-sm" />
-          </ReactFlow>
+          <ErrorBoundary name="WorkflowBuilder-ReactFlow">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              nodeTypes={nodeTypes}
+              onNodeClick={(_, node) => setSelectedStepId(node.id)}
+              onPaneClick={() => setSelectedStepId(null)}
+              fitView
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background gap={16} size={1} color="var(--color-border)" />
+              <Controls showInteractive={false} className="!bg-surface !border-border !shadow-sm" />
+            </ReactFlow>
+          </ErrorBoundary>
         </div>
 
         {/* AI Chat Panel - slides in from the right */}

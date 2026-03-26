@@ -1089,8 +1089,8 @@ class TestFieldPreservation:
         fields = dc.fields(StepDefinition)
         # If someone adds a field, this test reminds them to check
         # all places that construct StepDefinitions
-        assert len(fields) == 35, (
-            f"StepDefinition has {len(fields)} fields (expected 35). "
+        assert len(fields) == 37, (
+            f"StepDefinition has {len(fields)} fields (expected 37). "
             "If you added a new field, verify all dataclasses.replace() "
             "callers handle it correctly."
         )

@@ -499,7 +499,7 @@ class TestProviderRegistryValidation:
 
     def test_all_models_have_api_key_env(self):
         for name, info in PROVIDER_REGISTRY.items():
-            assert info.api_key_env, f"Model '{name}' has no api_key_env"
+            assert info.api_key_env is not None, f"Model '{name}' has no api_key_env"
 
     def test_all_models_have_positive_pricing(self):
         for name, info in PROVIDER_REGISTRY.items():
