@@ -279,9 +279,6 @@ function okResponse<T>(data: T) {
   return { data, error: null };
 }
 
-function errorResponse(message: string) {
-  return { data: null, error: { code: "ERROR", message } };
-}
 
 // ============================================================================
 // 1. OverviewBento regression (9 tests)
