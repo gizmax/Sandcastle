@@ -58,7 +58,7 @@
     "operatingSystem": "Cross-platform",
     "url": "https://sandcastle-ai.eu",
     "downloadUrl": "https://pypi.org/project/sandcastle-ai/",
-    "softwareVersion": "0.23.0",
+    "softwareVersion": "0.2666b1",
     "author": {
       "@type": "Person",
       "name": "Tomas Pflanzer",
@@ -108,7 +108,7 @@
         "name": "Is Sandcastle EU AI Act compliant?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. Sandcastle v0.23 includes built-in EU AI Act compliance features: risk classification (minimal/limited/high/unacceptable), tamper-evident audit trail with SHA-256 hash chain, transparency reports (Article 13), Annex IV technical documentation generator, global emergency stop, and PII redaction via Privacy Router."
+          "text": "Yes. Sandcastle includes built-in EU AI Act compliance: risk classification, tamper-evident audit trail (SHA-256 hash chain), transparency reports, Annex IV documentation, emergency stop, PII redaction, and EU data residency enforcement - all AI processing stays in EU when enabled."
         }
       },
       {
@@ -1757,7 +1757,7 @@
   <header class="hero" id="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.2666 - Your AI, Your Rules, Your Borders
+        v0.2666b1 - Your AI, Your Rules, Your Borders
       </div>
       <h1>
         Describe what you want. Go home.<br>
@@ -2414,7 +2414,7 @@
   <!-- Workflow Evolution (v0.25) -->
   <section class="enterprise-section" style="border-top: 1px solid var(--border); background: linear-gradient(180deg, rgba(245,158,11,0.04) 0%, transparent 100%);">
     <div class="container fade-in">
-      <span class="section-label">v0.25 - New</span>
+      <span class="section-label">Workflow Evolution</span>
       <h2 class="section-title">Your workflows improve themselves</h2>
       <p class="section-subtitle">Set a goal. Walk away. Come back to a faster, cheaper, more accurate workflow.</p>
 
@@ -2695,7 +2695,7 @@
   <footer>
     <div class="container footer-inner">
       <div class="footer-left">
-        <strong>Sandcastle</strong> v0.2666 - BSL 1.1 (Apache 2.0 after 2030)<br>
+        <strong>Sandcastle</strong> v0.2666b1 - BSL 1.1 (Apache 2.0 after 2030)<br>
         &copy; 2026 Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax
       </div>
       <div class="footer-links">
@@ -2777,7 +2777,7 @@
       if (!body || !cursor) return;
 
       var commands = [
-        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.18.0' },
+        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.2666b1' },
         { cmd: 'sandcastle init', output: 'Created .env with E2B backend' },
         { cmd: 'sandcastle serve', output: 'Dashboard ready at http://localhost:8080' }
       ];

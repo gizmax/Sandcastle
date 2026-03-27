@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
-import { cn } from "@/lib/utils";
+import { cn, buttonMd, buttonSm, buttonPrimary, buttonDanger, iconMd, iconSm } from "@/lib/utils";
 import type { InputSchema } from "@/types/inputSchema";
 
 interface WorkflowStep {
@@ -229,11 +229,12 @@ export default function Workflows() {
             onClick={() => navigate("/workflows/builder")}
             aria-label="New workflow"
             className={cn(
-              "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
-              "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
+              "flex items-center gap-2 font-medium",
+              buttonMd, buttonPrimary,
+              "shadow-sm hover:shadow-md"
             )}
           >
-            <Plus className="h-4 w-4" />
+            <Plus className={iconMd} />
             <span className="hidden sm:inline">New Workflow</span>
           </button>
         </div>
@@ -256,12 +257,11 @@ export default function Workflows() {
             <button
               onClick={() => setBulkAction("delete")}
               className={cn(
-                "flex items-center gap-1.5 rounded-lg border border-error/30 px-3 py-1.5",
-                "text-xs font-medium text-error",
-                "hover:bg-error/10 transition-colors"
+                "flex items-center gap-1.5 font-medium",
+                buttonSm, buttonDanger,
               )}
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className={iconSm} />
               Delete selected
             </button>
             <button

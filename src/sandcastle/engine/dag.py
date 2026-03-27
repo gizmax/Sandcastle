@@ -933,6 +933,10 @@ def _parse_parse_config(data: dict | None) -> ParseConfig | None:
 
 def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     """Parse a single step definition from YAML data."""
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Each step must be a mapping, got {type(data).__name__}: {str(data)[:100]}"
+        )
     if "id" not in data or not data["id"]:
         raise ValueError("Every step must have a non-empty 'id' field")
     if not isinstance(data["id"], str):
@@ -959,10 +963,18 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
     if slo and not model_pool:
         model_pool = _parse_model_pool("auto")
 
+    # Coerce depends_on to list of strings. YAML may parse bare numbers
+    # as integers (e.g. ``depends_on: [1]``), which would crash downstream
+    # set operations and dict lookups that expect string step IDs.
+    raw_deps = data.get("depends_on", [])
+    if not isinstance(raw_deps, list):
+        raw_deps = [raw_deps] if raw_deps is not None else []
+    depends_on = [str(d) for d in raw_deps]
+
     return StepDefinition(
         id=data["id"],
         prompt=prompt,
-        depends_on=data.get("depends_on", []),
+        depends_on=depends_on,
         model=data.get("model", defaults.get("model", "sonnet")),
         max_turns=data.get("max_turns", defaults.get("max_turns", 10)),
         timeout=data.get("timeout", defaults.get("timeout", 300)),
@@ -1061,6 +1073,12 @@ def parse(yaml_path: str) -> WorkflowDefinition:
     path = Path(yaml_path)
     with path.open() as f:
         data = yaml.safe_load(f)
+    if data is None:
+        raise ValueError(f"Workflow YAML file is empty: {yaml_path}")
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Workflow YAML must be a mapping, got {type(data).__name__} in {yaml_path}"
+        )
     return _parse_raw(data)
 
 

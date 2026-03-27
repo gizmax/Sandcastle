@@ -122,7 +122,7 @@ function BackendCard({
   const [copied, setCopied] = useState<string | null>(null);
 
   const handleCopy = (text: string, optId: string) => {
-    void navigator.clipboard.writeText(text);
+    void navigator.clipboard?.writeText(text).catch(() => {/* clipboard unavailable */});
     setCopied(optId);
     setTimeout(() => setCopied(null), 2000);
   };
@@ -391,8 +391,10 @@ export default function SettingsPage() {
       toast.error(`Failed to save: ${res.error.message}`);
     } else {
       toast.success("AI Provider saved");
+      // Refresh advisor status so dirty flag resets to match the new server state
+      void fetchAdvisorStatus();
     }
-  }, [selectedProvider, advisorModel, euMode]);
+  }, [selectedProvider, advisorModel, euMode, fetchAdvisorStatus]);
 
   // -- Connection test -------------------------------------------------------
 
@@ -642,7 +644,7 @@ export default function SettingsPage() {
                 </code>
                 <button
                   onClick={() => {
-                    void navigator.clipboard.writeText(update.installCommand!);
+                    void navigator.clipboard?.writeText(update.installCommand!).catch(() => {/* clipboard unavailable */});
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
                   }}

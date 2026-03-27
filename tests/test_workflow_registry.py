@@ -61,7 +61,7 @@ class TestSaveCreatesVersion:
                     "description": "First save",
                 },
             )
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()["data"]
         # name in response comes from YAML content (now matches unique name)
         assert data["name"] == name

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,8 @@ class GenerateResult:
     steps_count: int = 0
     validation_errors: list[str] = field(default_factory=list)
     input_schema: dict | None = None
+    fix_attempts: int = 0
+    similar_template: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +41,11 @@ _EXAMPLE_TEMPLATES = [
     "data_extractor",
     "email_campaign",
     "review_and_approve",
+    # v0.2666: diverse examples covering advanced step types
+    "deployment_monitor",              # condition step (branching)
+    "self_healing_pipeline",           # complex multi-step with parallel deps
+    "competitive_intel",               # deep research with many depends_on
+    "contract_analyzer_with_parse",    # parse step (document extraction)
 ]
 
 
@@ -52,14 +60,113 @@ def _load_example_templates() -> str:
     return "\n\n".join(parts)
 
 
+def _find_similar_template(description: str) -> str | None:
+    """Find a template with >50% keyword overlap with the user's description.
+
+    Loads all template YAML files, extracts name + description from each,
+    and does simple keyword matching. Returns the best match name or None.
+    """
+    templates_dir = Path(__file__).parent.parent / "templates"
+    if not templates_dir.is_dir():
+        return None
+
+    # Split description into lowercase words (alpha only, skip short ones)
+    desc_words = set(
+        w for w in re.findall(r"[a-z]+", description.lower()) if len(w) > 2
+    )
+    if not desc_words:
+        return None
+
+    best_name: str | None = None
+    best_score: float = 0.0
+
+    for path in templates_dir.glob("*.yaml"):
+        try:
+            content = path.read_text(errors="replace")
+        except OSError:
+            continue
+
+        # Extract name and description from the first ~20 lines
+        header_lines = content.split("\n", 20)[:20]
+        header_text = ""
+        for line in header_lines:
+            if line.startswith("name:") or line.startswith("description:"):
+                header_text += " " + line.split(":", 1)[1]
+
+        # Also include the filename stem as searchable text
+        header_text += " " + path.stem.replace("_", " ").replace("-", " ")
+
+        template_words = set(
+            w for w in re.findall(r"[a-z]+", header_text.lower()) if len(w) > 2
+        )
+        if not template_words:
+            continue
+
+        overlap = len(desc_words & template_words)
+        score = overlap / len(desc_words)
+
+        if score > best_score:
+            best_score = score
+            best_name = path.stem
+
+    if best_score > 0.5 and best_name:
+        return best_name
+    return None
+
+
+def _load_recent_user_workflows(max_files: int = 3, max_lines: int = 200) -> str:
+    """Load the most recent workflow YAML files from the user's workflows dir.
+
+    Returns formatted string for injection into the system prompt, or empty
+    string if no user workflows exist.
+    """
+    try:
+        from sandcastle.config import settings
+        workflows_dir = Path(settings.workflows_dir).resolve()
+    except Exception:
+        return ""
+
+    if not workflows_dir.is_dir():
+        return ""
+
+    # Find YAML files sorted by modification time (newest first)
+    yaml_files: list[Path] = []
+    try:
+        yaml_files = sorted(
+            [*workflows_dir.glob("*.yaml"), *workflows_dir.glob("*.yml")],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return ""
+
+    if not yaml_files:
+        return ""
+
+    parts: list[str] = []
+    for path in yaml_files[:max_files]:
+        try:
+            lines = path.read_text(errors="replace").split("\n")
+            # Cap at max_lines to prevent token bloat
+            content = "\n".join(lines[:max_lines])
+            parts.append(content)
+        except OSError:
+            continue
+
+    if not parts:
+        return ""
+
+    return "## User's Recent Workflows (for style reference)\n" + "\n---\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
-# Step types documentation (all 17 types)
+# Step types documentation (all 19 types)
 # ---------------------------------------------------------------------------
 
 _STEP_TYPES_DOC = """\
 ## Step Types
 
-Each step has a `type` field (default: "standard"). Here are all 17 supported types:
+Each step has a `type` field (default: "standard"). Here are all 19 supported types:
 
 ### standard (default)
 Default LLM agent step - runs an agent in a sandbox with tools.
@@ -151,34 +258,82 @@ connected_account_id links to a pre-authenticated Composio connection.
 app is an optional filter (e.g. "github").
 No prompt required. Requires TOOL_COMPOSIO_API_KEY env var.
 
+### parse
+Parse documents (PDF, DOCX, XLSX, CSV). Extracts text or markdown from files.
+Fields: parse_config: {input_path, output_format, pages}
+input_path is a file path or variable (e.g. "{input.file_path}").
+output_format: "markdown" (default), "text", or "json".
+pages: optional page range for PDFs (e.g. "1-5").
+No prompt required (prompt is optional context).
+
+### openclaw
+Call OpenClaw AI agents. Routes requests to an OpenClaw gateway.
+Fields: openclaw_config: {agent, task, gateway_url}
+agent: name of the OpenClaw agent to invoke.
+task: description of what the agent should do.
+gateway_url: optional, defaults to env OPENCLAW_GATEWAY_URL.
+No prompt required.
+
 ### sub_workflow (legacy)
 Run another workflow as a sub-step with input/output mapping.
 Fields: sub_workflow: {workflow, input_mapping, output_mapping,
 parallel_over, max_concurrent, timeout}
 
 IMPORTANT: Types that do NOT need a prompt: http, code, condition,
-loop, race, sensor, gate, transform, notify, composio.
+loop, race, sensor, gate, transform, notify, composio, openclaw, parse.
 All other types require a prompt field.
+
+## Optional Step Configuration
+
+Steps can include these optional fields for resilience and memory:
+
+- retry: {max_attempts: 3, backoff: exponential} - automatic retry on failure
+- memory: {read: true, write: true} - agent memory (persists across runs)
+
+## Workflow-Level Classification
+
+Workflows can declare an EU AI Act risk classification at the top level:
+- risk_level: minimal|limited|high - determines compliance requirements
 """
 
 
 def _load_tool_names() -> str:
-    """Load available tool connector names and descriptions from the registry."""
+    """Load available tool connector names with configuration status.
+
+    For each tool, checks whether its credential env vars are set.
+    Configured tools are marked as ready to use so the LLM prefers them.
+    """
     lines: list[str] = []
     # Group by category for readability
-    categories: dict[str, list[tuple[str, str]]] = {}
+    categories: dict[str, list[tuple[str, str, str]]] = {}
     for name, tool in sorted(TOOL_REGISTRY.items()):
         cat = tool.category
         if cat not in categories:
             categories[cat] = []
-        categories[cat].append((name, tool.description))
+
+        # Check if all credential env vars are set (non-empty)
+        cred_vars = tool.credential_env_vars
+        if cred_vars and all(os.environ.get(v) for v in cred_vars):
+            status = "(CONFIGURED - ready to use)"
+        elif cred_vars:
+            # Show the first missing env var as a hint
+            missing = next((v for v in cred_vars if not os.environ.get(v)), cred_vars[0])
+            status = f"(requires {missing})"
+        else:
+            status = ""
+
+        categories[cat].append((name, tool.description, status))
 
     for cat in sorted(categories):
         lines.append(f"**{cat.replace('_', ' ').title()}:**")
-        for name, desc in categories[cat]:
-            lines.append(f"- {name}: {desc}")
+        for name, desc, status in categories[cat]:
+            suffix = f" {status}" if status else ""
+            lines.append(f"- {name}: {desc}{suffix}")
         lines.append("")
 
+    lines.append(
+        "Prefer tools marked CONFIGURED as the user has already set them up."
+    )
     return "\n".join(lines)
 
 
@@ -187,11 +342,18 @@ def _load_tool_names() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_system_prompt() -> str:
-    """Build the system prompt with schema docs, model list, and examples."""
+def _build_system_prompt(*, include_user_workflows: bool = False) -> str:
+    """Build the system prompt with schema docs, model list, and examples.
+
+    When include_user_workflows is True, appends recent user workflows
+    from the workflows directory as style reference (few-shot).
+    """
     models = ", ".join(sorted(KNOWN_MODELS))
     examples = _load_example_templates()
     tool_connectors = _load_tool_names()
+    user_workflows_section = ""
+    if include_user_workflows:
+        user_workflows_section = _load_recent_user_workflows()
 
     return f"""\
 You are a workflow generator for Sandcastle, an AI agent orchestrator.
@@ -318,6 +480,8 @@ RULES FOR WEB-DEPENDENT WORKFLOWS:
 ## Examples
 
 {examples}
+
+{user_workflows_section}
 
 Generate a complete, valid workflow YAML based on the user's description.
 Output ONLY the YAML content, nothing else."""
@@ -878,7 +1042,15 @@ async def generate_workflow(
             "Set ANTHROPIC_API_KEY (or provider key) in your .env file or environment."
         )
 
-    system_prompt = _build_system_prompt()
+    # Template matching: find a similar template before generation
+    similar_template: str | None = None
+    try:
+        similar_template = _find_similar_template(description)
+    except Exception:
+        pass  # Never block generation for template matching
+
+    # Build system prompt with user's recent workflows for style reference
+    system_prompt = _build_system_prompt(include_user_workflows=True)
 
     # Build user message
     if refine_from and refine_instruction:
@@ -900,18 +1072,22 @@ async def generate_workflow(
     # Strip markdown fencing if present
     yaml_content = _strip_fencing(raw_text)
 
-    # Validate the generated YAML
-    result = GenerateResult(yaml_content=yaml_content)
-    try:
-        wf = parse_yaml_string(yaml_content)
-        result.name = wf.name
-        result.description = wf.description
-        result.steps_count = len(wf.steps)
-        result.input_schema = wf.input_schema
-        errors = validate(wf)
-        result.validation_errors = errors
-    except Exception as exc:
-        result.validation_errors = [f"YAML parse error: {exc}"]
+    # Validate and auto-fix via LLM if validation errors are found
+    (
+        yaml_content, name, description, steps_count,
+        validation_errors, input_schema, fix_attempts,
+    ) = await _attempt_fix_loop(yaml_content, system_prompt)
+
+    result = GenerateResult(
+        yaml_content=yaml_content,
+        name=name,
+        description=description,
+        steps_count=steps_count,
+        validation_errors=validation_errors,
+        input_schema=input_schema,
+        fix_attempts=fix_attempts,
+        similar_template=similar_template,
+    )
 
     return result
 
@@ -924,6 +1100,79 @@ def _strip_fencing(text: str) -> str:
     if m:
         return m.group(1).strip()
     return text
+
+
+# ---------------------------------------------------------------------------
+# Generate-validate-fix loop
+# ---------------------------------------------------------------------------
+
+_MAX_FIX_ATTEMPTS = 2
+
+_FIX_PROMPT_TEMPLATE = """\
+The workflow YAML you generated has these validation errors:
+{error_list}
+
+Here is the YAML:
+{generated_yaml}
+
+Fix ALL validation errors and return ONLY the corrected YAML. Do not add explanations."""
+
+
+async def _attempt_fix_loop(
+    yaml_content: str,
+    system_prompt: str,
+    max_attempts: int = _MAX_FIX_ATTEMPTS,
+) -> tuple[str, str, str, int, list[str], dict | None, int]:
+    """Validate YAML and auto-fix via LLM if validation errors are found.
+
+    Returns a tuple of (yaml_content, name, description, steps_count,
+    validation_errors, input_schema, fix_attempts).
+
+    Only retries for validation errors - YAML parse errors are not retried
+    because the output is too broken for a targeted fix prompt.
+    """
+    fix_attempts = 0
+
+    for attempt in range(max_attempts + 1):  # 0 = initial, 1..N = fix attempts
+        try:
+            wf = parse_yaml_string(yaml_content)
+            errors = validate(wf)
+            if not errors:
+                return (
+                    yaml_content, wf.name, wf.description,
+                    len(wf.steps), [], wf.input_schema, fix_attempts,
+                )
+            # Validation errors found - try to fix if we have attempts left
+            if attempt < max_attempts:
+                fix_attempts += 1
+                logger.info(
+                    "Auto-fix attempt %d for %d errors",
+                    fix_attempts, len(errors),
+                )
+                error_list = "\n".join(f"- {e}" for e in errors)
+                fix_prompt = _FIX_PROMPT_TEMPLATE.format(
+                    error_list=error_list,
+                    generated_yaml=yaml_content,
+                )
+                raw_fix = await _call_advisor_llm(
+                    system=system_prompt,
+                    user=fix_prompt,
+                    max_tokens=_MAX_TOKENS,
+                    purpose="generation",
+                )
+                yaml_content = _strip_fencing(raw_fix)
+            else:
+                # Out of attempts - return best result with remaining errors
+                return (
+                    yaml_content, wf.name, wf.description,
+                    len(wf.steps), errors, wf.input_schema, fix_attempts,
+                )
+        except Exception as exc:
+            # YAML parse error - do not retry, return immediately
+            return (yaml_content, "", "", 0, [f"YAML parse error: {exc}"], None, fix_attempts)
+
+    # Should not reach here, but safety fallback
+    return (yaml_content, "", "", 0, ["Unknown error during fix loop"], None, fix_attempts)
 
 
 # ---------------------------------------------------------------------------
@@ -1176,25 +1425,25 @@ async def generate_chat(
 
     if mode == "yaml":
         yaml_content = _strip_fencing(parsed.get("yaml", ""))
+
+        # Validate and auto-fix via LLM if validation errors are found
+        chat_system = _build_chat_system_prompt()
+        (
+            yaml_content, name, description, steps_count,
+            validation_errors, input_schema, fix_attempts,
+        ) = await _attempt_fix_loop(yaml_content, chat_system)
+
         result: dict = {
             "mode": "yaml",
             "message": message,
             "yaml_content": yaml_content,
+            "name": name,
+            "description": description,
+            "steps_count": steps_count,
+            "validation_errors": validation_errors,
+            "input_schema": input_schema,
+            "fix_attempts": fix_attempts,
         }
-
-        # Validate the generated YAML
-        try:
-            wf = parse_yaml_string(yaml_content)
-            result["name"] = wf.name
-            result["description"] = wf.description
-            result["steps_count"] = len(wf.steps)
-            result["input_schema"] = wf.input_schema
-            errors = validate(wf)
-            result["validation_errors"] = errors
-        except Exception as exc:
-            result["name"] = ""
-            result["steps_count"] = 0
-            result["validation_errors"] = [f"YAML parse error: {exc}"]
 
         return result
 

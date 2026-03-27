@@ -27,14 +27,14 @@ from sandcastle.config import (
 def _make_settings(**overrides) -> Settings:
     """Create a fresh Settings instance with specific values.
 
-    Uses model_construct for fields that have validators, but validates
-    them manually through the validators.
+    Removes all env vars matching Settings field names to prevent
+    pollution from earlier tests that may leak environment state.
     """
-    # Clear env vars that pydantic_settings might pick up
-    env_overrides = {}
+    _settings_env_keys = {f.upper() for f in Settings.model_fields}
+    cleaned = {k: v for k, v in os.environ.items() if k not in _settings_env_keys}
     for key, val in overrides.items():
-        env_overrides[key.upper()] = str(val)
-    with patch.dict(os.environ, env_overrides, clear=False):
+        cleaned[key.upper()] = str(val)
+    with patch.dict(os.environ, cleaned, clear=True):
         return Settings(
             _env_file=None,
             **overrides,

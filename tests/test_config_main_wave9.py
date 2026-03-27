@@ -39,11 +39,19 @@ _SENSITIVE_FIELDS: frozenset[str] = Settings.__private_attributes__[
 # ---------------------------------------------------------------------------
 
 def _make_settings(**overrides) -> Settings:
-    """Create a fresh Settings instance with specific overrides."""
-    env_overrides = {}
+    """Create a fresh Settings instance with specific overrides.
+
+    Removes all env vars matching Settings field names to prevent
+    pollution from earlier tests that may leak environment state.
+    """
+    # Build a clean env dict that removes all known Settings fields
+    # so defaults are not overridden by leaked env vars.
+    _settings_env_keys = {f.upper() for f in Settings.model_fields}
+    cleaned = {k: v for k, v in os.environ.items() if k not in _settings_env_keys}
+    # Apply explicit overrides
     for key, val in overrides.items():
-        env_overrides[key.upper()] = str(val)
-    with patch.dict(os.environ, env_overrides, clear=False):
+        cleaned[key.upper()] = str(val)
+    with patch.dict(os.environ, cleaned, clear=True):
         return Settings(_env_file=None, **overrides)
 
 

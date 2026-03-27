@@ -356,7 +356,7 @@ class TestHubSubmit:
                 "tags": ["test", "coverage"],
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()["data"]
         assert data["status"] == "pending"
         assert "slug" in data

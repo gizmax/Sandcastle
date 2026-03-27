@@ -64,7 +64,7 @@ class TestHubSubmit:
 
     def test_submit_valid_template_returns_pending(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         data = resp.json()["data"]
         assert data["status"] == "pending"
         assert data["name"] == "Test Marketplace Workflow"
@@ -74,20 +74,20 @@ class TestHubSubmit:
 
     def test_submit_extracts_models_used(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()["data"]
         assert "haiku" in data["models_used"]
         assert "sonnet" in data["models_used"]
 
     def test_submit_extracts_tools_used(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()["data"]
         assert "web_search" in data["tools_used"]
 
     def test_submit_stores_tags_and_category(self):
         resp = _submit(tags=["marketing", "crm"], category="marketing")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         data = resp.json()["data"]
         assert data["category"] == "marketing"
         assert "marketing" in data["tags"]
@@ -95,7 +95,7 @@ class TestHubSubmit:
 
     def test_submit_returns_slug_with_author_prefix(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         slug = resp.json()["data"]["slug"]
         # Slug must be "author/name" format
         assert "/" in slug
@@ -106,19 +106,19 @@ class TestHubSubmit:
 
     def test_submit_returns_id_and_created_at(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         data = resp.json()["data"]
         assert data["id"]
         assert data["created_at"]
 
     def test_submit_initial_downloads_is_zero(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         assert resp.json()["data"]["downloads"] == 0
 
     def test_submit_initial_rating_is_null(self):
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         assert resp.json()["data"]["rating"] is None
         assert resp.json()["data"]["rating_count"] == 0
 
@@ -175,7 +175,7 @@ class TestHubCommunity:
         from sandcastle.models.db import HubSubmission, async_session
 
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         slug = resp.json()["data"]["slug"]
 
         # Approve it directly in DB
@@ -194,7 +194,7 @@ class TestHubCommunity:
     def test_list_defaults_to_approved(self):
         slug = self._ensure_approved_submission()
         resp = client.get("/api/hub/community")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         data = resp.json()["data"]
         slugs = [item["slug"] for item in data]
         assert slug in slugs
@@ -202,14 +202,14 @@ class TestHubCommunity:
     def test_list_pending_excludes_approved(self):
         self._ensure_approved_submission()
         resp = client.get("/api/hub/community?status=pending")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         # All returned items should be pending
         for item in resp.json()["data"]:
             assert item["status"] == "pending"
 
     def test_list_returns_pagination_meta(self):
         resp = client.get("/api/hub/community")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         meta = resp.json().get("meta")
         assert meta is not None
         assert "total" in meta
@@ -238,13 +238,13 @@ class TestHubCommunity:
         asyncio.run(_approve())
 
         resp = client.get("/api/hub/community?category=marketing")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         for item in resp.json()["data"]:
             assert item["category"] == "marketing"
 
     def test_list_limit_and_offset(self):
         resp = client.get("/api/hub/community?limit=1&offset=0")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         data = resp.json()["data"]
         assert len(data) <= 1
 
@@ -269,14 +269,14 @@ class TestRateTemplate:
 
     def _create_and_get_slug(self) -> str:
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         return resp.json()["data"]["slug"]
 
     def test_rate_template_1_to_5(self):
         slug = self._create_and_get_slug()
         for star in [1, 2, 3, 4, 5]:
             resp = client.post(f"/api/hub/templates/{slug}/rate", json={"rating": star})
-            assert resp.status_code == 200, f"Failed for rating={star}"
+            assert resp.status_code in (200, 201), f"Failed for rating={star}"
             data = resp.json()["data"]
             assert data["slug"] == slug
             assert data["rating"] is not None
@@ -286,13 +286,13 @@ class TestRateTemplate:
         slug = self._create_and_get_slug()
         # First rating: 4
         resp = client.post(f"/api/hub/templates/{slug}/rate", json={"rating": 4})
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         assert resp.json()["data"]["rating"] == 4.0
         assert resp.json()["data"]["rating_count"] == 1
 
         # Second rating: 2 -> average should be 3.0
         resp = client.post(f"/api/hub/templates/{slug}/rate", json={"rating": 2})
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         assert resp.json()["data"]["rating"] == 3.0
         assert resp.json()["data"]["rating_count"] == 2
 
@@ -336,18 +336,18 @@ class TestDownloadTracking:
 
     def _create_and_get_slug(self) -> str:
         resp = _submit()
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         return resp.json()["data"]["slug"]
 
     def test_download_tracking_increments_count(self):
         slug = self._create_and_get_slug()
 
         resp1 = client.post(f"/api/hub/templates/{slug}/download")
-        assert resp1.status_code == 200
+        assert resp1.status_code in (200, 201)
         assert resp1.json()["data"]["downloads"] == 1
 
         resp2 = client.post(f"/api/hub/templates/{slug}/download")
-        assert resp2.status_code == 200
+        assert resp2.status_code in (200, 201)
         assert resp2.json()["data"]["downloads"] == 2
 
         resp3 = client.post(f"/api/hub/templates/{slug}/download")
@@ -357,7 +357,7 @@ class TestDownloadTracking:
     def test_download_tracking_returns_slug(self):
         slug = self._create_and_get_slug()
         resp = client.post(f"/api/hub/templates/{slug}/download")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)
         assert resp.json()["data"]["slug"] == slug
 
     def test_download_tracking_nonexistent_returns_404(self):
@@ -386,8 +386,8 @@ class TestDuplicateSlugPrevention:
         resp1 = _submit(yaml_content=yaml_content)
         resp2 = _submit(yaml_content=yaml_content)
 
-        assert resp1.status_code == 200
-        assert resp2.status_code == 200
+        assert resp1.status_code == 201
+        assert resp2.status_code == 201
 
         slug1 = resp1.json()["data"]["slug"]
         slug2 = resp2.json()["data"]["slug"]

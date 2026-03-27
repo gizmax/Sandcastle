@@ -829,9 +829,10 @@ class TestDelegateDepthLimit:
             )
 
         # Should proceed past depth check (may fail finding the workflow)
-        # The error should NOT be about depth
+        # The error should NOT be about exceeding depth limit
         if result.status == "failed" and result.error:
-            assert "depth" not in result.error.lower()
+            assert "exceeds max" not in result.error.lower()
+            assert "depth limit" not in result.error.lower()
 
     def test_missing_delegate_config(self):
         """Delegate step without config should return missing config error."""

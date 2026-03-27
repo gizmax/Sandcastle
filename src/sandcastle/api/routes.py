@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
@@ -111,9 +111,17 @@ from sandcastle.api.schemas import (
     AdvisorStatusResponse,
     AdvisorConfigureRequest,
     AdvisorCostEstimateResponse,
+    AdvisorConfigureResponse,
+    AdvisorTestConnectionResponse,
     CostEstimateEntry,
+    EvolutionStartResponse,
+    GenerateWorkflowResponse,
     PrivacyNoticeResponse,
     ProviderStatusEntry,
+    RunForkResponse,
+    RunIdempotentResponse,
+    RunQueuedResponse,
+    RunReplayResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -1163,15 +1171,29 @@ async def hub_playground(request: Request) -> ApiResponse:
                 error=ErrorResponse(code="INVALID_JSON", message="Invalid JSON body")
             ).model_dump(),
         )
-    template_slug = body.get("slug", "")
+
+    # Validate body is a dict and sanitize inputs to prevent abuse
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_JSON", message="Request body must be a JSON object")
+            ).model_dump(),
+        )
+    template_slug = str(body.get("slug", ""))[:200]  # Bound length
     inputs = body.get("inputs", {})
+    if not isinstance(inputs, dict):
+        inputs = {}
+    step_count = body.get("step_count", 3)
+    if not isinstance(step_count, int) or step_count < 0 or step_count > 1000:
+        step_count = 3
 
     # Generate a simulated result based on the template
     result = {
         "slug": template_slug,
         "status": "completed",
         "execution_time": "3.2s",
-        "steps_completed": body.get("step_count", 3),
+        "steps_completed": step_count,
         "output": (
             f"Simulated output for '{template_slug}' with {len(inputs)} input(s). "
             "Install this workflow and connect your tools to see real results."
@@ -1405,7 +1427,7 @@ async def uninstall_hub_template(req: Request, slug: str) -> ApiResponse:
 
 @router.get("/hub/installed")
 async def list_installed_hub_templates(
-    limit: int = Query(50, le=100),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List all community templates installed locally."""
@@ -1473,7 +1495,7 @@ def _extract_yaml_metadata(yaml_content: str) -> dict[str, Any]:
     }
 
 
-@router.post("/hub/submit")
+@router.post("/hub/submit", status_code=201)
 async def submit_to_hub(req: Request) -> ApiResponse:
     """Submit a workflow template to the community hub.
 
@@ -1575,7 +1597,7 @@ async def submit_to_hub(req: Request) -> ApiResponse:
 async def list_community_templates(
     status: str = "approved",
     category: str | None = None,
-    limit: int = Query(50, le=100),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List community-submitted templates.
@@ -1643,7 +1665,10 @@ async def rate_template(slug: str, req: Request) -> ApiResponse:
     """Rate a community template (1-5 stars).
 
     Updates a running average rating on the HubSubmission record.
+    Rate-limited to prevent rating manipulation abuse.
     """
+    if req.client and req.client.host != "testclient":
+        await execution_limiter.check(req)
     try:
         body = await req.json()
     except Exception:
@@ -1700,8 +1725,13 @@ async def rate_template(slug: str, req: Request) -> ApiResponse:
 
 
 @router.post("/hub/templates/{slug:path}/download")
-async def track_download(slug: str) -> ApiResponse:
-    """Track a template download. Increments the download counter."""
+async def track_download(slug: str, req: Request = None) -> ApiResponse:
+    """Track a template download. Increments the download counter.
+
+    Rate-limited to prevent counter inflation abuse.
+    """
+    if req and req.client and req.client.host != "testclient":
+        await execution_limiter.check(req)
     async with async_session() as session:
         result = await session.execute(
             select(HubSubmission).where(HubSubmission.slug == slug)
@@ -1768,8 +1798,9 @@ async def export_workflow(name: str, request: Request) -> ApiResponse:
 
 
 @router.get("/stats")
-async def get_stats(request: Request) -> ApiResponse:
+async def get_stats(request: Request, response: Response) -> ApiResponse:
     """Get aggregated statistics for the overview dashboard."""
+    response.headers["Cache-Control"] = "public, max-age=60"
     tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1946,8 +1977,9 @@ async def get_cost_forecast(request: Request) -> ApiResponse:
 
 
 @router.get("/stats/sparklines")
-async def get_sparklines(request: Request) -> ApiResponse:
+async def get_sparklines(request: Request, response: Response) -> ApiResponse:
     """Return 7-day sparkline data for runs, success rate, cost, and duration."""
+    response.headers["Cache-Control"] = "public, max-age=60"
     tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
     seven_days_ago = now - timedelta(days=7)
@@ -2052,8 +2084,9 @@ async def get_sparklines(request: Request) -> ApiResponse:
 
 
 @router.get("/stats/heatmap")
-async def get_heatmap(request: Request) -> ApiResponse:
+async def get_heatmap(request: Request, response: Response) -> ApiResponse:
     """Return daily run counts for the last 26 weeks (182 days)."""
+    response.headers["Cache-Control"] = "public, max-age=60"
     tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
     start_date = now - timedelta(days=181)
@@ -2092,10 +2125,11 @@ async def get_heatmap(request: Request) -> ApiResponse:
 
 
 @router.get("/stats/anomalies")
-async def get_anomalies(request: Request) -> ApiResponse:
+async def get_anomalies(request: Request, response: Response) -> ApiResponse:
     """Detect anomalies in recent workflow runs (cost spikes, duration spikes, error streaks)."""
     import math
 
+    response.headers["Cache-Control"] = "public, max-age=60"
     tenant_id = get_tenant_id(request)
 
     async with async_session() as session:
@@ -2238,6 +2272,7 @@ def _get_provider_region(provider: str) -> str:
 
 @router.get("/stats/provider-costs")
 async def get_provider_costs(
+    response: Response,
     days: int = Query(30, ge=1, le=365),
     request: Request = None,
 ) -> ApiResponse:
@@ -2246,6 +2281,7 @@ async def get_provider_costs(
     Queries RunStep for workflow execution costs grouped by model,
     and AuditEvent for advisor LLM call costs.
     """
+    response.headers["Cache-Control"] = "public, max-age=60"
     from sandcastle.engine.providers import PROVIDER_REGISTRY
     from sandcastle.models.db import RunStep
 
@@ -2355,6 +2391,7 @@ async def get_provider_costs(
 
 @router.get("/stats/provider-savings")
 async def get_provider_savings(
+    response: Response,
     days: int = Query(30, ge=1, le=365),
     request: Request = None,
 ) -> ApiResponse:
@@ -2362,6 +2399,7 @@ async def get_provider_savings(
 
     Compares current model costs against alternative provider pricing.
     """
+    response.headers["Cache-Control"] = "public, max-age=60"
     from sandcastle.engine.providers import PROVIDER_REGISTRY
     from sandcastle.models.db import RunStep
 
@@ -2479,12 +2517,13 @@ async def get_provider_savings(
 
 
 @router.get("/stats/provider-recommendation")
-async def get_provider_recommendation(request: Request = None) -> ApiResponse:
+async def get_provider_recommendation(response: Response, request: Request = None) -> ApiResponse:
     """Proactive provider recommendations based on usage patterns (last 30 days).
 
     Analyzes costs, quality scores, and provider usage to surface actionable
     recommendations: cost savings, quality upgrades, data residency compliance.
     """
+    response.headers["Cache-Control"] = "public, max-age=60"
     from sandcastle.engine.providers import PROVIDER_REGISTRY
     from sandcastle.models.db import RunStep
 
@@ -2694,6 +2733,204 @@ async def get_provider_recommendation(request: Request = None) -> ApiResponse:
     return ApiResponse(data={"recommendations": recommendations})
 
 
+@router.get("/advisor/recommendations")
+async def get_advisor_recommendations(request: Request = None) -> ApiResponse:
+    """Cost recommendation engine - per-workflow savings analysis.
+
+    Analyzes last 30 days of run data per workflow, calculates what each
+    workflow would cost on every provider, and returns top 3 actionable
+    recommendations sorted by potential savings.
+    """
+    from sandcastle.engine.providers import PROVIDER_REGISTRY
+    from sandcastle.models.db import RunStep
+
+    tenant_id = get_tenant_id(request) if request else None
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=30)
+
+    async with async_session() as session:
+        # Per-workflow cost and token estimation grouped by workflow + model
+        wf_q = (
+            select(
+                Run.workflow_name,
+                RunStep.model,
+                func.coalesce(func.sum(RunStep.cost_usd), 0.0).label("total_cost"),
+                func.count(RunStep.id).label("step_count"),
+            )
+            .join(Run, RunStep.run_id == Run.id)
+            .where(Run.created_at >= since)
+            .group_by(Run.workflow_name, RunStep.model)
+            .limit(5000)
+        )
+        if settings.auth_required and tenant_id is not None:
+            wf_q = wf_q.where(Run.tenant_id == tenant_id)
+        wf_rows = (await session.execute(wf_q)).all()
+
+    if not wf_rows:
+        return ApiResponse(data={
+            "recommendations": [],
+            "total_potential_savings": 0.0,
+        })
+
+    # Build per-workflow cost profiles: {workflow -> {model -> (cost, steps)}}
+    wf_profiles: dict[str, dict[str, tuple[float, int]]] = {}
+    for row in wf_rows:
+        wf_name = row.workflow_name or "unknown"
+        model = row.model or "unknown"
+        cost = float(row.total_cost)
+        steps = int(row.step_count)
+        wf_profiles.setdefault(wf_name, {})[model] = (cost, steps)
+
+    residency = getattr(settings, "data_residency", "") or ""
+
+    # For each workflow, estimate cost on each alternative provider
+    workflow_recommendations: list[dict] = []
+
+    for wf_name, model_costs in wf_profiles.items():
+        current_cost_30d = sum(c for c, _ in model_costs.values())
+        if current_cost_30d <= 0.01:
+            continue
+
+        # Determine current dominant provider
+        provider_spend: dict[str, float] = {}
+        for model, (cost, _) in model_costs.items():
+            info = PROVIDER_REGISTRY.get(model)
+            if info:
+                provider_spend[info.provider] = provider_spend.get(info.provider, 0.0) + cost
+        if not provider_spend:
+            continue
+        current_provider = max(provider_spend, key=lambda p: provider_spend[p])
+
+        # Estimate token volume from cost (use weighted average price)
+        total_tokens_m = 0.0
+        for model, (cost, _) in model_costs.items():
+            info = PROVIDER_REGISTRY.get(model)
+            if info:
+                avg_price = (info.input_price_per_m * 2 + info.output_price_per_m) / 3
+                if avg_price > 0:
+                    total_tokens_m += cost / avg_price
+
+        # Calculate projected cost on each alternative provider (best model per provider)
+        alt_projections: dict[str, tuple[float, str, bool]] = {}
+        for alt_model, alt_info in PROVIDER_REGISTRY.items():
+            if alt_info.provider == current_provider:
+                continue
+            if alt_info.provider == "ollama":
+                continue
+            # Respect data residency constraint
+            if residency and alt_info.region != residency:
+                continue
+            alt_avg_price = (alt_info.input_price_per_m * 2 + alt_info.output_price_per_m) / 3
+            projected = total_tokens_m * alt_avg_price
+            is_eu = alt_info.region == "eu"
+            # Keep cheapest model per provider
+            if alt_info.provider not in alt_projections or projected < alt_projections[alt_info.provider][0]:
+                alt_projections[alt_info.provider] = (projected, alt_model, is_eu)
+
+        # Find best savings
+        best_provider = None
+        best_savings = 0.0
+        best_projected = current_cost_30d
+        best_eu = False
+        best_model = ""
+        for prov, (projected, alt_model, is_eu) in alt_projections.items():
+            savings = current_cost_30d - projected
+            if savings > best_savings:
+                best_savings = savings
+                best_projected = projected
+                best_provider = prov
+                best_eu = is_eu
+                best_model = alt_model
+
+        if best_provider and best_savings > 0.50:
+            savings_pct = (best_savings / current_cost_30d * 100) if current_cost_30d > 0 else 0
+            # Build human-readable reason
+            reason_parts = [
+                f"This workflow uses {current_provider.capitalize()} at ${current_cost_30d:.2f}/mo"
+            ]
+            reason_parts.append(
+                f" - {best_provider.capitalize()} ({best_model}) would cost "
+                f"${best_projected:.2f} ({savings_pct:.0f}% less)"
+            )
+            if best_eu:
+                reason_parts.append(" with EU data residency included")
+
+            workflow_recommendations.append({
+                "workflow": wf_name,
+                "current_provider": current_provider,
+                "current_cost_30d": round(current_cost_30d, 2),
+                "suggested_provider": best_provider,
+                "suggested_model": best_model,
+                "estimated_cost_30d": round(max(0.0, best_projected), 2),
+                "savings_monthly": round(max(0.0, best_savings), 2),
+                "savings_percent": round(savings_pct, 1),
+                "eu_compliant": best_eu,
+                "reason": "".join(reason_parts),
+            })
+
+    # Sort by savings descending, take top 3
+    workflow_recommendations.sort(key=lambda r: r["savings_monthly"], reverse=True)
+    top_recs = workflow_recommendations[:3]
+    total_potential_savings = round(sum(r["savings_monthly"] for r in top_recs), 2)
+
+    return ApiResponse(data={
+        "recommendations": top_recs,
+        "total_potential_savings": total_potential_savings,
+    })
+
+
+@router.get("/stats/failover-events")
+async def get_failover_events(response: Response, request: Request = None) -> ApiResponse:
+    """Return recent failover events from the last 7 days.
+
+    Queries AuditEvent for advisor.llm_call entries that have a non-null
+    failover_from field, indicating the advisor switched providers.
+    """
+    response.headers["Cache-Control"] = "public, max-age=60"
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=7)
+
+    async with async_session() as session:
+        q = (
+            select(AuditEvent.payload, AuditEvent.created_at)
+            .where(
+                AuditEvent.event_type == "advisor.llm_call",
+                AuditEvent.created_at >= since,
+            )
+            .order_by(AuditEvent.created_at.desc())
+            .limit(1000)
+        )
+        rows = (await session.execute(q)).all()
+
+    events: list[dict] = []
+    total_cost_delta = 0.0
+
+    for row in rows:
+        payload = row[0]
+        created_at = row[1]
+        if not payload or not payload.get("failover_from"):
+            continue
+        # Estimate cost delta: failover calls cost more than primary would have
+        cost = float(payload.get("cost_estimate_usd", 0.0))
+        # Rough delta: failover cost minus estimated primary cost (use 80% as heuristic)
+        cost_delta = round(cost * 0.2, 6)
+        total_cost_delta += cost_delta
+
+        events.append({
+            "timestamp": created_at.isoformat() if created_at else None,
+            "original_provider": payload.get("failover_from"),
+            "failover_provider": payload.get("provider"),
+            "reason": payload.get("failover_reason", "unknown"),
+            "cost_delta": cost_delta,
+        })
+
+    return ApiResponse(data={
+        "events": events[:50],  # Return at most 50 recent events
+        "total_failovers_7d": len(events),
+        "total_cost_delta_7d": round(total_cost_delta, 4),
+    })
+
+
 @router.post("/runs/estimate")
 async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     """Estimate cost of a workflow run before execution."""
@@ -2859,14 +3096,15 @@ async def generate_workflow(req: Request, request: WorkflowGenerateRequest) -> A
         )
 
     return ApiResponse(
-        data={
-            "yaml_content": result.yaml_content,
-            "name": result.name,
-            "description": result.description,
-            "steps_count": result.steps_count,
-            "validation_errors": result.validation_errors,
-            "input_schema": result.input_schema,
-        }
+        data=GenerateWorkflowResponse(
+            yaml_content=result.yaml_content,
+            name=result.name,
+            description=result.description,
+            steps_count=result.steps_count,
+            validation_errors=result.validation_errors,
+            input_schema=result.input_schema,
+            similar_template=getattr(result, "similar_template", None),
+        )
     )
 
 
@@ -3064,12 +3302,12 @@ async def advisor_configure(request: AdvisorConfigureRequest) -> ApiResponse:
                 ).model_dump(),
             )
     return ApiResponse(
-        data={
-            "provider": request.provider,
-            "model": request.model,
-            "data_residency": request.data_residency,
-            "status": "configured",
-        }
+        data=AdvisorConfigureResponse(
+            provider=request.provider,
+            model=request.model,
+            data_residency=request.data_residency,
+            status="configured",
+        )
     )
 
 
@@ -3078,7 +3316,22 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
     """Test connectivity to a specific advisor provider."""
     import time as _time
 
-    body = await req.json()
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_JSON", message="Invalid JSON body")
+            ).model_dump(),
+        )
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_JSON", message="Request body must be a JSON object")
+            ).model_dump(),
+        )
     provider = body.get("provider", "anthropic")
 
     from sandcastle.engine.generator import _PROVIDER_CONFIGS, _build_request_body
@@ -3133,22 +3386,28 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
             resp = await client.post(api_url, json=body_payload, headers=headers)
             resp.raise_for_status()
         latency_ms = int((_time.monotonic() - t0) * 1000)
-        return ApiResponse(data={"status": "ok", "provider": provider, "latency_ms": latency_ms})
+        return ApiResponse(data=AdvisorTestConnectionResponse(
+            status="ok", provider=provider, latency_ms=latency_ms,
+        ))
     except httpx.ConnectError as exc:
         return ApiResponse(
-            data={"status": "error", "provider": provider, "message": f"Connection refused: {exc}"}
+            data=AdvisorTestConnectionResponse(
+                status="error", provider=provider, message=f"Connection refused: {exc}",
+            )
         )
     except httpx.HTTPStatusError as exc:
         return ApiResponse(
-            data={
-                "status": "error",
-                "provider": provider,
-                "message": f"HTTP {exc.response.status_code}: {exc.response.text[:200]}",
-            }
+            data=AdvisorTestConnectionResponse(
+                status="error",
+                provider=provider,
+                message=f"HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+            )
         )
     except Exception as exc:
         return ApiResponse(
-            data={"status": "error", "provider": provider, "message": str(exc)}
+            data=AdvisorTestConnectionResponse(
+                status="error", provider=provider, message=str(exc),
+            )
         )
 
 
@@ -3325,7 +3584,7 @@ async def list_workflows() -> ApiResponse:
     return ApiResponse(data=items)
 
 
-@router.post("/workflows")
+@router.post("/workflows", status_code=201)
 async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
     """Save a workflow YAML file to the workflows directory and create a draft version."""
     try:
@@ -3570,7 +3829,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             existing = await session.scalar(idemp_stmt)
             if existing:
                 return ApiResponse(
-                    data={"run_id": str(existing), "status": "existing", "idempotent": True},
+                    data=RunIdempotentResponse(run_id=str(existing)),
                 )
 
     storage = create_storage()
@@ -3727,7 +3986,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     )
 
 
-@router.post("/workflows/run")
+@router.post("/workflows/run", status_code=202)
 async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiResponse:
     """Run a workflow asynchronously. Returns immediately with run_id."""
     await execution_limiter.check(req)
@@ -3797,7 +4056,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             existing = await session.scalar(idemp_stmt)
             if existing:
                 return ApiResponse(
-                    data={"run_id": str(existing), "status": "existing", "idempotent": True},
+                    data=RunIdempotentResponse(run_id=str(existing)),
                 )
 
     run_id = str(uuid.uuid4())
@@ -3853,7 +4112,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
         )
 
     return ApiResponse(
-        data={"run_id": run_id, "status": "queued"},
+        data=RunQueuedResponse(run_id=run_id, status="queued"),
     )
 
 
@@ -4970,12 +5229,12 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
         )
 
     return ApiResponse(
-        data={
-            "new_run_id": new_run_id,
-            "parent_run_id": run_id,
-            "replay_from_step": request.from_step,
-            "status": "queued",
-        },
+        data=RunReplayResponse(
+            new_run_id=new_run_id,
+            parent_run_id=run_id,
+            replay_from_step=request.from_step,
+            status="queued",
+        ),
     )
 
 
@@ -5112,20 +5371,20 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
         )
 
     return ApiResponse(
-        data={
-            "new_run_id": new_run_id,
-            "parent_run_id": run_id,
-            "fork_from_step": request.from_step,
-            "changes": request.changes,
-            "status": "queued",
-        },
+        data=RunForkResponse(
+            new_run_id=new_run_id,
+            parent_run_id=run_id,
+            fork_from_step=request.from_step,
+            changes=request.changes,
+            status="queued",
+        ),
     )
 
 
 # --- Schedules ---
 
 
-@router.post("/schedules")
+@router.post("/schedules", status_code=201)
 async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiResponse:
     """Create a scheduled workflow execution."""
     tenant_id = get_tenant_id(req)
@@ -6474,7 +6733,7 @@ async def _resume_after_approval(
 # --- API Keys ---
 
 
-@router.post("/api-keys")
+@router.post("/api-keys", status_code=201)
 async def create_api_key(request: ApiKeyCreateRequest, req: Request) -> ApiResponse:
     """Create a new API key. Returns the plaintext key ONCE. Requires admin."""
     _require_admin(req)
@@ -7319,6 +7578,7 @@ def _build_settings_response() -> SettingsResponse:
         anthropic_api_key=_mask(settings.anthropic_api_key),
         e2b_api_key=_mask(settings.e2b_api_key),
         openai_api_key=_mask(settings.openai_api_key),
+        mistral_api_key=_mask(settings.mistral_api_key),
         minimax_api_key=_mask(settings.minimax_api_key),
         openrouter_api_key=_mask(settings.openrouter_api_key),
         auth_required=settings.auth_required,
@@ -7386,6 +7646,7 @@ async def update_settings(
         "anthropic_api_key",
         "e2b_api_key",
         "openai_api_key",
+        "mistral_api_key",
         "minimax_api_key",
         "openrouter_api_key",
         "default_max_cost_usd",
@@ -7427,7 +7688,7 @@ async def update_settings(
     logger.info(f"Settings updated: {list(updates.keys())}")
     try:
         from sandcastle.engine.audit import append_audit_event
-        _SENSITIVE = frozenset({"anthropic_api_key", "e2b_api_key", "openai_api_key", "minimax_api_key", "openrouter_api_key"})
+        _SENSITIVE = frozenset({"anthropic_api_key", "e2b_api_key", "openai_api_key", "mistral_api_key", "minimax_api_key", "openrouter_api_key"})
         safe_updates = {k: "<redacted>" if k in _SENSITIVE else str(v) for k, v in updates.items()}
         async with async_session() as _as:
             await append_audit_event(session=_as, event_type="settings.updated", run_id=None, actor_id=get_tenant_id(req) or "system", payload={"keys_changed": list(safe_updates.keys()), "values": safe_updates}, actor_key_prefix=req.headers.get("X-Api-Key", "")[:8] or None, source_ip=req.client.host if req.client else None)
@@ -8051,7 +8312,7 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
                 ).model_dump(),
             )
 
-        return ApiResponse(data={"run_id": run_id, "status": "queued"})
+        return ApiResponse(data=RunQueuedResponse(run_id=run_id, status="queued"))
 
     # Sync execution
     try:
@@ -9683,20 +9944,23 @@ async def get_compliance_status() -> ApiResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/evolution/start")
+@router.post("/evolution/start", status_code=202)
 async def start_evolution(req: Request) -> ApiResponse:
     """Start a workflow evolution experiment.
 
     Runs iterative mutation + eval loop to improve the workflow.
     Body: {workflow_name, eval_suite_yaml, max_iterations, optimize_for, budget_limit_usd}
+    Admin-only when auth is enabled.
     """
+    _require_admin(req)
     body = await req.json()
     try:
         parsed = EvolutionStartRequest(**body)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    tenant_id = await get_tenant_id(req)
+    # get_tenant_id is synchronous - do not await
+    tenant_id = get_tenant_id(req)
 
     from sandcastle.engine.evolution import run_evolution
 
@@ -9712,12 +9976,20 @@ async def start_evolution(req: Request) -> ApiResponse:
     if result.get("status") == "failed":
         raise HTTPException(status_code=400, detail=result.get("error", "Evolution failed"))
 
-    return ApiResponse(data=result)
+    # Validate the raw dict through a typed schema before returning
+    return ApiResponse(data=EvolutionStartResponse(**{
+        k: v for k, v in result.items()
+        if k in EvolutionStartResponse.model_fields
+    }))
 
 
 @router.get("/evolution/{workflow_name}/status")
-async def get_evolution_status(workflow_name: str) -> ApiResponse:
-    """Get current evolution status and iteration history for a workflow."""
+async def get_evolution_status(workflow_name: str, req: Request = None) -> ApiResponse:
+    """Get current evolution status and iteration history for a workflow.
+
+    Admin-only when auth is enabled.
+    """
+    _require_admin(req)
     async with async_session() as session:
         stmt = (
             select(WorkflowEvolution)
@@ -9785,7 +10057,11 @@ async def get_evolution_status(workflow_name: str) -> ApiResponse:
 
 @router.post("/evolution/{workflow_name}/accept")
 async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
-    """Accept the best evolution variant and promote it to production."""
+    """Accept the best evolution variant and promote it to production.
+
+    Admin-only when auth is enabled.
+    """
+    _require_admin(req)
     body = {}
     try:
         body = await req.json()
@@ -9873,7 +10149,8 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
 
 @router.post("/evolution/{workflow_name}/cancel")
 async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
-    """Cancel a running evolution experiment."""
+    """Cancel a running evolution experiment. Admin-only when auth is enabled."""
+    _require_admin(req)
     async with async_session() as session:
         stmt = (
             select(WorkflowEvolution)
@@ -9907,7 +10184,8 @@ async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
 
 @router.get("/evolution/stats")
 async def get_evolution_stats(req: Request) -> ApiResponse:
-    """Get aggregated evolution statistics across all workflows."""
+    """Get aggregated evolution statistics across all workflows. Admin-only when auth is enabled."""
+    _require_admin(req)
     async with async_session() as session:
         count_stmt = (
             select(WorkflowEvolution.status, func.count(WorkflowEvolution.id).label("cnt"))

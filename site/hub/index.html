@@ -11,8 +11,10 @@
   <meta property="og:title" content="Sandcastle Community Hub">
   <meta property="og:description" content="118 community AI workflows for Sandcastle. Sales, marketing, support, engineering, HR, and AI templates - browse, install, remix.">
   <meta property="og:url" content="https://sandcastle-ai.eu/hub/">
+  <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:type" content="website">
 
+  <link rel="canonical" href="https://sandcastle-ai.eu/hub/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
 
   <!-- Google Analytics -->
@@ -4045,7 +4047,8 @@
       var saved = localStorage.getItem('sandcastle-hub-theme');
       if (saved === 'light') {
         document.documentElement.classList.add('light');
-        document.getElementById('theme-toggle').innerHTML = '&#9728;&#65039;';
+        var btn = document.getElementById('theme-toggle');
+        if (btn) btn.innerHTML = '&#9728;&#65039;';
       }
     }
 
@@ -4053,12 +4056,14 @@
       document.documentElement.classList.add('transitioning');
       var isLight = document.documentElement.classList.toggle('light');
       var btn = document.getElementById('theme-toggle');
-      if (isLight) {
-        btn.innerHTML = '&#9728;&#65039;';
-        localStorage.setItem('sandcastle-hub-theme', 'light');
-      } else {
-        btn.innerHTML = '&#127769;';
-        localStorage.setItem('sandcastle-hub-theme', 'dark');
+      if (btn) {
+        if (isLight) {
+          btn.innerHTML = '&#9728;&#65039;';
+          localStorage.setItem('sandcastle-hub-theme', 'light');
+        } else {
+          btn.innerHTML = '&#127769;';
+          localStorage.setItem('sandcastle-hub-theme', 'dark');
+        }
       }
       setTimeout(function() {
         document.documentElement.classList.remove('transitioning');

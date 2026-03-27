@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
+  Brain,
   Calendar,
   Castle,
   ChevronRight,
@@ -81,6 +82,7 @@ const navSections: NavSection[] = [
       { to: "/optimizer", icon: Gauge, label: "Optimizer" },
       { to: "/schedules", icon: Calendar, label: "Schedules" },
       { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" },
+      { to: "/memory", icon: Brain, label: "Agent Memory" },
     ],
   },
   {

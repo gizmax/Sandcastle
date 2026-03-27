@@ -806,6 +806,7 @@ class SettingsResponse(BaseModel):
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
     openai_api_key: str = ""
+    mistral_api_key: str = ""
     minimax_api_key: str = ""
     openrouter_api_key: str = ""
     # Security
@@ -840,6 +841,7 @@ class SettingsUpdateRequest(BaseModel):
     anthropic_api_key: str | None = Field(None, max_length=500)
     e2b_api_key: str | None = Field(None, max_length=500)
     openai_api_key: str | None = Field(None, max_length=500)
+    mistral_api_key: str | None = Field(None, max_length=500)
     minimax_api_key: str | None = Field(None, max_length=500)
     openrouter_api_key: str | None = Field(None, max_length=500)
     default_max_cost_usd: float | None = Field(None, ge=0)
@@ -1409,6 +1411,108 @@ class PrivacyNoticeResponse(BaseModel):
     retention_days: int
     audit_trail: bool
     generated_at: str
+
+
+# --- Generation responses ---
+
+
+class GenerateWorkflowResponse(BaseModel):
+    """Response from /generate endpoint."""
+
+    yaml_content: str
+    name: str
+    description: str
+    steps_count: int = Field(0, ge=0)
+    validation_errors: list[str] = Field(default_factory=list)
+    input_schema: dict | None = None
+    similar_template: str | None = None
+
+
+# --- Async run queued response ---
+
+
+class RunQueuedResponse(BaseModel):
+    """Response when a workflow run is queued asynchronously."""
+
+    run_id: str
+    status: str = "queued"
+
+
+# --- Idempotent run response ---
+
+
+class RunIdempotentResponse(BaseModel):
+    """Response when an idempotent run already exists."""
+
+    run_id: str
+    status: str = "existing"
+    idempotent: bool = True
+
+
+# --- Replay / Fork responses ---
+
+
+class RunReplayResponse(BaseModel):
+    """Response after replaying a run from a specific step."""
+
+    new_run_id: str
+    parent_run_id: str
+    replay_from_step: str
+    status: str = "queued"
+
+
+class RunForkResponse(BaseModel):
+    """Response after forking a run with overrides."""
+
+    new_run_id: str
+    parent_run_id: str
+    fork_from_step: str
+    changes: dict[str, Any] = Field(default_factory=dict)
+    status: str = "queued"
+
+
+# --- Advisor configure/test responses ---
+
+
+class AdvisorConfigureResponse(BaseModel):
+    """Response from /advisor/configure endpoint."""
+
+    provider: str
+    model: str | None = None
+    data_residency: str | None = None
+    status: str = "configured"
+
+
+class AdvisorTestConnectionResponse(BaseModel):
+    """Response from /advisor/test-connection endpoint."""
+
+    status: str  # "ok" | "error"
+    provider: str
+    latency_ms: int | None = None
+    message: str | None = None
+
+
+# --- Evolution start response ---
+
+
+class EvolutionStartResponse(BaseModel):
+    """Response from /evolution/start after the evolution loop completes."""
+
+    evolution_id: str
+    workflow_name: str
+    status: str
+    baseline_score: float | None = None
+    baseline_quality: float | None = None
+    baseline_cost: float | None = None
+    best_score: float | None = None
+    best_quality: float | None = None
+    best_cost: float | None = None
+    best_variant_yaml: str | None = None
+    improvement: float | None = None
+    iterations_run: int | None = None
+    total_keeps: int | None = None
+    total_discards: int | None = None
+    optimize_for: str | None = None
 
 
 # Fix forward reference for ApiResponse.meta

@@ -561,7 +561,7 @@ class SandshoreRuntime:
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Execute with automatic model failover on retriable errors."""
-        from sandcastle.engine.providers import PROVIDER_REGISTRY, resolve_model
+        from sandcastle.engine.providers import resolve_model
 
         model_str = request.get("model", "sonnet")
         failover = get_failover()
@@ -755,7 +755,8 @@ def get_sandshore_runtime(
                 # Python 3.12+.
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(evicted.close())
+                    _task = loop.create_task(evicted.close())
+                    _task.add_done_callback(lambda t: t.result() if not t.cancelled() else None)
                 except RuntimeError:
                     # No running loop - skip async close; the evicted
                     # runtime's backend will be GC'd.

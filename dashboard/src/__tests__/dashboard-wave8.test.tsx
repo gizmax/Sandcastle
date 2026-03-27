@@ -1057,7 +1057,7 @@ describe("useUpdateCheck", () => {
     mockApi.get.mockResolvedValue({
       data: {
         current_version: "0.25.0",
-        latest_version: "0.2666",
+        latest_version: "0.2666b1",
         update_available: true,
         release_url: "https://github.com/gizmax/Sandcastle/releases/v0.2666",
         install_command: "pip install --upgrade sandcastle-ai",
@@ -1071,7 +1071,7 @@ describe("useUpdateCheck", () => {
 
     expect(result.current.updateAvailable).toBe(true);
     expect(result.current.currentVersion).toBe("0.25.0");
-    expect(result.current.latestVersion).toBe("0.2666");
+    expect(result.current.latestVersion).toBe("0.2666b1");
     expect(result.current.installCommand).toBe("pip install --upgrade sandcastle-ai");
     expect(result.current.releaseUrl).toBe("https://github.com/gizmax/Sandcastle/releases/v0.2666");
   });
@@ -1079,8 +1079,8 @@ describe("useUpdateCheck", () => {
   it("returns no update when up-to-date", async () => {
     mockApi.get.mockResolvedValue({
       data: {
-        current_version: "0.2666",
-        latest_version: "0.2666",
+        current_version: "0.2666b1",
+        latest_version: "0.2666b1",
         update_available: false,
         release_url: "",
         install_command: "",
@@ -1142,7 +1142,7 @@ describe("useRuntimeInfo", () => {
       queue: "in-process",
       storage: "local",
       data_dir: "/tmp/data",
-      version: "0.2666",
+      version: "0.2666b1",
       sandbox_backend: "e2b",
       license: null,
     };
@@ -1182,7 +1182,7 @@ describe("useRuntimeInfo", () => {
       queue: "redis",
       storage: "s3",
       data_dir: null,
-      version: "0.2666",
+      version: "0.2666b1",
       sandbox_backend: "docker",
       license: {
         status: "valid",

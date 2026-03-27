@@ -1049,7 +1049,7 @@ steps:
                 "tags": ["test"],
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert "data" in data
 

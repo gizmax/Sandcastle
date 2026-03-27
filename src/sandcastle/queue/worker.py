@@ -341,7 +341,6 @@ async def shutdown(ctx: dict) -> None:
     Cleans up the shared Redis connection pool to prevent leaked connections
     on process exit.
     """
-    global _enqueue_redis_pool
     logger.info("Sandcastle worker shutting down")
     await cleanup_enqueue_pool()
 

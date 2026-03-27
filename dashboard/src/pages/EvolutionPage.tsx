@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { POLL_INTERVAL } from "@/lib/constants";
 import {
   Sparkles,
   TrendingUp,
@@ -759,6 +760,15 @@ export default function EvolutionPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showStartModal, setShowStartModal] = useState(!!locationState?.workflow);
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+  // Use a ref so action handlers can check without re-creating callbacks
+  const actionLoadingRef = useRef(actionLoading);
+  actionLoadingRef.current = actionLoading;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -768,19 +778,29 @@ export default function EvolutionPage() {
         api.get<EvolutionStats>("/evolution/stats"),
         api.get<{ name: string }[]>("/workflows"),
       ]);
+      if (!mountedRef.current) return;
       if (evoRes.data) setEvolutions(evoRes.data);
       if (statsRes.data) setStats(statsRes.data);
       if (wfRes.data) setWorkflows(wfRes.data.map((w) => w.name));
     } catch {
+      if (!mountedRef.current) return;
       setError("Could not connect to the API server");
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  // Poll for progress when any evolution is running
+  const hasRunning = evolutions.some((e) => e.status === "running");
+  useEffect(() => {
+    if (!hasRunning) return;
+    const interval = setInterval(() => { void fetchData(); }, POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, [hasRunning, fetchData]);
 
   const handleExpand = useCallback(
     async (evo: Evolution) => {
@@ -795,9 +815,10 @@ export default function EvolutionPage() {
       setDetailLoading(true);
       try {
         const res = await api.get<EvolutionDetail>(`/evolution/${evo.id}/status`);
+        if (!mountedRef.current) return;
         if (res.data) setDetailData(res.data);
       } finally {
-        setDetailLoading(false);
+        if (mountedRef.current) setDetailLoading(false);
       }
     },
     [expandedId]
@@ -805,10 +826,11 @@ export default function EvolutionPage() {
 
   const handleAccept = useCallback(
     async (id: string) => {
-      if (actionLoading.has(id)) return;
+      if (actionLoadingRef.current.has(id)) return;
       setActionLoading((prev) => new Set(prev).add(id));
       try {
         const res = await api.post(`/evolution/${id}/accept`);
+        if (!mountedRef.current) return;
         if (res.error) {
           toast.error(`Failed to accept variant: ${res.error.message}`);
           return;
@@ -818,22 +840,25 @@ export default function EvolutionPage() {
         setExpandedId(null);
         setDetailData(null);
       } finally {
-        setActionLoading((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
+        if (mountedRef.current) {
+          setActionLoading((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
       }
     },
-    [fetchData, actionLoading]
+    [fetchData]
   );
 
   const handleCancel = useCallback(
     async (id: string) => {
-      if (actionLoading.has(id)) return;
+      if (actionLoadingRef.current.has(id)) return;
       setActionLoading((prev) => new Set(prev).add(id));
       try {
         const res = await api.post(`/evolution/${id}/cancel`);
+        if (!mountedRef.current) return;
         if (res.error) {
           toast.error(`Failed to cancel evolution: ${res.error.message}`);
           return;
@@ -841,14 +866,16 @@ export default function EvolutionPage() {
         toast.success("Evolution cancelled");
         void fetchData();
       } finally {
-        setActionLoading((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
+        if (mountedRef.current) {
+          setActionLoading((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
       }
     },
-    [fetchData, actionLoading]
+    [fetchData]
   );
 
   const handleStart = useCallback(

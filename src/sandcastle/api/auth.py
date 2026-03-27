@@ -145,7 +145,8 @@ async def auth_middleware(request: Request, call_next):
             result = await session.execute(stmt)
             candidates = result.scalars().all()
     except Exception as e:
-        logger.error(f"Auth DB error: {e}")
+        # Log only exception type, not message (may contain DB connection string)
+        logger.error("Auth DB error: %s", type(e).__name__)
         return _error_response(503, "SERVICE_UNAVAILABLE", "Authentication service unavailable")
 
     # Constant-time comparison of the full HMAC-SHA256 hash
