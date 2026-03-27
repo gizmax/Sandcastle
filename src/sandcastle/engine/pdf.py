@@ -198,7 +198,7 @@ class _ChartGen:
         fig, ax = plt.subplots(figsize=(4, 3.5))
         colors = [_CHART_COLORS[i % len(_CHART_COLORS)] for i in range(len(labels))]
 
-        wedges, texts, autotexts = ax.pie(
+        wedges, _texts, autotexts = ax.pie(
             values, labels=None, autopct="%1.0f%%",
             colors=colors, startangle=90, pctdistance=0.78,
             wedgeprops={"edgecolor": "white", "linewidth": 2},

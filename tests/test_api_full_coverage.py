@@ -371,7 +371,7 @@ class TestWorkflowRunAsync:
                 "/api/workflows/run",
                 json={"workflow": VALID_WORKFLOW, "input": {}, "max_cost_usd": 0},
             )
-        assert response.status_code == 200
+        assert response.status_code == 202
 
     def test_valid_workflow_queues(self):
         with patch(
@@ -382,7 +382,7 @@ class TestWorkflowRunAsync:
                 "/api/workflows/run",
                 json={"workflow": VALID_WORKFLOW, "input": {"name": "World"}},
             )
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = response.json()["data"]
         assert "run_id" in data
         assert data["status"] == "queued"
@@ -776,7 +776,7 @@ class TestApiKeys:
             "/api/api-keys",
             json={"name": f"test-key-{uuid.uuid4().hex[:8]}"},
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()["data"]
         assert "id" in data
         assert "key" in data
@@ -1067,7 +1067,7 @@ class TestWorkflows:
             "/api/workflows",
             json={"name": "test-save-wf", "content": VALID_WORKFLOW},
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
 
 
 # ---------------------------------------------------------------------------
@@ -1924,7 +1924,7 @@ class TestIdempotency:
                     "idempotency_key": idem_key,
                 },
             )
-            assert resp1.status_code == 200
+            assert resp1.status_code == 202
             run_id_1 = resp1.json()["data"]["run_id"]
 
             resp2 = client.post(
@@ -1935,7 +1935,7 @@ class TestIdempotency:
                     "idempotency_key": idem_key,
                 },
             )
-            assert resp2.status_code == 200
+            assert resp2.status_code == 202
             data2 = resp2.json()["data"]
             assert data2["run_id"] == run_id_1
             assert data2.get("idempotent") is True
@@ -1970,7 +1970,7 @@ class TestWorkflowInputValidation:
                     "input": {"name": "Alice", "count": 5},
                 },
             )
-        assert response.status_code == 200
+        assert response.status_code == 202
 
     def test_type_coercion_integer(self):
         """String '5' should be coerced to integer 5."""
@@ -1985,7 +1985,7 @@ class TestWorkflowInputValidation:
                     "input": {"name": "Alice", "count": "5"},
                 },
             )
-        assert response.status_code == 200
+        assert response.status_code == 202
 
     def test_invalid_integer_coercion(self):
         response = client.post(

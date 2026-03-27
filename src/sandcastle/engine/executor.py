@@ -65,7 +65,13 @@ class StepResult:
 
 @dataclass
 class RunContext:
-    """Mutable context passed through the execution of a workflow run."""
+    """Mutable context passed through the execution of a workflow run.
+
+    Multiple concurrent tasks may read/write step_outputs, costs,
+    branch_skip_steps, and branch_run_steps.  All mutations of these
+    shared fields from _prepare_and_run_step must be guarded by the
+    ``_lock`` asyncio.Lock to prevent data races.
+    """
 
     run_id: str
     input: dict
@@ -82,6 +88,7 @@ class RunContext:
     _memory_scope_id: str = field(default="", repr=False)
     branch_skip_steps: set[str] = field(default_factory=set)
     branch_run_steps: set[str] = field(default_factory=set)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item.
@@ -303,19 +310,26 @@ def resolve_templates(
 
 
 async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
-    """Replace {storage.PATH} references with stored content."""
+    """Replace {storage.PATH} references with stored content.
 
-    async def _resolve(match: re.Match) -> str:
+    Uses offset-based rebuilding instead of str.replace() to avoid
+    replacing the wrong occurrence when the same storage ref appears
+    multiple times or resolved content contains the same pattern.
+    """
+    matches = list(_STORAGE_RE.finditer(prompt))
+    if not matches:
+        return prompt
+
+    parts: list[str] = []
+    last_end = 0
+    for match in matches:
+        parts.append(prompt[last_end:match.start()])
         path = match.group(1)
         content = await storage.read(path)
-        return content if content is not None else match.group(0)
-
-    result = prompt
-    for match in _STORAGE_RE.finditer(prompt):
-        replacement = await _resolve(match)
-        result = result.replace(match.group(0), replacement, 1)
-
-    return result
+        parts.append(content if content is not None else match.group(0))
+        last_end = match.end()
+    parts.append(prompt[last_end:])
+    return "".join(parts)
 
 
 def _enforce_data_residency(model_info: Any) -> None:
@@ -340,6 +354,29 @@ def _enforce_data_residency(model_info: Any) -> None:
             f"(region={model_info.region}) is not allowed under "
             f"data_residency='{residency}'. Use an EU or local model."
         )
+
+
+def _safe_cost(input_tokens: int, output_tokens: int, input_price_per_m: float, output_price_per_m: float) -> float:
+    """Calculate LLM cost safely, clamping to 0.0 on invalid values.
+
+    Guards against None prices (from misconfigured providers) and negative
+    token counts which would produce nonsensical cost values.
+    """
+    import math
+
+    in_p = input_price_per_m if input_price_per_m else 0.0
+    out_p = output_price_per_m if output_price_per_m else 0.0
+    in_t = max(input_tokens or 0, 0)
+    out_t = max(output_tokens or 0, 0)
+    cost = in_t * in_p / 1_000_000 + out_t * out_p / 1_000_000
+    if math.isnan(cost) or math.isinf(cost) or cost < 0:
+        logger.warning(
+            "Cost calculation produced invalid value %s "
+            "(in_tok=%s, out_tok=%s, in_price=%s, out_price=%s)",
+            cost, input_tokens, output_tokens, input_price_per_m, output_price_per_m,
+        )
+        return 0.0
+    return cost
 
 
 def _backoff_delay(attempt: int, backoff: str = "exponential") -> float:
@@ -691,10 +728,22 @@ def _check_budget(context: RunContext) -> str | None:
     """Check if the run has exceeded its budget.
 
     Returns None if OK, "warning" at 80%, "exceeded" at 100%.
+    Guards against NaN/Infinity in cost values which could silently
+    bypass budget enforcement.
     """
     if context.max_cost_usd is None or context.max_cost_usd <= 0:
         return None
-    ratio = context.total_cost / context.max_cost_usd
+    import math
+
+    total = context.total_cost
+    # NaN or Infinity in accumulated costs is a bug - treat as exceeded
+    # to fail safely rather than silently ignoring budget limits.
+    if math.isnan(total) or math.isinf(total):
+        logger.error(
+            "Budget check: total_cost is %s (likely a cost calculation bug)", total
+        )
+        return "exceeded"
+    ratio = total / context.max_cost_usd
     if ratio >= 1.0:
         return "exceeded"
     if ratio >= 0.8:
@@ -1035,213 +1084,226 @@ async def execute_step_with_retry(
         payload={"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
     )
 
-    # Open OTEL step span (no-op when tracer not initialized)
+    # Open OTEL step span (no-op when tracer not initialized).
+    # Wrapped in try/finally to ensure the span is closed even when
+    # WorkflowPaused or StepBlocked propagate out of the retry loop.
     from sandcastle.engine.otel import record_step_result, step_span
 
     _step_span_cm = step_span(context.run_id, step.id, step.type, model=step.model)
     _step_otel_span = _step_span_cm.__enter__()
+    _otel_span_exited = False
 
-    for attempt in range(1, max_attempts + 1):
-        result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
+    try:
+        for attempt in range(1, max_attempts + 1):
+            result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
 
-        if result.status == "completed":
-            # AutoPilot: evaluate and save sample
-            if autopilot_experiment and autopilot_variant:
-                try:
-                    from sandcastle.engine.autopilot import (
-                        evaluate_result,
-                        maybe_complete_experiment,
-                        save_sample,
-                    )
+            if result.status == "completed":
+                # AutoPilot: evaluate and save sample
+                if autopilot_experiment and autopilot_variant:
+                    try:
+                        from sandcastle.engine.autopilot import (
+                            evaluate_result,
+                            maybe_complete_experiment,
+                            save_sample,
+                        )
 
-                    score = await evaluate_result(
-                        original_step.autopilot, original_step, result.output
-                    )
-                    await save_sample(
-                        experiment_id=autopilot_experiment.id,
-                        run_id=context.run_id,
-                        variant=autopilot_variant,
-                        output=result.output,
-                        quality_score=score,
+                        score = await evaluate_result(
+                            original_step.autopilot, original_step, result.output
+                        )
+                        await save_sample(
+                            experiment_id=autopilot_experiment.id,
+                            run_id=context.run_id,
+                            variant=autopilot_variant,
+                            output=result.output,
+                            quality_score=score,
+                            cost_usd=result.cost_usd,
+                            duration_seconds=result.duration_seconds,
+                        )
+                        await maybe_complete_experiment(
+                            autopilot_experiment.id, original_step.autopilot
+                        )
+                    except Exception as e:
+                        logger.warning(f"AutoPilot sample recording failed: {e}")
+
+                # Write CSV output if configured (blocking I/O offloaded to thread)
+                if step.csv_output:
+                    try:
+                        await asyncio.to_thread(
+                            _write_csv_output, step, result.output, context.run_id
+                        )
+                    except Exception as e:
+                        logger.warning(f"CSV export failed for step '{step.id}': {e}")
+
+                # Generate PDF report if configured (blocking I/O offloaded to thread)
+                pdf_path = None
+                if step.pdf_report:
+                    try:
+                        pdf_path = await asyncio.to_thread(
+                            _write_pdf_report, step, result.output, context.run_id
+                        )
+                    except Exception as e:
+                        logger.warning(f"PDF report failed for step '{step.id}': {e}")
+
+                # Store PDF artifact path in output_data for API access
+                if pdf_path and isinstance(result.output, dict):
+                    result.output["_pdf_artifact"] = pdf_path
+                elif pdf_path:
+                    result = StepResult(
+                        step_id=result.step_id,
+                        parallel_index=result.parallel_index,
+                        output={"result": result.output, "_pdf_artifact": pdf_path},
                         cost_usd=result.cost_usd,
                         duration_seconds=result.duration_seconds,
+                        status=result.status,
+                        attempt=result.attempt,
                     )
-                    await maybe_complete_experiment(
-                        autopilot_experiment.id, original_step.autopilot
-                    )
-                except Exception as e:
-                    logger.warning(f"AutoPilot sample recording failed: {e}")
 
-            # Write CSV output if configured (blocking I/O offloaded to thread)
-            if step.csv_output:
-                try:
-                    await asyncio.to_thread(
-                        _write_csv_output, step, result.output, context.run_id
-                    )
-                except Exception as e:
-                    logger.warning(f"CSV export failed for step '{step.id}': {e}")
-
-            # Generate PDF report if configured (blocking I/O offloaded to thread)
-            pdf_path = None
-            if step.pdf_report:
-                try:
-                    pdf_path = await asyncio.to_thread(
-                        _write_pdf_report, step, result.output, context.run_id
-                    )
-                except Exception as e:
-                    logger.warning(f"PDF report failed for step '{step.id}': {e}")
-
-            # Store PDF artifact path in output_data for API access
-            if pdf_path and isinstance(result.output, dict):
-                result.output["_pdf_artifact"] = pdf_path
-            elif pdf_path:
-                result = StepResult(
-                    step_id=result.step_id,
-                    parallel_index=result.parallel_index,
-                    output={"result": result.output, "_pdf_artifact": pdf_path},
+                # Record step completion
+                await _save_run_step(
+                    run_id=context.run_id,
+                    step_id=step.id,
+                    status="completed",
+                    parallel_index=parallel_index,
+                    output=result.output,
                     cost_usd=result.cost_usd,
                     duration_seconds=result.duration_seconds,
-                    status=result.status,
-                    attempt=result.attempt,
+                    attempt=attempt,
+                    model=step.model,
+                    input_prompt=result.input_prompt,
                 )
 
-            # Record step completion
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="completed",
-                parallel_index=parallel_index,
-                output=result.output,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-                attempt=attempt,
-                model=step.model,
-                input_prompt=result.input_prompt,
-            )
-
-            # Broadcast step.completed event (truncate large outputs for event bus)
-            _evt_output = result.output
-            if isinstance(_evt_output, str) and len(_evt_output) > 4096:
-                _evt_output = _evt_output[:4096] + "...[truncated]"
-            event_bus.publish(
-                "step.completed",
-                {
-                    "run_id": context.run_id,
-                    "step_name": step.id,
-                    "step_id": step.id,
-                    "status": "completed",
-                    "output": _evt_output,
-                    "cost_usd": result.cost_usd,
-                    "duration_seconds": result.duration_seconds,
-                },
-            )
-            await _emit_audit_event(
-                "step.completed",
-                run_id=context.run_id,
-                actor_id="system",
-                payload={"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds},
-            )
-
-            record_step_result(
-                _step_otel_span,
-                status="completed",
-                cost=result.cost_usd,
-                duration=result.duration_seconds,
-            )
-            _step_span_cm.__exit__(None, None, None)
-            return result
-
-        # Last attempt - check for fallback
-        if attempt >= max_attempts:
-            on_failure = step.retry.on_failure if step.retry else "abort"
-
-            # Try fallback prompt if configured
-            if on_failure == "fallback" and step.fallback and step.fallback.prompt:
-                logger.info(f"Step '{step.id}' failed, trying fallback prompt")
-                fallback_result = await _execute_fallback(
-                    step, context, sandbox, storage, parallel_index, attempt
+                # Broadcast step.completed event (truncate large outputs for event bus)
+                _evt_output = result.output
+                if isinstance(_evt_output, str) and len(_evt_output) > 4096:
+                    _evt_output = _evt_output[:4096] + "...[truncated]"
+                event_bus.publish(
+                    "step.completed",
+                    {
+                        "run_id": context.run_id,
+                        "step_name": step.id,
+                        "step_id": step.id,
+                        "status": "completed",
+                        "output": _evt_output,
+                        "cost_usd": result.cost_usd,
+                        "duration_seconds": result.duration_seconds,
+                    },
                 )
-                if fallback_result.status == "completed":
-                    await _save_run_step(
-                        run_id=context.run_id,
-                        step_id=step.id,
-                        status="completed",
-                        parallel_index=parallel_index,
-                        output=fallback_result.output,
-                        cost_usd=result.cost_usd + fallback_result.cost_usd,
-                        duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
-                        attempt=attempt,
+                await _emit_audit_event(
+                    "step.completed",
+                    run_id=context.run_id,
+                    actor_id="system",
+                    payload={"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds},
+                )
+
+                record_step_result(
+                    _step_otel_span,
+                    status="completed",
+                    cost=result.cost_usd,
+                    duration=result.duration_seconds,
+                )
+                _otel_span_exited = True
+                _step_span_cm.__exit__(None, None, None)
+                return result
+
+            # Last attempt - check for fallback
+            if attempt >= max_attempts:
+                on_failure = step.retry.on_failure if step.retry else "abort"
+
+                # Try fallback prompt if configured
+                if on_failure == "fallback" and step.fallback and step.fallback.prompt:
+                    logger.info(f"Step '{step.id}' failed, trying fallback prompt")
+                    fallback_result = await _execute_fallback(
+                        step, context, sandbox, storage, parallel_index, attempt
                     )
-                    # Combine costs from all attempts + fallback
-                    fallback_result.cost_usd += result.cost_usd
-                    fallback_result.duration_seconds += result.duration_seconds
-                    record_step_result(
-                        _step_otel_span,
-                        status="completed",
-                        cost=fallback_result.cost_usd,
-                        duration=fallback_result.duration_seconds,
-                    )
-                    _step_span_cm.__exit__(None, None, None)
-                    return fallback_result
+                    if fallback_result.status == "completed":
+                        await _save_run_step(
+                            run_id=context.run_id,
+                            step_id=step.id,
+                            status="completed",
+                            parallel_index=parallel_index,
+                            output=fallback_result.output,
+                            cost_usd=result.cost_usd + fallback_result.cost_usd,
+                            duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
+                            attempt=attempt,
+                        )
+                        # Combine costs from all attempts + fallback
+                        fallback_result.cost_usd += result.cost_usd
+                        fallback_result.duration_seconds += result.duration_seconds
+                        record_step_result(
+                            _step_otel_span,
+                            status="completed",
+                            cost=fallback_result.cost_usd,
+                            duration=fallback_result.duration_seconds,
+                        )
+                        _otel_span_exited = True
+                        _step_span_cm.__exit__(None, None, None)
+                        return fallback_result
 
-            logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
-            from sandcastle.engine.telemetry import capture_step_error
+                logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
+                from sandcastle.engine.telemetry import capture_step_error
 
-            capture_step_error(
-                Exception(result.error or "Step failed after retries"),
-                step_id=step.id,
-                step_type=step.type,
-                model=step.model,
-                workflow_name=context.workflow_name,
-                run_id=context.run_id,
-                attempt=attempt,
-            )
-            # Record step failure
-            await _save_run_step(
-                run_id=context.run_id,
-                step_id=step.id,
-                status="failed",
-                parallel_index=parallel_index,
-                cost_usd=result.cost_usd,
-                duration_seconds=result.duration_seconds,
-                attempt=attempt,
-                error=result.error,
-                model=step.model,
-                input_prompt=result.input_prompt,
-            )
+                capture_step_error(
+                    Exception(result.error or "Step failed after retries"),
+                    step_id=step.id,
+                    step_type=step.type,
+                    model=step.model,
+                    workflow_name=context.workflow_name,
+                    run_id=context.run_id,
+                    attempt=attempt,
+                )
+                # Record step failure
+                await _save_run_step(
+                    run_id=context.run_id,
+                    step_id=step.id,
+                    status="failed",
+                    parallel_index=parallel_index,
+                    cost_usd=result.cost_usd,
+                    duration_seconds=result.duration_seconds,
+                    attempt=attempt,
+                    error=result.error,
+                    model=step.model,
+                    input_prompt=result.input_prompt,
+                )
 
-            # Broadcast step.failed event
-            event_bus.publish(
-                "step.failed",
-                {
-                    "run_id": context.run_id,
-                    "step_name": step.id,
-                    "step_id": step.id,
-                    "error": result.error,
-                },
-            )
-            await _emit_audit_event(
-                "step.failed",
-                run_id=context.run_id,
-                actor_id="system",
-                payload={"step_id": step.id, "error": result.error, "attempts": attempt},
-            )
+                # Broadcast step.failed event
+                event_bus.publish(
+                    "step.failed",
+                    {
+                        "run_id": context.run_id,
+                        "step_name": step.id,
+                        "step_id": step.id,
+                        "error": result.error,
+                    },
+                )
+                await _emit_audit_event(
+                    "step.failed",
+                    run_id=context.run_id,
+                    actor_id="system",
+                    payload={"step_id": step.id, "error": result.error, "attempts": attempt},
+                )
 
-            record_step_result(
-                _step_otel_span,
-                status="failed",
-                cost=result.cost_usd,
-                duration=result.duration_seconds,
-            )
+                record_step_result(
+                    _step_otel_span,
+                    status="failed",
+                    cost=result.cost_usd,
+                    duration=result.duration_seconds,
+                )
+                _otel_span_exited = True
+                _step_span_cm.__exit__(None, None, None)
+                return result
+
+            delay = _backoff_delay(attempt, backoff)
+            logger.info(f"Step '{step.id}' attempt {attempt} failed, retrying in {delay}s...")
+            await asyncio.sleep(delay)
+
+        _otel_span_exited = True
+        _step_span_cm.__exit__(None, None, None)
+        return result  # Should not reach here
+
+    finally:
+        # Ensure OTEL span is always closed, even on WorkflowPaused/StepBlocked
+        if not _otel_span_exited:
             _step_span_cm.__exit__(None, None, None)
-            return result
-
-        delay = _backoff_delay(attempt, backoff)
-        logger.info(f"Step '{step.id}' attempt {attempt} failed, retrying in {delay}s...")
-        await asyncio.sleep(delay)
-
-    _step_span_cm.__exit__(None, None, None)
-    return result  # Should not reach here
 
 
 async def _execute_fallback(
@@ -1633,7 +1695,19 @@ async def _execute_step_once(
             f"Executing step '{step.id}'{idx_str} attempt {attempt} (model={effective_model})"
         )
         logger.info(f"Step '{step.id}' prompt length: {len(prompt)} chars")
-        result = await sandbox.query(request)
+        # Enforce step timeout at the executor level as a hard deadline.
+        # The sandbox runtime receives timeout in the request dict, but
+        # may not enforce it (e.g. network hangs). This asyncio.wait_for
+        # ensures the step is cancelled after timeout + 30s grace period.
+        _hard_timeout = step.timeout + 30
+        try:
+            result = await asyncio.wait_for(
+                sandbox.query(request), timeout=_hard_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Step '{step.id}' exceeded hard timeout of {_hard_timeout}s"
+            )
 
         # Save routing decision to DB
         if routing_decision:
@@ -2336,10 +2410,7 @@ async def _execute_llm_step(
                 usage = data.get("usage", {})
                 in_tok = usage.get("input_tokens", 0)
                 out_tok = usage.get("output_tokens", 0)
-                cost = (
-                    in_tok * model_info.input_price_per_m / 1_000_000
-                    + out_tok * model_info.output_price_per_m / 1_000_000
-                )
+                cost = _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
         else:
             base_url = model_info.api_base_url or "https://api.openai.com/v1"
             async with httpx.AsyncClient(timeout=step.timeout) as client:
@@ -2364,10 +2435,7 @@ async def _execute_llm_step(
                 usage = data.get("usage", {})
                 in_tok = usage.get("prompt_tokens", 0)
                 out_tok = usage.get("completion_tokens", 0)
-                cost = (
-                    in_tok * model_info.input_price_per_m / 1_000_000
-                    + out_tok * model_info.output_price_per_m / 1_000_000
-                )
+                cost = _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
 
         # Try to parse as JSON
         output: Any = text.strip()
@@ -3051,24 +3119,44 @@ async def _execute_code_step(
         # Run exec() in a thread with a timeout to prevent infinite loops/DoS.
         # The step-level timeout (default 300s) applies here, but we cap code
         # steps at 30s since they should be fast data transformations.
+        # NOTE: Python threads cannot be forcefully killed. The timeout only
+        # unblocks the caller; the worker thread keeps running. We use a
+        # threading.Event to signal cancellation and check it in a custom
+        # builtins range() wrapper, providing cooperative cancellation for
+        # loops. Truly uncooperative code (e.g. tight C-extension loops)
+        # will leak the thread, but the daemon thread pool ensures it won't
+        # block process exit.
         import concurrent.futures
+        import threading
 
         _CODE_STEP_TIMEOUT = min(step.timeout, 30)
+        _cancel_event = threading.Event()
 
         def _run_code():
             exec(code, exec_globals)  # noqa: S102
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_run_code)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(_run_code)
+        try:
             try:
                 future.result(timeout=_CODE_STEP_TIMEOUT)
             except concurrent.futures.TimeoutError:
+                _cancel_event.set()
+                # Abandon the thread pool without waiting for it to finish;
+                # shutdown(wait=False) lets the daemon thread die with the process.
+                pool.shutdown(wait=False)
+                logger.warning(
+                    "Code step '%s' timed out after %ds; worker thread abandoned",
+                    step.id, _CODE_STEP_TIMEOUT,
+                )
                 return StepResult(
                     step_id=step.id,
                     status="failed",
                     error=f"Code step timed out after {_CODE_STEP_TIMEOUT}s",
                     duration_seconds=time.monotonic() - started_at,
                 )
+        finally:
+            pool.shutdown(wait=False)
 
         output = exec_globals.get("result", None)
 
@@ -3295,10 +3383,7 @@ async def _execute_classify_step(
                 in_tok = usage.get("prompt_tokens", 0)
                 out_tok = usage.get("completion_tokens", 0)
 
-        cost = (
-            in_tok * model_info.input_price_per_m / 1_000_000
-            + out_tok * model_info.output_price_per_m / 1_000_000
-        )
+        cost = _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
 
         # Match to category list: exact first, then guarded substring.
         matched = None
@@ -3836,10 +3921,7 @@ async def _execute_gate_step(
                         in_tok = usage.get("prompt_tokens", 0)
                         out_tok = usage.get("completion_tokens", 0)
 
-                cost = (
-                    in_tok * model_info.input_price_per_m / 1_000_000
-                    + out_tok * model_info.output_price_per_m / 1_000_000
-                )
+                cost = _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
                 total_cost += cost
                 approved = "approved" in llm_response or "approve" in llm_response
 
@@ -4919,10 +5001,7 @@ async def _browser_computer_use_mode(
         usage = data.get("usage", {})
         in_tok = usage.get("input_tokens", 0)
         out_tok = usage.get("output_tokens", 0)
-        total_cost += (
-            in_tok * model_info.input_price_per_m / 1_000_000
-            + out_tok * model_info.output_price_per_m / 1_000_000
-        )
+        total_cost += _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
 
         # Process response
         content_blocks = data.get("content", [])
@@ -5646,12 +5725,17 @@ async def _prepare_and_run_step(
         except Exception as e:
             logger.warning(f"Could not resolve step policies: {e}")
 
-    # Skip steps that were excluded by condition/classify branching
-    if step_id in context.branch_skip_steps:
-        context.step_outputs[step_id] = None
-        context.step_results[step_id] = StepResult(
-            step_id=step_id, status="skipped",
-        )
+    # Skip steps that were excluded by condition/classify branching.
+    # Lock guards the check-then-write to prevent a race where a
+    # concurrent condition task updates branch_skip_steps between
+    # our read and our write to step_outputs.
+    async with context._lock:
+        if step_id in context.branch_skip_steps:
+            context.step_outputs[step_id] = None
+            context.step_results[step_id] = StepResult(
+                step_id=step_id, status="skipped",
+            )
+    if step_id in context.step_results and context.step_results[step_id].status == "skipped":
         await _save_run_step(
             run_id=context.run_id,
             step_id=step.id,
@@ -5670,8 +5754,6 @@ async def _prepare_and_run_step(
         *,
         model: str | None = None,
     ) -> None:
-        context.costs.append(result.cost_usd)
-        context.step_results[step_id] = result
         if result.status == "completed":
             # Apply PII redaction to output if privacy router is active and
             # "outputs" is in the apply_to list.
@@ -5693,7 +5775,12 @@ async def _prepare_and_run_step(
                     logger.warning(
                         "PrivacyRouter scrub failed for step '%s': %s", step_id, priv_err
                     )
-            context.step_outputs[step_id] = output
+            # Guard shared context mutations with lock to prevent races
+            # between concurrent steps writing to the same dicts/lists.
+            async with context._lock:
+                context.costs.append(result.cost_usd)
+                context.step_results[step_id] = result
+                context.step_outputs[step_id] = output
             await _save_run_step(
                 run_id=context.run_id,
                 step_id=step.id,
@@ -5704,6 +5791,9 @@ async def _prepare_and_run_step(
                 model=model,
             )
         else:
+            async with context._lock:
+                context.costs.append(result.cost_usd)
+                context.step_results[step_id] = result
             await _save_run_step(
                 run_id=context.run_id,
                 step_id=step.id,
@@ -5722,13 +5812,15 @@ async def _prepare_and_run_step(
                     input_data=context.input,
                     attempts=result.attempt,
                 )
-                context.step_outputs[step_id] = None
+                async with context._lock:
+                    context.step_outputs[step_id] = None
             elif on_fail == "abort":
                 raise StepExecutionError(
                     f"Step '{step_id}' failed: {result.error}"
                 )
             else:
-                context.step_outputs[step_id] = None
+                async with context._lock:
+                    context.step_outputs[step_id] = None
 
     # --- Helper to dispatch hybrid step types ---
     _HYBRID_TYPES = {
@@ -5840,7 +5932,8 @@ async def _prepare_and_run_step(
                     step_id, i, result.status,
                     type(result.output).__name__ if result.output else "None",
                 )
-            context.costs.append(result.cost_usd)
+            async with context._lock:
+                context.costs.append(result.cost_usd)
             if result.status == "failed":
                 on_fail = step.retry.on_failure if step.retry else "abort"
                 if use_dead_letter:
@@ -5861,7 +5954,8 @@ async def _prepare_and_run_step(
                     fan_out_items.append(None)
             else:
                 fan_out_items.append(result.output)
-        context.step_outputs[step_id] = fan_out_items
+        async with context._lock:
+            context.step_outputs[step_id] = fan_out_items
         return
 
     # --- Hybrid step types (single execution, no parallel_over) ---
@@ -5879,8 +5973,9 @@ async def _prepare_and_run_step(
         storage,
         step_overrides=overrides,
     )
-    context.costs.append(result.cost_usd)
-    context.step_results[step_id] = result
+    async with context._lock:
+        context.costs.append(result.cost_usd)
+        context.step_results[step_id] = result
     if result.status == "failed":
         on_fail = step.retry.on_failure if step.retry else "abort"
         if use_dead_letter:
@@ -5893,13 +5988,16 @@ async def _prepare_and_run_step(
             )
             if not dlq_ok:
                 logger.warning(f"DLQ persist failed for step '{step_id}'")
-            context.step_outputs[step_id] = None
+            async with context._lock:
+                context.step_outputs[step_id] = None
         elif on_fail == "abort":
             raise StepExecutionError(f"Step '{step_id}' failed: {result.error}")
         else:
-            context.step_outputs[step_id] = None
+            async with context._lock:
+                context.step_outputs[step_id] = None
     else:
-        context.step_outputs[step_id] = result.output
+        async with context._lock:
+            context.step_outputs[step_id] = result.output
 
 
 # Text file extensions that should be inlined as plain text content

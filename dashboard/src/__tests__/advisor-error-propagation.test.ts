@@ -2,17 +2,22 @@
  * useAdvisor Error Propagation Tests
  *
  * Tests that the useAdvisor hook correctly collects and surfaces errors
- * from the 13 API endpoints it fetches in parallel.
+ * from the 13 API endpoints it fetches in two phases:
+ *   - Critical (4 endpoints): /health, /stats, /runs, /workflows
+ *   - Deferred (9 endpoints): /tools, /dead-letter, /violations/stats, etc.
+ *
+ * On mount the deferred phase fires after a 2-second delay.  The public
+ * refresh() method runs both phases immediately.
  *
  * Scenarios:
- * 1. All 13 endpoints fail -> errors array has 13 entries
+ * 1. All 13 endpoints fail -> errors array has 13 entries (after deferred)
  * 2. 3 endpoints fail, 10 succeed -> errors has exactly 3 entries
  * 3. Error format: "endpoint_name: message"
  * 4. All succeed -> errors is empty
  * 5. After refresh where errors clear -> errors becomes empty
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
 // ============================================================================
@@ -93,6 +98,32 @@ const ENDPOINT_NAMES = [
   "api-keys",
 ] as const;
 
+/**
+ * Helper: render the hook, wait for the critical phase to complete (loading
+ * becomes false), then advance fake timers past the 2-second deferred delay
+ * so the deferred phase also completes.
+ */
+async function renderAndWaitForBothPhases() {
+  const hook = renderHook(() => useAdvisor());
+
+  // Wait for critical phase (sets loading = false)
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
+
+  // Advance past the 2-second deferred delay and let deferred promises flush
+  await act(async () => {
+    vi.advanceTimersByTime(2500);
+  });
+
+  // Let the deferred API responses settle into state
+  await waitFor(() => {
+    // After deferred phase, lastChecked updates a second time.
+    // We simply wait a tick for state to stabilize.
+    return true;
+  });
+
+  return hook;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -100,7 +131,14 @@ const ENDPOINT_NAMES = [
 describe("useAdvisor - error propagation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // shouldAdvanceTime keeps real-time advancing so waitFor polling works
+    // while still allowing vi.advanceTimersByTime for the deferred delay.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     mockSubscribe.mockReturnValue(() => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // --------------------------------------------------------------------------
@@ -109,9 +147,7 @@ describe("useAdvisor - error propagation", () => {
   it("collects 13 errors when all endpoints return errors", async () => {
     (api.get as Mock).mockResolvedValue({ ...ERROR_RESPONSE });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
 
     expect(result.current.errors).toHaveLength(13);
   });
@@ -130,9 +166,7 @@ describe("useAdvisor - error propagation", () => {
       return { ...SUCCESS_RESPONSE };
     });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
 
     expect(result.current.errors).toHaveLength(3);
   });
@@ -143,9 +177,7 @@ describe("useAdvisor - error propagation", () => {
   it("formats each error as 'endpoint_name: message'", async () => {
     (api.get as Mock).mockResolvedValue({ ...ERROR_RESPONSE });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
 
     // Every error entry must match the format "name: message"
     for (const entry of result.current.errors) {
@@ -170,9 +202,7 @@ describe("useAdvisor - error propagation", () => {
       error: { code: "HTTP_500", message: "Internal Server Error" },
     });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
 
     // All entries should reference the message, not the code
     for (const entry of result.current.errors) {
@@ -187,9 +217,7 @@ describe("useAdvisor - error propagation", () => {
   it("produces an empty errors array when all endpoints succeed", async () => {
     (api.get as Mock).mockResolvedValue({ ...SUCCESS_RESPONSE });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
 
     expect(result.current.errors).toHaveLength(0);
     expect(result.current.errors).toEqual([]);
@@ -200,13 +228,9 @@ describe("useAdvisor - error propagation", () => {
   // --------------------------------------------------------------------------
   it("clears errors on refresh when endpoints subsequently succeed", async () => {
     // First call: all fail
-    (api.get as Mock).mockResolvedValueOnce({ ...ERROR_RESPONSE }); // health
-    // Return error for all 13 on first fetchAll pass
     (api.get as Mock).mockResolvedValue({ ...ERROR_RESPONSE });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
     expect(result.current.errors.length).toBeGreaterThan(0);
 
     // Second call: all succeed
@@ -220,7 +244,7 @@ describe("useAdvisor - error propagation", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Bonus: loading starts as true and turns false after fetch
+  // Bonus: loading starts as true and turns false after critical phase
   // --------------------------------------------------------------------------
   it("sets loading to false after fetchAll completes", async () => {
     (api.get as Mock).mockResolvedValue({ ...SUCCESS_RESPONSE });
@@ -241,9 +265,7 @@ describe("useAdvisor - error propagation", () => {
       error: { code: "NETWORK_ERROR", message: undefined as unknown as string },
     });
 
-    const { result } = renderHook(() => useAdvisor());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderAndWaitForBothPhases();
 
     // When message is absent, the hook uses `res.error.message ?? res.error.code`
     // so entries should fall back to the code

@@ -645,7 +645,8 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       condition: "check", classify: "route", loop: "loop",
       race: "race", sensor: "sensor", gate: "gate",
       transform: "transform", notify: "notify", delegate: "delegate",
-      browser: "browser", parse: "parse",
+      browser: "browser", parse: "parse", approval: "approval",
+      sub_workflow: "sub", openclaw: "claw", composio: "composio",
     };
     const prefix = prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -666,7 +667,10 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       pdfReport: { ...DEFAULT_PDF_REPORT },
       autopilot: { ...DEFAULT_AUTOPILOT, variants: [] },
       retry: { ...DEFAULT_RETRY },
-      approval: { ...DEFAULT_APPROVAL },
+      // When added from the palette as an "approval" step, enable approval by default
+      approval: stepType === "approval"
+        ? { ...DEFAULT_APPROVAL, enabled: true }
+        : { ...DEFAULT_APPROVAL },
       policies: [],
       slo: { ...DEFAULT_SLO },
       llmSystemPrompt: "",

@@ -920,3 +920,407 @@ class TestBoundaryOverlap:
         assert pii_second == [], (
             f"Replacement tokens triggered second-pass matches: {pii_second}"
         )
+
+
+# ===========================================================================
+# 11. Date of Birth pattern detection
+# ===========================================================================
+
+
+class TestDateOfBirthDetection:
+    """Verify DOB pattern matches DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY formats."""
+
+    DATES = [
+        ("dd_slash_mm_slash_yyyy", "DOB: 15/06/1990"),
+        ("dd_dash_mm_dash_yyyy", "Born: 01-12-1985"),
+        ("dd_dot_mm_dot_yyyy", "Geburtsdatum: 23.03.2001"),
+        ("first_of_month", "DOB: 01/01/2000"),
+        ("last_of_month", "DOB: 31/12/1999"),
+        ("edge_day_30", "Born on 30/11/1975"),
+        ("edge_19xx", "DOB: 28/02/1900"),
+        ("edge_20xx", "DOB: 15/07/2025"),
+    ]
+
+    @pytest.mark.parametrize("label,text", DATES)
+    def test_dob_detected(self, label: str, text: str) -> None:
+        router = make_router(["date_of_birth"])
+        scrubbed, matches = router.scrub(text)
+        dob_matches = [m for m in matches if m.entity_type == "date_of_birth"]
+        assert len(dob_matches) >= 1, f"[{label}] No DOB match in: {text!r}"
+        assert "[DATE_OF_BIRTH]" in scrubbed, f"[{label}] Replacement missing in: {scrubbed!r}"
+
+    def test_dob_not_matched_for_invalid_month(self) -> None:
+        router = make_router(["date_of_birth"])
+        _, matches = router.scrub("Invalid: 15/13/1990")
+        assert matches == [], "Month 13 should not match DOB pattern"
+
+    def test_dob_not_matched_for_day_zero(self) -> None:
+        router = make_router(["date_of_birth"])
+        _, matches = router.scrub("Invalid: 00/06/1990")
+        assert matches == [], "Day 00 should not match DOB pattern"
+
+    def test_dob_not_matched_for_18xx_year(self) -> None:
+        router = make_router(["date_of_birth"])
+        _, matches = router.scrub("Old date: 15/06/1890")
+        assert matches == [], "Year 1890 should not match DOB pattern"
+
+    def test_multiple_dobs_in_text(self) -> None:
+        router = make_router(["date_of_birth"])
+        text = "Birth: 15/06/1990, Partner: 23.03.1985"
+        scrubbed, matches = router.scrub(text)
+        dob_matches = [m for m in matches if m.entity_type == "date_of_birth"]
+        assert len(dob_matches) == 2
+        assert scrubbed.count("[DATE_OF_BIRTH]") == 2
+
+
+# ===========================================================================
+# 12. Unicode and special character handling
+# ===========================================================================
+
+
+class TestUnicodeHandling:
+    """PII detection must work correctly with unicode text around PII."""
+
+    def test_email_in_unicode_text(self) -> None:
+        router = make_router(["email"])
+        text = "Kontakt: user@example.com pro vice informaci"
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert "[EMAIL]" in scrubbed
+        assert "user@example.com" not in scrubbed
+
+    def test_ssn_in_cjk_text(self) -> None:
+        router = make_router(["ssn"])
+        text = "SSN: 123-45-6789"
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert "123-45-6789" not in scrubbed
+
+    def test_email_with_emoji_context(self) -> None:
+        router = make_router(["email"])
+        text = "Send to admin@corp.com for details"
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert "[EMAIL]" in scrubbed
+
+    def test_mixed_script_no_false_positive(self) -> None:
+        router = make_router(["email", "ssn", "phone"])
+        text = "Arabic text and Chinese text, no PII here"
+        _, matches = router.scrub(text)
+        assert matches == []
+
+    def test_accented_characters_around_pii(self) -> None:
+        router = make_router(["email"])
+        text = "Rene's email is rene@example.com, merci beaucoup"
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert "rene@example.com" not in scrubbed
+
+    def test_zero_width_chars_do_not_break_detection(self) -> None:
+        # Zero-width space between normal text and PII
+        router = make_router(["ssn"])
+        text = "SSN:\u200b123-45-6789"
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert "123-45-6789" not in scrubbed
+
+
+# ===========================================================================
+# 13. Very long single-line input
+# ===========================================================================
+
+
+class TestVeryLongInput:
+    """Ensure the router handles extremely long single-line strings."""
+
+    def test_long_line_with_pii_at_end(self) -> None:
+        filler = "a" * 100_000
+        text = filler + " user@example.com"
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert "user@example.com" not in scrubbed
+        assert scrubbed.startswith("a" * 100)
+
+    def test_long_line_with_pii_at_start(self) -> None:
+        filler = "b" * 100_000
+        text = "user@example.com " + filler
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 1
+        assert scrubbed.startswith("[EMAIL]")
+
+    def test_long_line_with_multiple_scattered_pii(self) -> None:
+        parts = []
+        for i in range(50):
+            parts.append("x" * 2000)
+            parts.append(f" user{i}@example.com ")
+        text = "".join(parts)
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 50
+        assert scrubbed.count("[EMAIL]") == 50
+
+
+# ===========================================================================
+# 14. Redacted values cannot be reversed
+# ===========================================================================
+
+
+class TestRedactionIrreversibility:
+    """Verify that after redaction, original PII values are truly gone."""
+
+    def test_original_email_not_in_scrubbed(self) -> None:
+        router = make_router(["email"])
+        original = "secret@private.com"
+        scrubbed, _ = router.scrub(f"Contact: {original}")
+        assert original not in scrubbed
+
+    def test_original_ssn_not_in_scrubbed(self) -> None:
+        router = make_router(["ssn"])
+        original = "999-88-7777"
+        scrubbed, _ = router.scrub(f"SSN: {original}")
+        assert original not in scrubbed
+
+    def test_original_credit_card_not_in_scrubbed(self) -> None:
+        router = make_router(["credit_card"])
+        original = "4111111111111111"
+        scrubbed, _ = router.scrub(f"Card: {original}")
+        assert original not in scrubbed
+
+    def test_original_iban_not_in_scrubbed(self) -> None:
+        router = make_router(["iban"])
+        original = "DE89370400440532013000"
+        scrubbed, _ = router.scrub(f"IBAN: {original}")
+        assert original not in scrubbed
+
+    def test_original_ip_not_in_scrubbed(self) -> None:
+        router = make_router(["ip_address"])
+        original = "192.168.1.100"
+        scrubbed, _ = router.scrub(f"Server: {original}")
+        assert original not in scrubbed
+
+    def test_original_dob_not_in_scrubbed(self) -> None:
+        router = make_router(["date_of_birth"])
+        original = "15/06/1990"
+        scrubbed, _ = router.scrub(f"DOB: {original}")
+        assert original not in scrubbed
+
+    def test_match_objects_contain_originals_but_scrubbed_does_not(self) -> None:
+        """Matches carry the original values for audit, but scrubbed text does not."""
+        router = make_router(["email", "ssn"])
+        text = "Email: a@b.com, SSN: 111-22-3333"
+        scrubbed, matches = router.scrub(text)
+        originals = {m.original for m in matches}
+        assert "a@b.com" in originals
+        assert "111-22-3333" in originals
+        for orig in originals:
+            assert orig not in scrubbed, f"Original PII '{orig}' leaked into scrubbed output"
+
+    def test_redacted_dict_values_cannot_be_reversed(self) -> None:
+        """Scrub a dict and verify no original PII in any value."""
+        router = make_router(["email", "ssn"])
+        data = {"contact": "a@b.com", "id": "111-22-3333", "safe": "hello"}
+        scrubbed, matches = router.scrub_dict(data)
+        originals = {m.original for m in matches}
+        import json
+        serialized = json.dumps(scrubbed)
+        for orig in originals:
+            assert orig not in serialized
+
+
+# ===========================================================================
+# 15. apply_to targets and logs target
+# ===========================================================================
+
+
+class TestApplyToTargets:
+    """Verify that apply_to config is properly stored."""
+
+    def test_default_apply_to(self) -> None:
+        config = PrivacyConfig(enabled=True, entities=["email"])
+        assert config.apply_to == ["outputs", "webhooks"]
+
+    def test_custom_apply_to_outputs_only(self) -> None:
+        config = PrivacyConfig(enabled=True, entities=["email"], apply_to=["outputs"])
+        router = PrivacyRouter(config)
+        assert router.config.apply_to == ["outputs"]
+        assert "webhooks" not in router.config.apply_to
+
+    def test_apply_to_logs_target(self) -> None:
+        config = PrivacyConfig(
+            enabled=True, entities=["email"], apply_to=["logs"]
+        )
+        router = PrivacyRouter(config)
+        assert "logs" in router.config.apply_to
+
+    def test_apply_to_all_three_targets(self) -> None:
+        config = PrivacyConfig(
+            enabled=True, entities=["email"],
+            apply_to=["outputs", "webhooks", "logs"],
+        )
+        router = PrivacyRouter(config)
+        assert set(router.config.apply_to) == {"outputs", "webhooks", "logs"}
+
+    def test_from_workflow_apply_to_logs(self) -> None:
+        router = PrivacyRouter.from_workflow(
+            workflow_privacy={"enabled": True, "apply_to": ["outputs", "logs"]},
+            server_config=None,
+        )
+        assert router is not None
+        assert "logs" in router.config.apply_to
+        assert "outputs" in router.config.apply_to
+        assert "webhooks" not in router.config.apply_to
+
+    def test_server_apply_to_comma_separated_with_logs(self) -> None:
+        router = PrivacyRouter.from_workflow(
+            workflow_privacy=None,
+            server_config={"enabled": True, "apply_to": "outputs,webhooks,logs"},
+        )
+        assert router is not None
+        assert set(router.config.apply_to) == {"outputs", "webhooks", "logs"}
+
+
+# ===========================================================================
+# 16. Per-server privacy config (env vars simulation)
+# ===========================================================================
+
+
+class TestServerConfig:
+    """Test server-level privacy configuration."""
+
+    def test_server_only_config(self) -> None:
+        router = PrivacyRouter.from_workflow(
+            workflow_privacy=None,
+            server_config={
+                "enabled": True,
+                "entities": ["email", "phone", "ssn"],
+                "mode": "redact",
+                "apply_to": ["outputs", "webhooks"],
+                "replacement_template": "[SCRUBBED:{entity_type}]",
+            },
+        )
+        assert router is not None
+        assert set(router.config.entities) == {"email", "phone", "ssn"}
+        assert router.config.mode == "redact"
+        scrubbed, _ = router.scrub("Email: a@b.com")
+        assert "[SCRUBBED:EMAIL]" in scrubbed
+
+    def test_server_audit_only_mode(self) -> None:
+        router = PrivacyRouter.from_workflow(
+            workflow_privacy=None,
+            server_config={
+                "enabled": True,
+                "entities": ["email"],
+                "mode": "audit_only",
+            },
+        )
+        assert router is not None
+        original = "user@test.com"
+        scrubbed, matches = router.scrub(original)
+        assert scrubbed == original  # audit_only does not modify
+        assert len(matches) == 1
+
+    def test_server_config_all_seven_entities(self) -> None:
+        all_entities = list(PII_PATTERNS.keys())
+        router = PrivacyRouter.from_workflow(
+            workflow_privacy=None,
+            server_config={"enabled": True, "entities": all_entities},
+        )
+        assert router is not None
+        assert set(router.config.entities) == set(all_entities)
+
+    def test_server_entities_string_with_spaces(self) -> None:
+        router = PrivacyRouter.from_workflow(
+            workflow_privacy=None,
+            server_config={"enabled": True, "entities": "email , phone , ssn"},
+        )
+        assert router is not None
+        assert set(router.config.entities) == {"email", "phone", "ssn"}
+
+
+# ===========================================================================
+# 17. IP address edge cases
+# ===========================================================================
+
+
+class TestIPAddressEdgeCases:
+    """Additional IP address detection edge cases."""
+
+    def test_loopback_address(self) -> None:
+        router = make_router(["ip_address"])
+        scrubbed, matches = router.scrub("Listening on 127.0.0.1")
+        assert len(matches) == 1
+        assert "[IP_ADDRESS]" in scrubbed
+
+    def test_broadcast_address(self) -> None:
+        router = make_router(["ip_address"])
+        scrubbed, matches = router.scrub("Broadcast: 255.255.255.255")
+        assert len(matches) == 1
+
+    def test_zero_address(self) -> None:
+        router = make_router(["ip_address"])
+        scrubbed, matches = router.scrub("Bind to 0.0.0.0")
+        assert len(matches) == 1
+
+    def test_multiple_ips_in_log(self) -> None:
+        router = make_router(["ip_address"])
+        text = "From 10.0.0.1 to 192.168.1.1 via 172.16.0.1"
+        scrubbed, matches = router.scrub(text)
+        assert len(matches) == 3
+        assert scrubbed.count("[IP_ADDRESS]") == 3
+
+    def test_ip_not_matched_for_partial_octet(self) -> None:
+        router = make_router(["ip_address"])
+        _, matches = router.scrub("Version 1.2.3 is here")
+        assert matches == []
+
+
+# ===========================================================================
+# 18. Empty patterns configuration
+# ===========================================================================
+
+
+class TestEmptyPatterns:
+    """Behavior when no patterns are configured."""
+
+    def test_empty_entities_returns_no_matches(self) -> None:
+        config = PrivacyConfig(enabled=True, entities=[])
+        router = PrivacyRouter(config)
+        text = "Email: a@b.com SSN: 123-45-6789"
+        scrubbed, matches = router.scrub(text)
+        assert scrubbed == text
+        assert matches == []
+
+    def test_scrub_dict_with_empty_entities(self) -> None:
+        config = PrivacyConfig(enabled=True, entities=[])
+        router = PrivacyRouter(config)
+        data = {"email": "a@b.com"}
+        scrubbed, matches = router.scrub_dict(data)
+        assert scrubbed == data
+        assert matches == []
+
+    def test_none_text_input(self) -> None:
+        """None/falsy values passed to scrub should return gracefully."""
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub("")
+        assert scrubbed == ""
+        assert matches == []
+
+    def test_scrub_dict_none_value(self) -> None:
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub_dict(None)
+        assert scrubbed is None
+        assert matches == []
+
+    def test_scrub_dict_integer_value(self) -> None:
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub_dict(42)
+        assert scrubbed == 42
+        assert matches == []
+
+    def test_scrub_dict_boolean_value(self) -> None:
+        router = make_router(["email"])
+        scrubbed, matches = router.scrub_dict(True)
+        assert scrubbed is True
+        assert matches == []

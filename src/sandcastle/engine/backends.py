@@ -452,11 +452,9 @@ class DockerBackend:
             )
             security_opt = []
             try:
-                with open(seccomp_path) as f:
-                    import json as _json
-
-                    seccomp_data = _json.dumps(_json.load(f))
-                    security_opt.append(f"seccomp={seccomp_data}")
+                seccomp_text = await asyncio.to_thread(Path(seccomp_path).read_text)
+                seccomp_data = json.dumps(json.loads(seccomp_text))
+                security_opt.append(f"seccomp={seccomp_data}")
             except (FileNotFoundError, ValueError) as exc:
                 logger.warning("Seccomp profile not loaded: %s", exc)
 

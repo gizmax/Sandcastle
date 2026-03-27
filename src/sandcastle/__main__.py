@@ -3040,9 +3040,7 @@ def _cmd_violations_list(args: argparse.Namespace) -> None:
         if isinstance(v, dict):
             sev = v.get("severity", "")
             # Colorize severity levels
-            if sev == "critical":
-                sev_str = _color(sev, _C.RED)
-            elif sev == "high":
+            if sev in ("critical", "high"):
                 sev_str = _color(sev, _C.RED)
             elif sev == "medium":
                 sev_str = _color(sev, _C.YELLOW)

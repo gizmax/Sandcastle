@@ -15,7 +15,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -238,7 +238,7 @@ def validate_license_key(key: str) -> LicenseInfo:
                 license_id=license_id,
                 detail=f"Malformed expiry date: {exp_str}",
             )
-        if exp_date < date.today():
+        if exp_date < datetime.now(timezone.utc).date():
             return LicenseInfo(
                 status=LicenseStatus.expired,
                 tier=tier,

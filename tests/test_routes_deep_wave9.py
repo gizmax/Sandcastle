@@ -626,14 +626,14 @@ class TestWorkflowSave:
             "/api/workflows",
             json={"name": name, "content": VALID_WORKFLOW},
         )
-        assert resp1.status_code == 200
+        assert resp1.status_code == 201
         v1 = resp1.json()["data"].get("version")
 
         resp2 = client.post(
             "/api/workflows",
             json={"name": name, "content": VALID_WORKFLOW_V2},
         )
-        assert resp2.status_code == 200
+        assert resp2.status_code == 201
         v2 = resp2.json()["data"].get("version")
         # Second save should get a higher version number
         if v1 is not None and v2 is not None:

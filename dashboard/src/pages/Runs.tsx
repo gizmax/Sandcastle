@@ -23,6 +23,7 @@ export default function Runs() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") || "all");
   const [workflowFilter, setWorkflowFilter] = useState(() => searchParams.get("workflow") || "");
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") || "");
   const [searchTerm, setSearchTerm] = useState(() => searchParams.get("search") || "");
   const [offset, setOffset] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -36,6 +37,12 @@ export default function Runs() {
   const [filterToDelete, setFilterToDelete] = useState<string | null>(null);
   const savePopoverRef = useRef<HTMLDivElement>(null);
   const limit = 20;
+
+  // Debounce search input: update the actual searchTerm after 300ms idle
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(searchInput), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const { savedFilters, saveCurrentFilter, deleteFilter, getFilter } = useSavedFilters();
 
@@ -58,7 +65,7 @@ export default function Runs() {
     return () => { cancelled = true; };
   }, []);
 
-  const hasActiveFilter = statusFilter !== "all" || searchTerm !== "" || workflowFilter !== "";
+  const hasActiveFilter = statusFilter !== "all" || searchInput !== "" || workflowFilter !== "";
 
   const currentFilterCriteria: SavedFilterCriteria = useMemo(() => ({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
@@ -70,6 +77,7 @@ export default function Runs() {
     const filter = getFilter(id);
     if (!filter) return;
     setStatusFilter(filter.filters.status ?? "all");
+    setSearchInput(filter.filters.search ?? "");
     setSearchTerm(filter.filters.search ?? "");
     setWorkflowFilter(filter.filters.workflow ?? "");
     setActiveFilterId(id);
@@ -79,6 +87,7 @@ export default function Runs() {
 
   const applyQuickFilter = useCallback((criteria: SavedFilterCriteria) => {
     setStatusFilter(criteria.status ?? "all");
+    setSearchInput(criteria.search ?? "");
     setSearchTerm(criteria.search ?? "");
     setWorkflowFilter(criteria.workflow ?? "");
     setActiveFilterId(null);
@@ -235,8 +244,8 @@ export default function Runs() {
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
             <input
               type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by ID or name..."
               aria-label="Search runs by ID or name"
               className={cn(
@@ -503,6 +512,7 @@ export default function Runs() {
                   onClick: () => {
                     setStatusFilter("all");
                     setWorkflowFilter("");
+                    setSearchInput("");
                     setSearchTerm("");
                   },
                 }

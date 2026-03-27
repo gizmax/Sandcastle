@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Play, AlertTriangle, BarChart3, Star, GitBranch,
   CheckCircle2, ArrowRight, Activity, DollarSign, CheckCircle,
-  Castle, Timer, Sparkles, X, Check,
+  Castle, Timer, Sparkles, X, Check, Shuffle, Wifi, Key, Rocket, Loader2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
@@ -14,7 +14,7 @@ import { useAdvisorContext } from "@/hooks/useAdvisorContext";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { cn, formatCost, formatRelativeTime } from "@/lib/utils";
+import { cn, formatCost, formatRelativeTime, buttonMd, buttonPrimary, buttonDanger, buttonSecondary, iconMd } from "@/lib/utils";
 import type { Insight, Severity } from "@/lib/insights";
 
 // ---------------------------------------------------------------------------
@@ -112,6 +112,38 @@ interface ProviderRecommendation {
   confidence: number;
 }
 
+interface AdvisorRecommendation {
+  workflow: string;
+  current_provider: string;
+  current_cost_30d: number;
+  suggested_provider: string;
+  suggested_model: string;
+  estimated_cost_30d: number;
+  savings_monthly: number;
+  savings_percent: number;
+  eu_compliant: boolean;
+  reason: string;
+}
+
+interface AdvisorRecommendationsData {
+  recommendations: AdvisorRecommendation[];
+  total_potential_savings: number;
+}
+
+interface FailoverEvent {
+  timestamp: string;
+  original_provider: string;
+  failover_provider: string;
+  reason: string;
+  cost_delta: number;
+}
+
+interface FailoverEventsData {
+  events: FailoverEvent[];
+  total_failovers_7d: number;
+  total_cost_delta_7d: number;
+}
+
 interface LayoutSwitcherProps {
   layout: string;
   setLayout: (l: string) => void;
@@ -145,7 +177,7 @@ function normaliseHeatmapCell(raw: HeatmapApiCell): HeatmapCell {
  * indicating whether that element has ever entered the viewport. Once
  * visible the observer disconnects so the widget stays mounted permanently.
  */
-function useLazyLoad(rootMargin = "200px"): [React.RefCallback<HTMLDivElement>, boolean] {
+function useLazyLoad(rootMargin = "500px"): [React.RefCallback<HTMLDivElement>, boolean] {
   const [visible, setVisible] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -410,38 +442,36 @@ function BentoQuickActions() {
       <button
         onClick={() => navigate("/workflows")}
         className={cn(
-          "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "bg-accent text-accent-foreground font-semibold",
-          "hover:bg-accent-hover transition-all duration-200 active:scale-[0.98]"
+          "flex items-center gap-3 rounded-xl w-full text-left font-semibold",
+          buttonMd, buttonPrimary,
+          "active:scale-[0.98]"
         )}
       >
-        <Play className="h-4 w-4 shrink-0" />
+        <Play className={cn(iconMd, "shrink-0")} />
         <span className="text-sm font-semibold">Run Workflow</span>
       </button>
 
       <button
         onClick={() => navigate("/runs?status=failed")}
         className={cn(
-          "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "border border-error/30 text-error",
-          "hover:bg-error/10 hover:border-error/50",
-          "transition-all duration-200 active:scale-[0.98]"
+          "flex items-center gap-3 rounded-xl w-full text-left font-semibold",
+          buttonMd, buttonDanger,
+          "active:scale-[0.98]"
         )}
       >
-        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <AlertTriangle className={cn(iconMd, "shrink-0")} />
         <span className="text-sm font-semibold">View Failures</span>
       </button>
 
       <button
         onClick={() => navigate("/runs?sort=cost")}
         className={cn(
-          "flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left",
-          "border border-border text-muted-foreground",
-          "hover:border-accent/30 hover:text-foreground hover:bg-background",
-          "transition-all duration-200 active:scale-[0.98]"
+          "flex items-center gap-3 rounded-xl w-full text-left font-semibold",
+          buttonMd, buttonSecondary,
+          "active:scale-[0.98]"
         )}
       >
-        <BarChart3 className="h-4 w-4 shrink-0" />
+        <BarChart3 className={cn(iconMd, "shrink-0")} />
         <span className="text-sm font-semibold">Cost Report</span>
       </button>
 
@@ -870,11 +900,64 @@ function BentoProviderCosts({
 
 function RecommendationBanner({
   recommendation,
+  advisorRecs,
+  totalSavings,
   onDismiss,
 }: {
-  recommendation: ProviderRecommendation;
+  recommendation: ProviderRecommendation | null;
+  advisorRecs: AdvisorRecommendation[];
+  totalSavings: number;
   onDismiss: () => void;
 }) {
+  // Prefer per-workflow advisor recommendations when available
+  if (advisorRecs.length > 0) {
+    return (
+      <div className={cn(
+        "rounded-2xl border border-accent/30 bg-accent/5",
+        "p-4 space-y-3"
+      )}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-accent shrink-0" />
+            <p className="text-sm font-semibold text-foreground">
+              Switch {advisorRecs.length} workflow{advisorRecs.length > 1 ? "s" : ""} and save ${totalSavings.toFixed(0)}/month
+            </p>
+          </div>
+          <button
+            onClick={onDismiss}
+            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            aria-label="Dismiss recommendation"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {advisorRecs.map((rec) => (
+            <div
+              key={rec.workflow}
+              className="rounded-lg bg-background/60 border border-border/50 p-2.5 flex flex-col gap-1"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground truncate">{rec.workflow}</span>
+                <span className="text-xs font-semibold text-success shrink-0">
+                  -${rec.savings_monthly.toFixed(0)}/mo
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {rec.current_provider} → {rec.suggested_provider}
+                {rec.eu_compliant && (
+                  <span className="ml-1 text-accent" title="EU data residency">EU</span>
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback to legacy single recommendation
+  if (!recommendation) return null;
   return (
     <div className={cn(
       "rounded-2xl border border-accent/30 bg-accent/5",
@@ -897,6 +980,156 @@ function RecommendationBanner({
       >
         <X className="h-4 w-4" />
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Provider auto-detection banner - shown on first visit / empty state
+// ---------------------------------------------------------------------------
+
+interface ProviderInfo {
+  id: string;
+  name: string;
+  status: "running" | "configured" | "unconfigured";
+  region: string;
+  latency_ms: number | null;
+}
+
+const PROVIDER_BANNER_DISMISSED_KEY = "sandcastle_provider_banner_dismissed";
+
+function ProviderStatusBanner() {
+  const navigate = useNavigate();
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(PROVIDER_BANNER_DISMISSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [apiKey, setApiKey] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchProviders = async () => {
+      try {
+        const res = await api.get<{ providers: ProviderInfo[] }>("/health/providers");
+        if (cancelled) return;
+        if (res.data?.providers) {
+          setProviders(res.data.providers);
+        }
+      } catch {
+        // Non-critical - banner simply won't show
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    void fetchProviders();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (dismissed || !loaded || providers.length === 0) return null;
+
+  const handleDismiss = () => {
+    setDismissed(true);
+    try {
+      localStorage.setItem(PROVIDER_BANNER_DISMISSED_KEY, "true");
+    } catch { /* ignore */ }
+  };
+
+  const ollamaRunning = providers.find((p) => p.id === "ollama" && p.status === "running");
+  const hasAnyActive = providers.some((p) => p.status === "running" || p.status === "configured");
+
+  const handleApiKeySubmit = () => {
+    if (apiKey.trim()) {
+      navigate("/settings");
+    }
+  };
+
+  return (
+    <div className="bg-surface rounded-2xl shadow-sm border border-border px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <Wifi className="h-4 w-4 text-accent shrink-0" />
+
+          {/* Provider badges */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {providers.map((p) => {
+              const isActive = p.status === "running" || p.status === "configured";
+              return (
+                <span
+                  key={p.id}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                    isActive
+                      ? "bg-success/10 text-success"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full shrink-0",
+                      isActive ? "bg-success" : "bg-muted-foreground/40"
+                    )}
+                  />
+                  {p.name}
+                  {p.status === "running" && p.latency_ms != null && (
+                    <span className="text-[10px] text-success/70">{p.latency_ms}ms</span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Ollama detected message */}
+          {ollamaRunning && (
+            <span className="text-xs font-medium text-success whitespace-nowrap">
+              Ollama detected - ready to use!
+            </span>
+          )}
+
+          {/* API key input when no provider is active */}
+          {!hasAnyActive && (
+            <div className="flex items-center gap-1.5">
+              <div className="relative">
+                <Key className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleApiKeySubmit(); }}
+                  placeholder="Paste any API key to start"
+                  className="h-7 w-48 rounded-lg border border-border bg-background pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-accent"
+                />
+              </div>
+              <button
+                onClick={handleApiKeySubmit}
+                disabled={!apiKey.trim()}
+                className={cn(
+                  "h-7 px-3 rounded-lg text-xs font-medium transition-colors",
+                  apiKey.trim()
+                    ? "bg-accent text-accent-foreground hover:bg-accent/90"
+                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                )}
+              >
+                Go
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={handleDismiss}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss provider banner"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -925,9 +1158,20 @@ function saveChecklistState(state: ChecklistState) {
   localStorage.setItem(CHECKLIST_KEY, JSON.stringify(state));
 }
 
+interface DemoRunResult {
+  run_id: string;
+  status: string;
+  outputs: { generate: string; summarize: string };
+  total_cost_usd: number;
+}
+
 function EmptyStateCTA() {
   const navigate = useNavigate();
   const [cls, setCls] = useState<ChecklistState>(getChecklistState);
+
+  // Demo workflow state
+  const [demoState, setDemoState] = useState<"idle" | "step1" | "step2" | "done" | "error">("idle");
+  const [demoOutput, setDemoOutput] = useState<string | null>(null);
 
   const missions = [
     {
@@ -1003,6 +1247,41 @@ function EmptyStateCTA() {
     const next = { ...cls, dismissed: true };
     setCls(next);
     saveChecklistState(next);
+  };
+
+  const runDemo = async () => {
+    setDemoState("step1");
+    setDemoOutput(null);
+    try {
+      await new Promise((r) => setTimeout(r, 1000));
+      setDemoState("step2");
+
+      const res = await api.post<DemoRunResult>("/workflows/run", {
+        workflow_name: "demo-hello-world",
+        workflow: {
+          name: "demo-hello-world",
+          description: "Your first Sandcastle workflow",
+          default_model: "sonnet",
+          steps: [
+            { id: "generate", prompt: "Write 3 interesting facts about sandcastles." },
+            { id: "summarize", prompt: "Summarize these facts in one sentence: {steps.generate.output}", depends_on: ["generate"] },
+          ],
+        },
+      });
+
+      if (res.data) {
+        setDemoOutput(res.data.outputs?.summarize || "Workflow completed successfully.");
+        setDemoState("done");
+        // Auto-check "first-run" in checklist
+        const next = { ...cls, completed: { ...cls.completed, "first-run": true } };
+        setCls(next);
+        saveChecklistState(next);
+      } else {
+        setDemoState("error");
+      }
+    } catch {
+      setDemoState("error");
+    }
   };
 
   return (
@@ -1083,6 +1362,84 @@ function EmptyStateCTA() {
         </div>
       )}
 
+      {/* Run Demo card */}
+      <div className={cn(
+        "bg-surface rounded-2xl shadow-sm border p-6",
+        demoState === "done" ? "border-success/30" : "border-border",
+      )}>
+        <div className="flex items-start gap-4">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 shrink-0">
+            <Rocket className="h-5 w-5 text-accent" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-foreground tracking-tight">
+              Run Your First Workflow
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              See Sandcastle in action. A 2-step demo that summarizes text.
+            </p>
+
+            <div className="mt-4">
+              {demoState === "idle" && (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => void runDemo()}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground",
+                      "hover:bg-accent-hover transition-all shadow-sm hover:shadow-md active:scale-[0.98] cursor-pointer"
+                    )}
+                  >
+                    Run Demo
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    Free with Ollama &middot; ~$0.01 with Claude
+                  </span>
+                </div>
+              )}
+
+              {demoState === "step1" && (
+                <div className="flex items-center gap-2.5">
+                  <Loader2 className="h-4 w-4 text-accent animate-spin" />
+                  <span className="text-sm text-foreground">Running step 1 of 2 - Generating facts...</span>
+                </div>
+              )}
+
+              {demoState === "step2" && (
+                <div className="flex items-center gap-2.5">
+                  <Loader2 className="h-4 w-4 text-accent animate-spin" />
+                  <span className="text-sm text-foreground">Running step 2 of 2 - Summarizing...</span>
+                </div>
+              )}
+
+              {demoState === "done" && demoOutput && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-success" />
+                    <span className="text-sm font-semibold text-success">Done!</span>
+                  </div>
+                  <div className="rounded-lg bg-accent/5 border border-accent/20 p-3">
+                    <p className="text-sm text-foreground leading-relaxed">{demoOutput}</p>
+                  </div>
+                </div>
+              )}
+
+              {demoState === "error" && (
+                <div className="space-y-1.5">
+                  <p className="text-sm text-error">Something went wrong.</p>
+                  <button
+                    onClick={() => void runDemo()}
+                    className="text-xs font-medium text-accent hover:text-accent-hover transition-colors cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Quick Run cards */}
       <div className="bg-surface rounded-2xl shadow-sm border border-border p-6">
         <div className="flex items-center justify-between mb-4">
@@ -1120,6 +1477,76 @@ function EmptyStateCTA() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Failover Events widget
+// ---------------------------------------------------------------------------
+
+function BentoFailoverEvents({ data }: { data: FailoverEventsData }) {
+  if (data.total_failovers_7d === 0) return null;
+
+  const lastEvent = data.events[0];
+  const lastTimeAgo = lastEvent ? formatRelativeTime(lastEvent.timestamp) : "";
+
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  // Extract short reason label (e.g. "429 rate-limit" from "429 rate-limit from anthropic")
+  const shortReason = (reason: string) => {
+    const fromIdx = reason.lastIndexOf(" from ");
+    return fromIdx > 0 ? reason.slice(0, fromIdx) : reason;
+  };
+
+  return (
+    <div className={cn(
+      "bg-surface rounded-2xl shadow-sm border border-border",
+      "hover:border-accent/30 transition-all duration-300",
+      "p-5 flex flex-col gap-3"
+    )}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 rounded-xl bg-warning/10 flex items-center justify-center">
+            <Shuffle className="h-4 w-4 text-warning" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Provider Failovers
+            </p>
+            <p className="text-2xl font-bold text-foreground leading-none mt-0.5">
+              {data.total_failovers_7d}
+            </p>
+          </div>
+        </div>
+        {data.total_cost_delta_7d > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 border border-warning/20 px-2.5 py-1 text-[11px] font-semibold text-warning">
+            <DollarSign className="h-3 w-3" />
+            +{formatCost(data.total_cost_delta_7d)} extra
+          </span>
+        )}
+      </div>
+
+      {lastEvent && (
+        <div className="rounded-xl bg-background border border-border px-3 py-2">
+          <p className="text-sm text-foreground">
+            <span className="text-muted-foreground">{lastTimeAgo}</span>
+            {" - "}
+            {capitalize(lastEvent.original_provider)}
+            <span className="text-muted-foreground mx-1">&rarr;</span>
+            {capitalize(lastEvent.failover_provider)}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {shortReason(lastEvent.reason)}
+          </p>
+        </div>
+      )}
+
+      {data.events.length > 1 && (
+        <p className="text-xs text-muted-foreground">
+          +{data.events.length - 1} more in the last 7 days
+        </p>
+      )}
     </div>
   );
 }
@@ -1172,11 +1599,22 @@ export default function OverviewBento() {
   // -- Below-fold state (fetched lazily when scrolled into view) --
   const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
+  const [failoverData, setFailoverData] = useState<FailoverEventsData | null>(null);
   const [providerCosts, setProviderCosts] = useState<ProviderCostsData | null>(null);
   const [providerSavings, setProviderSavings] = useState<ProviderSavingsData | null>(null);
   const [topRecommendation, setTopRecommendation] = useState<ProviderRecommendation | null>(null);
+  const [advisorRecs, setAdvisorRecs] = useState<AdvisorRecommendation[]>([]);
+  const [advisorTotalSavings, setAdvisorTotalSavings] = useState(0);
   const [recDismissed, setRecDismissed] = useState<boolean>(false);
   const [belowFoldLoaded, setBelowFoldLoaded] = useState(false);
+
+  // Gate below-fold fetches behind a 1-second timer so they never block
+  // the initial render, even when sections start inside the viewport.
+  const [belowFoldReady, setBelowFoldReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setBelowFoldReady(true), 1000);
+    return () => clearTimeout(t);
+  }, []);
 
   const advisor = useAdvisorContext();
   const { subscribe } = useEventStreamContext();
@@ -1187,6 +1625,7 @@ export default function OverviewBento() {
   const [providerRef, providerVisible] = useLazyLoad();
   const [forecastRef, forecastVisible] = useLazyLoad();
   const [chartsRef, chartsVisible] = useLazyLoad();
+  const [failoverRef, failoverVisible] = useLazyLoad();
 
   // Count distinct providers from cost data to decide visibility
   const uniqueProviderCount = useMemo(() => {
@@ -1254,9 +1693,10 @@ export default function OverviewBento() {
     return () => { cancelled = true; };
   }, [retryCount]);
 
-  // Below-fold fetch: heatmap (triggered when heatmap sentinel enters viewport)
+  // Below-fold fetch: heatmap (triggered when heatmap sentinel enters viewport
+  // AND the 1-second below-fold gate has elapsed)
   useEffect(() => {
-    if (!heatmapVisible || heatmapLoaded) return;
+    if (!belowFoldReady || !heatmapVisible || heatmapLoaded) return;
     let cancelled = false;
     const fetchHeatmap = async () => {
       try {
@@ -1273,12 +1713,12 @@ export default function OverviewBento() {
     };
     void fetchHeatmap();
     return () => { cancelled = true; };
-  }, [heatmapVisible, heatmapLoaded]);
+  }, [belowFoldReady, heatmapVisible, heatmapLoaded]);
 
-  // Below-fold fetch: provider costs, savings, recommendations
-  // Triggered when provider section OR forecast section scrolls into view
+  // Below-fold fetch: provider costs, savings, recommendation banner
+  // Gated on belowFoldReady (1s after mount) AND visibility of provider/forecast sections
   useEffect(() => {
-    if (belowFoldLoaded) return;
+    if (!belowFoldReady || belowFoldLoaded) return;
     if (!providerVisible && !forecastVisible) return;
     let cancelled = false;
     const fetchProviderData = async () => {
@@ -1296,7 +1736,8 @@ export default function OverviewBento() {
             (r) => r.severity === "high" && !isDismissed(r.title)
           ) ?? null;
           setTopRecommendation(high);
-          setRecDismissed(high === null);
+          // If no advisor recs have loaded yet either, mark as dismissed
+          if (high === null && advisorRecs.length === 0) setRecDismissed(true);
         }
       } catch {
         // Provider data is non-critical, fail silently
@@ -1306,12 +1747,69 @@ export default function OverviewBento() {
     };
     void fetchProviderData();
     return () => { cancelled = true; };
-  }, [providerVisible, forecastVisible, belowFoldLoaded]);
+  }, [belowFoldReady, providerVisible, forecastVisible, belowFoldLoaded, advisorRecs.length]);
+
+  // Below-fold fetch: failover events (only when the failover section is visible)
+  const [failoverLoaded, setFailoverLoaded] = useState(false);
+  useEffect(() => {
+    if (!belowFoldReady || !failoverVisible || failoverLoaded) return;
+    let cancelled = false;
+    const fetchFailover = async () => {
+      try {
+        const failoverRes = await api.get<FailoverEventsData>("/stats/failover-events");
+        if (cancelled) return;
+        if (failoverRes.data) setFailoverData(failoverRes.data);
+      } catch {
+        // Failover data is non-critical, fail silently
+      } finally {
+        if (!cancelled) setFailoverLoaded(true);
+      }
+    };
+    void fetchFailover();
+    return () => { cancelled = true; };
+  }, [belowFoldReady, failoverVisible, failoverLoaded]);
+
+  // Below-fold fetch: advisor recommendations (only when provider section is visible)
+  const [advisorRecsLoaded, setAdvisorRecsLoaded] = useState(false);
+  useEffect(() => {
+    if (!belowFoldReady || !providerVisible || advisorRecsLoaded) return;
+    let cancelled = false;
+    const fetchAdvisorRecs = async () => {
+      try {
+        const advisorRes = await api.get<AdvisorRecommendationsData>("/advisor/recommendations");
+        if (cancelled) return;
+        let hasAdvisorRecs = false;
+        if (advisorRes.data?.recommendations?.length) {
+          const dismissKey = `advisor-${advisorRes.data.total_potential_savings.toFixed(0)}`;
+          if (!isDismissed(dismissKey)) {
+            setAdvisorRecs(advisorRes.data.recommendations);
+            setAdvisorTotalSavings(advisorRes.data.total_potential_savings);
+            hasAdvisorRecs = true;
+          }
+        }
+        // Update dismissed state once we know about both recommendation sources
+        if (!hasAdvisorRecs && !topRecommendation) {
+          setRecDismissed(true);
+        }
+      } catch {
+        // Advisor recommendations are non-critical, fail silently
+      } finally {
+        if (!cancelled) setAdvisorRecsLoaded(true);
+      }
+    };
+    void fetchAdvisorRecs();
+    return () => { cancelled = true; };
+  }, [belowFoldReady, providerVisible, advisorRecsLoaded, topRecommendation]);
 
   const dismissRecommendation = useCallback(() => {
+    if (advisorRecs.length > 0) {
+      dismissRec(`advisor-${advisorTotalSavings.toFixed(0)}`);
+      setAdvisorRecs([]);
+      setAdvisorTotalSavings(0);
+    }
     if (topRecommendation) dismissRec(topRecommendation.title);
     setRecDismissed(true);
-  }, [topRecommendation]);
+  }, [topRecommendation, advisorRecs, advisorTotalSavings]);
 
   // Refresh sparklines + stats when run.completed or run.failed SSE events arrive
   useEffect(() => {
@@ -1366,7 +1864,7 @@ export default function OverviewBento() {
     );
   }
 
-  const successRate = stats ? Math.round(stats.success_rate * 100) : 0;
+  const successRate = stats?.success_rate != null ? Math.round(stats.success_rate * 100) : 0;
   const totalRuns = stats?.total_runs_today ?? 0;
   const totalCost = stats?.total_cost_today ?? 0;
   const avgDuration = stats?.avg_duration_seconds ?? 0;
@@ -1398,6 +1896,9 @@ export default function OverviewBento() {
           avgDuration={0}
         />
 
+        {/* Provider auto-detection banner */}
+        <ProviderStatusBanner />
+
         {/* Empty state CTA */}
         <EmptyStateCTA />
       </div>
@@ -1417,10 +1918,12 @@ export default function OverviewBento() {
         {/* Layout switcher removed - bento is the only layout */}
       </div>
 
-      {/* Recommendation Banner - shown only when high severity, not dismissed, and multiple providers */}
-      {topRecommendation && !recDismissed && showProviderCosts && (
+      {/* Recommendation Banner - per-workflow advisor recs or legacy single recommendation */}
+      {!recDismissed && (advisorRecs.length > 0 || (topRecommendation && showProviderCosts)) && (
         <RecommendationBanner
           recommendation={topRecommendation}
+          advisorRecs={advisorRecs}
+          totalSavings={advisorTotalSavings}
           onDismiss={dismissRecommendation}
         />
       )}
@@ -1497,6 +2000,13 @@ export default function OverviewBento() {
       {/* Row 3.5: Anomalies (shown only when present) - uses above-fold data */}
       {anomalies.length > 0 && <BentoAnomalies anomalies={anomalies} />}
 
+      {/* Row 3.55: Failover Events (shown only when failovers > 0) - lazy loaded */}
+      <div ref={failoverRef}>
+        {failoverData && failoverData.total_failovers_7d > 0 && (
+          <BentoFailoverEvents data={failoverData} />
+        )}
+      </div>
+
       {/* Row 3.6: Provider Cost card + savings - lazy loaded, hidden when <= 1 provider */}
       <div ref={providerRef}>
         {!belowFoldLoaded ? (
@@ -1571,7 +2081,7 @@ export default function OverviewBento() {
       </div>
 
       {/* Row 5: Runs chart + Cost chart - lazy loaded */}
-      {stats && stats.runs_by_day.length > 0 && (
+      {stats && stats.runs_by_day?.length > 0 && (
         <div ref={chartsRef}>
           {!chartsVisible ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">

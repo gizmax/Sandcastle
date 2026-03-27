@@ -760,6 +760,65 @@ const MOCK_VIOLATION_STATS = {
   })),
 };
 
+const MOCK_MEMORIES = [
+  {
+    id: "mem-a1b2c3d4e5f6",
+    memory: "The lead-enrichment workflow performs best when LinkedIn profile URLs are included in the input data. Enrichment quality drops ~30% without them.",
+    metadata: { source_workflow: "lead-enrichment", importance: 0.92, decay: 0.05, tags: ["optimization", "data-quality"] },
+    created_at: h(2),
+    updated_at: h(1),
+  },
+  {
+    id: "mem-b2c3d4e5f6a1",
+    memory: "GPT-4o-mini is sufficient for competitor-monitor summarization steps. Switching from GPT-4o saved $0.40/run with no quality degradation.",
+    metadata: { source_workflow: "competitor-monitor", importance: 0.85, decay: 0.08, tags: ["cost", "model-selection"] },
+    created_at: h(12),
+    updated_at: h(6),
+  },
+  {
+    id: "mem-c3d4e5f6a1b2",
+    memory: "SEO audit results should be cached for 24h. Google Search Console API has strict rate limits (1200 req/day) and re-crawling within the same day yields identical results.",
+    metadata: { source_workflow: "seo-audit", importance: 0.78, decay: 0.12, tags: ["rate-limit", "caching"] },
+    created_at: h(48),
+    updated_at: h(24),
+  },
+  {
+    id: "mem-d4e5f6a1b2c3",
+    memory: "User prefers JSON output format over markdown tables for data-heavy reports. This was confirmed across 3 different workflow runs.",
+    metadata: { source_workflow: "global", importance: 0.71, decay: 0.15, tags: ["user-preference", "output-format"] },
+    created_at: h(72),
+    updated_at: h(48),
+  },
+  {
+    id: "mem-e5f6a1b2c3d4",
+    memory: "The Exa search connector returns higher quality results when queries include date ranges. Always append 'after:YYYY-MM-DD' for time-sensitive research.",
+    metadata: { source_workflow: "lead-enrichment", importance: 0.88, decay: 0.03, tags: ["connector", "exa", "search-quality"] },
+    created_at: h(6),
+    updated_at: h(3),
+  },
+  {
+    id: "mem-f6a1b2c3d4e5",
+    memory: "Browserbase sessions should be limited to 60 seconds max. Longer sessions often timeout and cause step failures in the dead letter queue.",
+    metadata: { source_workflow: "seo-audit", importance: 0.95, decay: 0.02, tags: ["reliability", "browser", "timeout"] },
+    created_at: h(1),
+    updated_at: h(0.5),
+  },
+  {
+    id: "mem-a2b3c4d5e6f7",
+    memory: "When processing European company data, always use the EU-based Mistral models to comply with GDPR data residency requirements.",
+    metadata: { source_workflow: "global", importance: 0.97, decay: 0.01, tags: ["compliance", "gdpr", "eu-ai-act"] },
+    created_at: h(24),
+    updated_at: h(12),
+  },
+  {
+    id: "mem-b3c4d5e6f7a2",
+    memory: "Parallel step execution with more than 5 concurrent API calls triggers rate limiting on the OpenAI API. Keep parallelism to max 4 for stability.",
+    metadata: { source_workflow: "lead-enrichment", importance: 0.82, decay: 0.10, tags: ["rate-limit", "parallelism", "stability"] },
+    created_at: h(96),
+    updated_at: h(72),
+  },
+];
+
 const MOCK_OPTIMIZER_DECISIONS = [
   {
     id: "opt-001",
@@ -3374,13 +3433,14 @@ const MOCK_RUN_COMPARE = {
   ],
 };
 
+// Fields match backend SettingsResponse schema exactly
 const MOCK_SETTINGS = {
   anthropic_api_key: "****Qf8x",
-  mistral_api_key: "****Eu4m",
+  e2b_api_key: "****mN2k",
   openai_api_key: "****xK9m",
+  mistral_api_key: "****Eu4m",
   minimax_api_key: "",
   openrouter_api_key: "****qR7z",
-  e2b_api_key: "****mN2k",
   auth_required: true,
   dashboard_origin: "http://localhost:5173",
   default_max_cost_usd: 5.0,
@@ -5884,7 +5944,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.2666", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.2666b1", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -6130,6 +6190,100 @@ const routes: MockRoute[] = [
       ],
     }),
   },
+  // GET /advisor/recommendations - per-workflow cost recommendation engine
+  {
+    match: /^\/advisor\/recommendations$/,
+    method: "GET",
+    handler: () => ({
+      recommendations: [
+        {
+          workflow: "lead-enrichment",
+          current_provider: "claude",
+          current_cost_30d: 45.20,
+          suggested_provider: "mistral",
+          suggested_model: "mistral/small",
+          estimated_cost_30d: 12.50,
+          savings_monthly: 32.70,
+          savings_percent: 72.3,
+          eu_compliant: true,
+          reason: "This workflow uses Claude at $45.20/mo - Mistral (mistral/small) would cost $12.50 (72% less) with EU data residency included",
+        },
+        {
+          workflow: "competitor-monitor",
+          current_provider: "claude",
+          current_cost_30d: 38.90,
+          suggested_provider: "mistral",
+          suggested_model: "mistral/large",
+          estimated_cost_30d: 15.60,
+          savings_monthly: 23.30,
+          savings_percent: 59.9,
+          eu_compliant: true,
+          reason: "This workflow uses Claude at $38.90/mo - Mistral (mistral/large) would cost $15.60 (60% less) with EU data residency included",
+        },
+        {
+          workflow: "weekly-report",
+          current_provider: "claude",
+          current_cost_30d: 28.40,
+          suggested_provider: "minimax",
+          suggested_model: "minimax/m2.5",
+          estimated_cost_30d: 9.00,
+          savings_monthly: 19.40,
+          savings_percent: 68.3,
+          eu_compliant: false,
+          reason: "This workflow uses Claude at $28.40/mo - MiniMax (minimax/m2.5) would cost $9.00 (68% less)",
+        },
+      ],
+      total_potential_savings: 75.40,
+    }),
+  },
+  // GET /stats/failover-events
+  {
+    match: /^\/stats\/failover-events$/,
+    method: "GET",
+    handler: () => {
+      return {
+        events: [
+          {
+            timestamp: h(2),
+            original_provider: "anthropic",
+            failover_provider: "mistral",
+            reason: "429 rate-limit from anthropic",
+            cost_delta: 0.02,
+          },
+          {
+            timestamp: h(8),
+            original_provider: "anthropic",
+            failover_provider: "openai",
+            reason: "500 server error from anthropic",
+            cost_delta: 0.05,
+          },
+          {
+            timestamp: h(26),
+            original_provider: "openai",
+            failover_provider: "mistral",
+            reason: "ConnectError from openai",
+            cost_delta: 0.01,
+          },
+          {
+            timestamp: h(52),
+            original_provider: "anthropic",
+            failover_provider: "mistral",
+            reason: "429 rate-limit from anthropic",
+            cost_delta: 0.03,
+          },
+          {
+            timestamp: h(120),
+            original_provider: "mistral",
+            failover_provider: "anthropic",
+            reason: "502 server error from mistral",
+            cost_delta: 0.01,
+          },
+        ],
+        total_failovers_7d: 5,
+        total_cost_delta_7d: 0.12,
+      };
+    },
+  },
   {
     match: /^\/workflows$/,
     method: "GET",
@@ -6161,8 +6315,11 @@ const routes: MockRoute[] = [
       }
       const offset = Number(_params.offset || 0);
       const limit = Number(_params.limit || 20);
+      // Backend RunListItem schema: run_id, workflow_name, status, total_cost_usd,
+      // started_at, completed_at, parent_run_id (no risk_level)
+      const items = filtered.slice(offset, offset + limit).map(({ risk_level: _, ...rest }) => rest);
       return {
-        _data: filtered.slice(offset, offset + limit),
+        _data: items,
         _meta: { total: filtered.length, limit, offset },
       };
     },
@@ -6251,7 +6408,9 @@ const routes: MockRoute[] = [
     match: /^\/autopilot\/stats$/,
     handler: () => MOCK_AUTOPILOT_STATS,
   },
-  // GET /evolution
+  // NOTE: Backend has no GET /evolution list endpoint. The dashboard fetches
+  // evolution data via GET /evolution/{name}/status for each workflow. This
+  // mock route is kept for dashboard convenience but has no backend equivalent.
   {
     match: /^\/evolution$/,
     method: "GET",
@@ -6622,7 +6781,8 @@ const routes: MockRoute[] = [
   {
     match: /^\/check-update$/,
     method: "GET",
-    handler: () => ({ current_version: "0.2666", latest_version: "0.2666", update_available: false }),
+    // Backend UpdateCheckResponse has release_url and install_command fields
+    handler: () => ({ current_version: "0.2666b1", latest_version: "0.2666", update_available: false, release_url: "https://github.com/gizmax/Sandcastle/releases", install_command: "pip install --upgrade sandcastle-ai" }),
   },
   // GET /browse (template browser - same as /templates but with different shape)
   {
@@ -6912,7 +7072,7 @@ const routes: MockRoute[] = [
   {
     match: /^\/memories$/,
     method: "GET",
-    handler: () => ({ memories: [], total: 0 }),
+    handler: () => ({ memories: MOCK_MEMORIES, total: MOCK_MEMORIES.length }),
   },
   // POST /memories
   {
@@ -6927,7 +7087,18 @@ const routes: MockRoute[] = [
   {
     match: /^\/memories\/search$/,
     method: "POST",
-    handler: () => ({ memories: [], total: 0 }),
+    handler: (_params, body) => {
+      const b = body as { query?: string } | undefined;
+      const query = (b?.query || "").toLowerCase();
+      if (!query) return { memories: MOCK_MEMORIES, total: MOCK_MEMORIES.length };
+      const filtered = MOCK_MEMORIES.filter(
+        (m) =>
+          m.memory.toLowerCase().includes(query) ||
+          (m.metadata.tags && m.metadata.tags.some((t: string) => t.toLowerCase().includes(query))) ||
+          (m.metadata.source_workflow && m.metadata.source_workflow.toLowerCase().includes(query))
+      );
+      return { memories: filtered, total: filtered.length };
+    },
   },
   // DELETE /memories/{id}
   {
@@ -7090,12 +7261,11 @@ const routes: MockRoute[] = [
       current_provider: "mistral",
       current_model: "mistral-large-latest",
       data_residency: "eu",
+      // Backend only exposes anthropic, mistral, openai, ollama - no google or minimax
       available_providers: [
         { id: "anthropic", name: "Anthropic (Claude)", region: "us", configured: true, status: "ok" },
         { id: "mistral", name: "Mistral", region: "eu", configured: true, status: "ok" },
         { id: "openai", name: "OpenAI", region: "us", configured: true, status: "ok" },
-        { id: "google", name: "Google (via OpenRouter)", region: "us", configured: true, status: "ok" },
-        { id: "minimax", name: "MiniMax", region: "us", configured: false, status: "unconfigured" },
         { id: "ollama", name: "Ollama (Local)", region: "local", configured: false, status: "not_detected" },
       ],
     }),
@@ -7153,7 +7323,131 @@ const routes: MockRoute[] = [
         retention_days: 90,
         audit_trail: true,
         generated_at: new Date().toISOString(),
-        notice: `## Privacy Notice - Sandcastle Data Processing\n\n**Effective date:** ${today}\n\n### Data Controller\nSandcastle instance operator.\n\n### Processing Purpose\nWorkflow automation for **${label}**.\n\n### AI Provider\nData submitted to workflow steps is processed by **Mistral AI**.\nData residency: **European Union (France)**.\n\n### PII Redaction\nPII redaction is **enabled**. Personal identifiers (email, phone, SSN, credit card) are automatically redacted before processing.\n\n### Data Retention\nWorkflow run results and audit events are retained for **90 days** before automatic deletion.\n\n### Audit Trail\nAll workflow executions are recorded in a tamper-evident audit log with SHA-256 hash chaining.\n\n### Your Rights (GDPR Art. 15-22)\nYou have the right to access, rectify, erase, restrict, and port your personal data.\n\n### Legal Basis\nProcessing is performed under legitimate interest (Art. 6(1)(f) GDPR) for workflow automation tasks.`,
+        notice: `## Privacy Notice - Sandcastle Data Processing\n\n**Effective date:** ${today}\n\n### Data Controller\nSandcastle instance operator.\n\n### Processing Purpose\nWorkflow automation for **${label}**.\n\n### AI Provider\nData submitted to workflow steps is processed by **Mistral AI**.\nData residency: **European Union (France)**.\n\n### PII Redaction\nPII redaction is **enabled**. Personal identifiers (email, phone, SSN, credit card) are automatically redacted before processing.\n\n### Data Retention\nWorkflow run results and audit events are retained for **90 days** before automatic deletion.\n\n### Audit Trail\nAll workflow executions are recorded in a tamper-evident audit log with SHA-256 hash chaining.\n\n### Your Rights (GDPR Art. 15-22)\nYou have the right to access, rectify, erase, restrict, and port your personal data.\nContact the instance operator to exercise these rights.\n\n### Legal Basis\nProcessing is performed under legitimate interest (Art. 6(1)(f) GDPR) for workflow automation tasks.`,
+      };
+    },
+  },
+  // --- Missing endpoints added to match backend ---
+  // GET /health/providers - provider connectivity check
+  {
+    match: /^\/health\/providers$/,
+    method: "GET",
+    handler: () => ({
+      anthropic: { status: "ok", latency_ms: 142.3, region: "us" },
+      mistral: { status: "ok", latency_ms: 89.1, region: "eu" },
+      openai: { status: "ok", latency_ms: 168.5, region: "us" },
+      ollama: { status: "not_detected", latency_ms: null, region: "local" },
+    }),
+  },
+  // POST /runs/estimate - cost estimation before execution
+  {
+    match: /^\/runs\/estimate$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { yaml_content?: string } | undefined;
+      void b;
+      return {
+        workflow_name: "estimated-workflow",
+        valid: true,
+        total_estimated_cost_usd: 0.1234,
+        steps: [
+          { step_id: "step_1", type: "standard", model: "sonnet", estimated_cost_usd: 0.0891, note: "~10000 in + ~7500 out tokens" },
+          { step_id: "step_2", type: "standard", model: "haiku", estimated_cost_usd: 0.0343, note: "~10000 in + ~7500 out tokens" },
+        ],
+        validation_errors: [],
+        disclaimer: "Estimates based on average token usage. Actual costs may vary.",
+      };
+    },
+  },
+  // POST /advisor/explain - explain step failure with AI
+  {
+    match: /^\/advisor\/explain$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { step_id?: string; error?: string } | undefined;
+      return {
+        explanation: `The step '${b?.step_id || "unknown"}' failed because: ${b?.error || "unknown error"}. This is typically caused by an upstream API timeout or rate limit. Consider adding retry logic or increasing the timeout.`,
+        suggestion: "Add retry_count: 3 and retry_delay: 5 to the step configuration.",
+        confidence: 0.85,
+      };
+    },
+  },
+  // POST /hub/submit - submit community template
+  {
+    match: /^\/hub\/submit$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { name?: string; yaml_content?: string } | undefined;
+      return {
+        slug: `user/${(b?.name || "untitled").toLowerCase().replace(/\s+/g, "-")}`,
+        status: "pending",
+        message: "Template submitted for review",
+      };
+    },
+  },
+  // GET /hub/community - community-submitted templates
+  {
+    match: /^\/hub\/community$/,
+    method: "GET",
+    handler: () => ({ _data: [], _meta: { total: 0, limit: 50, offset: 0 } }),
+  },
+  // POST /hub/templates/{slug}/rate
+  {
+    match: /^\/hub\/templates\/(.+)\/rate$/,
+    method: "POST",
+    handler: (params) => ({ slug: params._1, rating: 5, message: "Rating recorded" }),
+  },
+  // POST /hub/templates/{slug}/download
+  {
+    match: /^\/hub\/templates\/(.+)\/download$/,
+    method: "POST",
+    handler: (params) => ({ slug: params._1, downloaded: true }),
+  },
+  // GET /health/providers - provider auto-detection
+  {
+    match: /^\/health\/providers$/,
+    method: "GET",
+    handler: () => ({
+      providers: [
+        { id: "ollama", name: "Ollama (Local)", status: "running", region: "local", latency_ms: 12 },
+        { id: "anthropic", name: "Anthropic (Claude)", status: "configured", region: "us", latency_ms: null },
+        { id: "mistral", name: "Mistral", status: "configured", region: "eu", latency_ms: null },
+        { id: "openai", name: "OpenAI", status: "unconfigured", region: "us", latency_ms: null },
+        { id: "minimax", name: "MiniMax", status: "unconfigured", region: "us", latency_ms: null },
+      ],
+    }),
+  },
+  // POST /workflows/run - run a workflow (supports demo-hello-world)
+  {
+    match: /^\/workflows\/run$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { workflow_name?: string } | undefined;
+      if (b?.workflow_name === "demo-hello-world") {
+        return {
+          run_id: `demo-${Date.now().toString(36)}`,
+          status: "completed",
+          workflow_name: "demo-hello-world",
+          outputs: {
+            generate:
+              "1. The tallest sandcastle ever built was over 57 feet (17.65 meters) tall, constructed in Binz, Germany in 2019 by a team of sculptors. 2. Sand grains are most stable when mixed with about 1% water by volume - too dry and they crumble, too wet and they slump. 3. Professional sand sculptors use no adhesives; the structures hold together purely through the friction and capillary bridges between compacted wet grains.",
+            summarize:
+              "Sandcastles are engineering marvels held together by water and friction alone, with record structures exceeding 57 feet tall thanks to the precise 1% moisture ratio that professional sculptors rely on without any adhesives.",
+          },
+          total_cost_usd: 0.008,
+          started_at: new Date(Date.now() - 3000).toISOString(),
+          completed_at: new Date().toISOString(),
+        };
+      }
+      // Generic fallback for other workflows
+      return {
+        run_id: `run-${Date.now().toString(36)}`,
+        status: "completed",
+        workflow_name: b?.workflow_name || "unknown",
+        outputs: { result: "Workflow completed" },
+        total_cost_usd: 0.05,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
       };
     },
   },

@@ -12,7 +12,7 @@ import contextlib
 import json
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -737,7 +737,8 @@ class TestLicenseExpiryEdgeCases:
         """A license that expired yesterday should be expired."""
         from sandcastle.engine.license import LicenseStatus, validate_license_key
 
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        # Use UTC date to match the production code's UTC-based expiry check
+        yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
         payload = json.dumps({
             "v": 1, "tier": "pro", "licensee": "Yesterday Corp",
             "max_seats": 1, "exp": yesterday,

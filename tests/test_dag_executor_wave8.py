@@ -250,8 +250,8 @@ steps:
         assert isinstance(errors, list)
 
     def test_depends_on_string_instead_of_list(self):
-        """depends_on as a string (not list) should be handled gracefully."""
-        # YAML might parse `depends_on: step1` as a string
+        """depends_on as a string (not list) should be coerced to a list."""
+        # YAML might parse `depends_on: step1` as a string instead of ["step1"]
         wf = parse_yaml_string("""
 name: bad-deps
 steps:
@@ -261,15 +261,14 @@ steps:
     depends_on: step1
     prompt: "second"
 """)
-        # YAML parses `depends_on: step1` as the string "step1"
-        # _parse_step uses data.get("depends_on", []) which returns "step1" as string.
-        # StepDefinition.depends_on would be "step1" (a string, iterable as chars).
+        # _parse_step now coerces non-list depends_on to a list,
+        # so "step1" becomes ["step1"] and validation should pass.
         errors = validate(wf)
-        # Since "step1" is iterable as chars ["s","t","e","p","1"],
-        # each char becomes a "dep" - all would be unknown steps.
         dep_errors = [e for e in errors if "depends on unknown" in e.lower()]
-        # Expect errors because individual chars aren't valid step IDs
-        assert len(dep_errors) > 0
+        assert len(dep_errors) == 0
+        # Verify the coercion actually happened
+        step2 = wf.get_step("step2")
+        assert step2.depends_on == ["step1"]
 
     def test_negative_timeout_rejected(self):
         """Step with negative timeout should fail validation."""

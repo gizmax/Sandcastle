@@ -71,7 +71,7 @@ steps:
 
 ALL_17_STEP_TYPES = """\
 name: all-step-types
-description: Workflow exercising all 17 step types
+description: Workflow exercising all step types
 steps:
   - id: std-step
     type: standard
@@ -206,6 +206,20 @@ steps:
       params:
         title: "{steps.std-step.output}"
         body: "Auto-generated issue"
+
+  - id: openclaw-step
+    type: openclaw
+    depends_on: [std-step]
+    openclaw_config:
+      gateway_url: "https://openclaw.example.com/v1"
+      message: "Summarize {steps.std-step.output}"
+      timeout_seconds: 120
+
+  - id: parse-step
+    type: parse
+    depends_on: [http-step]
+    parse_config:
+      output: json
 """
 
 COMPOSIO_TEMPLATE_ACTION = """\

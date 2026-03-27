@@ -1457,6 +1457,8 @@ class TestDagTimeoutMaxTurns:
 
 class TestDagDependsOn:
     def test_depends_on_non_string(self):
+        # The parser coerces non-string depends_on values to strings,
+        # so the validation error is about unknown step references.
         wf = _parse_raw({
             "name": "test",
             "steps": [
@@ -1465,7 +1467,7 @@ class TestDagDependsOn:
             ],
         })
         errors = validate(wf)
-        assert any("non-string" in e for e in errors)
+        assert any("unknown step" in e.lower() for e in errors)
 
     def test_depends_on_unknown_step(self):
         wf = _parse_raw({

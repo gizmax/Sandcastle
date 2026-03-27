@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from sandcastle import __version__
 from sandcastle.api.a2a import a2a_router
@@ -275,8 +276,9 @@ async def lifespan(app: FastAPI):
                     )
                     setattr(settings, key, getattr(validated, key))
                 except Exception as e:
+                    # Never log the value - it may be an API key or secret
                     logger.warning(
-                        f"Ignoring invalid saved setting {key}={value!r}: {e}"
+                        f"Ignoring invalid saved setting {key}=<redacted>: {e}"
                     )
 
         if saved:
@@ -418,13 +420,16 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# Auth (added first = innermost middleware)
+# GZip compression (added first = innermost, compresses all responses >= 1KB)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Auth (added second = wraps gzip)
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
-# Security headers (added second = wraps auth)
+# Security headers (added third = wraps auth + gzip)
 app.add_middleware(BaseHTTPMiddleware, dispatch=security_headers_middleware)
 
-# CORS (added third = outermost middleware, wraps everything including auth + security headers)
+# CORS (added fourth = outermost middleware, wraps everything)
 # Only allow the configured dashboard origin plus the two default Vite dev
 # server ports (5173 primary, 5174 fallback). Previously ports 5173-5180 were
 # allowed, which needlessly widened the CORS attack surface.

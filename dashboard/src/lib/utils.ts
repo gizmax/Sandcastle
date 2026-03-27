@@ -12,6 +12,22 @@ export const inputClass = cn(
   "transition-colors"
 );
 
+// Button size utilities
+export const buttonSm = "px-2.5 py-1.5 text-xs rounded-lg";
+export const buttonMd = "px-4 py-2 text-sm rounded-lg";
+export const buttonLg = "px-5 py-2.5 text-sm rounded-lg";
+
+// Button variant utilities
+export const buttonPrimary = "bg-accent text-accent-foreground hover:bg-accent-hover transition-colors cursor-pointer";
+export const buttonSecondary = "border border-border text-muted-foreground hover:text-foreground hover:bg-border/40 transition-colors cursor-pointer";
+export const buttonDanger = "border border-error/30 text-error hover:bg-error/10 transition-colors cursor-pointer";
+export const buttonGhost = "text-accent hover:text-accent-hover transition-colors cursor-pointer";
+
+// Icon size utilities
+export const iconSm = "h-3.5 w-3.5";
+export const iconMd = "h-4 w-4";
+export const iconLg = "h-5 w-5";
+
 export function formatCost(cost: number): string {
   if (!Number.isFinite(cost)) return "$0.00";
   return `$${cost.toFixed(2)}`;

@@ -68,7 +68,7 @@ def _save_workflow(name: str, tmp_path) -> None:
             "/api/workflows",
             json={"name": name, "content": yaml_content, "description": "Test"},
         )
-    assert resp.status_code == 200, f"Save failed: {resp.text}"
+    assert resp.status_code == 201, f"Save failed: {resp.text}"
     return resp.json()["data"]
 
 
@@ -333,7 +333,7 @@ class TestScopedApiKeys:
                 },
             )
 
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 201, resp.text
         body = resp.json()["data"]
         assert body["allowed_workflows"] == ["workflow-a", "workflow-b"]
         assert body["key"].startswith("sc_")
@@ -348,7 +348,7 @@ class TestScopedApiKeys:
                 json={"name": "Unrestricted key"},
             )
 
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 201, resp.text
         body = resp.json()["data"]
         assert body["allowed_workflows"] is None
 

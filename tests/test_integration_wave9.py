@@ -125,7 +125,7 @@ class TestFullWorkflowLifecycle:
                     },
                 )
 
-            assert resp.status_code == 200
+            assert resp.status_code == 202
             body = resp.json()
             assert body["data"]["status"] == "queued"
             run_id = body["data"]["run_id"]
@@ -860,7 +860,7 @@ class TestApiDbRoundtrip:
                         "max_cost_usd": 5.0,
                     },
                 )
-                assert create_resp.status_code == 200
+                assert create_resp.status_code == 202
                 run_id = create_resp.json()["data"]["run_id"]
 
                 # Read back
@@ -913,7 +913,7 @@ class TestApiDbRoundtrip:
                         },
                     )
 
-                    assert create_resp.status_code == 200
+                    assert create_resp.status_code == 201
                     sched_data = create_resp.json()["data"]
                     schedule_id = sched_data["id"]
                     assert sched_data["workflow_name"] == "integration-test-workflow"
@@ -938,7 +938,7 @@ class TestApiDbRoundtrip:
                 "/api/api-keys",
                 json={"name": "test-key-roundtrip", "tenant_id": "tenant-xyz"},
             )
-            assert create_resp.status_code == 200
+            assert create_resp.status_code == 201
             key_data = create_resp.json()["data"]
             key_id = key_data["id"]
             assert key_data["name"] == "test-key-roundtrip"
@@ -1577,7 +1577,7 @@ class TestIdempotencyIntegration:
                         "idempotency_key": "unique-key-12345",
                     },
                 )
-                assert resp1.status_code == 200
+                assert resp1.status_code == 202
                 run_id_1 = resp1.json()["data"]["run_id"]
 
                 # Second request with same key
@@ -1588,7 +1588,7 @@ class TestIdempotencyIntegration:
                         "idempotency_key": "unique-key-12345",
                     },
                 )
-                assert resp2.status_code == 200
+                assert resp2.status_code == 202
                 data2 = resp2.json()["data"]
                 assert data2["run_id"] == run_id_1
                 assert data2["idempotent"] is True

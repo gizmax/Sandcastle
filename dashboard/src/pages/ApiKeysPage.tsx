@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, HelperText } from "@/components/ui/SectionCard";
-import { cn, inputClass } from "@/lib/utils";
+import { cn, inputClass, buttonMd, buttonLg, buttonSm, buttonPrimary, buttonSecondary, iconMd, iconSm } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
 
@@ -215,12 +215,12 @@ export default function ApiKeysPage() {
           onClick={() => setCreateModalOpen(true)}
           aria-label="New API key"
           className={cn(
-            "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200",
+            "flex items-center gap-2 font-medium",
+            buttonMd, buttonPrimary,
             "shadow-sm hover:shadow-md"
           )}
         >
-          <Plus className="h-4 w-4" />
+          <Plus className={iconMd} />
           <span className="hidden sm:inline">New API Key</span>
         </button>
       </div>
@@ -272,7 +272,7 @@ export default function ApiKeysPage() {
                     <button
                       type="button"
                       onClick={() => handleCancelEditing(key)}
-                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                      className={cn("shrink-0 font-medium", buttonSm, buttonSecondary)}
                     >
                       Cancel
                     </button>
@@ -291,7 +291,7 @@ export default function ApiKeysPage() {
                     <button
                       type="button"
                       onClick={() => handleStartEditing(key)}
-                      className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                      className={cn(buttonSm, buttonSecondary)}
                     >
                       {configured[key] ? "Change" : "Set"}
                     </button>
@@ -335,7 +335,7 @@ export default function ApiKeysPage() {
                     <button
                       type="button"
                       onClick={() => handleCancelEditing(key)}
-                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                      className={cn("shrink-0 font-medium", buttonSm, buttonSecondary)}
                     >
                       Cancel
                     </button>
@@ -354,7 +354,7 @@ export default function ApiKeysPage() {
                     <button
                       type="button"
                       onClick={() => handleStartEditing(key)}
-                      className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-border/40 transition-colors"
+                      className={cn(buttonSm, buttonSecondary)}
                     >
                       {configured[key] ? "Change" : "Set"}
                     </button>
@@ -374,11 +374,12 @@ export default function ApiKeysPage() {
             disabled={saving}
             onClick={() => void handleSaveCredentials()}
             className={cn(
-              "flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors",
-              "bg-accent text-accent-foreground hover:bg-accent-hover shadow-sm hover:shadow-md cursor-pointer"
+              "flex items-center gap-2 font-medium",
+              buttonLg, buttonPrimary,
+              "shadow-sm hover:shadow-md"
             )}
           >
-            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {saving && <Loader2 className={cn(iconSm, "animate-spin")} />}
             Save Changes
           </button>
         </div>

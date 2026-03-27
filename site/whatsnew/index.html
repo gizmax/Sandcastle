@@ -4,22 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.2666: Universal Advisor, EU Data Residency, Smart Failover, Cost Intelligence, 20 step types. Every release documented.">
+  <meta name="description" content="Sandcastle release history. v0.2666b1: Hardened - 1,875 new tests, 90 bug fixes, 10 security patches. Every release documented.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.2666">
-  <meta property="og:description" content="Your AI, Your Rules, Your Borders. 6 providers, EU data residency, smart failover, cost intelligence. See what Sandcastle ships.">
+  <meta property="og:title" content="What's New - Sandcastle v0.2666b1">
+  <meta property="og:description" content="Hardened. 1,875 new tests, 90 bug fixes, 10 security patches. See what Sandcastle ships.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.2666">
-  <meta name="twitter:description" content="Your AI, Your Rules, Your Borders. 6 providers, EU data residency, smart failover, cost intelligence.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.2666b1">
+  <meta name="twitter:description" content="Hardened. 1,875 new tests, 90 bug fixes, 10 security patches.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
+  <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
 
   <!-- Google Analytics -->
@@ -88,6 +89,10 @@
     .hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
     .hero h1 .accent { color: var(--accent); }
     .hero p { font-size: clamp(16px, 2vw, 19px); color: var(--text-muted); max-width: 640px; margin: 0 auto; line-height: 1.7; }
+
+    /* Nav CTA button */
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .btn-secondary:hover { background: var(--surface-hover); border-color: var(--border-light); }
 
     /* Footer */
     footer { border-top: 1px solid var(--border); padding: 48px 0; margin-top: 80px; }
@@ -179,7 +184,7 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
-      <div class="hero-badge">v0.2666 - Your AI, Your Rules, Your Borders</div>
+      <div class="hero-badge">v0.2666b1 - Hardened</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
       <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
     </div>
@@ -188,15 +193,91 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.2666b1 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.2666b1</span>
+          <span class="release-name">Hardened <span class="badge-latest">Latest</span></span>
+          <span class="release-date">March 27, 2026</span>
+        </div>
+
+        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          v0.2666 was the vision. v0.2666b1 is the proof. We shipped universal advisor, EU data residency, smart failover. Then we spent a week trying to break it. 1,875 new tests. 90 bug fixes. 10 security patches. Every edge case we found - fixed.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">AI</span>
+            <h4>AI Assistant got smarter</h4>
+            <p>Generates workflow, finds errors, fixes them automatically. Suggests matching templates. Learns your style from existing workflows. Knows which tools you have configured.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">UX</span>
+            <h4>First 60 seconds redesigned</h4>
+            <p>Auto-detects Ollama and API keys on first load. One-click demo workflow runs in 10 seconds. Onboarding wizard: 2 steps, not 5.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Failover Dashboard</h4>
+            <p>See when and why providers failed over. Per-workflow cost recommendations with savings amounts.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Agent Memory Page</h4>
+            <p>Search, browse, delete agent memories. Importance scores and decay visualization.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Security</span>
+            <h4>Security hardened</h4>
+            <p>Admin auth on evolution endpoints, template injection prevention, EU residency enforced on every LLM call, rate limiting, credential logging sanitized.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Performance</span>
+            <h4>Faster everywhere</h4>
+            <p>GZip compression, 2-phase dashboard loading, cache headers, database indexes, search debounce.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">1,875</div>
+                <div class="stat-label">New tests</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">90</div>
+                <div class="stat-label">Bug fixes</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">10</div>
+                <div class="stat-label">Security patches</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">14,361</div>
+                <div class="stat-label">Total tests</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.2666 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.2666</span>
-          <span class="release-name">Your AI, Your Rules, Your Borders <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Your AI, Your Rules, Your Borders</span>
           <span class="release-date">March 26, 2026</span>
         </div>
 
-        <p style="max-width: 640px; color: var(--muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
           The release where Sandcastle stopped being an orchestrator and became a platform. You used to choose a provider and hope for the best. Now you describe what you want and the system figures out the rest - which model, which provider, what it costs, where the data lives, and what happens when something breaks.
         </p>
 

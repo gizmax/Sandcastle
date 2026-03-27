@@ -134,6 +134,7 @@ class RunStep(Base):
         Index("ix_run_steps_run_id", "run_id"),
         Index("ix_run_steps_run_step_parallel", "run_id", "step_id", "parallel_index"),
         Index("ix_run_steps_run_id_status", "run_id", "status"),
+        Index("ix_run_steps_model", "model"),
         CheckConstraint("cost_usd >= 0", name="ck_run_steps_cost_non_negative"),
         CheckConstraint("duration_seconds >= 0", name="ck_run_steps_duration_non_negative"),
         CheckConstraint("attempt >= 1", name="ck_run_steps_attempt_positive"),
