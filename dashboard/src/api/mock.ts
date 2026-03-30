@@ -7434,6 +7434,7 @@ const routes: MockRoute[] = [
         { id: "mistral", name: "Mistral", region: "eu", configured: true, status: "ok" },
         { id: "openai", name: "OpenAI", region: "us", configured: true, status: "ok" },
         { id: "ollama", name: "Ollama (Local)", region: "local", configured: false, status: "not_detected" },
+        { id: "omlx", name: "oMLX (Apple Silicon)", region: "local", configured: true, status: "running" },
       ],
     }),
   },
