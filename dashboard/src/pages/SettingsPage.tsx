@@ -35,7 +35,7 @@ import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { SectionCard, FieldLabel, HelperText } from "@/components/ui/SectionCard";
 import { Link } from "react-router-dom";
-import { cn, inputClass, isSafeUrl } from "@/lib/utils";
+import { cn, inputClass } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -763,7 +763,7 @@ export default function SettingsPage() {
 
             {/* Update channel selector */}
             <div className="mt-4 pt-4 border-t border-border space-y-3">
-              <FieldLabel>Update Channel</FieldLabel>
+              <FieldLabel htmlFor="update_channel">Update Channel</FieldLabel>
               <div className="flex items-center gap-3 flex-wrap">
                 <select
                   value={updateChannel}

@@ -6361,6 +6361,11 @@ const routes: MockRoute[] = [
         enabled: b?.enabled ?? true,
         last_run_id: null,
         created_at: new Date().toISOString(),
+        last_run_at: null as string | null,
+        last_run_status: null as string | null,
+        next_run_at: null as string | null,
+        success_rate: 0,
+        status: "active" as string,
       };
       MOCK_SCHEDULES.push(newSched);
       return newSched;
