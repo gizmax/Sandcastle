@@ -20,12 +20,13 @@ interface WorkflowListProps {
   selectedNames?: Set<string>;
   onSelectionChange?: (names: Set<string>) => void;
   onRun: (workflow: WorkflowInfo) => void;
+  onBatch?: (workflow: WorkflowInfo) => void;
   onEdit: (workflow: WorkflowInfo) => void;
   onViewDag: (workflow: WorkflowInfo) => void;
   onViewVersions?: (workflow: WorkflowInfo) => void;
 }
 
-export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRun, onEdit, onViewDag, onViewVersions }: WorkflowListProps) {
+export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRun, onBatch, onEdit, onViewDag, onViewVersions }: WorkflowListProps) {
   const allSelected = selectedNames != null && workflows.length > 0 && workflows.every((wf) => selectedNames.has(wf.file_name.replace(".yaml", "")));
   const { isPinned, togglePin } = usePinnedWorkflows();
 
@@ -96,6 +97,7 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
               onSelect={onSelectionChange ? () => handleToggle(wfKey) : undefined}
               onTogglePin={() => togglePin(wf.name)}
               onRun={() => onRun(wf)}
+              onBatch={onBatch ? () => onBatch(wf) : undefined}
               onEdit={() => onEdit(wf)}
               onViewDag={() => onViewDag(wf)}
               onViewVersions={onViewVersions ? () => onViewVersions(wf) : undefined}

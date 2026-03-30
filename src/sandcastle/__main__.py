@@ -710,6 +710,14 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     _print_banner()
 
+    # Non-blocking update check (at most once every 24h)
+    try:
+        auto_check = os.getenv("AUTO_UPDATE_CHECK", "true").lower() not in ("0", "false", "no")
+        if auto_check:
+            _check_for_updates_on_startup()
+    except Exception:
+        pass  # Never let update check crash the server
+
     port = args.port
     if not (1 <= port <= 65535):
         print(
@@ -3455,6 +3463,431 @@ def _cmd_autopilot(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Update / rollback helpers
+# ---------------------------------------------------------------------------
+
+_SANDCASTLE_DIR = os.path.join(os.path.expanduser("~"), ".sandcastle")
+_PYPI_PACKAGE = "sandcastle-ai"
+_PYPI_JSON_URL = f"https://pypi.org/pypi/{_PYPI_PACKAGE}/json"
+
+
+def _ensure_sandcastle_dir() -> str:
+    """Ensure ~/.sandcastle exists and return its path."""
+    os.makedirs(_SANDCASTLE_DIR, exist_ok=True)
+    return _SANDCASTLE_DIR
+
+
+def _fetch_pypi_versions(timeout: int = 10) -> dict:
+    """Fetch package metadata from PyPI. Returns the full JSON response."""
+    import urllib.request
+    import urllib.error
+
+    req = urllib.request.Request(
+        _PYPI_JSON_URL,
+        headers={"Accept": "application/json", "User-Agent": "sandcastle-cli"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Failed to fetch PyPI metadata: {exc}") from exc
+
+
+def _is_prerelease(version_str: str) -> bool:
+    """Return True if version looks like a pre-release (contains a/b/rc/dev)."""
+    import re
+    return bool(re.search(r"(a|b|rc|dev)\d*$", version_str))
+
+
+def _latest_version_for_channel(pypi_data: dict, channel: str) -> str:
+    """Pick the latest version from PyPI data respecting the channel.
+
+    - "stable": skip pre-release versions (alpha/beta/rc/dev)
+    - "beta": include everything
+    """
+    from packaging.version import Version, InvalidVersion
+
+    all_versions: list[str] = list(pypi_data.get("releases", {}).keys())
+    parsed: list[tuple[Version, str]] = []
+    for v in all_versions:
+        try:
+            pv = Version(v)
+        except InvalidVersion:
+            continue
+        # Skip yanked releases
+        release_files = pypi_data["releases"].get(v, [])
+        if release_files and all(f.get("yanked", False) for f in release_files):
+            continue
+        # Skip empty releases (no files uploaded)
+        if not release_files:
+            continue
+        if channel == "stable" and pv.is_prerelease:
+            continue
+        parsed.append((pv, v))
+
+    if not parsed:
+        raise RuntimeError("No suitable version found on PyPI for channel: " + channel)
+
+    parsed.sort(key=lambda x: x[0])
+    return parsed[-1][1]
+
+
+def _save_previous_version(version: str) -> None:
+    """Persist the current version before upgrading so rollback works."""
+    import datetime
+    d = _ensure_sandcastle_dir()
+    path = os.path.join(d, "previous_version.json")
+    data = {
+        "version": version,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def _load_previous_version() -> dict | None:
+    """Load previous version info, or None if not available."""
+    path = os.path.join(_SANDCASTLE_DIR, "previous_version.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _backup_file(src: str, suffix: str) -> bool:
+    """Copy src to src + suffix. Returns True if backup was created."""
+    import shutil
+    if os.path.isfile(src):
+        dest = src + suffix
+        shutil.copy2(src, dest)
+        return True
+    return False
+
+
+def _restore_file(src_with_suffix: str, dest: str) -> bool:
+    """Restore a backup file. Returns True if restored."""
+    import shutil
+    if os.path.isfile(src_with_suffix):
+        shutil.copy2(src_with_suffix, dest)
+        return True
+    return False
+
+
+def _pip_install(package_spec: str) -> bool:
+    """Run pip install and return True on success."""
+    import subprocess
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", package_spec]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _verify_installed_version() -> str | None:
+    """Import sandcastle in a subprocess and return its __version__."""
+    import subprocess
+    cmd = [
+        sys.executable, "-c",
+        "from sandcastle import __version__; print(__version__)",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def _find_db_path() -> str | None:
+    """Return the path to the SQLite database if it exists."""
+    candidates = [
+        os.path.join(_SANDCASTLE_DIR, "data", "sandcastle.db"),
+        os.path.join(".", "sandcastle.db"),
+        os.path.join(".", "data", "sandcastle.db"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _find_env_path() -> str | None:
+    """Return the path to .env if it exists."""
+    if os.path.isfile(".env"):
+        return ".env"
+    return None
+
+
+def _cmd_update(args: argparse.Namespace) -> None:
+    """Check for updates and install the latest (or specified) version."""
+    from sandcastle import __version__
+
+    current = __version__
+    channel = getattr(args, "channel", None) or os.getenv("UPDATE_CHANNEL", "stable")
+    target_version = getattr(args, "target_version", None)
+    dry_run = getattr(args, "dry_run", False)
+    auto_yes = getattr(args, "yes", False)
+
+    print(f"\n  {_color('Checking for updates...', _C.CYAN)}\n")
+
+    # Fetch PyPI metadata
+    try:
+        pypi_data = _fetch_pypi_versions()
+    except RuntimeError as exc:
+        print(f"  {_color(str(exc), _C.RED)}")
+        sys.exit(1)
+
+    # Determine target version
+    if target_version:
+        # Validate that the requested version exists
+        if target_version not in pypi_data.get("releases", {}):
+            print(f"  {_color('Version ' + target_version + ' not found on PyPI.', _C.RED)}")
+            sys.exit(1)
+        latest = target_version
+    else:
+        try:
+            latest = _latest_version_for_channel(pypi_data, channel)
+        except RuntimeError as exc:
+            print(f"  {_color(str(exc), _C.RED)}")
+            sys.exit(1)
+
+    # Display version info
+    print(f"  Current:  {_color('v' + current, _C.YELLOW)}")
+    print(f"  Latest:   {_color('v' + latest, _C.GREEN)}")
+    print(f"  Channel:  {_color(channel, _C.CYAN)}")
+
+    # Check if already up to date
+    from packaging.version import Version
+    try:
+        if Version(latest) <= Version(current) and not target_version:
+            print(f"\n  {_color('Already up to date!', _C.GREEN)}")
+            return
+    except Exception:
+        pass  # Fall through if version comparison fails
+
+    # Show changelog (from PyPI description if available)
+    release_info = pypi_data.get("info", {})
+    summary = release_info.get("summary", "")
+    if summary:
+        label = "What's new:"
+        print(f"\n  {_color(label, _C.BOLD)}")
+        print(f"    - {summary}")
+    print()
+
+    # Dry run stops here
+    if dry_run:
+        print(f"  {_color('[dry-run] No changes made.', _C.YELLOW)}")
+        return
+
+    # Confirmation prompt
+    if not auto_yes:
+        if not sys.stdin.isatty():
+            print(
+                f"  {_color('Non-interactive mode. Use --yes to skip confirmation.', _C.RED)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            answer = input("  Proceed with update? [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Aborted.")
+            return
+        if answer not in ("", "y", "yes"):
+            print("  Aborted.")
+            return
+
+    # Backup phase
+    print(f"  {_color('Backing up current installation...', _C.CYAN)}")
+    _save_previous_version(current)
+
+    db_path = _find_db_path()
+    if db_path:
+        _backup_file(db_path, ".pre-update")
+        print(f"    Database: backed up to {os.path.basename(db_path)}.pre-update")
+
+    env_path = _find_env_path()
+    if env_path:
+        _backup_file(env_path, ".pre-update")
+        print("    Config: backed up to .env.pre-update")
+
+    print()
+
+    # Install
+    package_spec = f"{_PYPI_PACKAGE}=={latest}"
+    print(f"  Installing {_color(package_spec, _C.CYAN)}...")
+    if not _pip_install(package_spec):
+        print(f"  {_color('Installation failed!', _C.RED)}")
+        print(f"  Run manually: pip install {package_spec}")
+        sys.exit(1)
+
+    print(f"  {_color('Successfully installed ' + package_spec, _C.GREEN)}")
+
+    # Verify
+    print(f"\n  {_color('Verifying...', _C.CYAN)}")
+    installed = _verify_installed_version()
+    if installed:
+        print(f"    Version: {installed} {_color('OK', _C.GREEN)}")
+    else:
+        print(f"    {_color('Could not verify installed version.', _C.YELLOW)}")
+
+    # Restart instructions
+    print(f"\n  {_color('Update complete!', _C.GREEN)} Restart Sandcastle to apply:")
+    print("    sandcastle serve\n")
+
+
+def _cmd_rollback(args: argparse.Namespace) -> None:
+    """Roll back to the previously installed version."""
+    auto_yes = getattr(args, "yes", False)
+
+    prev = _load_previous_version()
+    if not prev:
+        print(
+            f"\n  {_color('No previous version to roll back to.', _C.RED)}\n"
+            f"  (Run 'sandcastle update' first to create a rollback point.)\n"
+        )
+        sys.exit(1)
+
+    prev_ver = prev["version"]
+    prev_ts = prev.get("timestamp", "unknown")
+
+    # Format relative time
+    age_str = ""
+    try:
+        import datetime
+        ts = datetime.datetime.fromisoformat(prev_ts)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        delta = now - ts
+        hours = int(delta.total_seconds() // 3600)
+        if hours < 1:
+            minutes = int(delta.total_seconds() // 60)
+            age_str = f" (installed {minutes}m ago)"
+        elif hours < 24:
+            age_str = f" (installed {hours}h ago)"
+        else:
+            days = hours // 24
+            age_str = f" (installed {days}d ago)"
+    except Exception:
+        pass
+
+    print(f"\n  Previous version: {_color('v' + prev_ver, _C.YELLOW)}{age_str}")
+
+    # Confirmation
+    if not auto_yes:
+        if not sys.stdin.isatty():
+            print(
+                f"  {_color('Non-interactive mode. Use --yes to skip confirmation.', _C.RED)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            answer = input(f"\n  Roll back to v{prev_ver}? [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Aborted.")
+            return
+        if answer not in ("", "y", "yes"):
+            print("  Aborted.")
+            return
+
+    # Install previous version
+    package_spec = f"{_PYPI_PACKAGE}=={prev_ver}"
+    print(f"\n  Installing {_color(package_spec, _C.CYAN)}...")
+    if not _pip_install(package_spec):
+        print(f"  {_color('Installation failed!', _C.RED)}")
+        print(f"  Run manually: pip install {package_spec}")
+        sys.exit(1)
+
+    print(f"  {_color('Successfully installed ' + package_spec, _C.GREEN)}")
+
+    # Restore DB backup if available
+    db_path = _find_db_path()
+    if db_path:
+        backup_path = db_path + ".pre-update"
+        if _restore_file(backup_path, db_path):
+            print(f"  Restoring database backup... {_color('OK', _C.GREEN)}")
+
+    # Verify
+    installed = _verify_installed_version()
+    if installed:
+        print(f"  Version: {installed} {_color('OK', _C.GREEN)}")
+
+    print(f"\n  {_color('Rollback complete!', _C.GREEN)} Restart to apply:")
+    print("    sandcastle serve\n")
+
+
+def _check_for_updates_on_startup() -> None:
+    """Non-blocking update check for 'sandcastle serve' startup.
+
+    Checks PyPI at most once every 24 hours. Never blocks startup for
+    more than 3 seconds.
+    """
+    import datetime
+
+    state_dir = _ensure_sandcastle_dir()
+    check_file = os.path.join(state_dir, "update_check.json")
+
+    # Read last check timestamp
+    now = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        with open(check_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        last_check = datetime.datetime.fromisoformat(state.get("last_check", ""))
+        if (now - last_check).total_seconds() < 86400:  # 24 hours
+            return
+    except (OSError, json.JSONDecodeError, ValueError, KeyError):
+        pass  # First run or corrupted file - proceed with check
+
+    # Fetch with a short timeout so we never block startup
+    try:
+        pypi_data = _fetch_pypi_versions(timeout=3)
+    except RuntimeError:
+        return  # Network error - silently skip
+
+    # Determine channel from env (config module may not be loaded yet)
+    channel = os.getenv("UPDATE_CHANNEL", "stable")
+
+    try:
+        latest = _latest_version_for_channel(pypi_data, channel)
+    except RuntimeError:
+        return
+
+    from sandcastle import __version__
+    current = __version__
+
+    # Persist check timestamp
+    try:
+        with open(check_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "last_check": now.isoformat(),
+                "latest_version": latest,
+                "current_version": current,
+            }, f, indent=2)
+    except OSError:
+        pass
+
+    # Compare versions
+    try:
+        from packaging.version import Version
+        if Version(latest) > Version(current):
+            msg = (
+                f"Sandcastle v{latest} available (current: v{current}). "
+                f"Run 'sandcastle update' to upgrade."
+            )
+            print(f"\n  {_color('Warning: ' + msg, _C.YELLOW)}\n")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -3781,6 +4214,30 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- providers ---
     subparsers.add_parser("providers", help="List configured AI advisor providers")
 
+    # --- update ---
+    p_update = subparsers.add_parser("update", help="Check for and install updates")
+    p_update.add_argument(
+        "--yes", "-y", action="store_true", default=False, help="Skip confirmation prompt"
+    )
+    p_update.add_argument(
+        "--version", dest="target_version", default=None, metavar="X.Y.Z",
+        help="Install a specific version instead of latest",
+    )
+    p_update.add_argument(
+        "--channel", default=None, choices=["stable", "beta"],
+        help="Override update channel (default: from config or 'stable')",
+    )
+    p_update.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Show what would happen without installing",
+    )
+
+    # --- rollback ---
+    p_rollback = subparsers.add_parser("rollback", help="Roll back to previous version")
+    p_rollback.add_argument(
+        "--yes", "-y", action="store_true", default=False, help="Skip confirmation prompt"
+    )
+
     # --- hub ---
     p_hub = subparsers.add_parser("hub", help="Community workflow hub")
     hub_sub = p_hub.add_subparsers(dest="hub_action")
@@ -3901,6 +4358,8 @@ def main() -> None:
         "tools": _cmd_tools,
         "autopilot": _cmd_autopilot,
         "providers": _cmd_providers,
+        "update": _cmd_update,
+        "rollback": _cmd_rollback,
     }
 
     handler = dispatch.get(args.command)

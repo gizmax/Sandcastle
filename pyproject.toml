@@ -57,6 +57,15 @@ parse = [
     "python-docx>=1.0",
     "openpyxl>=3.1",
 ]
+ocr = [
+    "chandra-ocr>=2.0",
+]
+report = [
+    "weasyprint>=62",
+    "jinja2>=3.1",
+    "markdown>=3.5",
+    "matplotlib>=3.8",
+]
 docker = [
     "aiodocker>=0.22",
 ]

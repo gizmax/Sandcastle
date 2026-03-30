@@ -714,9 +714,10 @@ class TestStatsResponse:
         with pytest.raises(ValidationError):
             StatsResponse(total_runs_today=-1)
 
-    def test_success_rate_over_100_rejected(self):
+    def test_success_rate_over_1_rejected(self):
+        """success_rate is a 0.0-1.0 ratio, not a percentage."""
         with pytest.raises(ValidationError):
-            StatsResponse(success_rate=101.0)
+            StatsResponse(success_rate=1.01)
 
     def test_negative_success_rate_rejected(self):
         with pytest.raises(ValidationError):

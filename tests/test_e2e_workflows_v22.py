@@ -220,6 +220,15 @@ steps:
     depends_on: [http-step]
     parse_config:
       output: json
+
+  - id: report-step
+    type: report
+    prompt: "Generate a summary report of all findings from {steps.std-step.output}"
+    depends_on: [std-step]
+    report_config:
+      theme: professional
+      title: "Analysis Report"
+      format: pdf
 """
 
 COMPOSIO_TEMPLATE_ACTION = """\

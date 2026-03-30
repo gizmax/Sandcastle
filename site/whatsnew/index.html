@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.2666b1: Hardened - 1,875 new tests, 90 bug fixes, 10 security patches. Every release documented.">
+  <meta name="description" content="Sandcastle release history. v0.28: Batch, Monitor, Report. Auto-update, batch runs, PDF reports, schedule monitor, OCR, local AI with oMLX. Every release documented.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.2666b1">
-  <meta property="og:description" content="Hardened. 1,875 new tests, 90 bug fixes, 10 security patches. See what Sandcastle ships.">
+  <meta property="og:title" content="What's New - Sandcastle v0.28">
+  <meta property="og:description" content="Batch, Monitor, Report. Auto-update, batch runs, PDF reports, schedule monitor, OCR, local AI with oMLX. See what Sandcastle ships.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.2666b1">
-  <meta name="twitter:description" content="Hardened. 1,875 new tests, 90 bug fixes, 10 security patches.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.28">
+  <meta name="twitter:description" content="Batch, Monitor, Report. Auto-update, batch runs, PDF reports, schedule monitor, OCR, local AI with oMLX.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -184,7 +184,7 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
-      <div class="hero-badge">v0.2666b1 - Hardened</div>
+      <div class="hero-badge">v0.28 - Batch, Monitor, Report.</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
       <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
     </div>
@@ -193,11 +193,108 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.28 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.28</span>
+          <span class="release-name">Batch, Monitor, Report. <span class="badge-latest">Latest</span></span>
+          <span class="release-date">March 29, 2026</span>
+        </div>
+
+        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          v0.28 is where Sandcastle stops being a tool and becomes a platform. Batch-process thousands of items. Monitor your schedules. Generate beautiful PDF reports with charts. Parse scanned documents with AI. Auto-update without downtime. And now - run everything locally on Apple Silicon with oMLX.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Auto-Update System</h4>
+            <p>CLI: <code>sandcastle update</code>. Dashboard: one-click with rollback. Stable/beta/pinned channels. Blackout windows. Enterprise approval policies. Never manually pip install again.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Batch Run</h4>
+            <p>Upload 1000 items, Sandcastle fans out into parallel runs. Progress tracking, per-item results, aggregate cost.</p>
+            <pre><span class="hl">POST</span> /workflows/{name}/batch</pre>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>PDF Report Engine</h4>
+            <p>New step type: <code>type: report</code>. Professional-grade PDFs with cover page, table of contents, charts, KPI boxes, callouts. 3 themes. WeasyPrint under the hood.</p>
+            <p><code>pip install sandcastle-ai[report]</code></p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Schedule Monitor</h4>
+            <p>Dashboard page showing all cron schedules: last run, next run countdown, success rate, pause/resume. No more guessing what failed overnight.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">New</span>
+            <h4>Chandra OCR</h4>
+            <p>Parse scanned documents, handwriting, tables from images. 90+ languages including Czech. <code>ocr_engine: chandra</code> in parse step.</p>
+            <p><code>pip install sandcastle-ai[ocr]</code></p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">New</span>
+            <h4>oMLX - Local AI on Apple Silicon</h4>
+            <p>7th provider. Run Llama 4, Mistral, Gemma, Qwen locally. Zero cloud costs. Zero data leaving your machine. OpenAI-compatible.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Workflow Version Diff</h4>
+            <p>Every edit versioned. Compare any two versions with YAML diff highlighting. See exactly what changed.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">UX</span>
+            <h4>Activity Feed + Run Compare</h4>
+            <p>Real-time activity stream on dashboard. Select 2 runs and compare side-by-side.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">7</div>
+                <div class="stat-label">AI providers</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">20</div>
+                <div class="stat-label">Step types</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">125</div>
+                <div class="stat-label">Templates</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">44</div>
+                <div class="stat-label">New oMLX tests</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Deep Research Pipeline</h4>
+            <p>OpenVLAW-inspired 6-step template: parallel research, judge, verify, typeset, audit. Built-in.</p>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.2666b1 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.2666b1</span>
-          <span class="release-name">Hardened <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Hardened</span>
           <span class="release-date">March 27, 2026</span>
         </div>
 

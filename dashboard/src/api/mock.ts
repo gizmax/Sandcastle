@@ -179,7 +179,7 @@ const MOCK_WORKFLOWS = [
     steps_count: 2,
     file_name: "contract-analyzer.yaml",
     steps: [
-      { id: "extract", model: null as unknown as string, type: "parse", depends_on: [] },
+      { id: "extract", model: null as unknown as string, type: "parse", depends_on: [], parse_config: { output: "markdown", ocr_engine: "auto" } },
       { id: "analyze", model: "sonnet", depends_on: ["extract"] },
     ],
     input_schema: {
@@ -193,9 +193,10 @@ const MOCK_WORKFLOWS = [
 ];
 
 const MOCK_SCHEDULES = [
-  { id: "sch-001", workflow_name: "competitor-monitor", cron_expression: "0 */6 * * *", input_data: {}, enabled: true, last_run_id: "a1b2c3d4-6666-4000-8000-000000000006", created_at: h(168) },
-  { id: "sch-002", workflow_name: "lead-enrichment", cron_expression: "0 8 * * 1-5", input_data: { company_url: "https://example.com" }, enabled: true, last_run_id: "a1b2c3d4-1111-4000-8000-000000000001", created_at: h(240) },
-  { id: "sch-003", workflow_name: "seo-audit", cron_expression: "0 0 * * 0", input_data: {}, enabled: false, last_run_id: null, created_at: h(48) },
+  { id: "sch-001", workflow_name: "competitor-monitor", cron_expression: "0 */6 * * *", input_data: {}, enabled: true, last_run_id: "a1b2c3d4-6666-4000-8000-000000000006", created_at: h(168), last_run_at: h(1.2), last_run_status: "completed" as string, next_run_at: h(-2.8), success_rate: 0.94, status: "active" as string },
+  { id: "sch-002", workflow_name: "lead-enrichment", cron_expression: "0 8 * * 1-5", input_data: { company_url: "https://example.com" }, enabled: true, last_run_id: "a1b2c3d4-1111-4000-8000-000000000001", created_at: h(240), last_run_at: h(0.5), last_run_status: "completed" as string, next_run_at: h(-15.5), success_rate: 0.88, status: "active" as string },
+  { id: "sch-003", workflow_name: "seo-audit", cron_expression: "0 0 * * 0", input_data: {}, enabled: false, last_run_id: null, created_at: h(48), last_run_at: null as string | null, last_run_status: null as string | null, next_run_at: null as string | null, success_rate: 0, status: "paused" as string },
+  { id: "sch-004", workflow_name: "lead-enrichment", cron_expression: "30 9 * * 1-5", input_data: { company_url: "https://acme.com" }, enabled: true, last_run_id: "a1b2c3d4-4444-4000-8000-000000000004", created_at: h(360), last_run_at: h(5), last_run_status: "failed" as string, next_run_at: h(-10.5), success_rate: 0.62, status: "failing" as string },
 ];
 
 const MOCK_API_KEYS = [
@@ -5896,6 +5897,11 @@ const MOCK_AUDIT_EVENTS = [
   { id: "aud-008", event_type: "emergency_stop.triggered", actor: "admin:operator", run_id: null, workflow_name: null, risk_level: null, metadata: { reason: "Manual safety check", scope: "all_high_risk", affected_runs: 2 }, timestamp: h(4), hash: "sha256:d2ddea18f00665ce8623" },
   { id: "aud-009", event_type: "emergency_stop.cleared", actor: "admin:operator", run_id: null, workflow_name: null, risk_level: null, metadata: { reason: "Safety check passed", cleared_at: h(3.5) }, timestamp: h(3.5), hash: "sha256:a87ff679a2f3e71d9181" },
   { id: "aud-010", event_type: "transparency_report.generated", actor: "api-key:sc_live_abc1", run_id: "a1b2c3d4-5555-4000-8000-000000000005", workflow_name: "lead-enrichment", risk_level: "limited", metadata: { report_version: "annex_iv_v1", pages: 4 }, timestamp: h(7.8), hash: "sha256:e4da3b7fbbce2345d777" },
+  { id: "aud-011", event_type: "workflow.completed", actor: "system", run_id: "a1b2c3d4-6666-4000-8000-000000000006", workflow_name: "competitor-monitor", risk_level: "minimal", metadata: { total_cost_usd: 1.35, duration_seconds: 25.4 }, timestamp: h(11.8), hash: "sha256:b1735a0b1e3d4c5f9e2a" },
+  { id: "aud-012", event_type: "workflow.started", actor: "schedule:sch-001", run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", risk_level: "limited", metadata: { input_hash: "sha256:c4d8...", pii_detected: false }, timestamp: h(18), hash: "sha256:c2a9e8f1d3b5a7e4f6c0" },
+  { id: "aud-013", event_type: "workflow.completed", actor: "system", run_id: "a1b2c3d4-7777-4000-8000-000000000007", workflow_name: "seo-audit", risk_level: "limited", metadata: { total_cost_usd: 0.98, duration_seconds: 18.1 }, timestamp: h(17.9), hash: "sha256:d3b5a7e4f6c0c2a9e8f1" },
+  { id: "aud-014", event_type: "schedule.triggered", actor: "scheduler", run_id: null, workflow_name: "competitor-monitor", risk_level: null, metadata: { schedule_id: "sch-001", cron: "0 */6 * * *" }, timestamp: h(1.2), hash: "sha256:e4f6c0c2a9e8f1d3b5a7" },
+  { id: "aud-015", event_type: "workflow.failed", actor: "system", run_id: "a1b2c3d4-9999-4000-8000-000000000009", workflow_name: "competitor-monitor", risk_level: "minimal", metadata: { step_id: "analyze", error: "Rate limit exceeded (429)", attempts: 3 }, timestamp: h(29.9), hash: "sha256:f6c0c2a9e8f1d3b5a7e4" },
 ];
 
 const MOCK_TRANSPARENCY_REPORT = {
@@ -5944,7 +5950,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.2666b1", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.28.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -6567,15 +6573,20 @@ const routes: MockRoute[] = [
   {
     match: /^\/workflows\/([^/]+)\/versions\/diff$/,
     method: "GET",
-    handler: (params) => ({
-      version_a: Number(params.version_a || 1),
-      version_b: Number(params.version_b || 2),
-      yaml_a: "name: example\nsteps:\n  - id: step1\n    model: sonnet",
-      yaml_b: "name: example\nsteps:\n  - id: step1\n    model: opus\n  - id: step2\n    model: haiku",
-      steps_added: ["step2"],
-      steps_removed: [],
-      steps_changed: ["step1"],
-    }),
+    handler: (params) => {
+      const name = params._1 || "example";
+      const vA = Number(params.version_a || 1);
+      const vB = Number(params.version_b || 2);
+      return {
+        version_a: vA,
+        version_b: vB,
+        yaml_a: `name: ${name}\ndescription: "v${vA} of ${name}"\ndefault_model: sonnet\n\nsteps:\n  - id: research\n    model: sonnet\n    prompt: "Research the topic"\n    max_turns: 5\n\n  - id: draft\n    depends_on: [research]\n    model: sonnet\n    prompt: "Draft based on {steps.research.output}"`,
+        yaml_b: `name: ${name}\ndescription: "v${vB} of ${name} - improved"\ndefault_model: opus\n\nsteps:\n  - id: research\n    model: opus\n    prompt: "Research the topic thoroughly"\n    max_turns: 10\n\n  - id: draft\n    depends_on: [research]\n    model: sonnet\n    prompt: "Draft based on {steps.research.output}"\n\n  - id: review\n    depends_on: [draft]\n    model: haiku\n    prompt: "Review and polish {steps.draft.output}"`,
+        steps_added: ["review"],
+        steps_removed: [],
+        steps_changed: ["research"],
+      };
+    },
   },
   {
     match: /^\/settings$/,
@@ -6781,8 +6792,35 @@ const routes: MockRoute[] = [
   {
     match: /^\/check-update$/,
     method: "GET",
-    // Backend UpdateCheckResponse has release_url and install_command fields
-    handler: () => ({ current_version: "0.2666b1", latest_version: "0.2666", update_available: false, release_url: "https://github.com/gizmax/Sandcastle/releases", install_command: "pip install --upgrade sandcastle-ai" }),
+    handler: () => ({
+      current_version: "0.28.0",
+      latest_version: "0.28.0",
+      update_available: false,
+      release_url: "https://github.com/gizmax/Sandcastle/releases/v0.28.0",
+      install_command: "pip install --upgrade sandcastle-ai",
+      changelog_url: "https://sandcastle-ai.eu/whatsnew/",
+      highlights: ["Auto-update with rollback", "AI structured output", "Quality scoring"],
+    }),
+  },
+  // POST /admin/update - trigger software update
+  {
+    match: /^\/admin\/update$/,
+    method: "POST",
+    handler: () => ({
+      status: "success",
+      new_version: "0.28.0",
+      previous_version: "0.2666b1",
+      restart_required: true,
+    }),
+  },
+  // POST /admin/rollback - rollback to previous version
+  {
+    match: /^\/admin\/rollback$/,
+    method: "POST",
+    handler: () => ({
+      status: "success",
+      rolled_back_to: "0.2666b1",
+    }),
   },
   // GET /browse (template browser - same as /templates but with different shape)
   {
@@ -6825,6 +6863,20 @@ const routes: MockRoute[] = [
       const idx = MOCK_SCHEDULES.findIndex((s) => s.id === params._1);
       if (idx >= 0) MOCK_SCHEDULES.splice(idx, 1);
       return { deleted: true };
+    },
+  },
+  // POST /schedules/{id}/trigger - run a schedule immediately
+  {
+    match: /^\/schedules\/([^/]+)\/trigger$/,
+    method: "POST",
+    handler: (params) => {
+      const sch = MOCK_SCHEDULES.find((s) => s.id === params._1);
+      if (!sch) return null;
+      const runId = `run-${Date.now().toString(36)}`;
+      sch.last_run_id = runId;
+      sch.last_run_at = new Date().toISOString();
+      sch.last_run_status = "running";
+      return { run_id: runId, status: "queued" };
     },
   },
   // POST /dead-letter/{id}/retry
@@ -7037,8 +7089,8 @@ const routes: MockRoute[] = [
     match: /^\/workflows\/([^/]+)\/promote$/,
     method: "POST",
     handler: (params, body) => {
-      const b = body as { version?: number; to_stage?: string } | undefined;
-      return { workflow_name: params._1, version: b?.version || 1, to_stage: b?.to_stage || "production", promoted_at: new Date().toISOString() };
+      const b = body as { version?: number } | undefined;
+      return { workflow_name: params._1, version: b?.version || 1, previous_status: "staging", new_status: "production" };
     },
   },
   // POST /workflows/{name}/rollback
@@ -7047,7 +7099,117 @@ const routes: MockRoute[] = [
     method: "POST",
     handler: (params, body) => {
       const b = body as { version?: number } | undefined;
-      return { workflow_name: params._1, rolled_back_to: b?.version || 1, rolled_back_at: new Date().toISOString() };
+      return { workflow_name: params._1, rolled_back_to_version: b?.version || 1, status: "production" };
+    },
+  },
+  // POST /workflows/{name}/batch - start a batch run
+  {
+    match: /^\/workflows\/([^/]+)\/batch$/,
+    method: "POST",
+    handler: (params, body) => {
+      const b = body as { items?: unknown[]; max_parallel?: number } | undefined;
+      const total = b?.items?.length || 3;
+      const batchId = `batch-${Date.now().toString(36)}`;
+      // Store mock batch state for GET /batch/{id}/status
+      (globalThis as Record<string, unknown>).__mockBatches = (globalThis as Record<string, unknown>).__mockBatches || {};
+      const batches = (globalThis as Record<string, unknown>).__mockBatches as Record<string, Record<string, unknown>>;
+      const items = Array.from({ length: total }, (_, i) => ({
+        index: i,
+        status: "pending",
+        run_id: null as string | null,
+        cost_usd: 0,
+        error: null as string | null,
+        started_at: null as string | null,
+        completed_at: null as string | null,
+      }));
+      batches[batchId] = {
+        batch_id: batchId,
+        workflow: params._1,
+        status: "running",
+        total,
+        completed: 0,
+        failed: 0,
+        running: 0,
+        pending: total,
+        total_cost_usd: 0,
+        items,
+        created_at: new Date().toISOString(),
+        _tick: 0,
+      };
+      return { batch_id: batchId, workflow: params._1, total, status: "running" };
+    },
+  },
+  // GET /batch/{batch_id}/status - poll batch status (simulates progress)
+  {
+    match: /^\/batch\/([^/]+)\/status$/,
+    method: "GET",
+    handler: (params) => {
+      const batches = ((globalThis as Record<string, unknown>).__mockBatches || {}) as Record<string, Record<string, unknown>>;
+      const batch = batches[params._1];
+      if (!batch) return null;
+
+      // Simulate progress on each poll
+      const items = batch.items as Array<Record<string, unknown>>;
+      const tick = (batch._tick as number) + 1;
+      batch._tick = tick;
+
+      let completed = 0;
+      let failed = 0;
+      let running = 0;
+      let pending = 0;
+      let totalCost = 0;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.status === "completed" || item.status === "failed") {
+          if (item.status === "completed") completed++;
+          else failed++;
+          totalCost += item.cost_usd as number;
+          continue;
+        }
+        // Progress items based on tick count
+        const itemReady = tick > i;
+        const itemDone = tick > i + 1;
+        if (itemDone) {
+          // 90% success rate, every 10th item fails
+          if (i % 10 === 7) {
+            item.status = "failed";
+            item.error = "Rate limit exceeded - provider returned 429";
+            item.completed_at = new Date().toISOString();
+            failed++;
+          } else {
+            item.status = "completed";
+            item.run_id = `run-batch-${Date.now().toString(36)}-${i}`;
+            item.cost_usd = Math.round((0.02 + Math.random() * 0.15) * 1000) / 1000;
+            item.completed_at = new Date().toISOString();
+            completed++;
+            totalCost += item.cost_usd as number;
+          }
+        } else if (itemReady) {
+          item.status = "running";
+          item.started_at = new Date().toISOString();
+          running++;
+        } else {
+          pending++;
+        }
+      }
+
+      batch.completed = completed;
+      batch.failed = failed;
+      batch.running = running;
+      batch.pending = pending;
+      batch.total_cost_usd = Math.round(totalCost * 1000) / 1000;
+
+      // Determine overall status
+      if (completed + failed >= (batch.total as number)) {
+        if (failed === 0) batch.status = "completed";
+        else if (completed > 0) batch.status = "partial_failure";
+        else batch.status = "failed";
+      }
+
+      // Return a clean copy without internal _tick
+      const { _tick: _, ...result } = batch;
+      return result;
     },
   },
   // POST /workflows/run/sync

@@ -1,0 +1,209 @@
+name: deep-research-pipeline
+description: >
+  Multi-agent deep research with parallel investigation, independent judge,
+  citation verification, PDF typesetting, and final audit. Inspired by
+  OpenVLAW methodology. Two independent AI researchers explore the topic
+  in parallel, a judge merges and resolves conflicts, a verifier checks
+  every citation, and an auditor does a final meta-review before the
+  document is published.
+
+default_model: sonnet
+default_max_turns: 25
+default_timeout: 600
+
+input_schema:
+  required:
+    - topic
+  properties:
+    topic:
+      type: string
+      description: "The research topic or question to investigate"
+    depth:
+      type: string
+      description: "Research depth: quick (20 sources), standard (50-100), deep (100-150)"
+      default: "standard"
+    languages:
+      type: string
+      description: "Preferred source languages, e.g. 'en,cs' for English and Czech"
+      default: "en"
+
+steps:
+  # ---------------------------------------------------------------
+  # Phase 1: Parallel deep research by two independent agents
+  # Both get the same topic but work independently. Different
+  # perspectives reduce blind spots and increase citation coverage.
+  # ---------------------------------------------------------------
+
+  - id: research-branch-a
+    model: opus
+    max_turns: 25
+    timeout: 600
+    tools: [tavily, exa]
+    prompt: |
+      You are Research Agent A. Conduct a thorough, independent deep
+      research investigation on this topic:
+
+      TOPIC: {input.topic}
+      DEPTH: {input.depth}
+
+      Your task:
+      - Find and analyze relevant academic papers, studies, and authoritative sources
+      - Target 50-150 citations depending on depth
+      - For each citation: include title, authors, year, DOI/URL, and key finding
+      - Verify that each source actually exists and says what you claim
+      - Organize findings by subtopic with clear section headers
+      - Separate strong evidence from preliminary or contested findings
+      - Note any methodological concerns or limitations
+
+      Be rigorous. Every claim must be traceable to a cited source.
+
+  - id: research-branch-b
+    model: opus
+    max_turns: 25
+    timeout: 600
+    tools: [tavily, exa]
+    prompt: |
+      You are Research Agent B. Conduct a thorough, independent deep
+      research investigation on this topic:
+
+      TOPIC: {input.topic}
+      DEPTH: {input.depth}
+
+      Your task:
+      - Approach the topic from a different angle than a typical literature review
+      - Focus on methodology quality and reproducibility of studies
+      - Find contrarian or minority viewpoints that challenge mainstream consensus
+      - Target 50-150 citations depending on depth
+      - For each citation: include title, authors, year, DOI/URL, and key finding
+      - Cross-check that cited data and statistics match the actual paper
+      - Flag any retracted, corrected, or disputed papers
+
+      Prioritize depth and accuracy over breadth.
+
+  # ---------------------------------------------------------------
+  # Phase 2: Independent judge merges both research outputs
+  # A third agent that didn't participate in research compares,
+  # resolves conflicts, removes duplicates, and produces one
+  # unified document.
+  # ---------------------------------------------------------------
+
+  - id: judge
+    model: opus
+    max_turns: 20
+    timeout: 600
+    depends_on: [research-branch-a, research-branch-b]
+    prompt: |
+      You are an independent Judge. You did NOT participate in the research.
+      Your job: compare two independent research outputs and merge them into
+      one authoritative document.
+
+      RESEARCH A:
+      {steps.research-branch-a.output}
+
+      RESEARCH B:
+      {steps.research-branch-b.output}
+
+      Your task:
+      1. Identify overlapping findings - keep the better-cited version
+      2. Resolve any contradictions between the two researches
+      3. Remove duplicate citations (same paper cited by both)
+      4. Choose more precise, methodologically careful formulations
+      5. Merge into ONE unified document with:
+         - Clear section structure (Introduction, Methods Overview,
+           Findings by Subtopic, Discussion, Conclusions)
+         - Numbered citation list at the end
+         - Separation of strong evidence vs preliminary findings
+         - Explicit notes where the two researches disagreed
+
+      The output must be a single, publication-ready research document.
+
+  # ---------------------------------------------------------------
+  # Phase 3: Verification layer - citations, facts, typography
+  # Checks every citation, verifies claims, catches errors.
+  # If something is wrong, flags it - does not pass bad content.
+  # ---------------------------------------------------------------
+
+  - id: verify
+    model: sonnet
+    max_turns: 15
+    timeout: 300
+    depends_on: [judge]
+    tools: [tavily, exa]
+    prompt: |
+      You are a rigorous fact-checker and copy editor. Review this
+      research document for accuracy and quality:
+
+      {steps.judge.output}
+
+      Check systematically:
+      1. CITATIONS: Does each citation point to a real, accessible source?
+         Verify at least a sample of 10-20 citations via web search.
+      2. CLAIMS: Does each factual claim match what the cited source says?
+      3. NUMBERS: Are statistics, percentages, and dates correct?
+      4. LOGIC: Are conclusions supported by the evidence presented?
+      5. TYPOGRAPHY: Fix any formatting issues, broken references, or
+         inconsistent citation styles.
+      6. COMPLETENESS: Are there obvious gaps in the coverage?
+
+      If you find errors:
+      - Fix minor issues (typos, formatting) directly
+      - Flag major issues (wrong citation, unsupported claim) clearly
+         with [VERIFICATION ISSUE: ...] markers
+
+      Output the corrected document. If no issues found, output the
+      document unchanged with a note "Verification passed - no issues found."
+
+  # ---------------------------------------------------------------
+  # Phase 4: PDF typesetting
+  # Generates the final formatted PDF from verified content.
+  # ---------------------------------------------------------------
+
+  - id: typeset
+    model: haiku
+    depends_on: [verify]
+    pdf_report:
+      enabled: true
+      title: "Research Report: {input.topic}"
+    prompt: |
+      Format this research document for final PDF output.
+      Ensure clean section headers, proper citation numbering,
+      and consistent formatting throughout.
+
+      {steps.verify.output}
+
+      Output the document with clean markdown formatting suitable
+      for PDF generation. Use ## for sections, ### for subsections,
+      numbered lists for citations, and > blockquotes for key findings.
+
+  # ---------------------------------------------------------------
+  # Phase 5: Independent audit - meta-review of the final document
+  # A fresh perspective from the most capable model catches anything
+  # the previous layers missed.
+  # ---------------------------------------------------------------
+
+  - id: audit
+    model: opus
+    max_turns: 15
+    timeout: 300
+    depends_on: [typeset]
+    prompt: |
+      You are an independent auditor conducting a final meta-review.
+      You have NOT been involved in any previous step.
+
+      Review this research document:
+      {steps.verify.output}
+
+      Focus your audit on:
+      1. METHODOLOGY: Are the research methods of cited studies sound?
+      2. EVIDENCE STRENGTH: Are conclusions proportional to evidence?
+      3. OVERSTATEMENTS: Any claims that go beyond what sources support?
+      4. RELEVANCE: Is everything relevant to the stated topic?
+      5. FORMAL GAPS: Anything the research + judge + verify missed?
+      6. BIAS: Any systematic bias in source selection?
+
+      Your verdict must be one of:
+      - PASS: Document is ready for publication as-is
+      - PASS WITH NOTES: Minor observations but publishable
+      - REVISE: Specific changes required (list them)
+
+      Provide your verdict and detailed reasoning.

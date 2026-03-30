@@ -508,6 +508,25 @@ class UpdateCheckResponse(BaseModel):
     update_available: bool
     release_url: str
     install_command: str
+    changelog_url: str = ""
+    highlights: list[str] = []
+
+
+class UpdateRequest(BaseModel):
+    """Request body for POST /admin/update."""
+
+    target_version: str = ""  # empty = latest from PyPI
+
+
+class UpdateResponse(BaseModel):
+    """Response for update/rollback operations."""
+
+    status: str  # "success" or "failed"
+    new_version: str = ""
+    previous_version: str = ""
+    rolled_back_to: str = ""
+    restart_required: bool = False
+    error: str = ""
 
 
 class RunListItem(BaseModel):
@@ -570,6 +589,11 @@ class ScheduleResponse(BaseModel):
     input_data: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     last_run_id: str | None = None
+    last_run_at: datetime | None = None
+    last_run_status: str | None = None
+    next_run_at: datetime | None = None
+    success_rate: float = Field(0.0, ge=0, le=1)
+    status: str = "active"  # "active" | "paused" | "failing"
     created_at: datetime | None = None
 
 
@@ -577,7 +601,7 @@ class StatsResponse(BaseModel):
     """Aggregated statistics for the overview dashboard."""
 
     total_runs_today: int = Field(0, ge=0)
-    success_rate: float = Field(0.0, ge=0, le=100)
+    success_rate: float = Field(0.0, ge=0, le=1)  # 0.0-1.0 ratio (not percentage)
     total_cost_today: float = Field(0.0, ge=0)
     avg_duration_seconds: float = Field(0.0, ge=0)
     runs_by_day: list[dict[str, Any]] = Field(default_factory=list)
@@ -1513,6 +1537,73 @@ class EvolutionStartResponse(BaseModel):
     total_keeps: int | None = None
     total_discards: int | None = None
     optimize_for: str | None = None
+
+
+class BatchRunRequest(BaseModel):
+    """Request to run a workflow in batch mode with multiple input items."""
+
+    items: list[dict[str, Any]] = Field(
+        ...,
+        description="List of input items to process",
+        min_length=1,
+        max_length=10000,
+    )
+    max_parallel: int = Field(
+        5,
+        description="Maximum number of concurrent executions (clamped to server max_concurrent_sandboxes)",
+        ge=1,
+        le=50,
+    )
+    max_cost_per_item_usd: float | None = Field(
+        None,
+        description="Maximum cost budget per individual item",
+        ge=0,
+    )
+
+    @field_validator("items")
+    @classmethod
+    def validate_items_list(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate each item in the batch."""
+        for i, item in enumerate(v):
+            _validate_json_dict(item, f"items[{i}]")
+        return v
+
+
+class BatchItemStatus(BaseModel):
+    """Status of a single item in a batch run."""
+
+    index: int = Field(..., ge=0)
+    status: str  # "pending" | "running" | "completed" | "failed"
+    run_id: str | None = None
+    cost_usd: float = Field(0.0, ge=0)
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class BatchStatusResponse(BaseModel):
+    """Status of a batch run."""
+
+    batch_id: str
+    workflow: str
+    status: str  # "running" | "completed" | "partial_failure"
+    total: int = Field(..., ge=0)
+    completed: int = Field(0, ge=0)
+    failed: int = Field(0, ge=0)
+    running: int = Field(0, ge=0)
+    pending: int = Field(0, ge=0)
+    total_cost_usd: float = Field(0.0, ge=0)
+    items: list[BatchItemStatus] = []
+    created_at: datetime | None = None
+
+
+class BatchStartedResponse(BaseModel):
+    """Response returned immediately when a batch run is accepted."""
+
+    batch_id: str
+    workflow: str
+    total: int = Field(..., ge=0)
+    status: str = "running"
 
 
 # Fix forward reference for ApiResponse.meta

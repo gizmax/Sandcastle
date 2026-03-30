@@ -6,6 +6,8 @@ import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
 import { WorkflowCard } from "@/components/workflows/WorkflowCard";
 import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
+import { BatchRunModal } from "@/components/workflows/BatchRunModal";
+import { VersionHistoryModal } from "@/components/workflows/VersionHistoryModal";
 import { DagGraph } from "@/components/workflows/DagGraph";
 import { DependencyGraph } from "@/components/workflows/DependencyGraph";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -42,12 +44,14 @@ export default function Workflows() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runModal, setRunModal] = useState<WorkflowInfo | null>(null);
+  const [batchModal, setBatchModal] = useState<WorkflowInfo | null>(null);
   const [dagWorkflow, setDagWorkflow] = useState<WorkflowInfo | null>(null);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<"delete" | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "graph">("grid");
+  const [versionHistoryWorkflow, setVersionHistoryWorkflow] = useState<string | null>(null);
   const { pinnedWorkflows, togglePin } = usePinnedWorkflows();
 
   const filteredWorkflows = useMemo(
@@ -316,9 +320,10 @@ export default function Workflows() {
                     stats={undefined}
                     onTogglePin={() => togglePin(wf.name)}
                     onRun={() => setRunModal(wf)}
+                    onBatch={() => setBatchModal(wf)}
                     onEdit={() => navigate("/workflows/builder", { state: { workflow: wf } })}
                     onViewDag={() => setDagWorkflow(wf)}
-                    onViewVersions={() => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
+                    onViewVersions={() => setVersionHistoryWorkflow(wf.file_name.replace(".yaml", ""))}
                   />
                 ))}
               </div>
@@ -346,9 +351,10 @@ export default function Workflows() {
               selectedNames={selectedNames}
               onSelectionChange={setSelectedNames}
               onRun={setRunModal}
+              onBatch={setBatchModal}
               onEdit={(wf) => navigate("/workflows/builder", { state: { workflow: wf } })}
               onViewDag={setDagWorkflow}
-              onViewVersions={(wf) => navigate(`/workflows/${wf.file_name.replace(".yaml", "")}`)}
+              onViewVersions={(wf) => setVersionHistoryWorkflow(wf.file_name.replace(".yaml", ""))}
             />
           )}
         </>
@@ -384,6 +390,25 @@ export default function Workflows() {
           inputSchema={runModal.input_schema}
           onClose={() => setRunModal(null)}
           onRun={handleRun}
+        />
+      )}
+
+      {/* Batch Run Modal */}
+      {batchModal && (
+        <BatchRunModal
+          open={true}
+          workflowName={batchModal.name}
+          fileName={batchModal.file_name}
+          onClose={() => setBatchModal(null)}
+        />
+      )}
+
+      {/* Version History Modal */}
+      {versionHistoryWorkflow && (
+        <VersionHistoryModal
+          open={true}
+          onClose={() => setVersionHistoryWorkflow(null)}
+          workflowName={versionHistoryWorkflow}
         />
       )}
 

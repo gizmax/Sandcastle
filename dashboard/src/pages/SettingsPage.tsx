@@ -26,6 +26,9 @@ import {
   Database,
   HardDrive,
   Container,
+  RotateCcw,
+  Clock,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -266,6 +269,10 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const { accentColor, setAccentColor } = useAccentColor();
   const { theme, toggleTheme } = useTheme();
+
+  // Update channel state
+  const [updateChannel, setUpdateChannel] = useState<"stable" | "beta" | "pinned">("stable");
+  const [pinnedVersion, setPinnedVersion] = useState("");
 
   // Advisor provider state
   const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
@@ -622,59 +629,169 @@ export default function SettingsPage() {
 
       {/* Software Update */}
       {!update.loading && update.currentVersion && (
-        <SectionCard
-          icon={update.updateAvailable ? ArrowUpCircle : CheckCircle2}
-          title="Software Update"
-          description="Check for new Sandcastle versions"
-        >
-          {update.updateAvailable ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-warning/15 border border-warning/30 text-warning">
-                  <ArrowUpCircle className="h-3 w-3" />
-                  v{update.latestVersion} available
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  Current: v{update.currentVersion}
-                </span>
+        <div id="software-update-section">
+          <SectionCard
+            icon={update.updateAvailable ? ArrowUpCircle : CheckCircle2}
+            title="Software Update"
+            description="Check for new Sandcastle versions"
+          >
+            {update.updateAvailable ? (
+              <div className="space-y-4">
+                {/* Version badges side by side */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted/50 border border-border text-muted-foreground">
+                    Current: v{update.currentVersion}
+                  </span>
+                  <span className="text-muted-foreground">-&gt;</span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-warning/15 border border-warning/30 text-warning">
+                    <ArrowUpCircle className="h-3 w-3" />
+                    v{update.latestVersion}
+                  </span>
+                </div>
+
+                {/* Highlights */}
+                {update.highlights.length > 0 && (
+                  <ul className="space-y-1 pl-1">
+                    {update.highlights.map((h, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-foreground">
+                        <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 text-accent shrink-0" />
+                        {h}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Update action area */}
+                {update.updateStatus === "idle" && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={() => void update.triggerUpdate()}
+                      className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 transition-colors cursor-pointer"
+                    >
+                      <Download className="h-4 w-4" />
+                      Update Now
+                    </button>
+                    {update.changelogUrl && (
+                      <a
+                        href={update.changelogUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        What's new
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Updating progress */}
+                {update.updateStatus === "updating" && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Updating to v{update.latestVersion}...
+                  </div>
+                )}
+
+                {/* Success state */}
+                {update.updateStatus === "success" && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-success">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Updated to v{update.latestVersion}! Restart to apply.
+                    </div>
+                    <button
+                      onClick={() => void update.triggerRollback()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-border/40 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Rollback
+                    </button>
+                  </div>
+                )}
+
+                {/* Error state */}
+                {update.updateStatus === "error" && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      Update failed: {update.updateError}
+                    </div>
+                    <button
+                      onClick={() => void update.triggerUpdate()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-border/40 transition-colors cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* Manual install command */}
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 overflow-x-auto rounded-lg bg-muted/50 border border-border px-3 py-2 text-xs sm:text-sm font-mono text-foreground">
+                    {update.installCommand}
+                  </code>
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(update.installCommand!).catch(() => {/* clipboard unavailable */});
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }}
+                    className="rounded-lg border border-border p-2 text-muted hover:text-foreground hover:bg-border/40 transition-colors cursor-pointer"
+                    title="Copy command"
+                  >
+                    {copied ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 overflow-x-auto rounded-lg bg-muted/50 border border-border px-3 py-2 text-xs sm:text-sm font-mono text-foreground">
-                  {update.installCommand}
-                </code>
-                <button
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(update.installCommand!).catch(() => {/* clipboard unavailable */});
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
-                  }}
-                  className="rounded-lg border border-border p-2 text-muted hover:text-foreground hover:bg-border/40 transition-colors cursor-pointer"
-                  title="Copy command"
-                >
-                  {copied ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-                </button>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-success" />
+                  <span className="text-sm text-foreground">
+                    v{update.currentVersion} - You're on the latest version
+                  </span>
+                </div>
+                {update.lastChecked && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    Last checked: {new Date(update.lastChecked).toLocaleString()}
+                  </div>
+                )}
               </div>
-              {update.releaseUrl && isSafeUrl(update.releaseUrl) && (
-                <a
-                  href={update.releaseUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+            )}
+
+            {/* Update channel selector */}
+            <div className="mt-4 pt-4 border-t border-border space-y-3">
+              <FieldLabel>Update Channel</FieldLabel>
+              <div className="flex items-center gap-3 flex-wrap">
+                <select
+                  value={updateChannel}
+                  onChange={(e) => setUpdateChannel(e.target.value as "stable" | "beta" | "pinned")}
+                  className={cn(inputClass, "w-40")}
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  View release notes
-                </a>
-              )}
+                  <option value="stable">Stable</option>
+                  <option value="beta">Beta</option>
+                  <option value="pinned">Pinned</option>
+                </select>
+                {updateChannel === "pinned" && (
+                  <input
+                    type="text"
+                    value={pinnedVersion}
+                    onChange={(e) => setPinnedVersion(e.target.value)}
+                    placeholder="e.g. 0.27.0"
+                    className={cn(inputClass, "w-36")}
+                  />
+                )}
+              </div>
+              <HelperText>
+                {updateChannel === "stable" && "Receive only stable, tested releases."}
+                {updateChannel === "beta" && "Receive pre-release versions with new features."}
+                {updateChannel === "pinned" && "Lock to a specific version. No automatic updates."}
+              </HelperText>
             </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-success" />
-              <span className="text-sm text-foreground">
-                v{update.currentVersion} - You're up to date
-              </span>
-            </div>
-          )}
-        </SectionCard>
+          </SectionCard>
+        </div>
       )}
 
       {/* Notifications */}

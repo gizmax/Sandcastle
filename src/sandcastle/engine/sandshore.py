@@ -415,6 +415,7 @@ class SandshoreRuntime:
         """
         from sandcastle.engine.providers import (
             get_api_key,
+            resolve_base_url,
             resolve_model,
         )
 
@@ -445,8 +446,9 @@ class SandshoreRuntime:
             model_api_key = get_api_key(model_info)
             envs["MODEL_API_KEY"] = model_api_key
             envs["MODEL_ID"] = model_info.api_model_id
-            if model_info.api_base_url:
-                envs["MODEL_BASE_URL"] = model_info.api_base_url
+            base_url = resolve_base_url(model_info)
+            if base_url:
+                envs["MODEL_BASE_URL"] = base_url
 
         # Inject tool credentials and bundle tool files
         tool_files: dict[str, str] = {}

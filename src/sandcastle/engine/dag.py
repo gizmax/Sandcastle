@@ -106,6 +106,24 @@ class PdfReportConfig:
 
 
 @dataclass
+class ReportConfig:
+    """Configuration for the report step type (WeasyPrint + Jinja2 PDF generation)."""
+
+    template: str = "research-report"  # template name
+    format: str = "pdf"  # pdf | html
+    theme: str = "professional"  # professional | minimal | academic
+    title: str = ""  # report title (can use {input.X} templates)
+    subtitle: str = ""
+    author: str = ""
+    logo_url: str = ""  # optional logo image URL
+    accent_color: str = "#f59e0b"  # theme accent color
+    include_toc: bool = True  # table of contents
+    include_page_numbers: bool = True
+    paper_size: str = "A4"  # A4 | letter
+
+
+
+@dataclass
 class SubWorkflowConfig:
     """Configuration for a sub-workflow (workflow-as-step)."""
 
@@ -277,6 +295,8 @@ class ParseConfig:
     output: str = "markdown"  # text, markdown, json
     pages: str | None = None  # "1-5,10-20" or None for all
     ocr: bool = False
+    ocr_engine: str = "auto"  # "auto" | "pymupdf" | "chandra"
+    languages: list[str] | None = None  # e.g. ["cs", "en"] for Chandra OCR
 
 
 @dataclass
@@ -383,6 +403,7 @@ VALID_STEP_TYPES = frozenset(
         "composio",
         "openclaw",
         "parse",
+        "report",
     }
 )
 
@@ -448,6 +469,7 @@ class StepDefinition:
     composio_config: ComposioConfig | None = None
     openclaw_config: OpenClawConfig | None = None
     parse_config: ParseConfig | None = None
+    report_config: ReportConfig | None = None
 
 
 VALID_RISK_LEVELS = frozenset({"minimal", "limited", "high", "unacceptable"})
@@ -682,6 +704,25 @@ def _parse_pdf_report(data: dict | None) -> PdfReportConfig | None:
         directory=data.get("directory", "./output"),
         language=data.get("language", "en"),
         filename=data.get("filename", ""),
+    )
+
+
+def _parse_report_config(data: dict | None) -> ReportConfig | None:
+    """Parse report step configuration from YAML data."""
+    if data is None:
+        return None
+    return ReportConfig(
+        template=data.get("template", "research-report"),
+        format=data.get("format", "pdf"),
+        theme=data.get("theme", "professional"),
+        title=data.get("title", ""),
+        subtitle=data.get("subtitle", ""),
+        author=data.get("author", ""),
+        logo_url=data.get("logo_url", ""),
+        accent_color=data.get("accent_color", "#f59e0b"),
+        include_toc=data.get("include_toc", True),
+        include_page_numbers=data.get("include_page_numbers", True),
+        paper_size=data.get("paper_size", "A4"),
     )
 
 
@@ -928,6 +969,8 @@ def _parse_parse_config(data: dict | None) -> ParseConfig | None:
         output=data.get("output", "markdown"),
         pages=data.get("pages"),
         ocr=bool(data.get("ocr", False)),
+        ocr_engine=data.get("ocr_engine", "auto"),
+        languages=data.get("languages"),
     )
 
 
@@ -1009,6 +1052,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         composio_config=_parse_composio_config(data.get("composio_config")),
         openclaw_config=_parse_openclaw_config(data.get("openclaw_config")),
         parse_config=_parse_parse_config(data.get("parse_config")),
+        report_config=_parse_report_config(data.get("report_config")),
     )
 
 
@@ -1310,6 +1354,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Parse step '{step.id}' has invalid output format '{cfg.output}'. "
                     "Must be 'text', 'markdown', or 'json'"
                 )
+            if cfg.ocr_engine not in ("auto", "pymupdf", "chandra"):
+                errors.append(
+                    f"Parse step '{step.id}' has invalid ocr_engine '{cfg.ocr_engine}'. "
+                    "Must be 'auto', 'pymupdf', or 'chandra'"
+                )
             # Warn when no file reference is provided (prompt is the NON_PROMPT placeholder)
             has_file_ref = (
                 step.prompt
@@ -1326,6 +1375,23 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Parse step '{step.id}' should have a prompt with a file reference "
                     "(@upload:file_id, @file:path, or a template variable) "
                     "or a depends_on step providing the path"
+                )
+        elif step.type == "report":
+            cfg = step.report_config or ReportConfig()
+            if cfg.format not in ("pdf", "html"):
+                errors.append(
+                    f"Report step '{step.id}' has invalid format '{cfg.format}'. "
+                    "Must be 'pdf' or 'html'"
+                )
+            if cfg.theme not in ("professional", "minimal", "academic"):
+                errors.append(
+                    f"Report step '{step.id}' has invalid theme '{cfg.theme}'. "
+                    "Must be 'professional', 'minimal', or 'academic'"
+                )
+            if cfg.paper_size not in ("A4", "letter"):
+                errors.append(
+                    f"Report step '{step.id}' has invalid paper_size '{cfg.paper_size}'. "
+                    "Must be 'A4' or 'letter'"
                 )
 
     # Validate sub_workflow configuration

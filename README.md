@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-8700%2B%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-14300%2B%20passing-brightgreen?style=flat-square)]()
 [![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)]()
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
@@ -34,7 +34,7 @@
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
 - [63 Built-in Integrations](#63-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [20 Step Types](#20-step-types)
+- [19 Step Types](#19-step-types)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
@@ -472,9 +472,9 @@ Once connected, ask your AI assistant to:
 | Capability | |
 |---|---|
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
-| **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini) | Yes |
+| **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
 | **63 built-in integrations** across 9 categories | Yes |
-| **20 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
+| **19 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -591,6 +591,10 @@ Use different AI providers per step. Claude for quality-critical tasks, cheaper 
 | `openai/codex` | OpenAI | OpenAI-compatible | $1.25 in / $10 out |
 | `minimax/m2.5` | MiniMax | OpenAI-compatible | $0.30 in / $1.20 out |
 | `google/gemini-2.5-pro` | Google (via OpenRouter) | OpenAI-compatible | $4 in / $20 out |
+| `omlx/llama-4-scout` | oMLX (local) | OpenAI-compatible | Free (self-hosted) |
+| `omlx/mistral-small` | oMLX (local) | OpenAI-compatible | Free (self-hosted) |
+| `omlx/gemma-3` | oMLX (local) | OpenAI-compatible | Free (self-hosted) |
+| `omlx/qwen-3` | oMLX (local) | OpenAI-compatible | Free (self-hosted) |
 
 ```yaml
 steps:
@@ -627,6 +631,7 @@ any supported provider:
 | Google (via OpenRouter) | US | `OPENROUTER_API_KEY` |
 | MiniMax | US | `MINIMAX_API_KEY` |
 | Ollama (local) | Local | None required |
+| oMLX (local) | Local | None required |
 
 ```bash
 # Switch to Mistral (EU data residency)
@@ -647,7 +652,7 @@ Enforce that all AI processing stays within EU borders:
 export DATA_RESIDENCY=eu
 ```
 
-When active, only EU-region providers (Mistral) and local providers (Ollama) are allowed.
+When active, only EU-region providers (Mistral) and local providers (Ollama, oMLX) are allowed.
 Attempts to use US providers will fail with a clear error message.
 
 #### OpenRouter (100+ Models)
@@ -799,9 +804,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 20 Step Types
+## 19 Step Types
 
-Sandcastle supports 20 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 19 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -822,6 +827,8 @@ Sandcastle supports 20 step types for building complex workflows beyond simple L
 | **Advanced** | `openclaw` | Delegate to an autonomous OpenClaw agent |
 | **Built-in** | `approval` | Human approval gate with timeout and auto-action |
 | **Built-in** | `sub_workflow` | Execute another workflow as a step |
+| **Built-in** | `browser` | Web automation with Playwright, LightPanda, or Browserbase |
+| **Built-in** | `composio` | 500+ business app actions via Composio integration |
 
 ```yaml
 steps:
@@ -1299,6 +1306,34 @@ Supported formats: PDF (with optional OCR), DOCX, XLSX, PPTX, CSV.
 Install parsing support: `pip install sandcastle-ai[parse]`
 
 PDFs are also auto-parsed when uploaded as workflow inputs (if pymupdf is installed).
+
+---
+
+### Batch Run
+
+Run any workflow on hundreds of items in parallel. Upload a CSV or JSON array, set max parallelism, and Sandcastle fans out into concurrent runs with progress tracking and aggregate cost reporting.
+
+```bash
+curl -X POST http://localhost:8080/api/workflows/lead-enrichment/batch \
+  -H "X-API-Key: $KEY" \
+  -d '{"items": [{"url": "https://acme.com"}, {"url": "https://beta.io"}], "max_parallel": 10}'
+```
+
+### Auto-Update
+
+Sandcastle checks for updates and can upgrade itself. CLI: `sandcastle update`. Dashboard: one-click update with rollback. Supports stable/beta/pinned channels, blackout windows, and enterprise approval policies.
+
+### Schedule Monitor
+
+Dashboard page showing all cron schedules at a glance: last run status, next run countdown, success rate, pause/resume controls. No more guessing which scheduled workflow failed overnight.
+
+### Workflow Version Diff
+
+Every workflow edit is versioned. Compare any two versions side-by-side with YAML diff highlighting. See exactly what changed, when, and roll back if needed.
+
+### Activity Feed
+
+Real-time activity stream on the dashboard: workflow runs, failures, edits, API key events. Know what happened without digging through logs.
 
 ---
 
@@ -1923,7 +1958,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 20 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 19 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
@@ -2022,9 +2057,10 @@ MAX_CONCURRENT_SANDBOXES=5     # rate limiter for parallel execution
 # OPENROUTER_API_KEY=sk-or-... # for Google Gemini via OpenRouter
 
 # Universal Advisor (AI provider for generation, evolution, evaluation)
-# SANDCASTLE_ADVISOR_PROVIDER=anthropic  # anthropic|openai|mistral|ollama|google|minimax (default: anthropic)
+# SANDCASTLE_ADVISOR_PROVIDER=anthropic  # anthropic|openai|mistral|ollama|omlx|google|minimax (default: anthropic)
 # SANDCASTLE_ADVISOR_MODEL=              # override default model for advisor
 # MISTRAL_API_KEY=...                    # Mistral AI API key (EU region)
+# OMLX_BASE_URL=http://localhost:8080    # oMLX server URL (local inference)
 # DATA_RESIDENCY=                        # eu|local|"" (empty = no restriction)
 
 # E2B custom template (pre-built sandbox with SDK installed)
@@ -2089,10 +2125,47 @@ LOG_LEVEL=info
 
 ---
 
+### oMLX - Local AI on Apple Silicon
+
+Run AI workflows entirely on your Mac with oMLX. Zero cloud costs, zero data leaving your machine.
+
+**Setup:**
+```bash
+# Install oMLX server
+pip install omlx
+
+# Start with Llama 4 Scout (17B, fits in 16GB RAM)
+omlx serve mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit
+
+# Configure Sandcastle
+export SANDCASTLE_ADVISOR_PROVIDER=omlx
+export OMLX_BASE_URL=http://localhost:8080
+
+# Run
+sandcastle serve
+```
+
+**Available models:**
+
+| Model | RAM | Best for |
+|-------|-----|----------|
+| Llama 4 Scout 17B | 12 GB | General research, analysis |
+| Mistral Small 24B | 16 GB | Structured tasks, coding |
+| Gemma 3 27B | 18 GB | Creative writing, summaries |
+| Qwen 3 30B | 20 GB | Multilingual, reasoning |
+
+**Custom server URL:**
+```bash
+# Point to remote oMLX server
+export OMLX_BASE_URL=http://192.168.1.100:8080
+```
+
+---
+
 ## Development
 
 ```bash
-# Run tests (8700+ passing)
+# Run tests (14,300+ passing)
 uv run pytest
 
 # Type check backend
