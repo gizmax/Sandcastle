@@ -186,9 +186,8 @@ function okResponse<T>(data: T) {
   return { data, error: null };
 }
 
-function errorResponse(msg: string) {
-  return { data: null, error: { message: msg } };
-}
+// errorResponse available for future use
+// function errorResponse(msg: string) { return { data: null, error: { message: msg } }; }
 
 // ============================================================================
 // 1. BatchRunModal (7 tests)
@@ -1115,7 +1114,7 @@ describe("Update Banner in Header", () => {
   const headerProps = {
     onMenuToggle: vi.fn(),
     onOpenPalette: vi.fn(),
-    notifications: [] as Array<{ id: string; title: string; body: string; time: string; read: boolean; link?: string }>,
+    notifications: [] as Array<{ id: string; type: "success" | "error" | "warning" | "info"; message: string; timestamp: Date; read: boolean; link?: string }>,
     onMarkAllRead: vi.fn(),
     onClickNotification: vi.fn(),
   };
