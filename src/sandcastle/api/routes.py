@@ -88,6 +88,8 @@ from sandcastle.api.schemas import (
     TransparencyPolicyViolationEntry,
     TransparencyReportResponse,
     UpdateCheckResponse,
+    UpdateRequest,
+    UpdateResponse,
     WorkflowGenerateRequest,
     WorkflowInfoResponse,
     WorkflowPromoteRequest,
@@ -122,6 +124,8 @@ from sandcastle.api.schemas import (
     RunIdempotentResponse,
     RunQueuedResponse,
     RunReplayResponse,
+    BatchRunRequest,
+    BatchStartedResponse,
 )
 from sandcastle.config import Settings, settings
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
@@ -172,6 +176,32 @@ SSE_KEEPALIVE_INTERVAL_SECONDS = 30
 _hub_cache: dict[str, tuple[float, Any]] = {}
 _HUB_CACHE_TTL = 300  # 5 minutes
 _HUB_CACHE_MAXSIZE = 100
+
+# --- Batch run in-memory tracking ---
+# Maps batch_id -> BatchStatusResponse dict for tracking batch progress.
+# In production, this would be stored in Redis or PostgreSQL.
+_batch_store: dict[str, dict[str, Any]] = {}
+_BATCH_STORE_MAX_SIZE = 500  # Evict oldest completed batches when exceeded
+
+
+def _evict_stale_batches() -> None:
+    """Remove completed/failed batches when the store exceeds the max size.
+
+    Keeps running batches intact. Evicts oldest completed batches first.
+    """
+    if len(_batch_store) <= _BATCH_STORE_MAX_SIZE:
+        return
+    # Sort non-running batches by creation time (oldest first)
+    candidates = [
+        (bid, b.get("created_at", ""))
+        for bid, b in _batch_store.items()
+        if b.get("status") != "running"
+    ]
+    candidates.sort(key=lambda x: x[1])
+    # Evict until we are under the limit
+    to_remove = len(_batch_store) - _BATCH_STORE_MAX_SIZE
+    for bid, _ in candidates[:to_remove]:
+        del _batch_store[bid]
 
 
 def _get_hub_cache(key: str, tenant_id: str | None = None) -> Any | None:
@@ -721,6 +751,8 @@ async def check_update() -> ApiResponse:
         current = __version__
         latest = current
         update_available = False
+        changelog_url = ""
+        highlights: list[str] = []
 
         try:
             async with httpx.AsyncClient(timeout=5) as client:
@@ -728,6 +760,23 @@ async def check_update() -> ApiResponse:
                 resp.raise_for_status()
                 latest = resp.json()["info"]["version"]
                 update_available = Version(latest) > Version(current)
+
+                # If update available, fetch highlights from GitHub release
+                if update_available:
+                    changelog_url = f"https://github.com/gizmax/Sandcastle/releases/tag/v{latest}"
+                    try:
+                        gh_resp = await client.get(
+                            f"https://api.github.com/repos/gizmax/Sandcastle/releases/tags/v{latest}"
+                        )
+                        body = gh_resp.json().get("body", "")
+                        # Extract first 3 bullet points starting with "- **"
+                        highlights = [
+                            line.strip("- *").split("**")[0].strip()
+                            for line in body.split("\n")
+                            if line.strip().startswith("- **")
+                        ][:3]
+                    except Exception:
+                        highlights = []
         except Exception:
             pass  # graceful degradation
 
@@ -737,10 +786,393 @@ async def check_update() -> ApiResponse:
             update_available=update_available,
             release_url="https://github.com/gizmax/Sandcastle/releases",
             install_command="pip install --upgrade sandcastle-ai",
+            changelog_url=changelog_url,
+            highlights=highlights,
         )
         _update_cache["result"] = result
         _update_cache["ts"] = time.monotonic()
         return ApiResponse(data=result)
+
+
+# --- Pre-update backup helpers ---
+
+_SANDCASTLE_HOME = Path.home() / ".sandcastle"
+
+
+def _is_in_blackout_window() -> bool:
+    """Return True if current UTC time falls inside the configured update blackout window."""
+    start = settings.update_blackout_start.strip()
+    end = settings.update_blackout_end.strip()
+    if not start or not end:
+        return False
+    try:
+        # Use UTC to avoid timezone-dependent behavior on different servers
+        now = datetime.now(timezone.utc)
+        h_s, m_s = int(start.split(":")[0]), int(start.split(":")[1])
+        h_e, m_e = int(end.split(":")[0]), int(end.split(":")[1])
+        if not (0 <= h_s <= 23 and 0 <= m_s <= 59):
+            logger.warning("Invalid blackout start time: %s", start)
+            return False
+        if not (0 <= h_e <= 23 and 0 <= m_e <= 59):
+            logger.warning("Invalid blackout end time: %s", end)
+            return False
+        current_minutes = now.hour * 60 + now.minute
+        start_minutes = h_s * 60 + m_s
+        end_minutes = h_e * 60 + m_e
+        if start_minutes <= end_minutes:
+            return start_minutes <= current_minutes < end_minutes
+        # Overnight window (e.g. 22:00 - 06:00)
+        return current_minutes >= start_minutes or current_minutes < end_minutes
+    except (ValueError, IndexError):
+        return False
+
+
+async def _pre_update_backup(current_version: str) -> None:
+    """Create pre-update backups of the database and .env file."""
+    # Store previous version
+    _SANDCASTLE_HOME.mkdir(parents=True, exist_ok=True)
+    previous_version_file = _SANDCASTLE_HOME / "previous_version"
+    previous_version_file.write_text(current_version)
+
+    # If SQLite: copy DB file to {db_path}.pre-update
+    db_url = settings.database_url
+    if not db_url or db_url.startswith("sqlite"):
+        if db_url:
+            # Extract path from sqlite:///path or sqlite+aiosqlite:///path
+            db_path_str = db_url.split("///")[-1] if "///" in db_url else ""
+        else:
+            db_path_str = str(Path(settings.data_dir) / "sandcastle.db")
+        if db_path_str:
+            db_path = Path(db_path_str)
+            if db_path.exists():
+                import shutil
+                backup_path = db_path.with_suffix(db_path.suffix + ".pre-update")
+                shutil.copy2(str(db_path), str(backup_path))
+                logger.info("Database backup created: %s", backup_path)
+
+    # Copy .env to .env.pre-update if exists
+    env_path = Path(".env")
+    if env_path.exists():
+        import shutil
+        shutil.copy2(".env", ".env.pre-update")
+        logger.info("Environment file backup created: .env.pre-update")
+
+
+async def _restore_pre_update_backup() -> None:
+    """Restore database from pre-update backup if it exists."""
+    db_url = settings.database_url
+    if not db_url or db_url.startswith("sqlite"):
+        if db_url:
+            db_path_str = db_url.split("///")[-1] if "///" in db_url else ""
+        else:
+            db_path_str = str(Path(settings.data_dir) / "sandcastle.db")
+        if db_path_str:
+            db_path = Path(db_path_str)
+            backup_path = db_path.with_suffix(db_path.suffix + ".pre-update")
+            if backup_path.exists():
+                import shutil
+                shutil.copy2(str(backup_path), str(db_path))
+                logger.info("Database restored from backup: %s", backup_path)
+
+
+async def _emit_update_audit(
+    event_type: str,
+    payload: dict,
+    source_ip: str | None = None,
+) -> None:
+    """Emit an audit event for update operations. Failures are silently logged."""
+    try:
+        from sandcastle.engine.audit import append_audit_event
+
+        async with async_session() as session:
+            await append_audit_event(
+                session=session,
+                event_type=event_type,
+                run_id=None,
+                actor_id="admin",
+                payload=payload,
+                source_ip=source_ip,
+            )
+    except Exception:
+        logger.warning("Failed to emit audit event: %s", event_type, exc_info=True)
+
+
+@router.post("/admin/update")
+async def trigger_update(req: Request, body: UpdateRequest | None = None) -> ApiResponse:
+    """Trigger a software update to the specified or latest version.
+
+    Creates pre-update backups, installs the new version via pip, and verifies
+    the installation. Requires admin privileges.
+    """
+    _require_admin(req)
+
+    from packaging.version import Version
+
+    from sandcastle import __version__
+
+    current = __version__
+    source_ip = req.client.host if req.client else None
+
+    # Check blackout window
+    if _is_in_blackout_window():
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error=(
+                    f"Update blocked: blackout window active "
+                    f"({settings.update_blackout_start} - {settings.update_blackout_end})"
+                ),
+            )
+        )
+
+    # Check update channel
+    if settings.update_channel == "pin":
+        if not settings.pinned_version:
+            return ApiResponse(
+                data=UpdateResponse(
+                    status="failed",
+                    previous_version=current,
+                    error="Update channel is 'pin' but no pinned_version is configured",
+                )
+            )
+        target = settings.pinned_version
+    elif body and body.target_version:
+        target = body.target_version
+    else:
+        # Fetch latest from PyPI
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get("https://pypi.org/pypi/sandcastle-ai/json")
+                resp.raise_for_status()
+                target = resp.json()["info"]["version"]
+        except Exception as exc:
+            return ApiResponse(
+                data=UpdateResponse(
+                    status="failed",
+                    previous_version=current,
+                    error=f"Failed to fetch latest version from PyPI: {exc}",
+                )
+            )
+
+    # Skip if already on target version
+    if Version(target) == Version(current):
+        return ApiResponse(
+            data=UpdateResponse(
+                status="success",
+                new_version=current,
+                previous_version=current,
+                restart_required=False,
+                error="Already on target version",
+            )
+        )
+
+    # Filter beta versions when channel is stable
+    if settings.update_channel == "stable" and ("a" in target or "b" in target or "rc" in target):
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error=f"Version {target} is a pre-release; update_channel is 'stable'",
+            )
+        )
+
+    # Emit audit: update started
+    await _emit_update_audit(
+        "update.started",
+        {"current_version": current, "target_version": target},
+        source_ip=source_ip,
+    )
+
+    # Pre-update backup
+    try:
+        await _pre_update_backup(current)
+    except Exception as exc:
+        logger.error("Pre-update backup failed: %s", exc, exc_info=True)
+        # Continue with update even if backup fails - log the warning
+
+    # Run pip install
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pip", "install", "--upgrade", f"sandcastle-ai=={target}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            await _emit_update_audit(
+                "update.failed",
+                {"target_version": target, "error": error_msg},
+                source_ip=source_ip,
+            )
+            return ApiResponse(
+                data=UpdateResponse(
+                    status="failed",
+                    previous_version=current,
+                    error=f"pip install failed (exit {proc.returncode}): {error_msg[:500]}",
+                )
+            )
+    except asyncio.TimeoutError:
+        await _emit_update_audit(
+            "update.failed",
+            {"target_version": target, "error": "pip install timed out after 120s"},
+            source_ip=source_ip,
+        )
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error="pip install timed out after 120 seconds",
+            )
+        )
+    except Exception as exc:
+        await _emit_update_audit(
+            "update.failed",
+            {"target_version": target, "error": str(exc)},
+            source_ip=source_ip,
+        )
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error=f"Failed to run pip: {exc}",
+            )
+        )
+
+    # Verify installation by checking the installed version
+    try:
+        verify_proc = await asyncio.create_subprocess_exec(
+            "python", "-c",
+            "from sandcastle import __version__; print(__version__)",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        v_stdout, _ = await asyncio.wait_for(verify_proc.communicate(), timeout=15)
+        installed_version = v_stdout.decode("utf-8").strip()
+    except Exception:
+        installed_version = target  # Assume success if verification fails
+
+    # Invalidate update check cache
+    _update_cache.clear()
+
+    await _emit_update_audit(
+        "update.completed",
+        {"new_version": installed_version, "previous_version": current},
+        source_ip=source_ip,
+    )
+
+    return ApiResponse(
+        data=UpdateResponse(
+            status="success",
+            new_version=installed_version,
+            previous_version=current,
+            restart_required=True,
+        )
+    )
+
+
+@router.post("/admin/rollback")
+async def trigger_rollback(req: Request) -> ApiResponse:
+    """Roll back to the previously installed version.
+
+    Reads the stored previous version from ~/.sandcastle/previous_version,
+    reinstalls that version, and restores the database backup if available.
+    """
+    _require_admin(req)
+
+    from sandcastle import __version__
+
+    current = __version__
+    source_ip = req.client.host if req.client else None
+
+    # Read previous version
+    previous_version_file = _SANDCASTLE_HOME / "previous_version"
+    if not previous_version_file.exists():
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error="No previous version found. No update has been performed yet.",
+            )
+        )
+
+    previous = previous_version_file.read_text().strip()
+    if not previous:
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error="Previous version file is empty",
+            )
+        )
+
+    # Emit audit: rollback started
+    await _emit_update_audit(
+        "update.rollback",
+        {"current_version": current, "rolling_back_to": previous},
+        source_ip=source_ip,
+    )
+
+    # Run pip install for the previous version
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pip", "install", f"sandcastle-ai=={previous}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            return ApiResponse(
+                data=UpdateResponse(
+                    status="failed",
+                    previous_version=current,
+                    error=f"Rollback pip install failed (exit {proc.returncode}): {error_msg[:500]}",
+                )
+            )
+    except asyncio.TimeoutError:
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error="Rollback pip install timed out after 120 seconds",
+            )
+        )
+    except Exception as exc:
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error=f"Rollback failed: {exc}",
+            )
+        )
+
+    # Restore database backup if exists
+    try:
+        await _restore_pre_update_backup()
+    except Exception as exc:
+        logger.error("Database restore failed during rollback: %s", exc, exc_info=True)
+
+    # Invalidate update check cache
+    _update_cache.clear()
+
+    # Clean up the previous_version file after successful rollback
+    try:
+        previous_version_file.unlink()
+    except OSError:
+        pass
+
+    return ApiResponse(
+        data=UpdateResponse(
+            status="success",
+            rolled_back_to=previous,
+            previous_version=current,
+            restart_required=True,
+        )
+    )
 
 
 # --- Browse (file system) ---
@@ -5519,18 +5951,72 @@ async def list_schedules(
         result = await session.execute(stmt)
         schedules = result.scalars().all()
 
-    items = [
-        ScheduleResponse(
-            id=str(s.id),
-            workflow_name=s.workflow_name,
-            cron_expression=s.cron_expression,
-            input_data=s.input_data or {},
-            enabled=s.enabled,
-            last_run_id=str(s.last_run_id) if s.last_run_id else None,
-            created_at=s.created_at,
+    # Compute enriched schedule data (last run info, success rate, status)
+    items: list[ScheduleResponse] = []
+    for s in schedules:
+        last_run_at = None
+        last_run_status = None
+        success_rate = 0.0
+        sched_status = "paused" if not s.enabled else "active"
+
+        if s.last_run_id:
+            async with async_session() as run_sess:
+                last_run = await run_sess.get(Run, s.last_run_id)
+                if last_run:
+                    last_run_at = last_run.started_at or last_run.created_at
+                    last_run_status = last_run.status.value if hasattr(last_run.status, "value") else str(last_run.status)
+                    if s.enabled and last_run_status == "failed":
+                        sched_status = "failing"
+
+                # Compute success rate from recent runs for this workflow
+                recent_q = (
+                    select(
+                        func.count(Run.id).label("total"),
+                        func.count(
+                            case(
+                                (Run.status == RunStatus.COMPLETED, Run.id),
+                                else_=None,
+                            )
+                        ).label("passed"),
+                    )
+                    .where(
+                        Run.workflow_name == s.workflow_name,
+                        Run.created_at >= datetime.now(timezone.utc) - timedelta(days=30),
+                    )
+                )
+                recent_q = _apply_tenant_filter(recent_q, tenant_id, Run.tenant_id)
+                row = (await run_sess.execute(recent_q)).one_or_none()
+                if row and row.total > 0:
+                    success_rate = round(row.passed / row.total, 2)
+
+        # Compute next_run_at from cron
+        next_run_at = None
+        if s.enabled:
+            try:
+                from apscheduler.triggers.cron import CronTrigger
+                trigger = CronTrigger.from_crontab(s.cron_expression)
+                next_fire = trigger.get_next_fire_time(None, datetime.now(timezone.utc))
+                if next_fire:
+                    next_run_at = next_fire
+            except Exception:
+                pass
+
+        items.append(
+            ScheduleResponse(
+                id=str(s.id),
+                workflow_name=s.workflow_name,
+                cron_expression=s.cron_expression,
+                input_data=s.input_data or {},
+                enabled=s.enabled,
+                last_run_id=str(s.last_run_id) if s.last_run_id else None,
+                last_run_at=last_run_at,
+                last_run_status=last_run_status,
+                next_run_at=next_run_at,
+                success_rate=success_rate,
+                status=sched_status,
+                created_at=s.created_at,
+            )
         )
-        for s in schedules
-    ]
 
     return ApiResponse(
         data=items,
@@ -5706,6 +6192,106 @@ async def delete_schedule(schedule_id: str, request: Request) -> ApiResponse:
         await session.commit()
 
     return ApiResponse(data={"deleted": True, "id": schedule_id})
+
+
+@router.post("/schedules/{schedule_id}/trigger", status_code=202)
+async def trigger_schedule(schedule_id: str, req: Request) -> ApiResponse:
+    """Trigger an immediate run for a schedule, bypassing the cron timer."""
+    await execution_limiter.check(req)
+    tenant_id = get_tenant_id(req)
+
+    try:
+        schedule_uuid = uuid.UUID(schedule_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid schedule ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(Schedule).where(Schedule.id == schedule_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Schedule.tenant_id)
+        result = await session.execute(stmt)
+        schedule = result.scalar_one_or_none()
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Schedule '{schedule_id}' not found",
+                    )
+                ).model_dump(),
+            )
+
+        if not schedule.enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="SCHEDULE_DISABLED",
+                        message="Cannot trigger a disabled schedule. Enable it first.",
+                    )
+                ).model_dump(),
+            )
+
+        # Load the workflow YAML
+        try:
+            yaml_content = _load_workflow_yaml(schedule.workflow_name)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_WORKFLOW",
+                        message=f"Workflow '{schedule.workflow_name}' not found on disk",
+                    )
+                ).model_dump(),
+            )
+
+        workflow = parse_yaml_string(yaml_content)
+        run_id = str(uuid.uuid4())
+
+        # Create a queued run
+        db_run = Run(
+            id=uuid.UUID(run_id),
+            workflow_name=workflow.name,
+            status=RunStatus.QUEUED,
+            input_data=schedule.input_data or {},
+            tenant_id=tenant_id,
+            risk_level=getattr(workflow, "risk_level", "minimal"),
+        )
+        session.add(db_run)
+
+        # Update schedule's last_run_id
+        schedule.last_run_id = uuid.UUID(run_id)
+        await session.commit()
+
+    # Enqueue the job outside the session
+    try:
+        await enqueue_workflow(yaml_content, schedule.input_data or {}, run_id)
+    except Exception as e:
+        logger.error("Failed to enqueue triggered schedule run: %s", e)
+        # Mark run as failed so it does not stay stuck
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = RunStatus.FAILED
+                    db_run.error = f"Enqueue failed: {e}"
+                    await session.commit()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="ENQUEUE_ERROR", message="Failed to enqueue workflow run")
+            ).model_dump(),
+        )
+
+    return ApiResponse(data={"run_id": run_id, "status": "queued"})
 
 
 # --- Dead Letter Queue ---
@@ -8060,6 +8646,239 @@ async def rollback_workflow(req: Request, name: str, request: WorkflowRollbackRe
             "status": "production",
         }
     )
+
+
+# --- Batch Run ---
+
+
+@router.post("/workflows/{name}/batch", status_code=202)
+async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
+    """Run a workflow in batch mode with multiple input items.
+
+    Accepts a list of input items and processes them concurrently with
+    a configurable parallelism limit. Returns a batch_id immediately.
+    """
+    await execution_limiter.check(req)
+    tenant_id = get_tenant_id(req)
+
+    # Parse the request body manually since we use Request, not a Pydantic model param
+    try:
+        body = await req.json()
+        batch_req = BatchRunRequest(**body)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_REQUEST",
+                    message=f"Invalid batch request: {e}",
+                )
+            ).model_dump(),
+        )
+
+    # Validate workflow exists by creating a WorkflowRunRequest for it
+    try:
+        run_req = WorkflowRunRequest(workflow_name=name)
+        yaml_content, wf_version = await _resolve_workflow_request(run_req)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW", message=str(e))
+            ).model_dump(),
+        )
+
+    # Validate YAML parses correctly
+    try:
+        workflow = parse_yaml_string(yaml_content)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW", message=str(e))
+            ).model_dump(),
+        )
+
+    errors = validate(workflow)
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="VALIDATION_ERROR", message="; ".join(errors))
+            ).model_dump(),
+        )
+
+    # Clamp max_parallel to the server's max_concurrent_sandboxes setting
+    effective_parallel = min(batch_req.max_parallel, settings.max_concurrent_sandboxes)
+
+    # Evict stale batches to prevent unbounded memory growth
+    _evict_stale_batches()
+
+    batch_id = str(uuid.uuid4())
+    now_utc = datetime.now(timezone.utc)
+
+    # Initialize per-item statuses
+    items_status: list[dict[str, Any]] = []
+    for i in range(len(batch_req.items)):
+        items_status.append({
+            "index": i,
+            "status": "pending",
+            "run_id": None,
+            "cost_usd": 0.0,
+            "error": None,
+            "started_at": None,
+            "completed_at": None,
+        })
+
+    # Store batch metadata
+    _batch_store[batch_id] = {
+        "batch_id": batch_id,
+        "workflow": name,
+        "status": "running",
+        "total": len(batch_req.items),
+        "completed": 0,
+        "failed": 0,
+        "running": 0,
+        "pending": len(batch_req.items),
+        "total_cost_usd": 0.0,
+        "items": items_status,
+        "created_at": now_utc.isoformat(),
+    }
+
+    # Background task to process items
+    async def _process_batch() -> None:
+        sem = asyncio.Semaphore(effective_parallel)
+        batch = _batch_store[batch_id]
+        # Lock protects counter updates (running/pending/completed/failed/total_cost)
+        # from concurrent coroutine interleaving
+        counter_lock = asyncio.Lock()
+
+        async def _process_item(idx: int, item_input: dict[str, Any]) -> None:
+            async with sem:
+                item = batch["items"][idx]
+                item["status"] = "running"
+                item["started_at"] = datetime.now(timezone.utc).isoformat()
+                async with counter_lock:
+                    batch["running"] += 1
+                    batch["pending"] -= 1
+
+                try:
+                    run_id = str(uuid.uuid4())
+                    item["run_id"] = run_id
+
+                    # Resolve budget for each item
+                    budget = batch_req.max_cost_per_item_usd
+                    if budget is None:
+                        budget = await _resolve_budget(None, tenant_id)
+
+                    # Create DB record with QUEUED status
+                    async with async_session() as session:
+                        db_run = Run(
+                            id=uuid.UUID(run_id),
+                            workflow_name=workflow.name,
+                            status=RunStatus.QUEUED,
+                            input_data=item_input,
+                            tenant_id=tenant_id,
+                            max_cost_usd=budget,
+                            workflow_version=wf_version,
+                            risk_level=getattr(workflow, "risk_level", "minimal"),
+                        )
+                        session.add(db_run)
+                        await session.commit()
+
+                    # Enqueue the job
+                    await enqueue_workflow(yaml_content, item_input, run_id)
+
+                    # Poll for completion (simple approach for in-memory tracking)
+                    for _ in range(600):  # 10 minutes max (1s intervals)
+                        await asyncio.sleep(1)
+                        async with async_session() as session:
+                            db_run = await session.get(Run, uuid.UUID(run_id))
+                            if db_run and db_run.status in (
+                                RunStatus.COMPLETED,
+                                RunStatus.FAILED,
+                            ):
+                                item["cost_usd"] = float(
+                                    db_run.total_cost_usd or 0
+                                )
+                                if db_run.status == RunStatus.COMPLETED:
+                                    item["status"] = "completed"
+                                    async with counter_lock:
+                                        batch["completed"] += 1
+                                else:
+                                    item["status"] = "failed"
+                                    item["error"] = db_run.error or "Unknown error"
+                                    async with counter_lock:
+                                        batch["failed"] += 1
+                                item["completed_at"] = datetime.now(
+                                    timezone.utc
+                                ).isoformat()
+                                async with counter_lock:
+                                    batch["total_cost_usd"] += item["cost_usd"]
+                                break
+                    else:
+                        # Timed out waiting for completion
+                        item["status"] = "failed"
+                        item["error"] = "Timed out after 10 minutes"
+                        async with counter_lock:
+                            batch["failed"] += 1
+                        item["completed_at"] = datetime.now(
+                            timezone.utc
+                        ).isoformat()
+
+                except Exception as exc:
+                    item["status"] = "failed"
+                    item["error"] = str(exc)
+                    item["completed_at"] = datetime.now(timezone.utc).isoformat()
+                    async with counter_lock:
+                        batch["failed"] += 1
+                finally:
+                    async with counter_lock:
+                        batch["running"] -= 1
+
+        # Launch all items concurrently (semaphore limits parallelism)
+        tasks = [
+            _process_item(i, item_input)
+            for i, item_input in enumerate(batch_req.items)
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Final status
+        if batch["failed"] == 0:
+            batch["status"] = "completed"
+        elif batch["completed"] > 0:
+            batch["status"] = "partial_failure"
+        else:
+            batch["status"] = "failed"
+
+    asyncio.create_task(_process_batch())
+
+    return ApiResponse(
+        data=BatchStartedResponse(
+            batch_id=batch_id,
+            workflow=name,
+            total=len(batch_req.items),
+            status="running",
+        ).model_dump(),
+    )
+
+
+@router.get("/batch/{batch_id}/status")
+async def get_batch_status(batch_id: str) -> ApiResponse:
+    """Get the status of a batch run."""
+    batch = _batch_store.get(batch_id)
+    if not batch:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Batch '{batch_id}' not found",
+                )
+            ).model_dump(),
+        )
+
+    return ApiResponse(data=batch)
 
 
 # --- Workflow as API ---

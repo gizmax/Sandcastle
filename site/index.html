@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sandcastle - Stop building AI infrastructure. Start shipping AI products.</title>
-  <meta name="description" content="Sandcastle - production AI workflow orchestrator. 6 AI providers, EU data residency, smart failover, cost intelligence, SLO routing, 20 step types, 236 templates. European-built, open source. pip install sandcastle-ai">
+  <meta name="description" content="Sandcastle - production AI workflow orchestrator. 7 AI providers, EU data residency, smart failover, cost intelligence, SLO routing, 20 step types, 236 templates. European-built, open source. pip install sandcastle-ai">
   <meta name="keywords" content="AI workflow orchestrator, AI agent orchestration, EU AI Act compliance, AI audit trail, PII redaction, LLM orchestration, AI pipeline, workflow automation, AI compliance, GDPR AI, AI governance, AI risk management, Claude API, GPT orchestration, AI sandbox, multi-model routing, AI cost tracking, AI approval gates, OpenTelemetry AI, AI observability, workflow YAML, AI dashboard, sandcastle, sandcastle-ai">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
@@ -14,7 +14,7 @@
 
   <!-- Open Graph -->
   <meta property="og:title" content="Sandcastle - Stop building AI infrastructure. Start shipping AI products.">
-  <meta property="og:description" content="Any model, any provider, your rules. 6 AI providers, EU data residency, smart failover, cost intelligence, 20 step types, 236 templates. pip install sandcastle-ai.">
+  <meta property="og:description" content="Any model, any provider, your rules. 7 AI providers, EU data residency, smart failover, cost intelligence, 20 step types, 236 templates. pip install sandcastle-ai.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu">
   <meta property="og:type" content="website">
@@ -24,7 +24,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Sandcastle - Stop building AI infrastructure. Start shipping AI products.">
-  <meta name="twitter:description" content="Any model, any provider, your rules. 6 AI providers, EU data residency, smart failover, cost intelligence. European-built, open source. pip install sandcastle-ai">
+  <meta name="twitter:description" content="Any model, any provider, your rules. 7 AI providers, EU data residency, smart failover, cost intelligence. European-built, open source. pip install sandcastle-ai">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta name="twitter:creator" content="@iuditg">
 
@@ -58,7 +58,7 @@
     "operatingSystem": "Cross-platform",
     "url": "https://sandcastle-ai.eu",
     "downloadUrl": "https://pypi.org/project/sandcastle-ai/",
-    "softwareVersion": "0.2666b1",
+    "softwareVersion": "0.28.0",
     "author": {
       "@type": "Person",
       "name": "Tomas Pflanzer",
@@ -124,7 +124,7 @@
         "name": "What LLM providers does Sandcastle support?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Sandcastle supports multi-provider model routing across Anthropic Claude, OpenAI GPT, Google Gemini, MiniMax, OpenRouter, and local models via Ollama. You can mix and match models per workflow step."
+          "text": "Sandcastle supports multi-provider model routing across Anthropic Claude, OpenAI GPT, Google Gemini, MiniMax, Mistral, OpenRouter, local models via Ollama, and on-device inference via oMLX on Apple Silicon. You can mix and match models per workflow step."
         }
       },
       {
@@ -1757,7 +1757,7 @@
   <header class="hero" id="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.2666b1 - Your AI, Your Rules, Your Borders
+        v0.28 - Batch, Monitor, Report.
       </div>
       <h1>
         Describe what you want. Go home.<br>
@@ -1820,7 +1820,7 @@
     <div class="container fade-in">
       <div class="stats-row">
         <div class="stat-item">
-          <div class="stat-number">6</div>
+          <div class="stat-number">7</div>
           <div class="stat-label">AI Providers</div>
         </div>
         <div class="stat-item">
@@ -1853,7 +1853,7 @@
       <div style="text-align:center;">
         <span class="highlight-pill">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          Zero vendor lock-in - switch between 6 AI providers with one setting. EU data residency built in.
+          Zero vendor lock-in - 7 AI providers including oMLX for local inference on Apple Silicon. EU data residency built in.
         </span>
       </div>
     </div>
@@ -1888,7 +1888,7 @@
           <div class="contrast-label"><span>&#10003;</span> With Sandcastle</div>
           <ul class="contrast-list">
             <li><span class="mark">&#10003;</span><strong>Describe it, ship it.</strong> Tell AI what you need - in production today, not next quarter.</li>
-            <li><span class="mark">&#10003;</span><strong>6 providers, one setting.</strong> Switch from Claude to Mistral in one line.</li>
+            <li><span class="mark">&#10003;</span><strong>7 providers, one setting.</strong> Switch from Claude to Mistral in one line. Run locally with oMLX.</li>
             <li><span class="mark">&#10003;</span><strong>You know what it costs.</strong> Per provider. Per workflow. Per step. Right now.</li>
             <li><span class="mark">&#10003;</span><strong>Provider down? You sleep.</strong> Auto-failover switches to the next one.</li>
             <li><span class="mark">&#10003;</span><strong>EU data stays in EU.</strong> One toggle. Hard enforcement. Not a policy doc.</li>
@@ -2193,6 +2193,21 @@
               <div class="compat-card-icon">G</div>
               <div class="compat-card-name">Gemini</div>
               <div class="compat-card-models">via OpenRouter</div>
+            </div>
+            <div class="compat-card card-ollama">
+              <div class="compat-card-icon">O</div>
+              <div class="compat-card-name">Ollama</div>
+              <div class="compat-card-models">Local models</div>
+            </div>
+            <div class="compat-card card-mistral">
+              <div class="compat-card-icon">M</div>
+              <div class="compat-card-name">Mistral</div>
+              <div class="compat-card-models">Large, Small, Codestral</div>
+            </div>
+            <div class="compat-card card-omlx">
+              <div class="compat-card-icon">X</div>
+              <div class="compat-card-name">oMLX</div>
+              <div class="compat-card-models">Apple Silicon local</div>
             </div>
           </div>
         </div>
@@ -2695,7 +2710,7 @@
   <footer>
     <div class="container footer-inner">
       <div class="footer-left">
-        <strong>Sandcastle</strong> v0.2666b1 - BSL 1.1 (Apache 2.0 after 2030)<br>
+        <strong>Sandcastle</strong> v0.28 - BSL 1.1 (Apache 2.0 after 2030)<br>
         &copy; 2026 Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax
       </div>
       <div class="footer-links">
@@ -2777,7 +2792,7 @@
       if (!body || !cursor) return;
 
       var commands = [
-        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.2666b1' },
+        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.28.0' },
         { cmd: 'sandcastle init', output: 'Created .env with E2B backend' },
         { cmd: 'sandcastle serve', output: 'Dashboard ready at http://localhost:8080' }
       ];

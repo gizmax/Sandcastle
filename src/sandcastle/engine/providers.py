@@ -1,8 +1,9 @@
 """Provider registry - maps model strings to runner configs, API keys, and pricing.
 
-Supports Claude (default), MiniMax, OpenAI, and OpenRouter-based models.
-Claude models use the Claude Agent SDK runner (runner.mjs), all others use
-the OpenAI-compatible runner (runner-openai.mjs).
+Supports Claude (default), MiniMax, OpenAI, Mistral, Google/Gemini (via
+OpenRouter), Ollama, and oMLX (local Apple Silicon inference).  Claude models
+use the Claude Agent SDK runner (runner.mjs), all others use the
+OpenAI-compatible runner (runner-openai.mjs).
 """
 
 from __future__ import annotations
@@ -79,6 +80,23 @@ PROVIDER_REGISTRY: dict[str, ModelInfo] = {
         "ollama", "llama3.2", "runner-openai.mjs",
         "", "http://localhost:11434/v1", 0.0, 0.0, region="local",
     ),
+    # oMLX (local - OpenAI-compatible self-hosted LLM on Apple Silicon)
+    "omlx/llama-4-scout": ModelInfo(
+        "omlx", "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit", "runner-openai.mjs",
+        "", "http://localhost:8080/v1", 0.0, 0.0, region="local",
+    ),
+    "omlx/mistral-small": ModelInfo(
+        "omlx", "mlx-community/Mistral-Small-24B-Instruct-2501-4bit", "runner-openai.mjs",
+        "", "http://localhost:8080/v1", 0.0, 0.0, region="local",
+    ),
+    "omlx/gemma-3": ModelInfo(
+        "omlx", "mlx-community/gemma-3-27b-it-qat-4bit", "runner-openai.mjs",
+        "", "http://localhost:8080/v1", 0.0, 0.0, region="local",
+    ),
+    "omlx/qwen-3": ModelInfo(
+        "omlx", "mlx-community/Qwen3-30B-A3B-4bit", "runner-openai.mjs",
+        "", "http://localhost:8080/v1", 0.0, 0.0, region="local",
+    ),
 }
 
 # All known model names (for validation)
@@ -123,6 +141,19 @@ def get_api_key(model_info: ModelInfo) -> str:
     if attr:
         return getattr(settings, attr, "")
     return ""
+
+
+def resolve_base_url(model_info: ModelInfo) -> str:
+    """Resolve the API base URL for *model_info*.
+
+    For oMLX models the URL is read from ``settings.omlx_base_url`` at
+    runtime so users can point to any oMLX server.  All other providers
+    return their static ``api_base_url`` (or the OpenAI default).
+    """
+    if model_info.provider == "omlx":
+        from sandcastle.config import settings
+        return settings.omlx_base_url.rstrip("/") + "/v1"
+    return model_info.api_base_url or "https://api.openai.com/v1"
 
 
 def is_claude_model(model_str: str) -> bool:
@@ -185,6 +216,19 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     ],
     # Ollama local - no cloud alternatives in local mode
     "ollama": [],
+    # oMLX local - failover to other oMLX models, then Ollama
+    "omlx/llama-4-scout": [
+        "omlx/mistral-small", "omlx/qwen-3", "omlx/gemma-3", "ollama",
+    ],
+    "omlx/mistral-small": [
+        "omlx/llama-4-scout", "omlx/qwen-3", "omlx/gemma-3", "ollama",
+    ],
+    "omlx/gemma-3": [
+        "omlx/mistral-small", "omlx/llama-4-scout", "omlx/qwen-3", "ollama",
+    ],
+    "omlx/qwen-3": [
+        "omlx/llama-4-scout", "omlx/mistral-small", "omlx/gemma-3", "ollama",
+    ],
 }
 
 
@@ -273,8 +317,8 @@ class ProviderFailover:
             # Skip if key is on cooldown
             if not self.is_available(info.api_key_env):
                 continue
-            # Skip if key is not configured
-            if not get_api_key(info):
+            # Skip if key is not configured (local providers need no key)
+            if info.api_key_env and not get_api_key(info):
                 continue
             result.append(alt)
         return result
@@ -294,7 +338,8 @@ class ProviderFailover:
         available: list[str] = []
         unavailable: list[str] = []
         for model_str, info in PROVIDER_REGISTRY.items():
-            if get_api_key(info) and self.is_available(info.api_key_env):
+            has_key = not info.api_key_env or bool(get_api_key(info))
+            if has_key and self.is_available(info.api_key_env):
                 available.append(model_str)
             else:
                 unavailable.append(model_str)

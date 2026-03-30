@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 import {
   Brain,
   Calendar,
+  CalendarClock,
   Castle,
   ChevronRight,
   ClipboardCheck,
@@ -81,6 +82,7 @@ const navSections: NavSection[] = [
       { to: "/compliance", icon: Shield, label: "Compliance" },
       { to: "/optimizer", icon: Gauge, label: "Optimizer" },
       { to: "/schedules", icon: Calendar, label: "Schedules" },
+      { to: "/schedule-monitor", icon: CalendarClock, label: "Schedule Monitor" },
       { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" },
       { to: "/memory", icon: Brain, label: "Agent Memory" },
     ],

@@ -166,7 +166,7 @@ def _load_recent_user_workflows(max_files: int = 3, max_lines: int = 200) -> str
 _STEP_TYPES_DOC = """\
 ## Step Types
 
-Each step has a `type` field (default: "standard"). Here are all 19 supported types:
+Each step has a `type` field (default: "standard"). Here are all 20 supported types:
 
 ### standard (default)
 Default LLM agent step - runs an agent in a sandbox with tools.
@@ -260,11 +260,27 @@ No prompt required. Requires TOOL_COMPOSIO_API_KEY env var.
 
 ### parse
 Parse documents (PDF, DOCX, XLSX, CSV). Extracts text or markdown from files.
-Fields: parse_config: {input_path, output_format, pages}
+Fields: parse_config: {input_path, output_format, pages, ocr_engine, languages}
 input_path is a file path or variable (e.g. "{input.file_path}").
 output_format: "markdown" (default), "text", or "json".
 pages: optional page range for PDFs (e.g. "1-5").
+ocr_engine: "auto" (default) | "pymupdf" | "chandra" - chandra for scanned docs, handwriting, tables from images.
+languages: optional list of language codes for Chandra OCR (e.g. ["cs", "en"]).
 No prompt required (prompt is optional context).
+
+### report
+Generate beautiful PDF/HTML reports using WeasyPrint + Jinja2.
+The prompt is used to generate report content via LLM, then rendered into a
+professional PDF with cover page, table of contents, and styled typography.
+Fields: prompt (content generation instruction), report_config:
+{template, format, theme, title, subtitle, author, logo_url,
+accent_color, include_toc, include_page_numbers, paper_size}
+format: "pdf" (default) | "html"
+theme: "professional" (default) | "minimal" | "academic"
+paper_size: "A4" (default) | "letter"
+accent_color: hex color (default "#f59e0b")
+title/subtitle/author support {input.X} template variables.
+Requires a prompt. Requires sandcastle-ai[report] extra.
 
 ### openclaw
 Call OpenClaw AI agents. Routes requests to an OpenClaw gateway.
@@ -524,6 +540,11 @@ ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
         "medium": "llama3.2",
         "low": "llama3.2",
     },
+    "omlx": {
+        "high": "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
+        "medium": "mlx-community/Mistral-Small-24B-Instruct-2501-4bit",
+        "low": "mlx-community/gemma-3-27b-it-qat-4bit",
+    },
     "google": {
         "high": "google/gemini-2.5-pro",
         "medium": "google/gemini-2.5-pro",
@@ -607,13 +628,20 @@ _PROVIDER_CONFIGS = {
         "region": "us",
         "headers_fn": lambda key: {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     },
+    "omlx": {
+        "api_url": "{omlx_base_url}/v1/chat/completions",
+        "model": "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
+        "api_key_env": "",  # no key needed for local inference
+        "region": "local",
+        "headers_fn": lambda _: {"Content-Type": "application/json"},
+    },
 }
 
 
 def _get_advisor_config() -> dict:
     """Resolve advisor provider from environment variables.
 
-    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | mistral | ollama
+    SANDCASTLE_ADVISOR_PROVIDER: anthropic (default) | openai | mistral | ollama | omlx
     SANDCASTLE_ADVISOR_MODEL: override model name
 
     When ``data_residency`` is set in settings, the chosen provider must
@@ -629,6 +657,13 @@ def _get_advisor_config() -> dict:
         provider = "anthropic"
 
     config = dict(_PROVIDER_CONFIGS[provider])
+
+    # Resolve dynamic base URL for oMLX provider
+    if "{omlx_base_url}" in config.get("api_url", ""):
+        config["api_url"] = config["api_url"].format(
+            omlx_base_url=settings.omlx_base_url.rstrip("/")
+        )
+
     model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
     if model_override:
         config["model"] = model_override
@@ -806,8 +841,9 @@ def _build_providers_to_try(primary: str, residency: str) -> list[str]:
     Fallback providers are added when they have a configured API key and
     satisfy the *residency* constraint (empty = no constraint).
 
-    Ollama is always included as a fallback even without a key (it needs no
-    key) but only when residency allows it ("local" or "").
+    Local providers (Ollama, oMLX) are always included as fallbacks even
+    without a key (they need no key) but only when residency allows it
+    ("local" or "").
     """
     providers_to_try: list[str] = [primary]
     for name, cfg in _PROVIDER_CONFIGS.items():
@@ -885,6 +921,12 @@ async def _call_advisor_llm(
     for i, provider_name in enumerate(providers_to_try):
         cfg = dict(_PROVIDER_CONFIGS[provider_name])
         api_url = cfg["api_url"]
+        # Resolve dynamic base URL for oMLX provider
+        if "{omlx_base_url}" in api_url:
+            from sandcastle.config import settings as _settings
+            api_url = api_url.format(
+                omlx_base_url=_settings.omlx_base_url.rstrip("/")
+            )
         provider_region = cfg.get("region", "us")
         is_anthropic = cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
 

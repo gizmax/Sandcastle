@@ -12,6 +12,7 @@ _VALID_SANDBOX_BACKENDS = frozenset({"e2b", "docker", "local", "cloudflare"})
 _VALID_STORAGE_BACKENDS = frozenset({"local", "s3"})
 _VALID_MEMORY_BACKENDS = frozenset({"local", "cloud"})
 _VALID_LOG_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
+_VALID_UPDATE_CHANNELS = frozenset({"stable", "beta", "pin"})
 
 _DEFAULT_DATA_DIR = str(Path.home() / ".sandcastle" / "data")
 _DEFAULT_WORKFLOWS_DIR = str(Path.home() / ".sandcastle" / "workflows")
@@ -29,6 +30,9 @@ class Settings(BaseSettings):
     mistral_api_key: str = ""
     openai_api_key: str = ""
     openrouter_api_key: str = ""
+
+    # oMLX server URL (OpenAI-compatible local inference on Apple Silicon)
+    omlx_base_url: str = "http://localhost:8080"
 
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"
@@ -166,6 +170,14 @@ class Settings(BaseSettings):
     otel_endpoint: str = ""  # OTLP HTTP endpoint, e.g. "http://localhost:4318"
     otel_service_name: str = "sandcastle"  # Service name reported in traces
 
+    # Auto-update settings
+    update_channel: str = "stable"  # "stable" | "beta" | "pin"
+    pinned_version: str = ""  # only used with "pin" channel
+    auto_update_check: bool = True  # check for updates on startup
+    update_blackout_start: str = ""  # e.g. "22:00" - no updates during this window
+    update_blackout_end: str = ""  # e.g. "06:00"
+    update_approval_required: bool = False  # enterprise: admin must approve
+
     # Logging
     log_level: str = "info"
 
@@ -227,6 +239,21 @@ class Settings(BaseSettings):
                 ", ".join(sorted(_VALID_LOG_LEVELS)),
             )
             return "info"
+        return v
+
+    @field_validator("update_channel", mode="after")
+    @classmethod
+    def _validate_update_channel(cls, v: str) -> str:
+        """Validate update_channel against known channels."""
+        v = v.strip().lower()
+        if v not in _VALID_UPDATE_CHANNELS:
+            _logger.warning(
+                "Unknown UPDATE_CHANNEL '%s', falling back to 'stable'. "
+                "Valid options: %s",
+                v,
+                ", ".join(sorted(_VALID_UPDATE_CHANNELS)),
+            )
+            return "stable"
         return v
 
     @field_validator("max_concurrent_sandboxes", mode="after")
@@ -399,6 +426,30 @@ class Settings(BaseSettings):
                 "Expected one of: %s. Falling back to empty (in-process queue).",
                 v[:30] + ("..." if len(v) > 30 else ""),
                 ", ".join(_valid_redis_schemes),
+            )
+            return ""
+        return v
+
+    @field_validator("update_blackout_start", "update_blackout_end", mode="after")
+    @classmethod
+    def _validate_blackout_time(cls, v: str) -> str:
+        """Validate HH:MM format for update blackout window times."""
+        v = v.strip()
+        if not v:
+            return ""
+        parts = v.split(":")
+        if len(parts) != 2:
+            _logger.warning(
+                "Invalid blackout time '%s' (expected HH:MM format), ignoring", v
+            )
+            return ""
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError("out of range")
+        except (ValueError, TypeError):
+            _logger.warning(
+                "Invalid blackout time '%s' (expected HH:MM with valid hour/minute), ignoring", v
             )
             return ""
         return v

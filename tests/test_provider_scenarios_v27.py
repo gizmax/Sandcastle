@@ -58,6 +58,7 @@ def _fake_settings(**overrides):
         "openrouter_api_key": "",
         "minimax_api_key": "",
         "advisor_quality_mode": "auto",
+        "omlx_base_url": "http://localhost:8080",
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

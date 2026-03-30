@@ -31,6 +31,8 @@ def parse_document(
     output_format: str = "markdown",
     pages: str | None = None,
     ocr: bool = False,
+    ocr_engine: str = "auto",
+    languages: list[str] | None = None,
 ) -> ParseResult:
     """Parse a document file to structured text.
 
@@ -39,6 +41,8 @@ def parse_document(
         output_format: "text", "markdown", or "json"
         pages: Page range string like "1-5,10" or None for all
         ocr: Enable OCR for scanned documents (requires tesseract)
+        ocr_engine: "auto" | "pymupdf" | "chandra" - OCR engine selection
+        languages: Language hints for Chandra OCR (e.g. ["cs", "en"])
 
     Returns:
         ParseResult with extracted text and metadata
@@ -47,7 +51,7 @@ def parse_document(
     suffix = p.suffix.lower()
 
     if suffix == ".pdf":
-        return _parse_pdf(p, output_format, pages, ocr)
+        return _parse_pdf_dispatch(p, output_format, pages, ocr, ocr_engine, languages)
     elif suffix in (".docx", ".doc"):
         return _parse_docx(p, output_format)
     elif suffix in (".xlsx", ".xls"):
@@ -73,6 +77,99 @@ def parse_document(
             f"Unsupported file format: {suffix}. "
             "Supported: .pdf, .docx, .xlsx, .pptx, .csv, .txt"
         )
+
+
+def _parse_pdf_dispatch(
+    path: Path,
+    output_format: str,
+    pages: str | None,
+    ocr: bool,
+    ocr_engine: str,
+    languages: list[str] | None,
+) -> ParseResult:
+    """Route PDF parsing to the appropriate engine based on ocr_engine setting."""
+    if ocr_engine == "chandra":
+        return _parse_with_chandra(str(path), output_format, pages, languages)
+    elif ocr_engine == "pymupdf":
+        return _parse_pdf(path, output_format, pages, ocr)
+    else:
+        # auto: try pymupdf first, fall back to chandra for sparse text
+        result = _parse_pdf(path, output_format, pages, ocr)
+        avg_chars = len(result.text) / max(result.pages, 1) if result.text else 0
+        if avg_chars < 50:
+            logger.info(
+                "pymupdf extracted <50 chars/page from %s, falling back to Chandra OCR",
+                path.name,
+            )
+            try:
+                return _parse_with_chandra(str(path), output_format, pages, languages)
+            except ImportError:
+                logger.debug("chandra-ocr not installed, keeping pymupdf result")
+            except Exception as exc:
+                logger.warning("Chandra OCR fallback failed: %s", exc)
+        return result
+
+
+def _parse_with_chandra(
+    file_path: str,
+    output_format: str = "markdown",
+    pages: str | None = None,
+    languages: list[str] | None = None,
+) -> ParseResult:
+    """Parse a PDF/image document using Chandra OCR.
+
+    Chandra handles scanned PDFs, images, handwriting, and complex tables.
+    Install with: pip install sandcastle-ai[ocr]
+    """
+    try:
+        from chandra_ocr import ocr
+    except ImportError:
+        raise ImportError(
+            "chandra-ocr is required for Chandra OCR engine. "
+            "Install with: pip install sandcastle-ai[ocr]"
+        )
+
+    kwargs: dict = {"output_format": output_format}
+    if languages:
+        kwargs["languages"] = languages
+    if pages:
+        kwargs["pages"] = pages
+
+    result_text = ocr(file_path, **kwargs)
+    if not isinstance(result_text, str):
+        result_text = str(result_text)
+
+    p = Path(file_path)
+    return ParseResult(
+        text=result_text,
+        format=output_format,
+        pages=_count_pages_hint(file_path, pages),
+        metadata={
+            "filename": p.name,
+            "size_bytes": p.stat().st_size,
+            "content_type": "application/pdf",
+            "parse_method": "chandra",
+            "languages": languages,
+        },
+    )
+
+
+def _count_pages_hint(file_path: str, pages: str | None) -> int:
+    """Best-effort page count without requiring pymupdf."""
+    try:
+        import fitz
+
+        doc = fitz.open(file_path)
+        total = len(doc)
+        doc.close()
+        if pages:
+            return len(_parse_page_ranges(pages, total))
+        return total
+    except Exception:
+        # If pymupdf is not available, estimate from page range string
+        if pages:
+            return len(_parse_page_ranges(pages, 9999))
+        return 1
 
 
 def _parse_page_ranges(pages_str: str | None, total: int) -> list[int]:

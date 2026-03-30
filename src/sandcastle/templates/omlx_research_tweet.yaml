@@ -1,0 +1,60 @@
+name: omlx-research-tweet
+description: >
+  Třístupňový výzkumný workflow běžící na lokálním oMLX serveru.
+  Zkoumá téma, analyzuje klíčové poznatky a vytváří tweet thread.
+  Vše lokálně - žádná data neopustí váš počítač.
+
+default_model: omlx/llama-4-scout
+default_max_turns: 10
+default_timeout: 120
+
+input_schema:
+  required: [topic]
+  properties:
+    topic:
+      type: string
+      description: "Téma výzkumu (česky nebo anglicky)"
+
+steps:
+  - id: research
+    model: omlx/llama-4-scout
+    max_turns: 15
+    prompt: |
+      Proveď hloubkový výzkum na téma: {input.topic}
+
+      Piš česky. Zaměř se na:
+      - Klíčová fakta a statistiky
+      - Aktuální trendy a vývoj
+      - Zajímavé souvislosti
+      - Zdroje a reference
+
+      Výstup strukturuj do přehledných sekcí.
+
+  - id: analyze
+    model: omlx/mistral-small
+    depends_on: [research]
+    prompt: |
+      Analyzuj tento výzkum a vytáhni 5 nejzajímavějších poznatků:
+
+      {steps.research.output}
+
+      Pro každý poznatek uveď:
+      1. Hlavní zjištění (1 věta)
+      2. Proč je to důležité
+      3. Čísla/data pokud jsou k dispozici
+
+  - id: tweet-thread
+    model: omlx/gemma-3
+    depends_on: [analyze]
+    prompt: |
+      Z těchto poznatků vytvoř tweet thread (5-7 tweetů):
+
+      {steps.analyze.output}
+
+      Pravidla:
+      - Každý tweet max 280 znaků
+      - První tweet musí zaujmout (hook)
+      - Používej emoji střídmě
+      - Poslední tweet = shrnutí + CTA
+      - Piš česky, neformálně ale informativně
+      - Čísluj: 1/7, 2/7 atd.

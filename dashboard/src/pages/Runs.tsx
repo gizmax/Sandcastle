@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
-import { PlayCircle, Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap, Download } from "lucide-react";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { PlayCircle, Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap, Download, GitCompareArrows } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
@@ -20,6 +20,7 @@ interface WorkflowItem {
 }
 
 export default function Runs() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") || "all");
   const [workflowFilter, setWorkflowFilter] = useState(() => searchParams.get("workflow") || "");
@@ -437,6 +438,22 @@ export default function Runs() {
             {selectedIds.size} selected
           </span>
           <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+            {selectedIds.size === 2 && (
+              <button
+                onClick={() => {
+                  const ids = Array.from(selectedIds);
+                  navigate(`/runs/compare?run_a=${encodeURIComponent(ids[0])}&run_b=${encodeURIComponent(ids[1])}`);
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
+                  "text-xs font-medium text-accent",
+                  "hover:bg-accent/10 transition-colors"
+                )}
+              >
+                <GitCompareArrows className="h-3.5 w-3.5" />
+                Compare
+              </button>
+            )}
             <button
               onClick={() => setBulkAction("cancel")}
               className={cn(

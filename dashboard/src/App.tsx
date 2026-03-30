@@ -20,6 +20,7 @@ const AutoPilotPage = lazy(() => import("@/pages/AutoPilotPage"));
 const ViolationsPage = lazy(() => import("@/pages/ViolationsPage"));
 const OptimizerPage = lazy(() => import("@/pages/OptimizerPage"));
 const Schedules = lazy(() => import("@/pages/Schedules"));
+const ScheduleMonitorPage = lazy(() => import("@/pages/ScheduleMonitorPage"));
 const DeadLetterPage = lazy(() => import("@/pages/DeadLetterPage"));
 const ApiKeysPage = lazy(() => import("@/pages/ApiKeysPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
@@ -100,6 +101,7 @@ export default function App() {
               <Route path="/violations" element={<PageBoundary name="violations"><ViolationsPage /></PageBoundary>} />
               <Route path="/optimizer" element={<PageBoundary name="optimizer"><OptimizerPage /></PageBoundary>} />
               <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
+              <Route path="/schedule-monitor" element={<PageBoundary name="schedule-monitor"><ScheduleMonitorPage /></PageBoundary>} />
               <Route path="/dead-letter" element={<PageBoundary name="dead-letter"><DeadLetterPage /></PageBoundary>} />
               <Route path="/api-keys" element={<PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary>} />
               <Route path="/settings" element={<PageBoundary name="settings"><SettingsPage /></PageBoundary>} />

@@ -2354,7 +2354,7 @@ async def _execute_llm_step(
 
     import httpx
 
-    from sandcastle.engine.providers import get_api_key, resolve_model
+    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
 
     started_at = time.monotonic()
     model_info = resolve_model(step.model)
@@ -2412,7 +2412,7 @@ async def _execute_llm_step(
                 out_tok = usage.get("output_tokens", 0)
                 cost = _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
         else:
-            base_url = model_info.api_base_url or "https://api.openai.com/v1"
+            base_url = resolve_base_url(model_info)
             async with httpx.AsyncClient(timeout=step.timeout) as client:
                 resp = await client.post(
                     f"{base_url}/chat/completions",
@@ -2975,6 +2975,8 @@ async def _execute_parse_step(
             output_format=cfg.output,
             pages=cfg.pages,
             ocr=cfg.ocr,
+            ocr_engine=cfg.ocr_engine,
+            languages=cfg.languages,
         )
 
         output = {
@@ -3006,6 +3008,223 @@ async def _execute_parse_step(
             error=f"Document parsing failed: {e}",
             duration_seconds=time.monotonic() - started_at,
         )
+
+
+async def _execute_report_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Generate a beautiful PDF/HTML report via LLM content + WeasyPrint rendering.
+
+    1. Runs the step prompt through the LLM to generate structured Markdown content.
+    2. Passes the Markdown output to the report renderer (WeasyPrint + Jinja2).
+    3. Saves the rendered PDF/HTML to storage.
+    4. Returns the step result with the artifact path.
+    """
+    import time
+
+    import httpx
+
+    from sandcastle.engine.dag import ReportConfig
+    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
+
+    started_at = time.monotonic()
+    cfg = step.report_config or ReportConfig()
+
+    # Resolve template variables in prompt, title, subtitle, author
+    prompt = resolve_templates(step.prompt or "", context, step.depends_on)
+    prompt = await resolve_storage_refs(prompt, storage)
+
+    resolved_title = resolve_templates(cfg.title, context) if cfg.title else ""
+    resolved_subtitle = resolve_templates(cfg.subtitle, context) if cfg.subtitle else ""
+    resolved_author = resolve_templates(cfg.author, context) if cfg.author else ""
+
+    # Build a system prompt that instructs the LLM to produce well-structured Markdown
+    system_prompt = (
+        "You are a professional report writer. Generate a comprehensive, well-structured "
+        "report in Markdown format. Use clear section headings (## for main sections, "
+        "### for subsections), bullet points, tables where appropriate, and blockquotes "
+        "for key findings or insights. Write in a professional, analytical tone. "
+        "Structure the content with a logical flow from overview to detailed analysis "
+        "to conclusions and recommendations. "
+        "Do NOT include a title heading (# Title) - the cover page handles that. "
+        "Start directly with ## sections."
+    )
+
+    # LLM call to generate report content
+    model_info = resolve_model(step.model)
+    _enforce_data_residency(model_info)
+    api_key = get_api_key(model_info)
+
+    _CLAUDE_MODEL_ALIASES = {
+        "sonnet": "claude-sonnet-4-20250514",
+        "haiku": "claude-haiku-4-5-20251001",
+        "opus": "claude-opus-4-20250115",
+    }
+
+    try:
+        if model_info.provider == "claude":
+            api_model = _CLAUDE_MODEL_ALIASES.get(
+                model_info.api_model_id, model_info.api_model_id
+            )
+            async with httpx.AsyncClient(timeout=step.timeout) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": api_model,
+                        "max_tokens": 8192,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                markdown_text = data["content"][0]["text"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                cost = _safe_cost(
+                    in_tok, out_tok,
+                    model_info.input_price_per_m, model_info.output_price_per_m,
+                )
+        else:
+            base_url = resolve_base_url(model_info)
+            async with httpx.AsyncClient(timeout=step.timeout) as client:
+                resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": 8192,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt},
+                        ],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                markdown_text = data["choices"][0]["message"]["content"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+                cost = _safe_cost(
+                    in_tok, out_tok,
+                    model_info.input_price_per_m, model_info.output_price_per_m,
+                )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Report LLM call failed: {e}",
+            duration_seconds=duration,
+        )
+
+    # Build a config copy with resolved template fields
+    render_cfg = ReportConfig(
+        template=cfg.template,
+        format=cfg.format,
+        theme=cfg.theme,
+        title=resolved_title,
+        subtitle=resolved_subtitle,
+        author=resolved_author,
+        logo_url=cfg.logo_url,
+        accent_color=cfg.accent_color,
+        include_toc=cfg.include_toc,
+        include_page_numbers=cfg.include_page_numbers,
+        paper_size=cfg.paper_size,
+    )
+
+    metadata = {
+        "run_id": context.run_id,
+        "step_id": step.id,
+        "title": resolved_title or "Report",
+    }
+
+    # Render the report (PDF or HTML)
+    try:
+        from sandcastle.engine.report import render_report
+
+        report_bytes = await asyncio.to_thread(
+            render_report, markdown_text, render_cfg, metadata
+        )
+    except RuntimeError as e:
+        # WeasyPrint not installed - fall back to HTML-only rendering
+        if "weasyprint" in str(e).lower():
+            try:
+                from sandcastle.engine.report import render_report_html
+
+                html_output = render_report_html(markdown_text, render_cfg, metadata)
+                report_bytes = html_output.encode("utf-8")
+                cfg = ReportConfig(
+                    **{**render_cfg.__dict__, "format": "html"}
+                )
+                render_cfg = cfg
+            except Exception as html_err:
+                duration = time.monotonic() - started_at
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=f"Report rendering failed (weasyprint not installed, HTML fallback also failed): {html_err}",
+                    duration_seconds=duration,
+                    cost_usd=cost,
+                )
+        else:
+            duration = time.monotonic() - started_at
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Report rendering failed: {e}",
+                duration_seconds=duration,
+                cost_usd=cost,
+            )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Report rendering failed: {e}",
+            duration_seconds=duration,
+            cost_usd=cost,
+        )
+
+    # Save to storage
+    ext = "html" if render_cfg.format == "html" else "pdf"
+    artifact_key = f"reports/{context.run_id}/{step.id}.{ext}"
+    try:
+        await storage.put(artifact_key, report_bytes)
+        logger.info("Report saved to storage: %s (%d bytes)", artifact_key, len(report_bytes))
+    except Exception as e:
+        logger.warning("Failed to save report to storage: %s", e)
+
+    duration = time.monotonic() - started_at
+    output = {
+        "report_path": artifact_key,
+        "format": render_cfg.format,
+        "size_bytes": len(report_bytes),
+        "theme": render_cfg.theme,
+        "title": resolved_title or "Report",
+        "content_preview": markdown_text[:500],
+    }
+
+    return StepResult(
+        step_id=step.id,
+        output=output,
+        cost_usd=cost,
+        duration_seconds=duration,
+        status="completed",
+        input_prompt=prompt[:200],
+    )
 
 
 async def _execute_code_step(
@@ -3317,7 +3536,7 @@ async def _execute_classify_step(
 
     import httpx
 
-    from sandcastle.engine.providers import get_api_key, resolve_model
+    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
 
     started_at = time.monotonic()
     cfg = step.classify_config
@@ -3362,7 +3581,7 @@ async def _execute_classify_step(
                 in_tok = usage.get("input_tokens", 0)
                 out_tok = usage.get("output_tokens", 0)
         else:
-            base_url = model_info.api_base_url or "https://api.openai.com/v1"
+            base_url = resolve_base_url(model_info)
             async with httpx.AsyncClient(timeout=step.timeout) as client:
                 resp = await client.post(
                     f"{base_url}/chat/completions",
@@ -3863,7 +4082,7 @@ async def _execute_gate_step(
                 # LLM-based evaluation (similar to classify step pattern)
                 import httpx
 
-                from sandcastle.engine.providers import get_api_key, resolve_model
+                from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
 
                 eval_prompt = strategy_config.get(
                     "prompt", "Evaluate this input and respond with 'approved' or 'rejected'."
@@ -3900,7 +4119,7 @@ async def _execute_gate_step(
                         in_tok = usage.get("input_tokens", 0)
                         out_tok = usage.get("output_tokens", 0)
                 else:
-                    base_url = model_info.api_base_url or "https://api.openai.com/v1"
+                    base_url = resolve_base_url(model_info)
                     async with httpx.AsyncClient(timeout=step.timeout) as client:
                         resp = await client.post(
                             f"{base_url}/chat/completions",
@@ -4846,7 +5065,7 @@ async def _browser_computer_use_mode(
 
     import httpx
 
-    from sandcastle.engine.providers import get_api_key, resolve_model
+    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
 
     if replay_screenshots is None:
         replay_screenshots = []
@@ -5827,6 +6046,7 @@ async def _prepare_and_run_step(
         "llm", "http", "code", "condition", "classify", "loop",
         "race", "sensor", "gate", "transform", "notify", "delegate",
         "browser", "sub_workflow", "composio", "openclaw", "parse",
+        "report",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -5873,6 +6093,8 @@ async def _prepare_and_run_step(
             return await _execute_openclaw_step(s, ctx)
         if s.type == "parse":
             return await _execute_parse_step(s, ctx)
+        if s.type == "report":
+            return await _execute_report_step(s, ctx, storage)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---

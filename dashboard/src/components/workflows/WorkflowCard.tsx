@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle, Star } from "lucide-react";
+import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle, Star, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // --- Mock workflow stats (deterministic, based on workflow name hash) ---
@@ -70,6 +70,7 @@ interface WorkflowCardProps {
   onSelect?: () => void;
   onTogglePin?: () => void;
   onRun: () => void;
+  onBatch?: () => void;
   onEdit: () => void;
   onViewDag: () => void;
   onViewVersions?: () => void;
@@ -88,6 +89,7 @@ export const WorkflowCard = memo(function WorkflowCard({
   onSelect,
   onTogglePin,
   onRun,
+  onBatch,
   onEdit,
   onViewDag,
   onViewVersions,
@@ -255,6 +257,15 @@ export const WorkflowCard = memo(function WorkflowCard({
           <Play className="h-3 w-3" />
           Run
         </button>
+        {onBatch && (
+          <button
+            onClick={onBatch}
+            className="flex items-center gap-1.5 rounded-lg border border-accent/50 bg-accent/10 px-2.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/20 transition-colors"
+          >
+            <Layers className="h-3 w-3" />
+            Batch
+          </button>
+        )}
         <button
           onClick={onViewDag}
           className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:bg-border/40 transition-colors"
