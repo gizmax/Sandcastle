@@ -39,6 +39,10 @@ steps:
     max_turns: 25
     timeout: 600
     tools: [tavily, exa]
+    responsibility: "Independent deep research investigation from perspective A"
+    source_hint: "Dual-agent approach reduces blind spots and increases citation coverage"
+    owner: "research-team"
+    added_date: "2026-03-15"
     prompt: |
       You are Research Agent A. Conduct a thorough, independent deep
       research investigation on this topic:
@@ -62,6 +66,10 @@ steps:
     max_turns: 25
     timeout: 600
     tools: [tavily, exa]
+    responsibility: "Independent deep research from contrarian/methodological perspective B"
+    source_hint: "Second agent challenges mainstream consensus for balanced research output"
+    owner: "research-team"
+    added_date: "2026-03-15"
     prompt: |
       You are Research Agent B. Conduct a thorough, independent deep
       research investigation on this topic:
@@ -92,6 +100,10 @@ steps:
     max_turns: 20
     timeout: 600
     depends_on: [research-branch-a, research-branch-b]
+    responsibility: "Merge two independent research outputs into one authoritative document"
+    source_hint: "Independent judge resolves conflicts and removes duplicates for quality"
+    owner: "research-team"
+    added_date: "2026-03-15"
     prompt: |
       You are an independent Judge. You did NOT participate in the research.
       Your job: compare two independent research outputs and merge them into
@@ -129,6 +141,10 @@ steps:
     timeout: 300
     depends_on: [judge]
     tools: [tavily, exa]
+    responsibility: "Fact-check citations, verify claims, and fix formatting issues"
+    source_hint: "Verification layer catches errors before publication"
+    owner: "qa-team"
+    added_date: "2026-03-15"
     prompt: |
       You are a rigorous fact-checker and copy editor. Review this
       research document for accuracy and quality:
@@ -161,6 +177,10 @@ steps:
   - id: typeset
     model: haiku
     depends_on: [verify]
+    responsibility: "Format verified research document into publication-ready PDF"
+    source_hint: "Clean typesetting is required for professional output delivery"
+    owner: "qa-team"
+    added_date: "2026-03-15"
     pdf_report:
       enabled: true
       title: "Research Report: {input.topic}"
@@ -186,6 +206,10 @@ steps:
     max_turns: 15
     timeout: 300
     depends_on: [typeset]
+    responsibility: "Independent meta-review of the final document for quality and bias"
+    source_hint: "Fresh-eyes audit catches issues all previous layers missed"
+    owner: "research-team"
+    added_date: "2026-03-15"
     prompt: |
       You are an independent auditor conducting a final meta-review.
       You have NOT been involved in any previous step.

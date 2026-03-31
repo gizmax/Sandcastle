@@ -1077,11 +1077,16 @@ async def execute_step_with_retry(
             "workflow": context.workflow_name,
         },
     )
+    _started_payload: dict = {"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name}
+    if step.responsibility:
+        _started_payload["responsibility"] = step.responsibility
+    if step.source_hint:
+        _started_payload["source_hint"] = step.source_hint
     await _emit_audit_event(
         "step.started",
         run_id=context.run_id,
         actor_id="system",
-        payload={"step_id": step.id, "step_type": step.type, "workflow": context.workflow_name},
+        payload=_started_payload,
     )
 
     # Open OTEL step span (no-op when tracer not initialized).
@@ -1188,11 +1193,16 @@ async def execute_step_with_retry(
                         "duration_seconds": result.duration_seconds,
                     },
                 )
+                _completed_payload: dict = {"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds}
+                if step.responsibility:
+                    _completed_payload["responsibility"] = step.responsibility
+                if step.source_hint:
+                    _completed_payload["source_hint"] = step.source_hint
                 await _emit_audit_event(
                     "step.completed",
                     run_id=context.run_id,
                     actor_id="system",
-                    payload={"step_id": step.id, "cost_usd": result.cost_usd, "duration_seconds": result.duration_seconds},
+                    payload=_completed_payload,
                 )
 
                 record_step_result(

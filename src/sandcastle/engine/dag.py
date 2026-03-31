@@ -470,6 +470,11 @@ class StepDefinition:
     openclaw_config: OpenClawConfig | None = None
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
+    # Self-describing metadata
+    responsibility: str = ""  # WHAT this step does in one sentence
+    source_hint: str = ""  # WHY this step exists (business reason, ticket, who requested)
+    owner: str = ""  # WHO is responsible for this step
+    added_date: str = ""  # WHEN was this step added (YYYY-MM-DD)
 
 
 VALID_RISK_LEVELS = frozenset({"minimal", "limited", "high", "unacceptable"})
@@ -501,6 +506,76 @@ class WorkflowDefinition:
             if step.id == step_id:
                 return step
         raise ValueError(f"Step '{step_id}' not found in workflow '{self.name}'")
+
+    def summary(self) -> str:
+        """Generate human-readable workflow summary with responsibilities."""
+        lines: list[str] = [f"{self.name}"]
+        if self.description:
+            lines.append(self.description.strip())
+        lines.append("")
+        lines.append("Steps:")
+        for i, step in enumerate(self.steps, 1):
+            deps = ""
+            if step.depends_on:
+                deps = f" (after: {', '.join(step.depends_on)})"
+            lines.append(f"  {i}. [{step.type}] {step.id}{deps}")
+            if step.responsibility:
+                lines.append(f"     -> {step.responsibility}")
+            if step.source_hint:
+                lines.append(f"     Why: {step.source_hint}")
+            if step.owner:
+                lines.append(f"     Owner: {step.owner}")
+            if step.added_date:
+                lines.append(f"     Added: {step.added_date}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def owners(self) -> set[str]:
+        """Return set of all step owners."""
+        result: set[str] = set()
+        for step in self.steps:
+            if step.owner:
+                result.add(step.owner)
+        return result
+
+    def health(self) -> dict:
+        """Check metadata completeness.
+
+        Returns dict with 'ok' (bool) and 'issues' (list of strings).
+        """
+        issues: list[str] = []
+        total_fields = 0
+        filled_fields = 0
+        for step in self.steps:
+            # Check responsibility
+            total_fields += 1
+            if step.responsibility:
+                filled_fields += 1
+            else:
+                issues.append(f"Step '{step.id}' missing responsibility")
+            # Check source_hint (only flag for non-trivial steps)
+            total_fields += 1
+            if step.source_hint:
+                filled_fields += 1
+            elif step.type not in ("transform", "notify"):
+                issues.append(f"Step '{step.id}' missing source_hint")
+            else:
+                # Non-trivial check skipped, but still count as unfilled
+                pass
+            # Check owner
+            total_fields += 1
+            if step.owner:
+                filled_fields += 1
+            # Check added_date
+            total_fields += 1
+            if step.added_date:
+                filled_fields += 1
+        return {
+            "ok": len(issues) == 0,
+            "issues": issues,
+            "total_fields": total_fields,
+            "filled_fields": filled_fields,
+        }
 
 
 @dataclass
@@ -1053,6 +1128,11 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         openclaw_config=_parse_openclaw_config(data.get("openclaw_config")),
         parse_config=_parse_parse_config(data.get("parse_config")),
         report_config=_parse_report_config(data.get("report_config")),
+        # Self-describing metadata
+        responsibility=data.get("responsibility", ""),
+        source_hint=data.get("source_hint", ""),
+        owner=data.get("owner", ""),
+        added_date=data.get("added_date", ""),
     )
 
 

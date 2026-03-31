@@ -306,6 +306,17 @@ Steps can include these optional fields for resilience and memory:
 - retry: {max_attempts: 3, backoff: exponential} - automatic retry on failure
 - memory: {read: true, write: true} - agent memory (persists across runs)
 
+## Optional Self-Describing Metadata (recommended for production workflows)
+
+Each step can include metadata that explains its purpose and ownership:
+- responsibility: "What this step does in one sentence"
+- source_hint: "Why this step exists - business reason or ticket reference"
+- owner: "Who is responsible for this step"
+- added_date: "2026-03-30"
+
+These fields power `sandcastle describe`, `sandcastle lint`, and `sandcastle owners` commands.
+Include them in production workflows for better documentation and auditability.
+
 ## Workflow-Level Classification
 
 Workflows can declare an EU AI Act risk classification at the top level:

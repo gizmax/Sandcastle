@@ -19,6 +19,10 @@ steps:
   - id: research
     model: omlx/llama-4-scout
     max_turns: 15
+    responsibility: "Deep research on the given topic using local LLM"
+    source_hint: "First stage gathers comprehensive facts and statistics locally"
+    owner: "content-team"
+    added_date: "2026-03-20"
     prompt: |
       Proveď hloubkový výzkum na téma: {input.topic}
 
@@ -33,6 +37,10 @@ steps:
   - id: analyze
     model: omlx/mistral-small
     depends_on: [research]
+    responsibility: "Extract top 5 key findings from the research output"
+    source_hint: "Distillation step filters noise and highlights actionable insights"
+    owner: "content-team"
+    added_date: "2026-03-20"
     prompt: |
       Analyzuj tento výzkum a vytáhni 5 nejzajímavějších poznatků:
 
@@ -46,6 +54,10 @@ steps:
   - id: tweet-thread
     model: omlx/gemma-3
     depends_on: [analyze]
+    responsibility: "Create engaging tweet thread from analyzed findings"
+    source_hint: "Final output stage formats insights for social media distribution"
+    owner: "content-team"
+    added_date: "2026-03-20"
     prompt: |
       Z těchto poznatků vytvoř tweet thread (5-7 tweetů):
 

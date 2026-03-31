@@ -3888,6 +3888,107 @@ def _check_for_updates_on_startup() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Self-describing workflow commands (describe, lint, owners)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_workflow_file(name: str) -> str:
+    """Resolve a workflow name or path to an absolute YAML file path.
+
+    Accepts a direct file path (*.yaml / *.yml) or a bare workflow name
+    which is looked up in the configured workflows directory and the
+    built-in templates directory.
+    """
+    from pathlib import Path
+
+    p = Path(name)
+    if p.suffix in (".yaml", ".yml") and p.exists():
+        return str(p.resolve())
+
+    # Try configured workflows directory
+    try:
+        from sandcastle.config import settings
+        wf_dir = Path(settings.workflows_dir).resolve()
+        for ext in (".yaml", ".yml"):
+            candidate = wf_dir / f"{name}{ext}"
+            if candidate.exists():
+                return str(candidate)
+    except Exception:
+        pass
+
+    # Try current working directory
+    for ext in (".yaml", ".yml"):
+        candidate = Path(name + ext)
+        if candidate.exists():
+            return str(candidate.resolve())
+
+    # Try built-in templates
+    templates_dir = Path(__file__).resolve().parent / "templates"
+    for ext in (".yaml", ".yml"):
+        candidate = templates_dir / f"{name}{ext}"
+        if candidate.exists():
+            return str(candidate)
+
+    print(f"Error: workflow '{name}' not found.", file=sys.stderr)
+    sys.exit(1)
+
+
+def _cmd_describe(args: argparse.Namespace) -> None:
+    """Print workflow summary with responsibilities and source hints."""
+    from sandcastle.engine.dag import parse
+
+    path = _resolve_workflow_file(args.workflow)
+    wf = parse(path)
+    print(wf.summary())
+
+
+def _cmd_lint(args: argparse.Namespace) -> None:
+    """Check workflow metadata completeness."""
+    from sandcastle.engine.dag import parse
+
+    path = _resolve_workflow_file(args.workflow)
+    wf = parse(path)
+    h = wf.health()
+
+    print(f"Linting {wf.name}...")
+    print()
+
+    if h["issues"]:
+        print("Warnings:")
+        for issue in h["issues"]:
+            print(f"  - {issue}")
+        print()
+
+    total = h["total_fields"]
+    filled = h["filled_fields"]
+    pct = int(filled / total * 100) if total > 0 else 0
+    warnings = len(h["issues"])
+    print(f"{warnings} warnings, 0 errors")
+    print(f"Metadata completeness: {pct}% ({filled}/{total} fields filled)")
+
+
+def _cmd_owners(args: argparse.Namespace) -> None:
+    """Show who owns which steps in a workflow."""
+    from sandcastle.engine.dag import parse
+
+    path = _resolve_workflow_file(args.workflow)
+    wf = parse(path)
+
+    print(f"Owners for {wf.name}:")
+    print()
+
+    # Group steps by owner
+    owner_map: dict[str, list[str]] = {}
+    for step in wf.steps:
+        key = step.owner if step.owner else "unassigned"
+        owner_map.setdefault(key, []).append(step.id)
+
+    for owner in sorted(owner_map, key=lambda o: (o == "unassigned", o)):
+        steps_str = ", ".join(owner_map[owner])
+        print(f"  {owner}: {steps_str}")
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -4275,6 +4376,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Skip security warnings (errors still block)"
     )
 
+    # --- describe ---
+    p_describe = subparsers.add_parser(
+        "describe", help="Print workflow summary with responsibilities"
+    )
+    p_describe.add_argument("workflow", help="Workflow name or path to .yaml file")
+
+    # --- lint ---
+    p_lint = subparsers.add_parser(
+        "lint", help="Check workflow metadata completeness"
+    )
+    p_lint.add_argument("workflow", help="Workflow name or path to .yaml file")
+
+    # --- owners ---
+    p_owners = subparsers.add_parser(
+        "owners", help="Show step ownership for a workflow"
+    )
+    p_owners.add_argument("workflow", help="Workflow name or path to .yaml file")
+
     return parser
 
 
@@ -4360,6 +4479,9 @@ def main() -> None:
         "providers": _cmd_providers,
         "update": _cmd_update,
         "rollback": _cmd_rollback,
+        "describe": _cmd_describe,
+        "lint": _cmd_lint,
+        "owners": _cmd_owners,
     }
 
     handler = dispatch.get(args.command)
