@@ -1440,15 +1440,116 @@ async def upload_file(file: UploadFile) -> ApiResponse:
 # --- Templates ---
 
 
+def _score_template_relevance(
+    name: str,
+    description: str,
+    tags: list[str],
+    query_words: set[str],
+) -> float:
+    """Score a template against query words using word overlap.
+
+    Returns a score between 0.0 and 1.0 indicating relevance.
+    """
+    if not query_words:
+        return 0.0
+
+    # Build searchable text from name, description, and tags
+    searchable = (
+        name.lower().replace("-", " ").replace("_", " ")
+        + " " + description.lower()
+        + " " + " ".join(t.lower() for t in tags)
+    )
+    template_words = set(
+        w for w in re.findall(r"[a-z]+", searchable) if len(w) > 2
+    )
+    if not template_words:
+        return 0.0
+
+    overlap = len(query_words & template_words)
+    return overlap / len(query_words)
+
+
 @router.get("/templates")
-async def list_templates() -> ApiResponse:
-    """List all available workflow templates.
+async def list_templates(
+    q: str | None = Query(None, description="Search query for templates"),
+) -> ApiResponse:
+    """List all available workflow templates, optionally filtered by search query.
+
+    When a search query is provided, templates are first filtered by keyword
+    match (name/description/tags). If no exact matches are found, fuzzy
+    matching by word overlap is used as a fallback. Results include a
+    ``relevance_score`` field (0.0-1.0) when a query is active.
 
     Public endpoint - no authentication required.
     """
     from sandcastle.templates import list_templates as _list_templates
 
     templates = _list_templates()
+
+    if not q or not q.strip():
+        return ApiResponse(
+            data=[
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "tags": t.tags,
+                    "step_count": t.step_count,
+                    "input_schema": t.input_schema,
+                    "category": t.category,
+                    "source": t.source,
+                    "relevance_score": None,
+                }
+                for t in templates
+            ]
+        )
+
+    query = q.strip().lower()
+
+    # Phase 1: exact keyword match (substring in name/description/tags)
+    exact_matches = []
+    for t in templates:
+        if (
+            query in t.name.lower()
+            or query in t.description.lower()
+            or any(query in tag.lower() for tag in t.tags)
+        ):
+            exact_matches.append((t, 1.0))
+
+    if exact_matches:
+        return ApiResponse(
+            data=[
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "tags": t.tags,
+                    "step_count": t.step_count,
+                    "input_schema": t.input_schema,
+                    "category": t.category,
+                    "source": t.source,
+                    "relevance_score": score,
+                }
+                for t, score in exact_matches
+            ]
+        )
+
+    # Phase 2: fuzzy word overlap matching
+    query_words = set(
+        w for w in re.findall(r"[a-z]+", query) if len(w) > 2
+    )
+    if not query_words:
+        return ApiResponse(data=[])
+
+    scored: list[tuple[Any, float]] = []
+    for t in templates:
+        score = _score_template_relevance(
+            t.name, t.description, t.tags, query_words,
+        )
+        if score > 0.0:
+            scored.append((t, round(score, 3)))
+
+    # Sort by score descending
+    scored.sort(key=lambda x: x[1], reverse=True)
+
     return ApiResponse(
         data=[
             {
@@ -1459,8 +1560,9 @@ async def list_templates() -> ApiResponse:
                 "input_schema": t.input_schema,
                 "category": t.category,
                 "source": t.source,
+                "relevance_score": score,
             }
-            for t in templates
+            for t, score in scored
         ]
     )
 
@@ -8755,6 +8857,10 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
 
         async def _process_item(idx: int, item_input: dict[str, Any]) -> None:
             async with sem:
+                # Check cancellation before starting a new item
+                if batch.get("_cancelled"):
+                    return
+
                 item = batch["items"][idx]
                 item["status"] = "running"
                 item["started_at"] = datetime.now(timezone.utc).isoformat()
@@ -8843,13 +8949,14 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
         ]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Final status
-        if batch["failed"] == 0:
-            batch["status"] = "completed"
-        elif batch["completed"] > 0:
-            batch["status"] = "partial_failure"
-        else:
-            batch["status"] = "failed"
+        # Final status - preserve "cancelled" if cancel was requested
+        if not batch.get("_cancelled"):
+            if batch["failed"] == 0:
+                batch["status"] = "completed"
+            elif batch["completed"] > 0:
+                batch["status"] = "partial_failure"
+            else:
+                batch["status"] = "failed"
 
     asyncio.create_task(_process_batch())
 
@@ -8879,6 +8986,57 @@ async def get_batch_status(batch_id: str) -> ApiResponse:
         )
 
     return ApiResponse(data=batch)
+
+
+@router.post("/batch/{batch_id}/cancel")
+async def cancel_batch(batch_id: str) -> ApiResponse:
+    """Cancel a running batch.
+
+    Sets the batch status to "cancelled". Pending items are skipped immediately.
+    Currently running items are allowed to finish, but no new items will start.
+    """
+    batch = _batch_store.get(batch_id)
+    if not batch:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Batch '{batch_id}' not found",
+                )
+            ).model_dump(),
+        )
+
+    if batch["status"] != "running":
+        raise HTTPException(
+            status_code=409,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="CONFLICT",
+                    message=f"Batch is already '{batch['status']}', cannot cancel",
+                )
+            ).model_dump(),
+        )
+
+    # Signal the background task to stop picking up new items
+    batch["_cancelled"] = True
+    batch["status"] = "cancelled"
+
+    # Mark all pending items as cancelled
+    cancelled_count = 0
+    for item in batch["items"]:
+        if item["status"] == "pending":
+            item["status"] = "cancelled"
+            cancelled_count += 1
+    batch["pending"] = 0
+
+    return ApiResponse(
+        data={
+            "status": "cancelled",
+            "completed": batch["completed"],
+            "cancelled": cancelled_count,
+        }
+    )
 
 
 # --- Workflow as API ---

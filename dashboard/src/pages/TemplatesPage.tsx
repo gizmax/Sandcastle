@@ -55,6 +55,51 @@ interface Template {
   input_schema?: InputSchema | null;
   source?: "community";
   author?: string;
+  relevance_score?: number | null;
+}
+
+// Fuzzy matching helper: score a template against query words by word overlap
+function fuzzyScore(template: Template, query: string): number {
+  const queryWords = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+  if (queryWords.length === 0) return 0;
+
+  const text = [
+    template.name.replace(/[-_]/g, " "),
+    template.description,
+    ...(template.tags || []),
+  ]
+    .join(" ")
+    .toLowerCase();
+  const textWords = new Set(text.split(/\s+/).filter((w) => w.length > 2));
+
+  let overlap = 0;
+  for (const qw of queryWords) {
+    for (const tw of textWords) {
+      if (tw.includes(qw) || qw.includes(tw)) {
+        overlap++;
+        break;
+      }
+    }
+  }
+  return overlap / queryWords.length;
+}
+
+// Get top N fuzzy suggestions from a list of templates
+function getFuzzySuggestions(
+  templates: Template[],
+  query: string,
+  limit = 5,
+): Template[] {
+  if (!query || query.length < 3) return [];
+  const scored = templates
+    .map((t) => ({ t, score: fuzzyScore(t, query) }))
+    .filter(({ score }) => score > 0.2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+  return scored.map(({ t }) => t);
 }
 
 interface TemplateDetailData extends Template {
@@ -816,6 +861,7 @@ export default function TemplatesPage() {
       {viewParam === "all" && (
         <AllTemplatesView
           templates={allTemplatesUnified}
+          allTemplates={templatesWithCategory}
           search={search}
           selectedTag={selectedTag}
           onTagSelect={setSelectedTag}
@@ -1486,19 +1532,44 @@ function PacksView({
     );
   }, [search, templatesWithCategory]);
 
+  // Compute fuzzy suggestions when exact search returns empty
+  const fuzzySuggestions = useMemo(() => {
+    if (!searchResults || searchResults.length > 0) return [];
+    return getFuzzySuggestions(templatesWithCategory, search);
+  }, [searchResults, templatesWithCategory, search]);
+
   if (searchResults) {
     return (
       <div className="space-y-3">
         <p className="text-sm text-muted">
           {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}{" "}
-          for "{search}"
+          for &quot;{search}&quot;
         </p>
         {searchResults.length === 0 ? (
-          <EmptyState
-            icon={Layers}
-            title="No templates found"
-            description="Try adjusting your search query."
-          />
+          <>
+            <EmptyState
+              icon={Layers}
+              title="No templates found"
+              description="Try adjusting your search query."
+            />
+            {fuzzySuggestions.length > 0 && (
+              <div className="space-y-2 mt-4">
+                <p className="text-sm font-medium text-muted">
+                  Did you mean...
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {fuzzySuggestions.map((t) => (
+                    <TemplateCard
+                      key={t.name}
+                      template={t}
+                      isSelected={false}
+                      onClick={() => onOpenDetail(t.name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {searchResults.map((t) => (
@@ -1757,6 +1828,7 @@ function PackDetailView({
 // All Templates flat view with category pills
 function AllTemplatesView({
   templates,
+  allTemplates,
   search,
   selectedTag,
   onTagSelect,
@@ -1767,6 +1839,7 @@ function AllTemplatesView({
   communityTemplates,
 }: {
   templates: Template[];
+  allTemplates: Template[];
   search: string;
   selectedTag: string | null;
   onTagSelect: (tag: string | null) => void;
@@ -1862,19 +1935,13 @@ function AllTemplatesView({
 
       {/* Template grid */}
       {visibleTemplates.length === 0 ? (
-        <EmptyState
-          icon={Layers}
-          title="No templates found"
-          description={
-            isInstalledFilter
-              ? "No recently installed community templates match your search."
-              : "Try adjusting your search or category filter."
-          }
-          action={
-            search || selectedTag
-              ? { label: "Reset filters", onClick: onReset }
-              : undefined
-          }
+        <AllTemplatesEmpty
+          search={search}
+          selectedTag={selectedTag}
+          isInstalledFilter={isInstalledFilter}
+          allTemplates={allTemplates}
+          onReset={onReset}
+          onOpenDetail={onOpenDetail}
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1886,6 +1953,62 @@ function AllTemplatesView({
               onClick={() => onOpenDetail(t.name)}
             />
           ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Empty state with fuzzy "Did you mean..." suggestions for AllTemplatesView
+function AllTemplatesEmpty({
+  search,
+  selectedTag,
+  isInstalledFilter,
+  allTemplates,
+  onReset,
+  onOpenDetail,
+}: {
+  search: string;
+  selectedTag: string | null;
+  isInstalledFilter: boolean;
+  allTemplates: Template[];
+  onReset: () => void;
+  onOpenDetail: (name: string) => void;
+}) {
+  const suggestions = useMemo(
+    () => (search ? getFuzzySuggestions(allTemplates, search) : []),
+    [allTemplates, search],
+  );
+
+  return (
+    <>
+      <EmptyState
+        icon={Layers}
+        title="No templates found"
+        description={
+          isInstalledFilter
+            ? "No recently installed community templates match your search."
+            : "Try adjusting your search or category filter."
+        }
+        action={
+          search || selectedTag
+            ? { label: "Reset filters", onClick: onReset }
+            : undefined
+        }
+      />
+      {suggestions.length > 0 && (
+        <div className="space-y-2 mt-4">
+          <p className="text-sm font-medium text-muted">Did you mean...</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {suggestions.map((t) => (
+              <TemplateCard
+                key={t.name}
+                template={t}
+                isSelected={false}
+                onClick={() => onOpenDetail(t.name)}
+              />
+            ))}
+          </div>
         </div>
       )}
     </>

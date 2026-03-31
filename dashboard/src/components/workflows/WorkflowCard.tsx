@@ -67,6 +67,7 @@ interface WorkflowCardProps {
   selected?: boolean;
   pinned?: boolean;
   stats?: WorkflowStats;
+  owners?: string[];
   onSelect?: () => void;
   onTogglePin?: () => void;
   onRun: () => void;
@@ -86,6 +87,7 @@ export const WorkflowCard = memo(function WorkflowCard({
   selected,
   pinned,
   stats,
+  owners,
   onSelect,
   onTogglePin,
   onRun,
@@ -170,6 +172,13 @@ export const WorkflowCard = memo(function WorkflowCard({
           <p className="mt-0.5 line-clamp-2 text-xs text-muted" title={description}>{description}</p>
         </div>
       </div>
+
+      {/* Owners line */}
+      {owners && owners.length > 0 && (
+        <p className="mb-2 truncate text-[11px] text-muted">
+          Owners: {owners.join(", ")}
+        </p>
+      )}
 
       {/* Last run status */}
       <div className="mb-3 flex items-center gap-1.5 text-xs text-muted">

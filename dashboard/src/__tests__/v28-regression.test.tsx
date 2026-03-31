@@ -360,12 +360,12 @@ describe("BatchRunModal", () => {
     expect(screen.getByText("$0.12")).toBeInTheDocument();
   });
 
-  it("modal is closeable via Cancel button", async () => {
+  it("modal is closeable via Dismiss button", async () => {
     await act(async () => {
       render(<BatchRunModal {...defaultProps} />);
     });
 
-    fireEvent.click(screen.getByText("Cancel"));
+    fireEvent.click(screen.getByText("Dismiss"));
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });
 

@@ -29,6 +29,10 @@ interface MockStep {
   error: string | null;
   started_at?: string | null;
   pdf_artifact?: boolean;
+  responsibility?: string;
+  owner?: string;
+  type?: string;
+  artifact_url?: string;
 }
 
 const now = new Date();
@@ -51,21 +55,22 @@ const MOCK_RUNS = [
 ];
 
 const MOCK_STEPS: MockStep[] = [
-  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null, started_at: h(0.5), pdf_artifact: false },
-  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null, started_at: h(0.49), pdf_artifact: false },
-  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null, started_at: h(0.48), pdf_artifact: false },
+  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null, started_at: h(0.5), pdf_artifact: false, responsibility: "Fetch raw HTML from target website", owner: "data-team" },
+  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null, started_at: h(0.49), pdf_artifact: false, responsibility: "Augment scraped data with firmographic info", owner: "ml-ops" },
+  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null, started_at: h(0.48), pdf_artifact: false, owner: "sales-ai" },
+  { step_id: "report", parallel_index: null, status: "completed", output: { summary: "Lead enrichment report generated successfully" }, cost_usd: 0.12, duration_seconds: 3.1, attempt: 1, error: null, started_at: h(0.47), pdf_artifact: true, type: "report", artifact_url: "/api/runs/a1b2c3d4-1111-4000-8000-000000000001/steps/report/pdf", responsibility: "Generate final PDF report", owner: "data-team" },
 ];
 
 const MOCK_STEPS_RUNNING: MockStep[] = [
-  { step_id: "fetch-competitors", parallel_index: null, status: "completed", output: { competitors: ["CompA", "CompB", "CompC"] }, cost_usd: 0.02, duration_seconds: 6.1, attempt: 1, error: null },
-  { step_id: "analyze", parallel_index: 0, status: "completed", output: { name: "CompA", changes: "New pricing page" }, cost_usd: 0.01, duration_seconds: 9.3, attempt: 1, error: null },
-  { step_id: "analyze", parallel_index: 1, status: "running", output: null, cost_usd: 0.0, duration_seconds: 0, attempt: 1, error: null },
-  { step_id: "analyze", parallel_index: 2, status: "pending", output: null, cost_usd: 0.0, duration_seconds: 0, attempt: 1, error: null },
+  { step_id: "fetch-competitors", parallel_index: null, status: "completed", output: { competitors: ["CompA", "CompB", "CompC"] }, cost_usd: 0.02, duration_seconds: 6.1, attempt: 1, error: null, responsibility: "Discover and list competitor domains", owner: "data-team" },
+  { step_id: "analyze", parallel_index: 0, status: "completed", output: { name: "CompA", changes: "New pricing page" }, cost_usd: 0.01, duration_seconds: 9.3, attempt: 1, error: null, owner: "ml-ops" },
+  { step_id: "analyze", parallel_index: 1, status: "running", output: null, cost_usd: 0.0, duration_seconds: 0, attempt: 1, error: null, owner: "ml-ops" },
+  { step_id: "analyze", parallel_index: 2, status: "pending", output: null, cost_usd: 0.0, duration_seconds: 0, attempt: 1, error: null, owner: "ml-ops" },
 ];
 
 const MOCK_STEPS_FAILED: MockStep[] = [
-  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://broken.test" }, cost_usd: 0.02, duration_seconds: 4.1, attempt: 1, error: null },
-  { step_id: "enrich", parallel_index: null, status: "failed", output: null, cost_usd: 0.01, duration_seconds: 2.3, attempt: 3, error: "Timeout after 300s - external API unreachable" },
+  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://broken.test" }, cost_usd: 0.02, duration_seconds: 4.1, attempt: 1, error: null, responsibility: "Fetch raw HTML from target website", owner: "data-team" },
+  { step_id: "enrich", parallel_index: null, status: "failed", output: null, cost_usd: 0.01, duration_seconds: 2.3, attempt: 3, error: "ConnectionError: Timeout after 300s - external enrichment API at api.clearbit.com:443 unreachable. Attempted 3 retries with exponential backoff (2s, 4s, 8s). Last response: TCP connection reset by peer. Check network connectivity and API status at https://status.clearbit.com", owner: "ml-ops" },
 ];
 
 function getRunDetail(runId: string) {
@@ -124,9 +129,9 @@ const MOCK_WORKFLOWS = [
     steps_count: 3,
     file_name: "lead-enrichment.yaml",
     steps: [
-      { id: "scrape", model: "sonnet", depends_on: [] },
-      { id: "enrich", model: "sonnet", depends_on: ["scrape"] },
-      { id: "score", model: "haiku", depends_on: ["enrich"] },
+      { id: "scrape", model: "sonnet", depends_on: [], owner: "data-team" },
+      { id: "enrich", model: "sonnet", depends_on: ["scrape"], owner: "ml-ops" },
+      { id: "score", model: "haiku", depends_on: ["enrich"], owner: "sales-ai" },
     ],
     input_schema: {
       required: ["company_url"],
@@ -142,9 +147,9 @@ const MOCK_WORKFLOWS = [
     steps_count: 4,
     file_name: "competitor-monitor.yaml",
     steps: [
-      { id: "fetch-competitors", model: "sonnet", depends_on: [] },
-      { id: "analyze", model: "sonnet", depends_on: ["fetch-competitors"] },
-      { id: "summarize", model: "sonnet", depends_on: ["analyze"] },
+      { id: "fetch-competitors", model: "sonnet", depends_on: [], owner: "data-team" },
+      { id: "analyze", model: "sonnet", depends_on: ["fetch-competitors"], owner: "ml-ops" },
+      { id: "summarize", model: "sonnet", depends_on: ["analyze"], owner: "ml-ops" },
       { id: "format-report", model: "haiku", depends_on: ["summarize"] },
     ],
     input_schema: {
@@ -7153,6 +7158,12 @@ const routes: MockRoute[] = [
       const batch = batches[params._1];
       if (!batch) return null;
 
+      // If batch was cancelled, return current state without simulating more progress
+      if (batch.status === "cancelled") {
+        const { _tick: _, ...result } = batch;
+        return result;
+      }
+
       // Simulate progress on each poll
       const items = batch.items as Array<Record<string, unknown>>;
       const tick = (batch._tick as number) + 1;
@@ -7215,6 +7226,39 @@ const routes: MockRoute[] = [
       // Return a clean copy without internal _tick
       const { _tick: _, ...result } = batch;
       return result;
+    },
+  },
+  // POST /batch/{batch_id}/cancel - cancel a running batch
+  {
+    match: /^\/batch\/([^/]+)\/cancel$/,
+    method: "POST",
+    handler: (params) => {
+      const batches = ((globalThis as Record<string, unknown>).__mockBatches || {}) as Record<string, Record<string, unknown>>;
+      const batch = batches[params._1];
+      if (!batch) return null;
+
+      if (batch.status !== "running") {
+        return { error: { code: "CONFLICT", message: `Batch is already '${batch.status}', cannot cancel` } };
+      }
+
+      // Mark all pending items as cancelled
+      const items = batch.items as Array<Record<string, unknown>>;
+      let cancelledCount = 0;
+      for (const item of items) {
+        if (item.status === "pending") {
+          item.status = "cancelled";
+          cancelledCount++;
+        }
+      }
+
+      batch.status = "cancelled";
+      batch.pending = 0;
+
+      return {
+        status: "cancelled",
+        completed: batch.completed,
+        cancelled: cancelledCount,
+      };
     },
   },
   // POST /workflows/run/sync

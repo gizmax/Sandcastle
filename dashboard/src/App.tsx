@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { EventStreamProvider } from "@/components/providers/EventStreamProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
+import { usePageTracking } from "@/hooks/usePageTracking";
 
 // Lazy-loaded page components for code splitting
 const Overview = lazy(() => import("@/pages/Overview"));
@@ -37,6 +38,12 @@ const Onboarding = lazy(() => import("@/pages/Onboarding"));
  *  page does not take down the entire app. */
 function PageBoundary({ name, children }: { name: string; children: React.ReactNode }) {
   return <ErrorBoundary name={name}>{children}</ErrorBoundary>;
+}
+
+/** Invisible component that tracks page views inside the router context. */
+function PageTracker() {
+  usePageTracking();
+  return null;
 }
 
 function NotFound() {
@@ -71,6 +78,7 @@ export default function App() {
 
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
+      <PageTracker />
       <ErrorBoundary name="root">
       <EventStreamProvider>
         <Suspense

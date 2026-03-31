@@ -41,7 +41,9 @@ import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAccentColor, ACCENT_COLORS } from "@/hooks/useAccentColor";
 import { useTheme } from "@/hooks/useTheme";
+import { useUsageStats } from "@/hooks/usePageTracking";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { BarChart3, Trash2 } from "lucide-react";
 
 // -- Types ------------------------------------------------------------------
 
@@ -269,6 +271,7 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const { accentColor, setAccentColor } = useAccentColor();
   const { theme, toggleTheme } = useTheme();
+  const { topPages, totalViews, clearStats } = useUsageStats();
 
   // Update channel state
   const [updateChannel, setUpdateChannel] = useState<"stable" | "beta" | "pinned">("stable");
@@ -1271,6 +1274,80 @@ export default function SettingsPage() {
         })()}
       </SectionCard>
       </ErrorBoundary>
+
+      {/* Usage Stats - local analytics */}
+      <SectionCard
+        icon={BarChart3}
+        title="Usage Stats"
+        description="Local page view analytics - no data leaves your browser"
+        readOnly
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-foreground">
+              Total Page Views
+            </p>
+            <span className="text-sm font-mono text-muted-foreground">
+              {totalViews.toLocaleString()}
+            </span>
+          </div>
+
+          {topPages.length > 0 ? (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">
+                Most Visited Pages
+              </p>
+              <div className="space-y-1.5">
+                {topPages.map((stat, i) => {
+                  const pct = totalViews > 0 ? (stat.count / totalViews) * 100 : 0;
+                  return (
+                    <div key={stat.page} className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground w-4 text-right shrink-0">
+                        {i + 1}.
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-xs font-mono text-foreground truncate">
+                            {stat.page}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums shrink-0 ml-2">
+                            {stat.count} ({pct.toFixed(1)}%)
+                          </span>
+                        </div>
+                        <div className="h-1 rounded-full bg-border/50 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-accent/60 transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No page views recorded yet. Navigate around to start tracking.
+            </p>
+          )}
+
+          {totalViews > 0 && (
+            <div className="pt-2 border-t border-border/50">
+              <button
+                onClick={clearStats}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs text-muted-foreground",
+                  "hover:text-destructive transition-colors cursor-pointer",
+                )}
+              >
+                <Trash2 className="h-3 w-3" />
+                Clear analytics
+              </button>
+            </div>
+          )}
+        </div>
+      </SectionCard>
 
     </div>
   );

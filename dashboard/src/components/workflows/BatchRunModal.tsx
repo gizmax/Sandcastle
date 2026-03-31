@@ -49,6 +49,7 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Close on Escape key
@@ -70,6 +71,7 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
       setBatchId(null);
       setBatchStatus(null);
       setStarting(false);
+      setCancelling(false);
     }
   }, [open]);
 
@@ -161,9 +163,33 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
     }
   }
 
+  async function handleCancel() {
+    if (!batchId || cancelling) return;
+    setCancelling(true);
+    try {
+      const res = await api.post<{ status: string; completed: number; cancelled: number }>(
+        `/batch/${batchId}/cancel`
+      );
+      if (res.error) {
+        toast.error(`Cancel failed: ${res.error.message}`);
+      } else if (res.data) {
+        toast.success(
+          `Batch cancelled: ${res.data.completed} completed, ${res.data.cancelled} cancelled`
+        );
+        // Refresh status immediately after cancel
+        void pollStatus();
+      }
+    } catch {
+      toast.error("Network error - could not cancel batch");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (!open) return null;
 
-  const isDone = batchStatus && batchStatus.status !== "running";
+  const isRunning = batchStatus?.status === "running";
+  const isDone = batchStatus && !isRunning;
   // Guard against division by zero when total is 0
   const progressPct = batchStatus && batchStatus.total > 0
     ? Math.round(((batchStatus.completed + batchStatus.failed) / batchStatus.total) * 100)
@@ -274,6 +300,9 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
                     {batchStatus?.status === "failed" && (
                       <XCircle className="h-4 w-4 text-error" />
                     )}
+                    {batchStatus?.status === "cancelled" && (
+                      <XCircle className="h-4 w-4 text-warning" />
+                    )}
                     <span className="text-sm font-medium text-foreground capitalize">
                       {batchStatus?.status || "Starting..."}
                     </span>
@@ -364,6 +393,9 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
                               {item.status === "pending" && (
                                 <span className="h-3 w-3 rounded-full border border-muted" />
                               )}
+                              {item.status === "cancelled" && (
+                                <XCircle className="h-3 w-3 text-muted" />
+                              )}
                               <span className="font-mono text-muted-foreground">#{item.index}</span>
                               {item.error && (
                                 <span className="text-error truncate max-w-[200px]" title={item.error}>
@@ -392,7 +424,9 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
                     >
                       {batchStatus?.status === "completed"
                         ? `All ${batchStatus.total} items completed successfully. Total cost: $${(batchStatus.total_cost_usd ?? 0).toFixed(2)}`
-                        : `Batch finished: ${batchStatus?.completed ?? 0} passed, ${batchStatus?.failed ?? 0} failed. Total cost: $${(batchStatus?.total_cost_usd ?? 0).toFixed(2)}`}
+                        : batchStatus?.status === "cancelled"
+                          ? `Batch cancelled: ${batchStatus?.completed ?? 0} completed, ${batchStatus.total - (batchStatus?.completed ?? 0) - (batchStatus?.failed ?? 0)} cancelled. Total cost: $${(batchStatus?.total_cost_usd ?? 0).toFixed(2)}`
+                          : `Batch finished: ${batchStatus?.completed ?? 0} passed, ${batchStatus?.failed ?? 0} failed. Total cost: $${(batchStatus?.total_cost_usd ?? 0).toFixed(2)}`}
                     </div>
                   )}
                 </div>
@@ -407,8 +441,27 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
               onClick={onClose}
               className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground transition-colors"
             >
-              {isDone ? "Close" : "Cancel"}
+              {isDone ? "Close" : "Dismiss"}
             </button>
+            {batchId && isRunning && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={cancelling}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border border-error/30 px-4 py-2 text-sm font-medium text-error",
+                  "hover:bg-error/10 transition-all duration-200",
+                  "disabled:opacity-50 disabled:cursor-not-allowed"
+                )}
+              >
+                {cancelling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <XCircle className="h-3.5 w-3.5" />
+                )}
+                {cancelling ? "Cancelling..." : "Cancel Batch"}
+              </button>
+            )}
             {!batchId && (
               <button
                 type="button"

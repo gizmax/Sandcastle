@@ -13,6 +13,10 @@ interface Step {
   error: string | null;
   started_at: string | null;
   pdf_artifact?: boolean;
+  responsibility?: string;
+  owner?: string;
+  type?: string;
+  artifact_url?: string;
 }
 
 interface StepTimelineProps {
@@ -57,6 +61,10 @@ export function StepTimeline({ steps, runId, onReplay, onFork }: StepTimelinePro
               parallelIndex={step.parallel_index}
               startedAt={step.started_at}
               pdfArtifact={step.pdf_artifact}
+              responsibility={step.responsibility}
+              owner={step.owner}
+              stepType={step.type}
+              artifactUrl={step.artifact_url}
               runId={runId}
               onReplay={onReplay}
               onFork={onFork}

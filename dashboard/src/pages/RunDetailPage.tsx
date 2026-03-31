@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
+import { useEventStreamContext } from "@/hooks/useEventStreamContext";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -36,6 +37,10 @@ interface Step {
   error: string | null;
   started_at: string | null;
   pdf_artifact?: boolean;
+  responsibility?: string;
+  owner?: string;
+  type?: string;
+  artifact_url?: string;
 }
 
 interface RunDetail {
@@ -85,6 +90,63 @@ export default function RunDetailPage() {
   const prevStatusRef = useRef<string | null>(null);
   const celebratedRef = useRef(false);
 
+  // Real-time step progress via SSE events
+  const { subscribe } = useEventStreamContext();
+
+  // Track step status overrides from SSE events (step_id -> status)
+  const [stepOverrides, setStepOverrides] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!id) return;
+
+    const handleStepStarted = subscribe("step.started", (event) => {
+      const data = event.data as { run_id?: string; step_id?: string };
+      if (data.run_id === id && data.step_id) {
+        setStepOverrides((prev) => ({ ...prev, [data.step_id as string]: "running" }));
+      }
+    });
+
+    const handleStepCompleted = subscribe("step.completed", (event) => {
+      const data = event.data as { run_id?: string; step_id?: string };
+      if (data.run_id === id && data.step_id) {
+        setStepOverrides((prev) => ({ ...prev, [data.step_id as string]: "completed" }));
+      }
+    });
+
+    const handleStepFailed = subscribe("step.failed", (event) => {
+      const data = event.data as { run_id?: string; step_id?: string };
+      if (data.run_id === id && data.step_id) {
+        setStepOverrides((prev) => ({ ...prev, [data.step_id as string]: "failed" }));
+      }
+    });
+
+    return () => {
+      handleStepStarted();
+      handleStepCompleted();
+      handleStepFailed();
+    };
+  }, [id, subscribe]);
+
+  // Clear step overrides when run data refreshes from the server
+  useEffect(() => {
+    if (run) {
+      setStepOverrides({});
+    }
+  }, [run]);
+
+  // Merge SSE step overrides into run steps for real-time updates
+  const liveSteps = useMemo(() => {
+    if (!run?.steps) return [];
+    if (Object.keys(stepOverrides).length === 0) return run.steps;
+    return run.steps.map((step) => {
+      const override = stepOverrides[step.step_id];
+      if (override) {
+        return { ...step, status: override };
+      }
+      return step;
+    });
+  }, [run?.steps, stepOverrides]);
+
   // Must be called unconditionally (Rules of Hooks) - workflow is empty string until run loads
   const { runs: siblingRuns } = useRuns({
     workflow: run?.workflow_name ?? "",
@@ -96,12 +158,12 @@ export default function RunDetailPage() {
   const anomalies = useMemo<Anomaly[]>(() => {
     if (!run) return [];
     const result = detectAnomalies(run, siblingRuns);
-    if (run.steps) {
-      const retryAnomaly = detectRetryHeavy(run.steps);
+    if (liveSteps.length > 0) {
+      const retryAnomaly = detectRetryHeavy(liveSteps);
       if (retryAnomaly) result.push(retryAnomaly);
     }
     return result;
-  }, [run, siblingRuns]);
+  }, [run, siblingRuns, liveSteps]);
 
   const fetchRun = useCallback(async (cancelled?: { current: boolean }) => {
     if (!id) return;
@@ -606,11 +668,11 @@ export default function RunDetailPage() {
       {isRunning && id && <LiveStream runId={id} />}
 
       {/* Pipeline / Flamegraph visualization */}
-      {run.steps && run.steps.length > 0 && (
+      {liveSteps.length > 0 && (
         <div className="space-y-4">
           {/* Pipeline or Flamegraph based on toggle */}
           {vizMode === "pipeline" ? (
-            <PipelineViz steps={run.steps} />
+            <PipelineViz steps={liveSteps} />
           ) : null}
 
           {/* Execution Timeline (Flamegraph) - collapsible */}
@@ -659,9 +721,9 @@ export default function RunDetailPage() {
             {flamegraphExpanded && (
               <div className="border-t border-border p-4 overflow-x-auto">
                 {vizMode === "flamegraph" ? (
-                  <StepFlamegraph steps={run.steps} />
+                  <StepFlamegraph steps={liveSteps} />
                 ) : (
-                  <StepFlamegraph steps={run.steps} />
+                  <StepFlamegraph steps={liveSteps} />
                 )}
               </div>
             )}
@@ -673,7 +735,7 @@ export default function RunDetailPage() {
       <div>
         <h2 className="mb-3 text-sm font-semibold text-foreground">Steps</h2>
         <StepTimeline
-          steps={run.steps || []}
+          steps={liveSteps}
           runId={run.run_id}
           onReplay={handleReplay}
           onFork={handleFork}
@@ -682,7 +744,7 @@ export default function RunDetailPage() {
 
       {/* Generated images gallery */}
       {(() => {
-        const allImages = (run.steps || []).flatMap((s) => {
+        const allImages = liveSteps.flatMap((s) => {
           const out = s.output as Record<string, unknown> | null;
           if (out && Array.isArray(out._images)) return out._images as Array<{ index: number; url?: string; filename?: string; error?: string }>;
           return [];

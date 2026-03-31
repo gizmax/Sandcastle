@@ -13,6 +13,7 @@ interface WorkflowInfo {
   version?: number | null;
   version_status?: string | null;
   total_versions?: number | null;
+  steps?: Array<{ id: string; owner?: string; [key: string]: unknown }>;
 }
 
 interface WorkflowListProps {
@@ -81,6 +82,10 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {workflows.map((wf) => {
           const wfKey = wf.file_name.replace(".yaml", "");
+          // Derive unique owners from workflow step definitions
+          const owners = wf.steps
+            ? [...new Set(wf.steps.map((s) => s.owner).filter((o): o is string => !!o))]
+            : undefined;
           return (
             <WorkflowCard
               key={wf.file_name}
@@ -94,6 +99,7 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
               selected={selectedNames?.has(wfKey)}
               pinned={isPinned(wf.name)}
               stats={statsMap.get(wf.file_name)}
+              owners={owners}
               onSelect={onSelectionChange ? () => handleToggle(wfKey) : undefined}
               onTogglePin={() => togglePin(wf.name)}
               onRun={() => onRun(wf)}

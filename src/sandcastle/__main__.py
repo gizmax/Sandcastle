@@ -385,6 +385,134 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
         return {"id": run_id, "status": "interrupted"}
 
 
+def _stream_run(client: Any, run_id: str) -> None:
+    """Poll a run every 2s and print step-by-step progress with colors.
+
+    Shows each step's status as it transitions (running -> done/failed),
+    then prints a summary line when the run reaches a terminal state.
+    Ctrl+C prints a note that the run continues in the background.
+    """
+    terminal = {
+        "completed", "failed", "cancelled", "error",
+        "partial", "budget_exceeded", "awaiting_approval",
+    }
+    start = time.monotonic()
+    max_wait = 3600
+    printed_steps: dict[str, str] = {}  # step_id -> last printed status
+    workflow_name: str | None = None
+    total_steps: int = 0
+
+    def _step_line(idx: int, total: int, step: dict, is_update: bool = False) -> str:
+        """Format a single step progress line."""
+        step_id = step.get("step_id", "?")
+        status = step.get("status", "unknown").lower()
+        cost = step.get("cost_usd", 0) or 0
+        duration = step.get("duration_seconds", 0) or 0
+        responsibility = step.get("responsibility", "")
+
+        prefix = f"  [{idx}/{total}] {step_id}..."
+
+        if status in ("completed", "success"):
+            detail = f"done ({duration:.1f}s, ${cost:.2f})"
+            if responsibility:
+                detail += f" [{responsibility}]"
+            return f"\r\033[K{prefix} {_color(detail, _C.GREEN)}"
+        elif status in ("failed", "error"):
+            detail = f"FAILED ({duration:.1f}s)"
+            error_msg = step.get("error", "")
+            if error_msg:
+                detail += f" - {error_msg[:60]}"
+            return f"\r\033[K{prefix} {_color(detail, _C.RED)}"
+        elif status == "running":
+            detail = "running..."
+            if responsibility:
+                detail += f" [{responsibility}]"
+            return f"\r\033[K{prefix} {_color(detail, _C.YELLOW)}"
+        elif status == "skipped":
+            return f"\r\033[K{prefix} {_color('skipped', _C.GRAY)}"
+        else:
+            return f"\r\033[K{prefix} {status}"
+
+    try:
+        while True:
+            if time.monotonic() - start > max_wait:
+                print(f"\nTimeout: run did not complete within {max_wait}s")
+                return
+
+            run = client.get_run(run_id)
+            r = _to_dict(run)
+            run_status = _attr(run, "status", "unknown")
+
+            if workflow_name is None:
+                workflow_name = r.get("workflow_name", "workflow")
+                print(f"\n{_color('Running:', _C.BOLD)} {workflow_name}")
+
+            steps = r.get("steps") or []
+            if total_steps == 0 and steps:
+                total_steps = len(steps)
+
+            for i, s_raw in enumerate(steps, 1):
+                s = _to_dict(s_raw)
+                sid = s.get("step_id", f"step-{i}")
+                s_status = s.get("status", "pending").lower()
+
+                prev = printed_steps.get(sid)
+
+                # Print if new step or status changed
+                if prev != s_status and s_status != "pending":
+                    # If updating from running -> done, overwrite
+                    if prev == "running":
+                        sys.stdout.write("\033[A")  # move cursor up
+                    line = _step_line(i, total_steps or len(steps), s)
+                    print(line)
+                    printed_steps[sid] = s_status
+
+            if run_status in terminal:
+                elapsed = time.monotonic() - start
+                total_cost = r.get("total_cost_usd", 0) or 0
+                passed = sum(
+                    1 for s_raw in steps
+                    if _to_dict(s_raw).get("status", "").lower()
+                    in ("completed", "success")
+                )
+                step_total = len(steps)
+
+                print()
+                if run_status in ("completed", "success"):
+                    summary = (
+                        f"{_color('Completed', _C.GREEN)} in {elapsed:.1f}s"
+                        f" | Cost: ${total_cost:.2f}"
+                        f" | {passed}/{step_total} steps passed"
+                    )
+                elif run_status in ("failed", "error"):
+                    summary = (
+                        f"{_color('Failed', _C.RED)} after {elapsed:.1f}s"
+                        f" | Cost: ${total_cost:.2f}"
+                        f" | {passed}/{step_total} steps passed"
+                    )
+                    err = r.get("error", "")
+                    if err:
+                        summary += f"\n  {_color('Error:', _C.RED)} {err}"
+                else:
+                    summary = (
+                        f"{_status_color(run_status)} after {elapsed:.1f}s"
+                        f" | Cost: ${total_cost:.2f}"
+                        f" | {passed}/{step_total} steps passed"
+                    )
+                print(summary)
+                print()
+
+                if run_status in ("failed", "error", "budget_exceeded"):
+                    sys.exit(2)
+                return
+
+            time.sleep(2)
+
+    except KeyboardInterrupt:
+        print(f"\n\n{_color('Run continues in background.', _C.YELLOW)}"
+              f" Check status with: sandcastle status {run_id}")
+
+
 # ---------------------------------------------------------------------------
 # Retro banner & boot sequence
 # ---------------------------------------------------------------------------
@@ -838,7 +966,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     run_id = _attr(run, "run_id", str(run))
 
-    if args.wait:
+    if getattr(args, "stream", False):
+        _stream_run(client, run_id)
+    elif args.wait:
         result = _wait_for_run(client, run_id)
         if getattr(args, "json", False):
             print(json.dumps(result, indent=2, default=str))
@@ -2038,6 +2168,19 @@ def _print_run_detail(run: Any) -> None:
                 ]
             )
         print(_table(headers, rows))
+
+        # Show detailed error messages for failed steps
+        failed_steps = [
+            _to_dict(s) for s in steps if _to_dict(s).get("status") == "failed" and _to_dict(s).get("error")
+        ]
+        if failed_steps:
+            print()
+            print(_color("  Step Errors:", _C.RED))
+            for fs in failed_steps:
+                step_name = fs.get("step_id", "?")
+                step_error = fs.get("error", "")
+                attempt_num = fs.get("attempt", 1)
+                print(f"    {_color('X', _C.RED)} {step_name} (attempt {attempt_num}): {step_error}")
 
     # Outputs
     outputs = r.get("outputs")
@@ -4053,6 +4196,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--input-file", "-f", metavar="FILE", help="JSON file with input data")
     p_run.add_argument(
         "--wait", "-w", action="store_true", help="Wait for completion and print result"
+    )
+    p_run.add_argument(
+        "--stream",
+        "-s",
+        action="store_true",
+        help="Stream step-by-step progress after queuing the run",
     )
     p_run.add_argument(
         "--max-cost", type=float, default=None, metavar="USD", help="Maximum cost limit in USD"

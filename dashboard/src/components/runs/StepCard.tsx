@@ -120,6 +120,10 @@ interface StepCardProps {
   parallelIndex: number | null;
   startedAt: string | null;
   pdfArtifact?: boolean;
+  responsibility?: string;
+  owner?: string;
+  stepType?: string;
+  artifactUrl?: string;
   runId?: string;
   onReplay?: (stepId: string) => void;
   onFork?: (stepId: string) => void;
@@ -136,6 +140,10 @@ export function StepCard({
   parallelIndex,
   startedAt,
   pdfArtifact,
+  responsibility,
+  owner,
+  stepType,
+  artifactUrl,
   runId,
   onReplay,
   onFork,
@@ -177,7 +185,15 @@ export function StepCard({
             {parallelIndex !== null && (
               <span className="text-xs text-muted">[{parallelIndex}]</span>
             )}
+            {owner && (
+              <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                {owner}
+              </span>
+            )}
           </div>
+          {responsibility && (
+            <p className="mt-0.5 text-xs italic text-muted">{responsibility}</p>
+          )}
           <div className="mt-0.5 flex items-center gap-3 text-xs text-muted">
             <span>{formatDuration(durationSeconds)}</span>
             <span>{formatCost(costUsd)}</span>
@@ -199,9 +215,18 @@ export function StepCard({
             </div>
           )}
           {error && (
-            <div className="mb-3 rounded-md bg-error/10 px-3 py-2">
-              <p className="text-xs font-medium text-error">Error</p>
-              <p className="mt-0.5 font-mono text-xs text-error/80">{error}</p>
+            <div className={cn(
+              "mb-3 rounded-md px-3 py-2",
+              status === "failed"
+                ? "border border-error/30 bg-error/10"
+                : "bg-error/10"
+            )}>
+              <p className="text-xs font-semibold text-error">
+                {status === "failed" ? "Step Failed" : "Error"}
+              </p>
+              <p className="mt-1 font-mono text-xs text-error/80 whitespace-pre-wrap break-words leading-relaxed">
+                {error}
+              </p>
             </div>
           )}
           {/* Image gallery for approval steps */}
@@ -279,11 +304,11 @@ export function StepCard({
             );
           })()}
 
-          {/* PDF download */}
-          {pdfArtifact && runId && (
+          {/* PDF download - show for pdf_artifact flag or completed report steps with artifact_url */}
+          {((pdfArtifact && runId) || (stepType === "report" && status === "completed" && artifactUrl)) && (
             <div className="mt-2">
               <a
-                href={`${API_BASE_URL}/runs/${runId}/steps/${stepId}/pdf`}
+                href={artifactUrl || `${API_BASE_URL}/runs/${runId}/steps/${stepId}/pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={cn(
@@ -293,7 +318,7 @@ export function StepCard({
                 )}
               >
                 <FileText className="h-3 w-3" />
-                Download PDF Report
+                Download PDF
               </a>
             </div>
           )}
