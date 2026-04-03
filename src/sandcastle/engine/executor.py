@@ -35,7 +35,7 @@ from sandcastle.engine.storage import StorageBackend
 logger = logging.getLogger(__name__)
 
 # Pre-compiled regex patterns for template and storage reference resolution.
-_TEMPLATE_RE = re.compile(r"\{((?:input|steps|env)\.[^}]+|run_id|date|memory)\}")
+_TEMPLATE_RE = re.compile(r"\{((?:input|steps|env)\.[^}]+|run_id|date|memory|context)\}")
 _STORAGE_RE = re.compile(r"\{storage\.([^}]+)\}")
 
 # Default instructions prepended to every step prompt to keep agent output clean.
@@ -84,6 +84,7 @@ class RunContext:
     workflow_name: str = ""
     default_tools: list[str] = field(default_factory=list)
     memories: list[dict] = field(default_factory=list)
+    _resolved_context: str = field(default="", repr=False)  # Dynamic context from context_query
     _memory_config: Any = field(default=None, repr=False)
     _memory_scope_id: str = field(default="", repr=False)
     branch_skip_steps: set[str] = field(default_factory=set)
@@ -109,6 +110,7 @@ class RunContext:
             workflow_name=self.workflow_name,
             default_tools=self.default_tools,
             memories=list(self.memories),
+            _resolved_context=self._resolved_context,
             _memory_config=self._memory_config,
             _memory_scope_id=self._memory_scope_id,
             branch_skip_steps=set(self.branch_skip_steps),
@@ -216,6 +218,9 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
         from sandcastle.engine.memory import format_memories_for_prompt
 
         return format_memories_for_prompt(context.memories)
+
+    if var_path == "context":
+        return context._resolved_context or ""
 
     if var_path == "run_id":
         return context.run_id
@@ -330,6 +335,155 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
         last_end = match.end()
     parts.append(prompt[last_end:])
     return "".join(parts)
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to approximate token limit (rough: 1 token ~ 4 chars)."""
+    max_chars = max_tokens * 4
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n...[truncated]"
+
+
+async def _context_search_memory(query: str, scope_id: str, limit: int = 5) -> str:
+    """Search agent memory for relevant context."""
+    try:
+        from sandcastle.engine.memory import load_memories
+
+        memories = await load_memories(scope_id, query=query, limit=limit)
+        if not memories:
+            return ""
+        return "\n\n".join(m.get("memory", "") for m in memories if m.get("memory"))
+    except Exception as e:
+        logger.warning(f"Context query memory search failed: {e}")
+        return ""
+
+
+async def _context_search_web(query: str, limit: int = 3) -> str:
+    """Search the web for context using tavily if available."""
+    try:
+        import os
+        api_key = os.environ.get("TOOL_TAVILY_API_KEY", "")
+        if not api_key:
+            logger.debug("Context query web search skipped: TOOL_TAVILY_API_KEY not set")
+            return ""
+
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={"api_key": api_key, "query": query, "max_results": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", [])
+            if not results:
+                return ""
+            return "\n\n".join(
+                f"[{r.get('title', 'Result')}]\n{r.get('content', '')}"
+                for r in results[:limit]
+            )
+    except Exception as e:
+        logger.warning(f"Context query web search failed: {e}")
+        return ""
+
+
+def _context_search_files(query: str, limit: int = 5) -> str:
+    """Search local workflow YAML files for relevant context by keyword overlap."""
+    try:
+        from sandcastle.config import settings
+        workflows_dir = Path(settings.workflows_dir).resolve()
+    except Exception:
+        return ""
+
+    if not workflows_dir.is_dir():
+        return ""
+
+    query_words = set(query.lower().split())
+    if not query_words:
+        return ""
+
+    scored: list[tuple[float, str]] = []
+    try:
+        yaml_files = list(workflows_dir.glob("*.yaml")) + list(workflows_dir.glob("*.yml"))
+    except OSError:
+        return ""
+
+    for path in yaml_files:
+        try:
+            content = path.read_text(errors="replace")[:4000]
+            content_words = set(content.lower().split())
+            overlap = len(query_words & content_words)
+            if overlap > 0:
+                score = overlap / len(query_words)
+                scored.append((score, content))
+        except OSError:
+            continue
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return "\n\n---\n\n".join(s[1] for s in scored[:limit])
+
+
+async def _context_run_command(command: str) -> str:
+    """Run a shell command and capture its stdout as context."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "sh", "-c", command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        if proc.returncode != 0:
+            logger.warning(
+                f"Context query custom command failed (rc={proc.returncode}): "
+                f"{stderr.decode(errors='replace')[:200]}"
+            )
+            return ""
+        return stdout.decode(errors="replace")
+    except asyncio.TimeoutError:
+        logger.warning("Context query custom command timed out after 30s")
+        return ""
+    except Exception as e:
+        logger.warning(f"Context query custom command error: {e}")
+        return ""
+
+
+async def _resolve_context_query(
+    step: StepDefinition,
+    context: RunContext,
+) -> str:
+    """Fetch dynamic context for a step's context_query.
+
+    Resolves template variables in the query first, then dispatches
+    to the appropriate source (memory, web, files, custom).
+    Returns empty string if no context_query is set.
+    """
+    if not step.context_query:
+        return ""
+
+    # Resolve template variables in the query itself
+    query = resolve_templates(step.context_query, context, step.depends_on)
+
+    if step.context_source == "memory":
+        scope_id = context._memory_scope_id or context.workflow_name or "default"
+        result = await _context_search_memory(query, scope_id, limit=5)
+
+    elif step.context_source == "web":
+        result = await _context_search_web(query, limit=3)
+
+    elif step.context_source == "files":
+        result = _context_search_files(query, limit=5)
+
+    elif step.context_source == "custom":
+        result = await _context_run_command(query)
+
+    else:
+        result = ""
+
+    if not result:
+        return ""
+
+    return _truncate_to_tokens(result, step.context_max_tokens)
 
 
 def _enforce_data_residency(model_info: Any) -> None:
@@ -1605,6 +1759,21 @@ async def _execute_step_once(
             and context._memory_scope_id
             and (context._memory_config.auto_inject or (step.memory and step.memory.read))
         )
+
+        # Resolve dynamic context_query before template resolution so that
+        # {context} is available as a template variable in the prompt.
+        if step.context_query:
+            try:
+                resolved_ctx = await _resolve_context_query(step, context)
+                context._resolved_context = resolved_ctx
+                if resolved_ctx:
+                    logger.info(
+                        "Context query resolved for step '%s': %d chars from '%s'",
+                        step.id, len(resolved_ctx), step.context_source,
+                    )
+            except Exception as e:
+                logger.warning(f"Context query failed for step '{step.id}': {e}")
+                context._resolved_context = ""
 
         # Resolve template variables first (cheap string interpolation) so the
         # cache key reflects the actual inputs, not the raw template string.

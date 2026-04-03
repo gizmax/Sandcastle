@@ -470,12 +470,18 @@ class StepDefinition:
     openclaw_config: OpenClawConfig | None = None
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
+    # Dynamic context retrieval before execution
+    context_query: str = ""  # Search query to fetch relevant context
+    context_source: str = "memory"  # "memory" | "web" | "files" | "custom"
+    context_max_tokens: int = 2000  # Max tokens of context to inject
     # Self-describing metadata
     responsibility: str = ""  # WHAT this step does in one sentence
     source_hint: str = ""  # WHY this step exists (business reason, ticket, who requested)
     owner: str = ""  # WHO is responsible for this step
     added_date: str = ""  # WHEN was this step added (YYYY-MM-DD)
 
+
+VALID_CONTEXT_SOURCES = frozenset({"memory", "web", "files", "custom"})
 
 VALID_RISK_LEVELS = frozenset({"minimal", "limited", "high", "unacceptable"})
 
@@ -597,6 +603,16 @@ def _resolve_env_vars(value: str) -> str:
         return os.environ.get(var_name, "")
 
     return re.sub(r"\$\{(\w+)\}", _replace, value)
+
+
+def _validate_context_source(source: str) -> str:
+    """Validate context_source value."""
+    if source not in VALID_CONTEXT_SOURCES:
+        raise ValueError(
+            f"Invalid context_source '{source}'. "
+            f"Valid sources: {', '.join(sorted(VALID_CONTEXT_SOURCES))}"
+        )
+    return source
 
 
 def _parse_retry(data: dict | None) -> RetryConfig | None:
@@ -1128,6 +1144,10 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         openclaw_config=_parse_openclaw_config(data.get("openclaw_config")),
         parse_config=_parse_parse_config(data.get("parse_config")),
         report_config=_parse_report_config(data.get("report_config")),
+        # Dynamic context retrieval
+        context_query=data.get("context_query", ""),
+        context_source=_validate_context_source(data.get("context_source", "memory")),
+        context_max_tokens=data.get("context_max_tokens", 2000),
         # Self-describing metadata
         responsibility=data.get("responsibility", ""),
         source_hint=data.get("source_hint", ""),

@@ -299,6 +299,35 @@ IMPORTANT: Types that do NOT need a prompt: http, code, condition,
 loop, race, sensor, gate, transform, notify, composio, openclaw, parse.
 All other types require a prompt field.
 
+## Dynamic Context Retrieval (optional)
+
+Steps can fetch external context before execution. The resolved context is
+available as {{context}} in the prompt template:
+
+- context_query: "search query to fetch relevant context before execution"
+- context_source: "memory"  # memory|web|files|custom
+- context_max_tokens: 2000  # max context length
+
+Sources:
+- memory: semantic search over agent memory (requires memory config)
+- web: search the web via Tavily (requires TOOL_TAVILY_API_KEY)
+- files: keyword search over local workflow YAML files
+- custom: run a shell command, capture stdout as context
+
+Example:
+```yaml
+steps:
+  - id: research
+    context_query: "latest trends in {{input.topic}}"
+    context_source: web
+    context_max_tokens: 3000
+    prompt: |
+      Based on this research:
+      {{context}}
+
+      Write a comprehensive analysis of {{input.topic}}.
+```
+
 ## Optional Step Configuration
 
 Steps can include these optional fields for resilience and memory:
