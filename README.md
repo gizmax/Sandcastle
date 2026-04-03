@@ -862,6 +862,20 @@ steps:
 
 ---
 
+## Self-Describing Workflows
+
+Every step can declare `responsibility`, `source_hint`, `owner`, and `added_date` metadata so your workflows stay understandable as they grow. Three new CLI commands support this: `sandcastle describe` prints a human-readable summary of any workflow, `sandcastle lint` flags missing metadata and structural issues, and `sandcastle owners` lists who owns each step. The audit trail and dashboard are enriched with this metadata automatically.
+
+## Dynamic Context (context_query)
+
+LLM steps can now fetch relevant context before execution using the `context_query` field. Four sources are supported: Agent Memory (semantic search over stored knowledge), web (Tavily search), local files (keyword search across project files), and custom (arbitrary shell command output). Retrieved context is injected as `{context}` in prompts, giving your LLM steps fresh, relevant information without manual prompt engineering.
+
+## Streaming CLI (sandcastle run --stream)
+
+The `sandcastle run --stream` flag enables live terminal output with color-coded status: green for completed steps, yellow for running, red for failed. Each step shows timing, cost, and responsibility. Pressing Ctrl+C detaches from the stream and lets the workflow continue in background. Three additional commands ship in this release: `sandcastle describe`, `sandcastle lint`, and `sandcastle owners`.
+
+---
+
 ## Human Approval Gates
 
 Pause any workflow at a critical step and wait for human review before continuing. Define approval steps in YAML, set timeouts with auto-actions (skip or abort), and approve/reject/skip via API or dashboard. Reviewers can edit the request data before approving. Webhook notifications fire when approval is needed.

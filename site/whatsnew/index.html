@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.28: Batch, Monitor, Report. Auto-update, batch runs, PDF reports, schedule monitor, OCR, local AI with oMLX. Every release documented.">
+  <meta name="description" content="Sandcastle release history. v0.28.1: Every Step Knows Its Story. Self-describing workflows, context_query, streaming CLI, real-time progress, 540 new tests. Every release documented.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.28">
-  <meta property="og:description" content="Batch, Monitor, Report. Auto-update, batch runs, PDF reports, schedule monitor, OCR, local AI with oMLX. See what Sandcastle ships.">
+  <meta property="og:title" content="What's New - Sandcastle v0.28.1">
+  <meta property="og:description" content="Every Step Knows Its Story. Self-describing workflows, context_query, streaming CLI, real-time progress, 540 new tests. See what Sandcastle ships.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.28">
-  <meta name="twitter:description" content="Batch, Monitor, Report. Auto-update, batch runs, PDF reports, schedule monitor, OCR, local AI with oMLX.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.28.1">
+  <meta name="twitter:description" content="Every Step Knows Its Story. Self-describing workflows, context_query, streaming CLI, real-time progress, 540 new tests.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -184,7 +184,7 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
-      <div class="hero-badge">v0.28 - Batch, Monitor, Report.</div>
+      <div class="hero-badge">v0.28.1 - Every Step Knows Its Story</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
       <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
     </div>
@@ -193,11 +193,70 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.28.1 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.28.1</span>
+          <span class="release-name">Every Step Knows Its Story <span class="badge-latest">Latest</span></span>
+          <span class="release-date">April 1, 2026</span>
+        </div>
+
+        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          v0.28.1 is about making what you've built understandable. Steps explain why they exist. Errors tell you what went wrong. The CLI shows you what's happening in real-time. And LLM steps can now pull in fresh context from memory, web, or files before they run.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Self-Describing Workflows</h4>
+            <p>Every step can declare its <code>responsibility</code>, <code>source_hint</code>, <code>owner</code>, and <code>added_date</code>. Three new CLI commands: <code>sandcastle describe</code>, <code>sandcastle lint</code>, <code>sandcastle owners</code>. Audit trail enriched. Dashboard shows metadata on steps and workflow cards.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>context_query - Dynamic Context for LLM Steps</h4>
+            <p>Steps fetch relevant context before execution. Four sources: Agent Memory (semantic search), web (Tavily), local files (keyword search), custom (shell command). Available as <code>{context}</code> in prompts.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">UX</span>
+            <h4>sandcastle run --stream</h4>
+            <p>Live terminal output with colors: green for done, yellow for running, red for failed. Shows step timing, cost, and responsibility. Ctrl+C runs in background.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">UX</span>
+            <h4>Real-Time Step Progress</h4>
+            <p>Dashboard shows live checkmarks via SSE as steps complete. No more refreshing to see progress.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">UX</span>
+            <h4>Detailed Errors + PDF Download</h4>
+            <p>Full error messages in red callout boxes (not just "failed"). Download PDF button for report steps.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Batch Cancel + Semantic Search</h4>
+            <p>Cancel running batches mid-flight. Template search with "Did you mean..." fuzzy suggestions.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Quality</span>
+            <h4>540 New Tests</h4>
+            <p>280 template e2e tests (top 20 templates). 260 provider integration tests (all 7 providers). Full validation coverage.</p>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.28 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.28</span>
-          <span class="release-name">Batch, Monitor, Report. <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Batch, Monitor, Report.</span>
           <span class="release-date">March 29, 2026</span>
         </div>
 
