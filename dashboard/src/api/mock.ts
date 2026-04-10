@@ -232,14 +232,14 @@ const MOCK_WORKFLOWS = [
   },
   {
     name: "Deep Research Report",
-    description: "Cloud agent researches a topic with web search and code execution, local model formats cheaply, Sandcastle generates professional PDF report.",
+    description: "Managed Agent researches with web search and Python in Anthropic cloud. Analyst agent creates charts. Mistral formats cheaply. Sandcastle generates PDF.",
     steps_count: 4,
     file_name: "deep-research-report.yaml",
     steps: [
-      { id: "research", type: "agent", depends_on: [], owner: "research-team", agent_template: "researcher" },
-      { id: "analyze-data", type: "agent", depends_on: ["research"], owner: "data-team", agent_template: "analyst" },
-      { id: "format", model: "mistral-small", depends_on: ["research", "analyze-data"], owner: "content-team" },
-      { id: "pdf-report", type: "report", depends_on: ["format"], owner: "content-team" },
+      { id: "research", type: "managed-agent", depends_on: [], owner: "research-team", agent_template: "researcher", responsibility: "Web research with citations via Anthropic Managed Agent (bash + web_search + web_fetch)" },
+      { id: "analyze-data", type: "managed-agent", depends_on: ["research"], owner: "data-team", agent_template: "analyst", responsibility: "Data analysis with pandas + matplotlib via Anthropic Managed Agent (bash + Python)" },
+      { id: "format", model: "mistral-small", depends_on: ["research", "analyze-data"], owner: "content-team", responsibility: "Cheap formatting via Mistral (1/10th cost of Claude)" },
+      { id: "pdf-report", type: "report", depends_on: ["format"], owner: "content-team", responsibility: "Professional PDF with charts and TOC via Sandcastle engine (free, local)" },
     ],
     input_schema: {
       required: ["topic"],
