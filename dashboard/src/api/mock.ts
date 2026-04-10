@@ -230,6 +230,25 @@ const MOCK_WORKFLOWS = [
       },
     },
   },
+  {
+    name: "Deep Research Report",
+    description: "Cloud agent researches a topic with web search and code execution, local model formats cheaply, Sandcastle generates professional PDF report.",
+    steps_count: 4,
+    file_name: "deep-research-report.yaml",
+    steps: [
+      { id: "research", type: "agent", depends_on: [], owner: "research-team", agent_template: "researcher" },
+      { id: "analyze-data", type: "agent", depends_on: ["research"], owner: "data-team", agent_template: "analyst" },
+      { id: "format", model: "mistral-small", depends_on: ["research", "analyze-data"], owner: "content-team" },
+      { id: "pdf-report", type: "report", depends_on: ["format"], owner: "content-team" },
+    ],
+    input_schema: {
+      required: ["topic"],
+      properties: {
+        topic: { type: "string", description: "Research topic" },
+        depth: { type: "string", description: "Research depth: quick, standard, deep", default: "standard" },
+      },
+    },
+  },
 ];
 
 const MOCK_SCHEDULES = [
