@@ -1218,7 +1218,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Agent Template</label>
             <select
-              value={step.agentConfig.template}
+              value={step.agentConfig?.template}
               onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, template: e.target.value, describe: "" } })}
               className={inputClass}
             >
@@ -1237,11 +1237,11 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           </div>
 
           {/* Describe (natural language) - shown when no template selected */}
-          {!step.agentConfig.template && (
+          {!step.agentConfig?.template && (
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">Or Describe</label>
               <textarea
-                value={step.agentConfig.describe}
+                value={step.agentConfig?.describe}
                 onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, describe: e.target.value } })}
                 rows={3}
                 placeholder="Describe the agent in natural language, e.g. 'An expert Python developer who writes clean code with tests...'"
@@ -1255,7 +1255,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Message</label>
             <textarea
-              value={step.agentConfig.message}
+              value={step.agentConfig?.message}
               onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, message: e.target.value } })}
               rows={4}
               placeholder="What should this agent do? Use {input.field} or {steps.id.output} for context."
@@ -1269,7 +1269,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">Runtime</label>
               <select
-                value={step.agentConfig.runtime}
+                value={step.agentConfig?.runtime}
                 onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, runtime: e.target.value as "auto" | "anthropic" | "local" } })}
                 className={inputClass}
               >
@@ -1294,7 +1294,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                 <label className="mb-1 block text-xs font-medium text-muted">Timeout (seconds)</label>
                 <input
                   type="number"
-                  value={step.agentConfig.timeout}
+                  value={step.agentConfig?.timeout}
                   onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, timeout: Number(e.target.value) } })}
                   min={30}
                   max={3600}
@@ -1306,7 +1306,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted">Output Format</label>
                 <select
-                  value={step.agentConfig.outputFormat}
+                  value={step.agentConfig?.outputFormat}
                   onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, outputFormat: e.target.value as "text" | "json" | "files" | "markdown" } })}
                   className={inputClass}
                 >
@@ -1321,7 +1321,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted">Fallback Template</label>
                 <select
-                  value={step.agentConfig.fallbackTemplate}
+                  value={step.agentConfig?.fallbackTemplate}
                   onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, fallbackTemplate: e.target.value } })}
                   className={inputClass}
                 >
