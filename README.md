@@ -1,11 +1,11 @@
 # Sandcastle
 
-**Stop babysitting your AI agents.** Sandcastle is a workflow orchestrator that runs your agent pipelines so you don't have to. Define workflows in YAML, start locally with zero config, and scale to production when you're ready. Pluggable sandbox backends, multi-provider model routing, 63 built-in integrations, and a full-featured dashboard included.
+**Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
 [![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-14300%2B%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-14600%2B%20passing-brightgreen?style=flat-square)]()
 [![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)]()
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
@@ -2247,7 +2247,7 @@ export OMLX_BASE_URL=http://192.168.1.100:8080
 ## Development
 
 ```bash
-# Run tests (14,300+ passing)
+# Run tests (14,600+ passing)
 uv run pytest
 
 # Type check backend
