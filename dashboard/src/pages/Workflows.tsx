@@ -18,13 +18,6 @@ import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
 import { cn, buttonMd, buttonSm, buttonPrimary, buttonDanger, iconMd, iconSm } from "@/lib/utils";
 import type { InputSchema } from "@/types/inputSchema";
 
-interface WorkflowStep {
-  id: string;
-  model?: string;
-  depends_on?: string[];
-  prompt?: string;
-}
-
 interface WorkflowInfo {
   name: string;
   description: string;
