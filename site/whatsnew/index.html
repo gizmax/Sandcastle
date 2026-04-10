@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.28.1: Every Step Knows Its Story. Self-describing workflows, context_query, streaming CLI, real-time progress, 540 new tests. Every release documented.">
+  <meta name="description" content="Sandcastle release history. v0.30: Agents Unleashed. Claude Managed Agents as workflow steps, 15 agent templates, Describe Mode, GLM-OCR, token waste detection. Every release documented.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.28.1">
-  <meta property="og:description" content="Every Step Knows Its Story. Self-describing workflows, context_query, streaming CLI, real-time progress, 540 new tests. See what Sandcastle ships.">
+  <meta property="og:title" content="What's New - Sandcastle v0.30">
+  <meta property="og:description" content="Agents Unleashed. Claude Managed Agents as workflow steps, 15 agent templates, Describe Mode, GLM-OCR with 94.6% accuracy, token waste detection. See what Sandcastle ships.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.28.1">
-  <meta name="twitter:description" content="Every Step Knows Its Story. Self-describing workflows, context_query, streaming CLI, real-time progress, 540 new tests.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.30">
+  <meta name="twitter:description" content="Agents Unleashed. Claude Managed Agents as workflow steps, 15 agent templates, Describe Mode, GLM-OCR, token waste detection.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -184,7 +184,7 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
-      <div class="hero-badge">v0.28.1 - Every Step Knows Its Story</div>
+      <div class="hero-badge">v0.30 - Agents Unleashed</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
       <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
     </div>
@@ -193,11 +193,87 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.30 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.30</span>
+          <span class="release-name">Agents Unleashed <span class="badge-latest">Latest</span></span>
+          <span class="release-date">April 10, 2026</span>
+        </div>
+
+        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          v0.30 is the biggest Sandcastle release yet. Claude Managed Agents are now workflow steps. Pick from 15 built-in agent templates - or describe what you need and AI designs the agent for you. Combine cloud agents, local models, OCR, and PDF reports in one YAML file. Plus: GLM-OCR with 94.6% accuracy runs locally for free, and every run now tells you exactly where your tokens go.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Claude Managed Agents as Workflow Steps</h4>
+            <p>Delegate to Anthropic's cloud agent runtime. Agents get bash, files, web search, code execution. Use them alongside Mistral, oMLX, or any other provider. One YAML, best tool per step.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>15 Built-in Agent Templates</h4>
+            <p>researcher, coder, analyst, writer, reviewer, scraper, tester, devops, translator, designer, sql_expert, seo_specialist, legal_analyst, financial_analyst, project_manager. One line: <code>agent_template: researcher</code></p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Describe Mode</h4>
+            <p>Don't pick a template. Describe what you need: "Data analyst who creates charts from CSVs." AI designs the agent automatically - system prompt, tools, packages, network.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Agent Chaining</h4>
+            <p>output_format (json/files/markdown), shared_files between agents, fallback_template on failure. Agents collaborate in multi-step pipelines.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>GLM-OCR Engine</h4>
+            <p>0.9B model, 94.6% accuracy, #1 on OmniDocBench. Runs locally via Ollama. Free. Handles tables, handwriting, math, code blocks. 4th OCR engine alongside pymupdf and Chandra.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Perf</span>
+            <h4>Token Waste Detection</h4>
+            <p>Every run generates a token efficiency report. Detects duplicate file reads, duplicate prompts, oversized context. output_max_tokens limits what passes between steps. Cache-aware execution.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">21</div>
+                <div class="stat-label">Step types</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">15</div>
+                <div class="stat-label">Agent templates</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">4</div>
+                <div class="stat-label">OCR engines</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">325</div>
+                <div class="stat-label">New tests</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.28.1 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.28.1</span>
-          <span class="release-name">Every Step Knows Its Story <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Every Step Knows Its Story</span>
           <span class="release-date">April 1, 2026</span>
         </div>
 

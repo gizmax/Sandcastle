@@ -4426,7 +4426,10 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             db_run = await session.get(Run, uuid.UUID(run_id))
             if db_run:
                 db_run.status = status_map.get(result.status, RunStatus.FAILED)
-                db_run.output_data = result.outputs
+                output_with_report = dict(result.outputs) if result.outputs else {}
+                if result.token_report:
+                    output_with_report["_token_report"] = result.token_report
+                db_run.output_data = output_with_report
                 db_run.total_cost_usd = result.total_cost_usd
                 if result.status != "awaiting_approval":
                     db_run.completed_at = result.completed_at
@@ -4889,13 +4892,21 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
         for s in _dedup.values()
     ]
 
+    # Extract token_report from output_data if present
+    token_report = None
+    outputs = run.output_data
+    if isinstance(outputs, dict) and "_token_report" in outputs:
+        token_report = outputs.get("_token_report")
+        # Return outputs without the internal metadata key
+        outputs = {k: v for k, v in outputs.items() if k != "_token_report"}
+
     return ApiResponse(
         data=RunStatusResponse(
             run_id=str(run.id),
             workflow_name=run.workflow_name,
             status=run.status.value if hasattr(run.status, "value") else run.status,
             input_data=run.input_data,
-            outputs=run.output_data,
+            outputs=outputs,
             total_cost_usd=run.total_cost_usd,
             max_cost_usd=run.max_cost_usd,
             started_at=run.started_at,
@@ -4919,6 +4930,7 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             if run.children
             else None,
             risk_level=run.risk_level or "minimal",
+            token_report=token_report,
         )
     )
 
@@ -9351,7 +9363,10 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
             db_run = await session.get(Run, uuid.UUID(run_id))
             if db_run:
                 db_run.status = status_map.get(result.status, RunStatus.FAILED)
-                db_run.output_data = result.outputs
+                output_with_report = dict(result.outputs) if result.outputs else {}
+                if result.token_report:
+                    output_with_report["_token_report"] = result.token_report
+                db_run.output_data = output_with_report
                 db_run.total_cost_usd = result.total_cost_usd
                 if result.status != "awaiting_approval":
                     db_run.completed_at = result.completed_at

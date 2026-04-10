@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # oMLX server URL (OpenAI-compatible local inference on Apple Silicon)
     omlx_base_url: str = "http://localhost:8080"
 
+    # Ollama server URL (for GLM-OCR and other local models)
+    ollama_host: str = "http://localhost:11434"
+
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sandcastle - Stop building AI infrastructure. Start shipping AI products.</title>
-  <meta name="description" content="Sandcastle - production AI workflow orchestrator. 7 AI providers, EU data residency, smart failover, cost intelligence, SLO routing, 20 step types, 236 templates. European-built, open source. pip install sandcastle-ai">
+  <meta name="description" content="Sandcastle - production AI workflow orchestrator. 7 AI providers, EU data residency, smart failover, cost intelligence, SLO routing, 21 step types, 236 templates. European-built, open source. pip install sandcastle-ai">
   <meta name="keywords" content="AI workflow orchestrator, AI agent orchestration, EU AI Act compliance, AI audit trail, PII redaction, LLM orchestration, AI pipeline, workflow automation, AI compliance, GDPR AI, AI governance, AI risk management, Claude API, GPT orchestration, AI sandbox, multi-model routing, AI cost tracking, AI approval gates, OpenTelemetry AI, AI observability, workflow YAML, AI dashboard, sandcastle, sandcastle-ai">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
@@ -14,7 +14,7 @@
 
   <!-- Open Graph -->
   <meta property="og:title" content="Sandcastle - Stop building AI infrastructure. Start shipping AI products.">
-  <meta property="og:description" content="Any model, any provider, your rules. 7 AI providers, EU data residency, smart failover, cost intelligence, 20 step types, 236 templates. pip install sandcastle-ai.">
+  <meta property="og:description" content="Any model, any provider, your rules. 7 AI providers, EU data residency, smart failover, cost intelligence, 21 step types, 236 templates. pip install sandcastle-ai.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu">
   <meta property="og:type" content="website">
@@ -58,7 +58,7 @@
     "operatingSystem": "Cross-platform",
     "url": "https://sandcastle-ai.eu",
     "downloadUrl": "https://pypi.org/project/sandcastle-ai/",
-    "softwareVersion": "0.28.1",
+    "softwareVersion": "0.30.0",
     "author": {
       "@type": "Person",
       "name": "Tomas Pflanzer",
@@ -1757,7 +1757,7 @@
   <header class="hero" id="hero">
     <div class="container">
       <div class="hero-badge">
-        v0.28.1 - Every Step Knows Its Story
+        v0.30 - Agents Unleashed
       </div>
       <h1>
         Describe what you want. Go home.<br>
@@ -2292,7 +2292,7 @@
             <code>sensor</code> for polling, <code>transform</code> for templates, <code>notify</code> for alerts - and <code>llm</code> or full agent steps where you actually need AI.
           </p>
           <ul class="yaml-features">
-            <li><span class="check">&#10003;</span><strong>20 step types</strong> - standard, llm, http, code, condition, classify, loop, race, sensor, gate, transform, notify, delegate, approval, sub_workflow, parse, openclaw, map, retry, switch</li>
+            <li><span class="check">&#10003;</span><strong>21 step types</strong> - standard, llm, http, code, condition, classify, loop, race, sensor, gate, transform, notify, delegate, approval, sub_workflow, parse, openclaw, map, retry, switch, agent</li>
             <li><span class="check">&#10003;</span><strong>Smart branching</strong> - <code>condition</code>, <code>classify</code>, and <code>race</code> route to different paths</li>
             <li><span class="check">&#10003;</span><strong>$0 steps</strong> - http, code, condition, transform, notify cost nothing - no LLM call</li>
             <li><span class="check">&#10003;</span><strong>Data passing</strong> - reference prior outputs with <code>{steps.id.output}</code></li>
@@ -2710,7 +2710,7 @@
   <footer>
     <div class="container footer-inner">
       <div class="footer-left">
-        <strong>Sandcastle</strong> v0.28.1 - BSL 1.1 (Apache 2.0 after 2030)<br>
+        <strong>Sandcastle</strong> v0.30 - BSL 1.1 (Apache 2.0 after 2030)<br>
         &copy; 2026 Created by <a href="https://github.com/gizmax" target="_blank" rel="noopener">Tomas Pflanzer</a> @gizmax
       </div>
       <div class="footer-links">
@@ -2792,7 +2792,7 @@
       if (!body || !cursor) return;
 
       var commands = [
-        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.28.1' },
+        { cmd: 'pip install sandcastle-ai', output: 'Successfully installed sandcastle-ai-0.30.0' },
         { cmd: 'sandcastle init', output: 'Created .env with E2B backend' },
         { cmd: 'sandcastle serve', output: 'Dashboard ready at http://localhost:8080' }
       ];

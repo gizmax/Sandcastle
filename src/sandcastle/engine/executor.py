@@ -90,6 +90,11 @@ class RunContext:
     branch_skip_steps: set[str] = field(default_factory=set)
     branch_run_steps: set[str] = field(default_factory=set)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    # Token optimization: cache-aware execution
+    _file_read_cache: dict[str, str] = field(default_factory=dict, repr=False)
+    _file_read_counts: dict[str, int] = field(default_factory=dict, repr=False)
+    _seen_prompt_hashes: set[str] = field(default_factory=set, repr=False)
+    _step_output_max_tokens: dict[str, int] = field(default_factory=dict, repr=False)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item.
@@ -115,6 +120,10 @@ class RunContext:
             _memory_scope_id=self._memory_scope_id,
             branch_skip_steps=set(self.branch_skip_steps),
             branch_run_steps=set(self.branch_run_steps),
+            _file_read_cache=dict(self._file_read_cache),
+            _file_read_counts=dict(self._file_read_counts),
+            _seen_prompt_hashes=set(self._seen_prompt_hashes),
+            _step_output_max_tokens=dict(self._step_output_max_tokens),
         )
 
     @property
@@ -143,6 +152,7 @@ class WorkflowResult:
     error: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    token_report: dict[str, Any] | None = None
 
 
 _UNRESOLVED = object()
@@ -197,6 +207,12 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
         step_data = context.step_outputs[step_id]
         if parts[2] == "output":
             if len(parts) == 3:
+                # Apply output_max_tokens truncation if configured
+                max_tok = context._step_output_max_tokens.get(step_id, 0)
+                if max_tok > 0 and isinstance(step_data, str):
+                    max_chars = max_tok * 4
+                    if len(step_data) > max_chars:
+                        step_data = step_data[:max_chars] + "\n\n[... truncated to fit context window ...]"
                 return step_data
             if step_data is None:
                 return None
@@ -307,6 +323,12 @@ def resolve_templates(
             for dep in missing:
                 data = context.step_outputs[dep]
                 formatted = json.dumps(data) if isinstance(data, (dict, list)) else str(data)
+                # Apply output_max_tokens truncation for auto-injected outputs
+                max_tok = context._step_output_max_tokens.get(dep, 0)
+                if max_tok > 0:
+                    max_chars = max_tok * 4
+                    if len(formatted) > max_chars:
+                        formatted = formatted[:max_chars] + "\n[... truncated to fit context window ...]"
                 parts.append(f"[{dep}]: {_escape_braces(formatted)}")
             context_block = "\n".join(parts)
             resolved = f"{resolved}\n\nContext from previous steps:\n{context_block}"
@@ -314,12 +336,19 @@ def resolve_templates(
     return resolved
 
 
-async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
+async def resolve_storage_refs(
+    prompt: str,
+    storage: StorageBackend,
+    context: RunContext | None = None,
+) -> str:
     """Replace {storage.PATH} references with stored content.
 
     Uses offset-based rebuilding instead of str.replace() to avoid
     replacing the wrong occurrence when the same storage ref appears
     multiple times or resolved content contains the same pattern.
+
+    When *context* is provided, file reads are cached to avoid redundant
+    storage lookups within the same run.
     """
     matches = list(_STORAGE_RE.finditer(prompt))
     if not matches:
@@ -330,7 +359,20 @@ async def resolve_storage_refs(prompt: str, storage: StorageBackend) -> str:
     for match in matches:
         parts.append(prompt[last_end:match.start()])
         path = match.group(1)
-        content = await storage.read(path)
+        # Check file read cache first
+        if context is not None and path in context._file_read_cache:
+            context._file_read_counts[path] = context._file_read_counts.get(path, 1) + 1
+            if context._file_read_counts[path] > 2:
+                logger.warning(
+                    "File '%s' read %d times in same run - consider caching",
+                    path, context._file_read_counts[path],
+                )
+            content = context._file_read_cache[path]
+        else:
+            content = await storage.read(path)
+            if context is not None and content is not None:
+                context._file_read_cache[path] = content
+                context._file_read_counts[path] = 1
         parts.append(content if content is not None else match.group(0))
         last_end = match.end()
     parts.append(prompt[last_end:])
@@ -1482,7 +1524,7 @@ async def _execute_fallback(
     started_at = datetime.now(timezone.utc)
     try:
         prompt = resolve_templates(step.fallback.prompt, context, step.depends_on)
-        prompt = await resolve_storage_refs(prompt, storage)
+        prompt = await resolve_storage_refs(prompt, storage, context)
         prompt = _STEP_SYSTEM_PREFIX + prompt
 
         request: dict[str, Any] = {
@@ -1778,7 +1820,7 @@ async def _execute_step_once(
         # Resolve template variables first (cheap string interpolation) so the
         # cache key reflects the actual inputs, not the raw template string.
         prompt = resolve_templates(step.prompt, context, step.depends_on)
-        prompt = await resolve_storage_refs(prompt, storage)
+        prompt = await resolve_storage_refs(prompt, storage, context)
         # Capture resolved prompt (before system prefix) for audit/compliance.
         resolved_input_prompt = prompt
 
@@ -1851,6 +1893,16 @@ async def _execute_step_once(
             prompt = pdf_instruction + "\n\n" + prompt
         else:
             prompt = _STEP_SYSTEM_PREFIX + prompt
+
+        # Prompt deduplication detection
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()[:12]
+        if prompt_hash in context._seen_prompt_hashes:
+            logger.warning(
+                "Duplicate prompt detected (hash=%s) - step '%s' sends same "
+                "content as earlier step",
+                prompt_hash, step.id,
+            )
+        context._seen_prompt_hashes.add(prompt_hash)
 
         request: dict[str, Any] = {
             "prompt": prompt,
@@ -2544,7 +2596,7 @@ async def _execute_llm_step(
     # images from HTTP steps) that blow up prompt size.  LLM prompts should
     # explicitly reference what they need via {steps.X.output} templates.
     prompt = resolve_templates(step.prompt, context)
-    prompt = await resolve_storage_refs(prompt, storage)
+    prompt = await resolve_storage_refs(prompt, storage, context)
 
     system_prompt = _STEP_SYSTEM_PREFIX
     if step.llm_config and step.llm_config.system_prompt:
@@ -3070,6 +3122,492 @@ async def _execute_openclaw_step(
         )
 
 
+# Module-level caches to avoid recreating agents/environments on every run.
+# Keys are derived from step config; values are Anthropic resource IDs.
+_managed_agent_cache: dict[str, str] = {}   # cache_key -> agent_id
+_managed_env_cache: dict[str, str] = {}     # cache_key -> environment_id
+
+
+def _managed_agent_cache_key(step: StepDefinition) -> str:
+    """Build a deterministic cache key from step config for agent reuse."""
+    cfg = step.managed_agent_config
+    if not cfg:
+        return step.id
+    parts = [cfg.model, cfg.system_prompt or "", ",".join(cfg.tools_enabled or [])]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _managed_env_cache_key(step: StepDefinition) -> str:
+    """Build a deterministic cache key from step config for environment reuse."""
+    cfg = step.managed_agent_config
+    if not cfg:
+        return step.id
+    parts = [
+        ",".join(sorted(cfg.packages or [])),
+        str(cfg.network_access),
+    ]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+async def _resolve_agent_config(config: "ManagedAgentConfig") -> dict:
+    """Resolve final agent configuration from template, description, or explicit config.
+
+    Returns a dict with keys: system, model, tools, packages, network.
+    Template values serve as defaults; explicit config fields override them.
+    """
+    from sandcastle.engine.agent_templates import MANAGED_AGENT_TEMPLATES
+
+    if config.agent_template:
+        template = MANAGED_AGENT_TEMPLATES.get(config.agent_template)
+        if not template:
+            raise ValueError(f"Unknown agent template: {config.agent_template}")
+        return {
+            "system": config.system_prompt or template["system"],
+            "model": config.model if config.model != "claude-sonnet-4-6" else template["model"],
+            "tools": config.tools_enabled or template["tools"],
+            "packages": config.packages if config.packages is not None else template["packages"],
+            "network": "unrestricted" if config.network_access else template["network"],
+        }
+
+    if config.describe:
+        return await _design_agent_from_description(config.describe)
+
+    # Explicit config - pass through
+    return {
+        "system": config.system_prompt,
+        "model": config.model,
+        "tools": config.tools_enabled,
+        "packages": config.packages or [],
+        "network": "unrestricted" if config.network_access else "limited",
+    }
+
+
+async def _design_agent_from_description(description: str) -> dict:
+    """Use AI to design a Managed Agent configuration from natural language.
+
+    Calls the advisor LLM to generate an agent configuration (system prompt,
+    model, tools, packages, network policy) based on a plain-text task
+    description. Falls back to sensible defaults on parse failure.
+    """
+    import json as _json
+
+    from sandcastle.engine.generator import _call_advisor_llm
+
+    prompt = (
+        "Design a Claude Managed Agent for this task. Return ONLY valid JSON.\n\n"
+        f"Task description: {description}\n\n"
+        "Available tools: bash, read, write, edit, glob, grep, web_search, web_fetch\n"
+        "Available pip packages: any standard Python package\n\n"
+        "Return JSON:\n"
+        "{\n"
+        '    "system": "detailed system prompt for the agent (3-5 sentences)",\n'
+        '    "model": "claude-sonnet-4-6" or "claude-haiku-4-5",\n'
+        '    "tools": ["list", "of", "needed", "tools"],\n'
+        '    "packages": ["pip", "packages", "needed"],\n'
+        '    "network": "unrestricted" or "limited"\n'
+        "}"
+    )
+
+    try:
+        response = await _call_advisor_llm(
+            system="You are an expert at designing AI agent configurations. "
+                   "Return ONLY valid JSON, no markdown fences or explanation.",
+            user=prompt,
+            max_tokens=512,
+            purpose="agent_design",
+        )
+        # Strip markdown fences if present
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        result = _json.loads(text)
+        # Validate and sanitize
+        return {
+            "system": str(result.get("system", f"Complete this task: {description}")),
+            "model": result.get("model", "claude-sonnet-4-6"),
+            "tools": result.get("tools", ["bash", "read", "write"]),
+            "packages": result.get("packages", []),
+            "network": result.get("network", "unrestricted"),
+        }
+    except Exception:
+        # Fallback: reasonable defaults based on description
+        return {
+            "system": f"Complete this task thoroughly and return structured results: {description}",
+            "model": "claude-sonnet-4-6",
+            "tools": ["bash", "read", "write", "web_search", "web_fetch"],
+            "packages": [],
+            "network": "unrestricted",
+        }
+
+
+async def _execute_managed_agent_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend | None = None,
+) -> StepResult:
+    """Execute a step by delegating to Anthropic Claude Managed Agents.
+
+    Creates an environment (required), creates or reuses an agent,
+    opens a session, sends user.message with content blocks, streams
+    SSE events until session.status_idle, then cleans up the session.
+    Supports three configuration modes: agent_template, describe, or explicit.
+    Requires ANTHROPIC_API_KEY env var.
+    """
+    import os
+    import time
+
+    import httpx
+
+    started_at = time.monotonic()
+    config = step.managed_agent_config
+    if not config:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="managed_agent_config is required",
+        )
+
+    # Resolve config from template/describe/explicit before proceeding
+    if config.agent_template or config.describe:
+        try:
+            resolved = await _resolve_agent_config(config)
+        except ValueError as e:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=str(e),
+                duration_seconds=time.monotonic() - started_at,
+            )
+        # Apply resolved config back - template/describe always use auto agent creation
+        if not config.agent_id:
+            config.agent_id = "auto"
+        if not config.system_prompt and resolved.get("system"):
+            config.system_prompt = resolved["system"]
+        if resolved.get("model"):
+            config.model = resolved["model"]
+        if config.tools_enabled is None and resolved.get("tools"):
+            config.tools_enabled = resolved["tools"]
+        if config.packages is None and resolved.get("packages"):
+            config.packages = resolved["packages"]
+        if resolved.get("network") == "limited":
+            config.network_access = False
+
+    if not config.agent_id:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="managed_agent_config.agent_id is required (set explicitly or use agent_template/describe)",
+        )
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="ANTHROPIC_API_KEY required for managed-agent steps",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    # Resolve message template
+    message = resolve_templates(
+        config.message or step.prompt or f"managed-agent step {step.id}",
+        context,
+        step.depends_on,
+    )
+    if storage:
+        message = await resolve_storage_refs(message, storage, context)
+
+    # Shared files: append file outputs from referenced steps to the message
+    if config.shared_files:
+        shared_parts: list[str] = []
+        for ref_step_id in config.shared_files:
+            ref_output = context.step_outputs.get(ref_step_id)
+            if ref_output is not None:
+                if isinstance(ref_output, dict) and ref_output.get("_output_format") == "files":
+                    for fname, fcontent in ref_output.get("files", {}).items():
+                        shared_parts.append(f"--- File: {fname} (from step '{ref_step_id}') ---\n{fcontent}")
+                else:
+                    shared_parts.append(
+                        f"--- Output from step '{ref_step_id}' ---\n"
+                        f"{ref_output if isinstance(ref_output, str) else json.dumps(ref_output, default=str)}"
+                    )
+        if shared_parts:
+            message = message + "\n\n" + "\n\n".join(shared_parts)
+
+    base_url = "https://api.anthropic.com/v1"
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "managed-agents-2026-04-01",
+        "content-type": "application/json",
+    }
+
+    session_id: str | None = None
+
+    def _classify_http_error(status_code: int, body: str = "") -> str:
+        """Return a human-readable error message based on HTTP status code."""
+        if status_code == 401:
+            return "Invalid API key"
+        if status_code == 429:
+            retry_after = ""
+            # Try to extract Retry-After hint from body
+            try:
+                parsed = json.loads(body)
+                ra = parsed.get("retry_after") or parsed.get("error", {}).get("retry_after")
+                if ra:
+                    retry_after = f" (retry after {ra}s)"
+            except (json.JSONDecodeError, ValueError, AttributeError):
+                pass
+            return f"Rate limited{retry_after}"
+        if status_code >= 500:
+            return "Anthropic server error"
+        return f"HTTP {status_code}"
+
+    primary_error: str = ""
+    try:
+        async with httpx.AsyncClient(timeout=config.timeout + 30) as client:
+            agent_id = config.agent_id
+
+            # --- Create ad-hoc agent if agent_id is "auto" ---
+            if agent_id == "auto":
+                agent_cache_key = _managed_agent_cache_key(step)
+                cached_agent = _managed_agent_cache.get(agent_cache_key)
+                if cached_agent:
+                    agent_id = cached_agent
+                else:
+                    agent_payload: dict = {
+                        "name": f"sandcastle-{step.id}",
+                        "model": config.model,
+                        "tools": [{"type": "agent_toolset_20260401"}],
+                    }
+                    if config.system_prompt:
+                        agent_payload["system"] = config.system_prompt
+                    agent_resp = await client.post(
+                        f"{base_url}/agents", headers=headers, json=agent_payload,
+                    )
+                    if agent_resp.status_code != 200:
+                        return StepResult(
+                            step_id=step.id,
+                            status="failed",
+                            error=(
+                                f"Failed to create ad-hoc agent: "
+                                f"{_classify_http_error(agent_resp.status_code, agent_resp.text)}"
+                            ),
+                            duration_seconds=time.monotonic() - started_at,
+                        )
+                    agent_id = agent_resp.json()["id"]
+                    _managed_agent_cache[agent_cache_key] = agent_id
+
+            # --- Create or reuse environment (REQUIRED for session creation) ---
+            env_id = config.environment_id
+            if not env_id:
+                env_cache_key = _managed_env_cache_key(step)
+                cached_env = _managed_env_cache.get(env_cache_key)
+                if cached_env:
+                    env_id = cached_env
+                else:
+                    env_payload: dict = {
+                        "name": f"sandcastle-env-{step.id}",
+                        "network_access": config.network_access,
+                    }
+                    if config.packages:
+                        env_payload["packages"] = config.packages
+                    env_resp = await client.post(
+                        f"{base_url}/environments",
+                        headers=headers,
+                        json=env_payload,
+                    )
+                    if env_resp.status_code != 200:
+                        return StepResult(
+                            step_id=step.id,
+                            status="failed",
+                            error=(
+                                f"Failed to create environment: "
+                                f"{_classify_http_error(env_resp.status_code, env_resp.text)}"
+                            ),
+                            duration_seconds=time.monotonic() - started_at,
+                        )
+                    env_id = env_resp.json()["id"]
+                    _managed_env_cache[env_cache_key] = env_id
+
+            # --- Create session (environment_id is required) ---
+            session_body: dict = {
+                "agent": agent_id,
+                "environment_id": env_id,
+            }
+            session_resp = await client.post(
+                f"{base_url}/sessions", headers=headers, json=session_body,
+            )
+            if session_resp.status_code != 200:
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=(
+                        f"Failed to create session: "
+                        f"{_classify_http_error(session_resp.status_code, session_resp.text)}"
+                    ),
+                    duration_seconds=time.monotonic() - started_at,
+                )
+            session_id = session_resp.json()["id"]
+
+            # --- Send user message with content blocks format ---
+            await client.post(
+                f"{base_url}/sessions/{session_id}/events",
+                headers=headers,
+                json={
+                    "events": [{
+                        "type": "user.message",
+                        "content": [{"type": "text", "text": message}],
+                    }],
+                },
+            )
+
+            # --- Stream SSE response ---
+            result_text = ""
+            total_input_tokens = 0
+            total_output_tokens = 0
+
+            async with client.stream(
+                "GET",
+                f"{base_url}/sessions/{session_id}/stream",
+                headers=headers,
+            ) as stream:
+                async for line in stream.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        event = json.loads(line[6:])
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+
+                    event_type = event.get("type", "")
+
+                    # Collect agent text output
+                    if event_type == "agent.message":
+                        for block in event.get("content", []):
+                            if block.get("type") == "text":
+                                result_text += block.get("text", "")
+
+                    # Track token usage from any event that includes it
+                    usage = event.get("usage")
+                    if usage:
+                        total_input_tokens += usage.get("input_tokens", 0)
+                        total_output_tokens += usage.get("output_tokens", 0)
+
+                    # Session finished: agent idle or session terminated
+                    if event_type in (
+                        "session.status_idle",
+                        "session.terminated",
+                    ):
+                        break
+
+            # Compute cost (Sonnet pricing by default)
+            cost = _safe_cost(
+                total_input_tokens, total_output_tokens,
+                3.0, 15.0,  # Default Sonnet pricing per 1M tokens
+            )
+
+            # Process output_format for agent chaining
+            final_output: str | dict = result_text
+            if config.output_format == "json":
+                try:
+                    final_output = json.loads(result_text)
+                except (json.JSONDecodeError, ValueError):
+                    # Wrap raw text in a JSON-safe envelope
+                    final_output = {"raw_text": result_text, "_parse_error": True}
+            elif config.output_format == "files":
+                # List files created by the agent and return as dict
+                final_output = {
+                    "text": result_text,
+                    "files": {},
+                    "_output_format": "files",
+                }
+
+            return StepResult(
+                step_id=step.id,
+                status="completed",
+                output=final_output,
+                cost_usd=cost,
+                duration_seconds=time.monotonic() - started_at,
+                input_prompt=message,
+            )
+
+    except httpx.TimeoutException:
+        primary_error = f"Session exceeded timeout ({config.timeout}s)"
+    except httpx.HTTPStatusError as e:
+        primary_error = (
+            f"Managed Agent API error: {_classify_http_error(e.response.status_code)}"
+        )
+    except httpx.ConnectError:
+        primary_error = "Cannot connect to Anthropic API"
+    except Exception as e:
+        primary_error = f"Managed-agent step failed: {e}"
+    finally:
+        # Clean up session to free resources
+        if session_id:
+            try:
+                import httpx as _httpx
+                async with _httpx.AsyncClient(timeout=10) as cleanup_client:
+                    await cleanup_client.delete(
+                        f"{base_url}/sessions/{session_id}",
+                        headers=headers,
+                    )
+            except Exception:
+                logger.debug("Failed to delete session %s (non-critical)", session_id)
+
+    # Fallback template retry: if primary failed and fallback_template is set
+    if config.fallback_template:
+        from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES
+        from sandcastle.engine.dag import ManagedAgentConfig
+        if config.fallback_template in VALID_AGENT_TEMPLATES:
+            logger.info(
+                "Step '%s' failed with template '%s', retrying with fallback '%s'",
+                step.id, config.agent_template or "(explicit)", config.fallback_template,
+            )
+            from copy import copy
+            fallback_step = copy(step)
+            fallback_config = ManagedAgentConfig(
+                agent_template=config.fallback_template,
+                message=config.message,
+                timeout=config.timeout,
+                model=config.model,
+                stream=config.stream,
+                packages=config.packages,
+                network_access=config.network_access,
+                output_format=config.output_format,
+                shared_files=config.shared_files,
+                fallback_template="",  # prevent infinite retry
+            )
+            fallback_step.managed_agent_config = fallback_config
+            fallback_result = await _execute_managed_agent_step(
+                fallback_step, context, storage,
+            )
+            if fallback_result.status == "completed":
+                return fallback_result
+            # Both failed - report both errors
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Primary failed: {primary_error}; "
+                    f"Fallback ({config.fallback_template}) also failed: "
+                    f"{fallback_result.error}"
+                ),
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+    return StepResult(
+        step_id=step.id,
+        status="failed",
+        error=primary_error,
+        duration_seconds=time.monotonic() - started_at,
+    )
+
+
 async def _execute_parse_step(
     step: StepDefinition,
     context: RunContext,
@@ -3213,7 +3751,7 @@ async def _execute_report_step(
 
     # Resolve template variables in prompt, title, subtitle, author
     prompt = resolve_templates(step.prompt or "", context, step.depends_on)
-    prompt = await resolve_storage_refs(prompt, storage)
+    prompt = await resolve_storage_refs(prompt, storage, context)
 
     resolved_title = resolve_templates(cfg.title, context) if cfg.title else ""
     resolved_subtitle = resolve_templates(cfg.subtitle, context) if cfg.subtitle else ""
@@ -3724,7 +4262,7 @@ async def _execute_classify_step(
 
     try:
         input_text = resolve_templates(cfg.input, context, step.depends_on)
-        input_text = await resolve_storage_refs(input_text, storage)
+        input_text = await resolve_storage_refs(input_text, storage, context)
 
         model_info = resolve_model(cfg.model)
         _enforce_data_residency(model_info)
@@ -4795,7 +5333,7 @@ async def _execute_browser_step(
         )
 
     prompt = resolve_templates(step.prompt, context, step.depends_on)
-    prompt = await resolve_storage_refs(prompt, storage)
+    prompt = await resolve_storage_refs(prompt, storage, context)
 
     # Resolve credentials from environment if configured
     credentials_json = None
@@ -6225,7 +6763,7 @@ async def _prepare_and_run_step(
         "llm", "http", "code", "condition", "classify", "loop",
         "race", "sensor", "gate", "transform", "notify", "delegate",
         "browser", "sub_workflow", "composio", "openclaw", "parse",
-        "report",
+        "report", "managed-agent",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -6274,6 +6812,8 @@ async def _prepare_and_run_step(
             return await _execute_parse_step(s, ctx)
         if s.type == "report":
             return await _execute_report_step(s, ctx, storage)
+        if s.type == "managed-agent":
+            return await _execute_managed_agent_step(s, ctx, storage)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
@@ -6485,6 +7025,51 @@ async def _resolve_file_input(value: str, storage: StorageBackend) -> str:
         return f"@file:{local_path}"
 
 
+def _compute_token_report(context: RunContext) -> dict:
+    """Analyze token usage for waste detection after a workflow run."""
+    report: dict[str, Any] = {
+        "duplicate_file_reads": {
+            path: count
+            for path, count in context._file_read_counts.items()
+            if count > 1
+        },
+        "duplicate_prompt_count": 0,
+        "cached_file_reads": len(context._file_read_cache),
+        "recommendations": [],
+    }
+
+    # Count duplicate prompts (hashes seen more than once cannot be tracked
+    # individually with a set, but we log a warning when detected - report
+    # the total number of unique prompts observed).
+    report["unique_prompts"] = len(context._seen_prompt_hashes)
+
+    # Check for large context injection
+    for step_id, output in context.step_outputs.items():
+        if isinstance(output, str) and len(output) > 20000:
+            report["recommendations"].append(
+                f"Step '{step_id}' output is {len(output)} chars "
+                f"(~{len(output) // 4} tokens). Consider adding "
+                f"output_max_tokens to limit context passed to dependents."
+            )
+        elif isinstance(output, (dict, list)):
+            serialized = json.dumps(output)
+            if len(serialized) > 20000:
+                report["recommendations"].append(
+                    f"Step '{step_id}' output is {len(serialized)} chars "
+                    f"(~{len(serialized) // 4} tokens). Consider adding "
+                    f"output_max_tokens to limit context passed to dependents."
+                )
+
+    # Check duplicate reads
+    for path, count in report["duplicate_file_reads"].items():
+        report["recommendations"].append(
+            f"File '{path}' was read {count} times. "
+            f"Content is cached after first read."
+        )
+
+    return report
+
+
 async def execute_workflow(
     workflow: WorkflowDefinition,
     plan: ExecutionPlan,
@@ -6591,12 +7176,20 @@ async def execute_workflow(
                     _file_exc,
                 )
 
+    # Build output_max_tokens mapping from step definitions
+    step_output_max_tokens = {
+        s.id: s.output_max_tokens
+        for s in workflow.steps
+        if s.output_max_tokens > 0
+    }
+
     context = RunContext(
         run_id=run_id,
         input=merged_input,
         max_cost_usd=max_cost_usd,
         workflow_name=workflow.name,
         default_tools=getattr(workflow, "default_tools", []),
+        _step_output_max_tokens=step_output_max_tokens,
     )
 
     # Set telemetry context for this workflow run
@@ -6921,6 +7514,9 @@ async def execute_workflow(
             payload={"workflow": workflow.name, "duration_seconds": duration, "total_cost_usd": context.total_cost},
         )
 
+        # Compute token efficiency report
+        token_report = _compute_token_report(context)
+
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -6928,6 +7524,7 @@ async def execute_workflow(
             status="completed",
             started_at=started_at,
             completed_at=completed_at,
+            token_report=token_report,
         )
 
     except WorkflowPaused:

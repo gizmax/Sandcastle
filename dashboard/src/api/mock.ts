@@ -33,6 +33,8 @@ interface MockStep {
   owner?: string;
   type?: string;
   artifact_url?: string;
+  agent_template?: string;
+  describe?: string;
 }
 
 const now = new Date();
@@ -52,6 +54,7 @@ const MOCK_RUNS = [
   { run_id: "a1b2c3d4-aaaa-4000-8000-00000000000a", workflow_name: "seo-audit", status: "completed", total_cost_usd: 0.87, started_at: h(36), completed_at: h(35.8), parent_run_id: null, risk_level: "limited" },
   { run_id: "a1b2c3d4-bbbb-4000-8000-00000000000b", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.54, started_at: h(48), completed_at: h(47.5), parent_run_id: null, risk_level: "minimal" },
   { run_id: "a1b2c3d4-cccc-4000-8000-00000000000c", workflow_name: "lead-enrichment", status: "completed", total_cost_usd: 1.97, started_at: h(60), completed_at: h(59.8), parent_run_id: null, risk_level: "high" },
+  { run_id: "a1b2c3d4-dddd-4000-8000-00000000000d", workflow_name: "deep-research-agent", status: "completed", total_cost_usd: 2.43, started_at: h(1.5), completed_at: h(1.2), parent_run_id: null, risk_level: "limited" },
 ];
 
 const MOCK_STEPS: MockStep[] = [
@@ -73,6 +76,37 @@ const MOCK_STEPS_FAILED: MockStep[] = [
   { step_id: "enrich", parallel_index: null, status: "failed", output: null, cost_usd: 0.01, duration_seconds: 2.3, attempt: 3, error: "ConnectionError: Timeout after 300s - external enrichment API at api.clearbit.com:443 unreachable. Attempted 3 retries with exponential backoff (2s, 4s, 8s). Last response: TCP connection reset by peer. Check network connectivity and API status at https://status.clearbit.com", owner: "ml-ops" },
 ];
 
+const MOCK_STEPS_MANAGED_AGENT: MockStep[] = [
+  { step_id: "research-topic", parallel_index: null, status: "completed", output: { summary: "Comprehensive research on quantum computing advances in 2026", sources: 12, citations: 8 }, cost_usd: 1.21, duration_seconds: 45.3, attempt: 1, error: null, started_at: h(1.5), type: "managed-agent", agent_template: "researcher", responsibility: "Deep web research with citations", owner: "research-team" },
+  { step_id: "analyze-data", parallel_index: null, status: "completed", output: { charts_generated: 3, key_findings: ["Market growing 23% YoY", "Top 5 players control 67%"] }, cost_usd: 0.87, duration_seconds: 32.1, attempt: 1, error: null, started_at: h(1.4), type: "managed-agent", describe: "Data analyst who processes research findings and generates charts with matplotlib", responsibility: "Statistical analysis and visualization", owner: "data-team" },
+  { step_id: "write-report", parallel_index: null, status: "completed", output: { report: "Final report generated: 2400 words, 3 sections, executive summary included" }, cost_usd: 0.35, duration_seconds: 18.7, attempt: 1, error: null, started_at: h(1.3), type: "managed-agent", agent_template: "writer", responsibility: "Compile findings into executive report", owner: "content-team" },
+];
+
+// --- Managed Agent Templates (15 built-in agent recipes) ---
+const MOCK_AGENT_TEMPLATES = [
+  // Research
+  { name: "researcher", category: "Research", description: "Deep web research with citations and source verification", icon: "search", model: "claude-sonnet-4-6", tools: ["web_search", "web_fetch", "bash", "read", "write"], network: "unrestricted" },
+  { name: "seo_specialist", category: "Research", description: "SEO auditing, meta tags, structured data, and keyword research", icon: "bar-chart", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "web_search", "web_fetch"], network: "unrestricted" },
+  // Development
+  { name: "coder", category: "Development", description: "Expert Python developer with testing and documentation", icon: "code", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "edit", "glob", "grep"], network: "limited" },
+  { name: "reviewer", category: "Development", description: "Security-focused code review with linting and static analysis", icon: "shield", model: "claude-sonnet-4-6", tools: ["bash", "read", "glob", "grep"], network: "limited" },
+  { name: "tester", category: "Development", description: "Comprehensive pytest test suites with coverage tracking", icon: "check-circle", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "edit", "glob", "grep"], network: "limited" },
+  { name: "devops", category: "Development", description: "Dockerfiles, CI/CD configs, deployment scripts, and monitoring", icon: "server", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "edit", "glob", "grep"], network: "limited" },
+  { name: "designer", category: "Development", description: "UI/UX prototypes with HTML, CSS, Tailwind, and SVG", icon: "palette", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "edit", "web_fetch"], network: "limited" },
+  // Data
+  { name: "analyst", category: "Data", description: "Statistical analysis and professional chart generation", icon: "trending-up", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "web_fetch"], network: "unrestricted" },
+  { name: "sql_expert", category: "Data", description: "Optimized SQL queries, schema design, and migrations", icon: "database", model: "claude-sonnet-4-6", tools: ["bash", "read", "write"], network: "limited" },
+  { name: "scraper", category: "Data", description: "Structured web data extraction with pagination and error recovery", icon: "download", model: "claude-haiku-4-5", tools: ["bash", "read", "write", "web_fetch"], network: "unrestricted" },
+  // Content
+  { name: "writer", category: "Content", description: "Professional content writing, editing, and proofreading", icon: "file-text", model: "claude-sonnet-4-6", tools: ["web_search", "web_fetch", "read", "write"], network: "unrestricted" },
+  { name: "translator", category: "Content", description: "Accurate translation preserving tone, context, and cultural nuances", icon: "globe", model: "claude-haiku-4-5", tools: ["read", "write"], network: "limited" },
+  // Business
+  { name: "financial_analyst", category: "Business", description: "Financial modeling, ratio analysis, forecasting, and charts", icon: "dollar-sign", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "web_fetch"], network: "unrestricted" },
+  { name: "legal_analyst", category: "Business", description: "Contract analysis, clause extraction, and risk identification", icon: "scale", model: "claude-sonnet-4-6", tools: ["read", "write", "bash"], network: "limited" },
+  // Operations
+  { name: "project_manager", category: "Operations", description: "Task breakdown, dependency mapping, Gantt charts, and status reports", icon: "clipboard", model: "claude-sonnet-4-6", tools: ["bash", "read", "write", "web_search"], network: "limited" },
+];
+
 function getRunDetail(runId: string) {
   const run = MOCK_RUNS.find((r) => r.run_id === runId);
   if (!run) return null;
@@ -80,6 +114,7 @@ function getRunDetail(runId: string) {
   let steps = MOCK_STEPS;
   if (run.status === "running") steps = MOCK_STEPS_RUNNING;
   if (run.status === "failed") steps = MOCK_STEPS_FAILED;
+  if (run.workflow_name === "deep-research-agent") steps = MOCK_STEPS_MANAGED_AGENT;
 
   // Add budget for the first run to demo the BudgetBar
   const maxCost = runId === "a1b2c3d4-1111-4000-8000-000000000001" ? 2.50 : null;
@@ -5955,7 +5990,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.28.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.30.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -6803,10 +6838,10 @@ const routes: MockRoute[] = [
     match: /^\/check-update$/,
     method: "GET",
     handler: () => ({
-      current_version: "0.28.0",
-      latest_version: "0.28.0",
+      current_version: "0.30.0",
+      latest_version: "0.30.0",
       update_available: false,
-      release_url: "https://github.com/gizmax/Sandcastle/releases/v0.28.0",
+      release_url: "https://github.com/gizmax/Sandcastle/releases/v0.30.0",
       install_command: "pip install --upgrade sandcastle-ai",
       changelog_url: "https://sandcastle-ai.eu/whatsnew/",
       highlights: ["Auto-update with rollback", "AI structured output", "Quality scoring"],
@@ -6818,8 +6853,8 @@ const routes: MockRoute[] = [
     method: "POST",
     handler: () => ({
       status: "success",
-      new_version: "0.28.0",
-      previous_version: "0.2666b1",
+      new_version: "0.30.0",
+      previous_version: "0.28.1",
       restart_required: true,
     }),
   },
@@ -6837,6 +6872,16 @@ const routes: MockRoute[] = [
     match: /^\/browse$/,
     method: "GET",
     handler: () => MOCK_TEMPLATES,
+  },
+  // GET /agent-templates (managed agent template recipes)
+  {
+    match: /^\/agent-templates$/,
+    method: "GET",
+    handler: () => ({
+      templates: MOCK_AGENT_TEMPLATES,
+      categories: [...new Set(MOCK_AGENT_TEMPLATES.map((t) => t.category))],
+      total: MOCK_AGENT_TEMPLATES.length,
+    }),
   },
   // GET /hub/collections
   {
