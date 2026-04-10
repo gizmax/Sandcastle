@@ -79,7 +79,35 @@ export interface AutoPilotConfig {
   variants: AutoPilotVariant[];
 }
 
-export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser" | "parse" | "openclaw" | "composio";
+export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser" | "parse" | "openclaw" | "composio" | "agent" | "managed-agent";
+
+export interface AgentStepConfig {
+  template: string;
+  runtime: "auto" | "anthropic" | "local";
+  message: string;
+  describe: string;
+  timeout: number;
+  outputFormat: "text" | "json" | "files" | "markdown";
+  fallbackTemplate: string;
+}
+
+export const AGENT_TEMPLATES = [
+  { id: "researcher", label: "Researcher", category: "Research", icon: "search" },
+  { id: "seo_specialist", label: "SEO Specialist", category: "Research", icon: "bar-chart" },
+  { id: "coder", label: "Coder", category: "Development", icon: "code" },
+  { id: "reviewer", label: "Reviewer", category: "Development", icon: "shield" },
+  { id: "tester", label: "Tester", category: "Development", icon: "check-circle" },
+  { id: "devops", label: "DevOps", category: "Development", icon: "server" },
+  { id: "designer", label: "Designer", category: "Development", icon: "palette" },
+  { id: "analyst", label: "Analyst", category: "Data", icon: "trending-up" },
+  { id: "sql_expert", label: "SQL Expert", category: "Data", icon: "database" },
+  { id: "scraper", label: "Scraper", category: "Data", icon: "download" },
+  { id: "writer", label: "Writer", category: "Content", icon: "file-text" },
+  { id: "translator", label: "Translator", category: "Content", icon: "globe" },
+  { id: "financial_analyst", label: "Financial Analyst", category: "Business", icon: "dollar-sign" },
+  { id: "legal_analyst", label: "Legal Analyst", category: "Business", icon: "scale" },
+  { id: "project_manager", label: "Project Manager", category: "Operations", icon: "clipboard" },
+] as const;
 
 export interface HttpStepConfig {
   url: string;
@@ -206,6 +234,7 @@ export interface StepConfig {
   notifyConfig: NotifyStepConfig;
   delegateConfig: DelegateStepConfig;
   browserConfig: BrowserStepConfig;
+  agentConfig: AgentStepConfig;
 }
 
 interface StepConfigPanelProps {
@@ -326,6 +355,8 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           <option value="delegate">Delegate (Sub-workflow)</option>
           <option value="browser">Browser (RPA)</option>
           <option value="parse">Parse Document</option>
+          <option value="agent">Agent (Universal)</option>
+          <option value="managed-agent">Managed Agent (Anthropic)</option>
         </select>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {step.stepType === "standard" && "Full agent with sandbox - multi-turn conversation with tools."}
@@ -343,6 +374,8 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
           {step.stepType === "delegate" && "Delegate work to another workflow as a sub-task."}
           {step.stepType === "browser" && "Browser automation via Playwright selectors or Computer Use visual AI."}
           {step.stepType === "parse" && "Extract text from PDF, DOCX, XLSX, PPTX, CSV - $0 cost, no LLM."}
+          {step.stepType === "agent" && "Universal agent - auto-selects runtime (Anthropic cloud or local Ollama)."}
+          {step.stepType === "managed-agent" && "Anthropic Managed Agent - cloud containers with bash, web, files."}
         </p>
       </div>
 
@@ -1175,6 +1208,132 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
               <p className="text-[10px] text-muted">Define expected output structure for data extraction</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Agent Config - shown for agent and managed-agent */}
+      {(step.stepType === "agent" || step.stepType === "managed-agent") && (
+        <div className="space-y-3">
+          {/* Template selection */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Agent Template</label>
+            <select
+              value={step.agentConfig.template}
+              onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, template: e.target.value, describe: "" } })}
+              className={inputClass}
+            >
+              <option value="">-- Custom (use describe) --</option>
+              {["Research", "Development", "Data", "Content", "Business", "Operations"].map((cat) => (
+                <optgroup key={cat} label={cat}>
+                  {AGENT_TEMPLATES.filter((t) => t.category === cat).map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Select a built-in agent template or describe a custom agent below.
+            </p>
+          </div>
+
+          {/* Describe (natural language) - shown when no template selected */}
+          {!step.agentConfig.template && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Or Describe</label>
+              <textarea
+                value={step.agentConfig.describe}
+                onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, describe: e.target.value } })}
+                rows={3}
+                placeholder="Describe the agent in natural language, e.g. 'An expert Python developer who writes clean code with tests...'"
+                className={cn(inputClass, "h-auto py-2 resize-y")}
+              />
+              <p className="text-[11px] text-muted-foreground mt-0.5">AI will design the agent configuration from your description.</p>
+            </div>
+          )}
+
+          {/* Message */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Message</label>
+            <textarea
+              value={step.agentConfig.message}
+              onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, message: e.target.value } })}
+              rows={4}
+              placeholder="What should this agent do? Use {input.field} or {steps.id.output} for context."
+              className={cn(inputClass, "h-auto py-2 resize-y")}
+            />
+            <p className="text-[11px] text-muted-foreground mt-0.5">{"Template variables: {input.field}, {steps.id.output}, {env.VAR}"}</p>
+          </div>
+
+          {/* Runtime selector */}
+          {step.stepType === "agent" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Runtime</label>
+              <select
+                value={step.agentConfig.runtime}
+                onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, runtime: e.target.value as "auto" | "anthropic" | "local" } })}
+                className={inputClass}
+              >
+                <option value="auto">Auto (best available)</option>
+                <option value="anthropic">Anthropic (cloud containers)</option>
+                <option value="local">Local (Ollama)</option>
+              </select>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Auto prefers Anthropic when API key is set, falls back to local Ollama.
+              </p>
+            </div>
+          )}
+
+          {/* Advanced settings */}
+          <details className="rounded-lg border border-border">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted hover:text-foreground">
+              Advanced Settings
+            </summary>
+            <div className="border-t border-border px-3 py-2.5 space-y-3">
+              {/* Timeout */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">Timeout (seconds)</label>
+                <input
+                  type="number"
+                  value={step.agentConfig.timeout}
+                  onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, timeout: Number(e.target.value) } })}
+                  min={30}
+                  max={3600}
+                  className={inputClass}
+                />
+              </div>
+
+              {/* Output Format */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">Output Format</label>
+                <select
+                  value={step.agentConfig.outputFormat}
+                  onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, outputFormat: e.target.value as "text" | "json" | "files" | "markdown" } })}
+                  className={inputClass}
+                >
+                  <option value="text">Text</option>
+                  <option value="json">JSON</option>
+                  <option value="files">Files</option>
+                  <option value="markdown">Markdown</option>
+                </select>
+              </div>
+
+              {/* Fallback Template */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">Fallback Template</label>
+                <select
+                  value={step.agentConfig.fallbackTemplate}
+                  onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, fallbackTemplate: e.target.value } })}
+                  className={inputClass}
+                >
+                  <option value="">None</option>
+                  {AGENT_TEMPLATES.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Retry with a different template if the primary fails.</p>
+              </div>
+            </div>
+          </details>
         </div>
       )}
 

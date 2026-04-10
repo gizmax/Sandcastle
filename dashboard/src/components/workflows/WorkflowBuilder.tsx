@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink, Sparkles, Plug, ChevronDown } from "lucide-react";
+import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink, Sparkles, Plug, ChevronDown, Bot, Search, BarChart, PenTool, Server, TrendingUp, Database, Download, FileEdit, DollarSign, Clipboard } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -26,6 +26,7 @@ import {
   type AutoPilotConfig,
   type GateStepConfig,
   type BrowserStepConfig,
+  type AgentStepConfig,
 } from "@/components/workflows/StepConfigPanel";
 import { YamlPreview } from "@/components/workflows/YamlPreview";
 import { TemplateBrowser } from "@/components/workflows/TemplateBrowser";
@@ -60,6 +61,7 @@ const DEFAULT_TRANSFORM_CONFIG = { template: "" };
 const DEFAULT_NOTIFY_CONFIG = { service: "", channel: "", message: "" };
 const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 3600 };
 const DEFAULT_BROWSER_CONFIG: BrowserStepConfig = { mode: "playwright", startUrl: "", viewportWidth: 1280, viewportHeight: 720, timeout: 120, waitAfterAction: 1.0, headless: true, credentials_env: "", screenshotOnError: true, max_actions: 100, capture_screenshots: false, output_schema: null, captcha_strategy: "pause" };
+const DEFAULT_AGENT_CONFIG: AgentStepConfig = { template: "", runtime: "auto", message: "", describe: "", timeout: 600, outputFormat: "text", fallbackTemplate: "" };
 
 function generateYaml(
   workflowName: string,
@@ -301,6 +303,38 @@ function generateYaml(
       }
       if (step.browserConfig.output_schema) {
         yaml += `      output_schema: ${JSON.stringify(step.browserConfig.output_schema)}\n`;
+      }
+    } else if (sType === "agent" || sType === "managed-agent") {
+      const configKey = sType === "agent" ? "agent_config" : "managed_agent_config";
+      yaml += `  - id: "${step.id}"\n`;
+      yaml += `    type: ${sType}\n`;
+      yaml += `    ${configKey}:\n`;
+      if (step.agentConfig.template) {
+        yaml += `      ${sType === "agent" ? "template" : "agent_template"}: ${step.agentConfig.template}\n`;
+      }
+      if (step.agentConfig.describe && !step.agentConfig.template) {
+        yaml += `      describe: |\n`;
+        step.agentConfig.describe.split("\n").forEach((line) => {
+          yaml += `        ${line}\n`;
+        });
+      }
+      if (step.agentConfig.message) {
+        yaml += `      message: |\n`;
+        step.agentConfig.message.split("\n").forEach((line) => {
+          yaml += `        ${line}\n`;
+        });
+      }
+      if (sType === "agent" && step.agentConfig.runtime !== "auto") {
+        yaml += `      runtime: ${step.agentConfig.runtime}\n`;
+      }
+      if (step.agentConfig.timeout !== 600) {
+        yaml += `      timeout: ${step.agentConfig.timeout}\n`;
+      }
+      if (step.agentConfig.outputFormat !== "text") {
+        yaml += `      output_format: ${step.agentConfig.outputFormat}\n`;
+      }
+      if (step.agentConfig.fallbackTemplate) {
+        yaml += `      fallback_template: ${step.agentConfig.fallbackTemplate}\n`;
       }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
@@ -639,7 +673,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     [setEdges]
   );
 
-  const addStep = useCallback((stepType: StepType = "standard") => {
+  const addStep = useCallback((stepType: StepType = "standard", agentTemplate?: string) => {
     const prefixes: Record<string, string> = {
       standard: "step", llm: "llm", http: "http", code: "code",
       condition: "check", classify: "route", loop: "loop",
@@ -647,8 +681,9 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       transform: "transform", notify: "notify", delegate: "delegate",
       browser: "browser", parse: "parse", approval: "approval",
       sub_workflow: "sub", openclaw: "claw", composio: "composio",
+      agent: "agent", "managed-agent": "magent",
     };
-    const prefix = prefixes[stepType] || "step";
+    const prefix = agentTemplate || prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
     setCounter((c) => c + 1);
 
@@ -686,6 +721,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       notifyConfig: { ...DEFAULT_NOTIFY_CONFIG },
       delegateConfig: { ...DEFAULT_DELEGATE_CONFIG },
       browserConfig: { ...DEFAULT_BROWSER_CONFIG },
+      agentConfig: { ...DEFAULT_AGENT_CONFIG, template: agentTemplate || "" },
     };
 
     setSteps((prev) => [...prev, newStep]);
@@ -921,6 +957,28 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       ],
     },
     {
+      key: "agents",
+      label: "Agents",
+      icon: Bot,
+      items: [
+        { type: "agent" as const, icon: Bot, label: "Agent (Auto)", color: "text-accent" },
+        { type: "agent" as const, icon: Search, label: "Researcher", color: "text-blue-400", template: "researcher" },
+        { type: "agent" as const, icon: Code, label: "Coder", color: "text-emerald-400", template: "coder" },
+        { type: "agent" as const, icon: TrendingUp, label: "Analyst", color: "text-orange-400", template: "analyst" },
+        { type: "agent" as const, icon: FileEdit, label: "Writer", color: "text-violet-400", template: "writer" },
+        { type: "agent" as const, icon: ShieldCheck, label: "Reviewer", color: "text-red-400", template: "reviewer" },
+        { type: "agent" as const, icon: Download, label: "Scraper", color: "text-cyan-400", template: "scraper" },
+        { type: "agent" as const, icon: Wrench, label: "Tester", color: "text-green-400", template: "tester" },
+        { type: "agent" as const, icon: Server, label: "DevOps", color: "text-amber-400", template: "devops" },
+        { type: "agent" as const, icon: Globe, label: "Translator", color: "text-pink-400", template: "translator" },
+        { type: "agent" as const, icon: PenTool, label: "Designer", color: "text-fuchsia-400", template: "designer" },
+        { type: "agent" as const, icon: Database, label: "SQL Expert", color: "text-indigo-400", template: "sql_expert" },
+        { type: "agent" as const, icon: BarChart, label: "SEO", color: "text-teal-400", template: "seo_specialist" },
+        { type: "agent" as const, icon: DollarSign, label: "Finance", color: "text-yellow-400", template: "financial_analyst" },
+        { type: "agent" as const, icon: Clipboard, label: "PM", color: "text-rose-400", template: "project_manager" },
+      ],
+    },
+    {
       key: "output",
       label: "Output",
       icon: Bell,
@@ -967,19 +1025,23 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                 </button>
                 {!isCollapsed && (
                   <div className="mt-1 grid grid-cols-2 gap-1.5">
-                    {items.map(({ type, icon: Icon, label: stepLabel, color }) => (
-                      <button
-                        key={type}
-                        onClick={() => addStep(type)}
-                        className={cn(
-                          "flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5",
-                          "text-[11px] font-medium text-muted hover:border-accent hover:text-accent transition-colors"
-                        )}
-                      >
-                        <Icon className={cn("h-3 w-3", color)} />
-                        {stepLabel}
-                      </button>
-                    ))}
+                    {items.map((item) => {
+                      const { type, icon: Icon, label: stepLabel, color } = item;
+                      const tmpl = "template" in item ? (item as { template?: string }).template : undefined;
+                      return (
+                        <button
+                          key={`${type}-${tmpl || stepLabel}`}
+                          onClick={() => addStep(type, tmpl)}
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5",
+                            "text-[11px] font-medium text-muted hover:border-accent hover:text-accent transition-colors"
+                          )}
+                        >
+                          <Icon className={cn("h-3 w-3", color)} />
+                          {stepLabel}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

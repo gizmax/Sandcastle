@@ -3608,6 +3608,132 @@ async def _execute_managed_agent_step(
     )
 
 
+async def _execute_agent_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend | None = None,
+) -> StepResult:
+    """Execute a universal ``type: agent`` step using the runtime abstraction.
+
+    Resolves agent configuration (template, describe, or explicit), selects
+    the appropriate runtime (auto/anthropic/local), and delegates execution.
+    Falls back to ``_execute_managed_agent_step`` for full Anthropic-native
+    features (caching, shared_files, fallback_template) when runtime is
+    ``anthropic``.
+    """
+    import time
+
+    from sandcastle.engine.agent_runtime import get_runtime
+
+    started_at = time.monotonic()
+    config = step.managed_agent_config
+    if not config:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="agent_config (or managed_agent_config) is required for type: agent",
+        )
+
+    runtime_name = config.runtime or "auto"
+
+    # For anthropic runtime or when advanced features are used (shared_files,
+    # fallback_template, explicit agent_id/environment_id), delegate to the
+    # full managed-agent implementation which handles caching and SSE properly.
+    uses_advanced = bool(
+        config.shared_files
+        or config.fallback_template
+        or (config.agent_id and config.agent_id != "auto")
+        or config.environment_id
+    )
+    if runtime_name == "anthropic" or (runtime_name == "auto" and uses_advanced):
+        return await _execute_managed_agent_step(step, context, storage)
+
+    # Resolve config from template/describe/explicit
+    if config.agent_template or config.describe:
+        try:
+            resolved = await _resolve_agent_config(config)
+        except ValueError as e:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=str(e),
+                duration_seconds=time.monotonic() - started_at,
+            )
+    else:
+        resolved = {
+            "system": config.system_prompt,
+            "model": config.model,
+            "tools": config.tools_enabled,
+            "packages": config.packages or [],
+            "network": "unrestricted" if config.network_access else "limited",
+        }
+
+    # Resolve message template
+    message = resolve_templates(
+        config.message or step.prompt or f"agent step {step.id}",
+        context,
+        step.depends_on,
+    )
+    if storage:
+        message = await resolve_storage_refs(message, storage, context)
+
+    try:
+        runtime = get_runtime(runtime_name)
+        result = await runtime.execute(
+            system_prompt=resolved.get("system", ""),
+            tools=resolved.get("tools") or [],
+            packages=resolved.get("packages") or [],
+            message=message,
+            model=resolved.get("model", "claude-sonnet-4-6"),
+            timeout=config.timeout,
+            network=resolved.get("network", "unrestricted"),
+        )
+
+        # Process output_format
+        final_output: str | dict = result.get("output", "")
+        if config.output_format == "json":
+            try:
+                final_output = json.loads(str(final_output))
+            except (json.JSONDecodeError, ValueError):
+                final_output = {"raw_text": str(final_output), "_parse_error": True}
+        elif config.output_format == "files":
+            final_output = {
+                "text": str(final_output),
+                "files": {},
+                "_output_format": "files",
+            }
+
+        # Estimate cost (Sonnet pricing by default)
+        cost = _safe_cost(
+            result.get("tokens_in", 0),
+            result.get("tokens_out", 0),
+            3.0, 15.0,
+        )
+
+        return StepResult(
+            step_id=step.id,
+            status="completed",
+            output=final_output,
+            cost_usd=cost,
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=message,
+        )
+    except Exception as e:
+        logger.error("Agent step '%s' failed: %s", step.id, e)
+        # Try fallback to managed-agent if auto runtime fails
+        if runtime_name == "auto":
+            logger.info(
+                "Auto runtime failed for step '%s', falling back to managed-agent path", step.id,
+            )
+            return await _execute_managed_agent_step(step, context, storage)
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Agent step failed: {e}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+
 async def _execute_parse_step(
     step: StepDefinition,
     context: RunContext,
@@ -6763,7 +6889,7 @@ async def _prepare_and_run_step(
         "llm", "http", "code", "condition", "classify", "loop",
         "race", "sensor", "gate", "transform", "notify", "delegate",
         "browser", "sub_workflow", "composio", "openclaw", "parse",
-        "report", "managed-agent",
+        "report", "managed-agent", "agent",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -6814,6 +6940,8 @@ async def _prepare_and_run_step(
             return await _execute_report_step(s, ctx, storage)
         if s.type == "managed-agent":
             return await _execute_managed_agent_step(s, ctx, storage)
+        if s.type == "agent":
+            return await _execute_agent_step(s, ctx, storage)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---

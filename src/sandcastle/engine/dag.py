@@ -290,7 +290,11 @@ class OpenClawConfig:
 
 @dataclass
 class ManagedAgentConfig:
-    """Configuration for delegating to Anthropic Claude Managed Agents."""
+    """Configuration for delegating to Anthropic Claude Managed Agents.
+
+    Also used by the universal ``type: agent`` step via the ``agent_config``
+    alias. The ``runtime`` field selects which execution backend to use.
+    """
 
     agent_id: str = ""              # Anthropic agent ID (required, or "auto" for ad-hoc)
     environment_id: str = ""        # Container environment ID (required for sessions)
@@ -310,6 +314,8 @@ class ManagedAgentConfig:
     shared_files: list[str] | None = None  # step IDs whose file outputs to mount
     # Retry with different template on failure
     fallback_template: str = ""     # retry with this template if primary fails
+    # Runtime abstraction: "auto" | "anthropic" | "local"
+    runtime: str = "auto"
 
 
 @dataclass
@@ -429,6 +435,7 @@ VALID_STEP_TYPES = frozenset(
         "parse",
         "report",
         "managed-agent",
+        "agent",
     }
 )
 
@@ -437,7 +444,7 @@ NON_PROMPT_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent",
+        "managed-agent", "agent",
     }
 )
 
@@ -446,7 +453,7 @@ NON_LLM_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent",
+        "managed-agent", "agent",
     }
 )
 
@@ -469,7 +476,7 @@ class StepDefinition:
     # "standard" | "approval" | "sub_workflow" | "llm" | "http"
     # | "code" | "condition" | "classify" | "loop" | "race"
     # | "sensor" | "gate" | "transform" | "notify" | "delegate"
-    # | "browser" | "composio" | "managed-agent"
+    # | "browser" | "composio" | "managed-agent" | "agent"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -1083,7 +1090,12 @@ def _parse_openclaw_config(data: dict | None) -> OpenClawConfig | None:
 
 
 def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
-    """Parse Anthropic Managed Agent configuration from YAML data."""
+    """Parse Managed Agent / universal agent configuration from YAML data.
+
+    Accepts both ``managed_agent_config`` and ``agent_config`` keys.
+    The ``template`` key is treated as an alias for ``agent_template``
+    (useful for the shorter ``type: agent`` syntax).
+    """
     if data is None:
         return None
     tools = data.get("tools_enabled")
@@ -1106,11 +1118,12 @@ def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
         system_prompt=data.get("system_prompt", ""),
         packages=packages,
         network_access=data.get("network_access", True),
-        agent_template=data.get("agent_template", ""),
+        agent_template=data.get("agent_template", "") or data.get("template", ""),
         describe=data.get("describe", ""),
         output_format=data.get("output_format", "text"),
         shared_files=shared,
         fallback_template=data.get("fallback_template", ""),
+        runtime=data.get("runtime", "auto"),
     )
 
 
@@ -1206,7 +1219,10 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         openclaw_config=_parse_openclaw_config(data.get("openclaw_config")),
         parse_config=_parse_parse_config(data.get("parse_config")),
         report_config=_parse_report_config(data.get("report_config")),
-        managed_agent_config=_parse_managed_agent_config(data.get("managed_agent_config")),
+        managed_agent_config=_parse_managed_agent_config(
+            data.get("managed_agent_config") if "managed_agent_config" in data
+            else data.get("agent_config")
+        ),
         # Dynamic context retrieval
         context_query=data.get("context_query", ""),
         context_source=_validate_context_source(data.get("context_source", "memory")),
