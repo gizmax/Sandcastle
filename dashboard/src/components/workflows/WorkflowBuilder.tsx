@@ -586,11 +586,18 @@ function parseAdvancedConfig(yamlContent: string | undefined, stepId: string) {
 function buildInitialState(wf: InitialWorkflow) {
   const steps: StepConfig[] = (wf.steps || []).map((s) => {
     const adv = parseAdvancedConfig(wf.yaml_content, s.id);
+    const sAny = s as Record<string, unknown>;
+    const rawType = (sAny.type as string) || "standard";
+    const resolvedType = (rawType === "agent" || rawType === "managed-agent" ? rawType : rawType) as StepType;
+    const agentTpl = (sAny.agent_template as string) || "";
     return {
       id: s.id,
-      stepType: "standard" as StepType,
+      stepType: resolvedType,
       prompt: s.prompt || "",
-      model: s.model || "sonnet",
+      model: resolvedType === "managed-agent" || resolvedType === "agent"
+        ? (agentTpl ? `agent:${agentTpl}` : (s.model || "managed-agent"))
+        : resolvedType === "report" ? "report" : (s.model || "sonnet"),
+      agentConfig: agentTpl ? { template: agentTpl, runtime: "auto" as const } : undefined,
       maxTurns: 10,
       timeout: 300,
       parallelOver: "",
