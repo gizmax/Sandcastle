@@ -82,13 +82,13 @@ export interface AutoPilotConfig {
 export type StepType = "standard" | "llm" | "http" | "code" | "condition" | "classify" | "loop" | "approval" | "sub_workflow" | "race" | "sensor" | "gate" | "transform" | "notify" | "delegate" | "browser" | "parse" | "openclaw" | "composio" | "agent" | "managed-agent";
 
 export interface AgentStepConfig {
-  template: string;
-  runtime: "auto" | "anthropic" | "local";
-  message: string;
-  describe: string;
-  timeout: number;
-  outputFormat: "text" | "json" | "files" | "markdown";
-  fallbackTemplate: string;
+  template?: string;
+  runtime?: "auto" | "anthropic" | "local";
+  message?: string;
+  describe?: string;
+  timeout?: number;
+  outputFormat?: "text" | "json" | "files" | "markdown";
+  fallbackTemplate?: string;
 }
 
 export const AGENT_TEMPLATES = [
