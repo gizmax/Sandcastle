@@ -169,7 +169,10 @@ async def run_workflow_job(
                     run = await session.get(Run, run_uuid)
                     if run:
                         run.status = status_map.get(result.status, RunStatus.FAILED)
-                        run.output_data = result.outputs
+                        output_with_report = dict(result.outputs) if result.outputs else {}
+                        if getattr(result, "token_report", None):
+                            output_with_report["_token_report"] = result.token_report
+                        run.output_data = output_with_report
                         run.total_cost_usd = result.total_cost_usd
                         # Don't set completed_at for paused workflows
                         if result.status != "awaiting_approval":

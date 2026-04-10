@@ -166,7 +166,7 @@ def _load_recent_user_workflows(max_files: int = 3, max_lines: int = 200) -> str
 _STEP_TYPES_DOC = """\
 ## Step Types
 
-Each step has a `type` field (default: "standard"). Here are all 20 supported types:
+Each step has a `type` field (default: "standard"). Here are all 21 supported types:
 
 ### standard (default)
 Default LLM agent step - runs an agent in a sandbox with tools.
@@ -264,7 +264,10 @@ Fields: parse_config: {input_path, output_format, pages, ocr_engine, languages}
 input_path is a file path or variable (e.g. "{input.file_path}").
 output_format: "markdown" (default), "text", or "json".
 pages: optional page range for PDFs (e.g. "1-5").
-ocr_engine: "auto" (default) | "pymupdf" | "chandra" - chandra for scanned docs, handwriting, tables from images.
+ocr_engine: "auto" (default) | "pymupdf" | "chandra" | "glm-ocr"
+  - pymupdf: fast text extraction from digital PDFs.
+  - chandra: scanned docs, handwriting, tables from images.
+  - glm-ocr: 0.9B local model via Ollama, 94.6% accuracy, free. Best for tables, handwriting, math formulas, mixed documents. Runs locally - zero cost, zero data leaving your machine. Requires: ollama pull glm-ocr
 languages: optional list of language codes for Chandra OCR (e.g. ["cs", "en"]).
 No prompt required (prompt is optional context).
 
@@ -290,13 +293,59 @@ task: description of what the agent should do.
 gateway_url: optional, defaults to env OPENCLAW_GATEWAY_URL.
 No prompt required.
 
+### managed-agent
+Delegate to Anthropic Claude Managed Agents. The agent runs in a cloud
+container with bash, file operations, and web access.
+Best for: complex research, code execution, web scraping, multi-tool tasks.
+
+Three ways to configure:
+
+A) Template (simplest):
+  managed_agent_config:
+    agent_template: researcher
+    message: "Research {input.topic}"
+
+B) Describe (AI designs the agent):
+  managed_agent_config:
+    describe: "Data analyst who downloads CSVs, cleans data with pandas, generates matplotlib charts"
+    message: "Analyze this dataset: {steps.fetch.output}"
+
+C) Explicit (full control):
+  managed_agent_config:
+    agent_id: auto
+    model: claude-sonnet-4-6
+    system_prompt: "You are a security auditor..."
+    tools_enabled: [bash, read, grep, glob]
+    packages: [bandit, safety]
+    network_access: false
+    message: "Audit this codebase for vulnerabilities"
+
+15 built-in templates (by category):
+  Research: researcher (web+citations), seo_specialist (SEO audit+keywords)
+  Development: coder (Python dev), reviewer (code review), tester (pytest),
+    devops (Docker+CI/CD), designer (UI/UX prototypes)
+  Data: analyst (data+charts), sql_expert (SQL+schemas), scraper (web extraction)
+  Content: writer (content+editing), translator (multilingual translation)
+  Business: financial_analyst (financial modeling), legal_analyst (contract analysis)
+  Operations: project_manager (task breakdown+Gantt)
+
+Agent chaining options:
+  output_format: "text" (default) | "json" | "files" | "markdown"
+  shared_files: [step_id_1, step_id_2]  # mount outputs from previous steps
+  fallback_template: coder  # retry with different template on failure
+
+message is a template string (supports {input.X} and {steps.X.output}).
+timeout in seconds (default 600).
+No prompt required. Requires ANTHROPIC_API_KEY environment variable.
+
 ### sub_workflow (legacy)
 Run another workflow as a sub-step with input/output mapping.
 Fields: sub_workflow: {workflow, input_mapping, output_mapping,
 parallel_over, max_concurrent, timeout}
 
 IMPORTANT: Types that do NOT need a prompt: http, code, condition,
-loop, race, sensor, gate, transform, notify, composio, openclaw, parse.
+loop, race, sensor, gate, transform, notify, composio, openclaw, parse,
+managed-agent.
 All other types require a prompt field.
 
 ## Dynamic Context Retrieval (optional)

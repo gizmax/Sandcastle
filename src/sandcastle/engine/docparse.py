@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -41,7 +42,7 @@ def parse_document(
         output_format: "text", "markdown", or "json"
         pages: Page range string like "1-5,10" or None for all
         ocr: Enable OCR for scanned documents (requires tesseract)
-        ocr_engine: "auto" | "pymupdf" | "chandra" - OCR engine selection
+        ocr_engine: "auto" | "pymupdf" | "chandra" | "glm-ocr" - OCR engine selection
         languages: Language hints for Chandra OCR (e.g. ["cs", "en"])
 
     Returns:
@@ -90,17 +91,26 @@ def _parse_pdf_dispatch(
     """Route PDF parsing to the appropriate engine based on ocr_engine setting."""
     if ocr_engine == "chandra":
         return _parse_with_chandra(str(path), output_format, pages, languages)
+    elif ocr_engine == "glm-ocr":
+        return _parse_with_glm_ocr(str(path), output_format, pages)
     elif ocr_engine == "pymupdf":
         return _parse_pdf(path, output_format, pages, ocr)
     else:
-        # auto: try pymupdf first, fall back to chandra for sparse text
+        # auto: try pymupdf first, then glm-ocr if available, then chandra
         result = _parse_pdf(path, output_format, pages, ocr)
         avg_chars = len(result.text) / max(result.pages, 1) if result.text else 0
         if avg_chars < 50:
             logger.info(
-                "pymupdf extracted <50 chars/page from %s, falling back to Chandra OCR",
+                "pymupdf extracted <50 chars/page from %s, trying OCR fallback",
                 path.name,
             )
+            # Try GLM-OCR first (local, free, high accuracy)
+            if _is_glm_ocr_available():
+                try:
+                    return _parse_with_glm_ocr(str(path), output_format, pages)
+                except Exception as exc:
+                    logger.warning("GLM-OCR fallback failed: %s", exc)
+            # Fall back to Chandra OCR
             try:
                 return _parse_with_chandra(str(path), output_format, pages, languages)
             except ImportError:
@@ -150,6 +160,145 @@ def _parse_with_chandra(
             "content_type": "application/pdf",
             "parse_method": "chandra",
             "languages": languages,
+        },
+    )
+
+
+def _is_glm_ocr_available() -> bool:
+    """Check if Ollama is running and has a GLM-OCR model pulled."""
+    try:
+        import httpx
+
+        ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+        if resp.status_code == 200:
+            models = [m.get("name", "") for m in resp.json().get("models", [])]
+            return any("glm" in m.lower() and "ocr" in m.lower() for m in models)
+    except Exception:
+        pass
+    return False
+
+
+def _pdf_to_images(file_path: str, pages: str | None = None) -> list[bytes]:
+    """Convert PDF pages to PNG images using pymupdf.
+
+    Args:
+        file_path: Path to the PDF file
+        pages: Optional page range string like "1-5,10"
+
+    Returns:
+        List of PNG image bytes, one per page
+    """
+    try:
+        import fitz  # pymupdf
+    except ImportError:
+        raise ImportError(
+            "pymupdf is required for PDF-to-image conversion (GLM-OCR). "
+            "Install with: pip install sandcastle-ai[parse]"
+        )
+
+    doc = fitz.open(file_path)
+    page_range = _parse_page_ranges(pages, len(doc)) if pages else range(len(doc))
+
+    images = []
+    for page_num in page_range:
+        if page_num >= len(doc):
+            continue
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=300)  # high resolution for OCR accuracy
+        images.append(pix.tobytes("png"))
+
+    doc.close()
+    return images
+
+
+def _parse_with_glm_ocr(
+    file_path: str,
+    output_format: str = "markdown",
+    pages: str | None = None,
+) -> ParseResult:
+    """Parse a document using GLM-OCR via Ollama.
+
+    GLM-OCR is a 0.9B vision-language model with 94.6% accuracy on
+    document reading benchmarks. Runs locally via Ollama - zero cost,
+    zero data leaving the machine.
+
+    Requires: ollama pull glm-ocr
+    """
+    import base64
+
+    try:
+        import httpx
+    except ImportError:
+        raise ImportError(
+            "httpx is required for GLM-OCR (Ollama API). "
+            "Install with: pip install httpx"
+        )
+
+    ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+    # Convert PDF pages to images via pymupdf
+    page_images = _pdf_to_images(file_path, pages)
+    if not page_images:
+        p = Path(file_path)
+        return ParseResult(
+            text="",
+            format=output_format,
+            pages=0,
+            metadata={
+                "filename": p.name,
+                "size_bytes": p.stat().st_size if p.exists() else 0,
+                "parse_method": "glm-ocr",
+                "model": "glm-ocr",
+            },
+        )
+
+    results: list[str] = []
+    for img_bytes in page_images:
+        img_b64 = base64.b64encode(img_bytes).decode()
+
+        resp = httpx.post(
+            f"{ollama_url}/api/chat",
+            json={
+                "model": "glm-ocr",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Extract all text from this document page as {output_format}. "
+                            "Preserve tables, formulas, and layout."
+                        ),
+                        "images": [img_b64],
+                    }
+                ],
+                "stream": False,
+            },
+            timeout=60,
+        )
+
+        if resp.status_code == 200:
+            text = resp.json().get("message", {}).get("content", "")
+            results.append(text)
+        else:
+            logger.warning(
+                "GLM-OCR returned status %d for page %d",
+                resp.status_code,
+                len(results) + 1,
+            )
+            results.append("")
+
+    p = Path(file_path)
+    return ParseResult(
+        text="\n\n---\n\n".join(results),
+        format=output_format,
+        pages=len(results),
+        metadata={
+            "filename": p.name,
+            "size_bytes": p.stat().st_size if p.exists() else 0,
+            "content_type": "application/pdf",
+            "parse_method": "glm-ocr",
+            "model": "glm-ocr",
+            "accuracy_benchmark": "94.62%",
         },
     )
 

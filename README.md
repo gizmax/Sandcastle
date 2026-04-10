@@ -34,7 +34,8 @@
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
 - [63 Built-in Integrations](#63-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [19 Step Types](#19-step-types)
+- [21 Step Types](#21-step-types)
+- [Managed Agents](#managed-agents)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
@@ -474,7 +475,7 @@ Once connected, ask your AI assistant to:
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
 | **63 built-in integrations** across 9 categories | Yes |
-| **19 step types** (standard, llm, http, code, race, sensor, gate, parse...) | Yes |
+| **21 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -804,9 +805,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 19 Step Types
+## 21 Step Types
 
-Sandcastle supports 19 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 21 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -825,10 +826,12 @@ Sandcastle supports 19 step types for building complex workflows beyond simple L
 | **Advanced** | `notify` | Send alerts via Slack, Teams, email, or webhook |
 | **Advanced** | `delegate` | Spawn a sub-workflow and collect results |
 | **Advanced** | `openclaw` | Delegate to an autonomous OpenClaw agent |
+| **Advanced** | `managed-agent` | Delegate to Anthropic Managed Agents (15 built-in templates) |
 | **Built-in** | `approval` | Human approval gate with timeout and auto-action |
 | **Built-in** | `sub_workflow` | Execute another workflow as a step |
 | **Built-in** | `browser` | Web automation with Playwright, LightPanda, or Browserbase |
 | **Built-in** | `composio` | 500+ business app actions via Composio integration |
+| **Built-in** | `report` | Generate PDF reports with charts, KPIs, and callouts |
 
 ```yaml
 steps:
@@ -859,6 +862,69 @@ steps:
       **Result:** {{ steps['fastest-wins'].output.summary }}
       **Generated:** {{ now() }}
 ```
+
+---
+
+## Managed Agents
+
+Delegate complex tasks to Anthropic Claude Managed Agents running in isolated cloud containers with full tool access (bash, file I/O, web browsing). Three configuration modes let you go from zero-config to fully customized:
+
+### Templates (Quickstart)
+
+15 built-in agent templates across 6 categories:
+
+| Category | Template | Role |
+|----------|----------|------|
+| **Research** | `researcher` | Web research with citations and source verification |
+| **Research** | `seo_specialist` | SEO audit, keywords, meta tags, structured data |
+| **Development** | `coder` | Python development - writes and runs code |
+| **Development** | `reviewer` | Code review, security audit, best practices |
+| **Development** | `tester` | Pytest tests, coverage, fixtures |
+| **Development** | `devops` | Dockerfiles, CI/CD, deployment scripts |
+| **Development** | `designer` | HTML/CSS/Tailwind prototypes, SVG |
+| **Data** | `analyst` | Pandas, matplotlib, statistical analysis |
+| **Data** | `sql_expert` | SQL optimization, schema design, migrations |
+| **Data** | `scraper` | Web scraping, BeautifulSoup, data extraction |
+| **Content** | `writer` | Content writing, proofreading, editing |
+| **Content** | `translator` | Translation with cultural context, 90+ languages |
+| **Business** | `legal_analyst` | Contract analysis, risk identification, clause extraction |
+| **Business** | `financial_analyst` | Financial models, charts, forecasting |
+| **Operations** | `project_manager` | Project breakdown, Gantt charts, status reports |
+
+Advanced features: `output_format` (json/files/markdown), `shared_files` between agents, `fallback_template` on failure.
+
+```yaml
+# A) Template - one line to configure
+steps:
+  - id: deep-research
+    type: managed-agent
+    managed_agent_config:
+      agent_template: researcher
+      message: "Research {input.topic} and provide a comprehensive report with citations"
+
+# B) Describe - AI designs the agent from natural language
+  - id: custom-analyst
+    type: managed-agent
+    managed_agent_config:
+      describe: "Data analyst who downloads CSVs, cleans data with pandas, generates matplotlib charts"
+      message: "Analyze this dataset: {steps.fetch.output}"
+
+# C) Explicit - full control over every parameter
+  - id: security-audit
+    type: managed-agent
+    managed_agent_config:
+      agent_id: auto
+      model: claude-sonnet-4-6
+      system_prompt: "You are a security auditor. Find vulnerabilities."
+      tools_enabled: [bash, read, grep, glob]
+      packages: [bandit, safety]
+      network_access: false
+      message: "Audit this codebase for vulnerabilities"
+```
+
+**When to use managed-agent vs llm:** Use `managed-agent` when the task needs tool execution (running code, browsing the web, reading/writing files). Use `llm` for pure text generation where no tools are needed. Managed agents cost more but can autonomously solve multi-step problems.
+
+Requires `ANTHROPIC_API_KEY` environment variable.
 
 ---
 
@@ -1318,6 +1384,8 @@ steps:
 
 Supported formats: PDF (with optional OCR), DOCX, XLSX, PPTX, CSV.
 Install parsing support: `pip install sandcastle-ai[parse]`
+
+**OCR engines:** `pymupdf` (fast text extraction), `chandra` (scanned docs, handwriting), `glm-ocr` (0.9B vision-language model via Ollama, 94.6% accuracy, runs 100% locally). In `auto` mode Sandcastle tries pymupdf first, then glm-ocr (if Ollama is available), then Chandra.
 
 PDFs are also auto-parsed when uploaded as workflow inputs (if pymupdf is installed).
 
@@ -1972,7 +2040,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 19 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 21 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]

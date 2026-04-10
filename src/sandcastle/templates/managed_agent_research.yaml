@@ -1,0 +1,48 @@
+name: managed-agent-research
+description: >
+  Delegates deep research to Anthropic Claude Managed Agent.
+  The agent runs in a cloud container with web search, bash, and file access.
+  Sandcastle handles scheduling, cost tracking, and output formatting.
+
+default_model: sonnet
+input_schema:
+  required: [topic]
+  properties:
+    topic: {type: string, description: "Research topic"}
+
+steps:
+  - id: research
+    type: managed-agent
+    responsibility: "Deep research with web access and code execution"
+    source_hint: "Managed Agent can search web and run code - capabilities beyond standard LLM"
+    managed_agent_config:
+      agent_id: "auto"
+      model: "claude-sonnet-4-6"
+      message: |
+        Research this topic thoroughly: {input.topic}
+
+        Use web search to find recent sources.
+        Compile findings with citations.
+        Write a structured summary with key findings.
+      timeout: 300
+
+  - id: format
+    depends_on: [research]
+    model: haiku
+    responsibility: "Format research into clean summary"
+    prompt: |
+      Format this research into a clean, structured summary:
+      {steps.research.output}
+
+      Include: key findings, sources, and recommendations.
+
+  - id: report
+    type: report
+    depends_on: [format]
+    responsibility: "Generate professional PDF report"
+    report_config:
+      theme: professional
+      title: "Research: {input.topic}"
+    prompt: |
+      Create a professional research report from:
+      {steps.format.output}

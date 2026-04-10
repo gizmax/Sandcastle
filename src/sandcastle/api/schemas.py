@@ -451,6 +451,7 @@ class RunStatusResponse(BaseModel):
     sub_workflow_of_step: str | None = None
     sub_runs: list[dict[str, Any]] | None = None
     risk_level: str = "minimal"
+    token_report: dict[str, Any] | None = None
 
 
 class StepStatusResponse(BaseModel):

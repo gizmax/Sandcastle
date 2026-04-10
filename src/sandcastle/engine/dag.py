@@ -289,13 +289,37 @@ class OpenClawConfig:
 
 
 @dataclass
+class ManagedAgentConfig:
+    """Configuration for delegating to Anthropic Claude Managed Agents."""
+
+    agent_id: str = ""              # Anthropic agent ID (required, or "auto" for ad-hoc)
+    environment_id: str = ""        # Container environment ID (required for sessions)
+    message: str = ""               # Message template to send (can use {input.X}, {steps.X.output})
+    timeout: int = 600              # Max session time in seconds
+    model: str = "claude-sonnet-4-6"  # Model for the managed agent
+    tools_enabled: list[str] | None = None  # Which tools to enable (None = all)
+    stream: bool = True             # Stream events
+    system_prompt: str = ""         # System prompt for ad-hoc agent
+    packages: list[str] | None = None  # pip packages to install in environment
+    network_access: bool = True     # Allow internet access in environment
+    agent_template: str = ""        # Built-in template name (see agent_templates.py)
+    describe: str = ""              # Natural language description - AI designs the agent config
+    # Agent chaining: output format for downstream consumption
+    output_format: str = "text"     # "text" | "json" | "files" | "markdown"
+    # Agent collaboration: mount file outputs from previous steps
+    shared_files: list[str] | None = None  # step IDs whose file outputs to mount
+    # Retry with different template on failure
+    fallback_template: str = ""     # retry with this template if primary fails
+
+
+@dataclass
 class ParseConfig:
     """Configuration for document parsing step."""
 
     output: str = "markdown"  # text, markdown, json
     pages: str | None = None  # "1-5,10-20" or None for all
     ocr: bool = False
-    ocr_engine: str = "auto"  # "auto" | "pymupdf" | "chandra"
+    ocr_engine: str = "auto"  # "auto" | "pymupdf" | "chandra" | "glm-ocr"
     languages: list[str] | None = None  # e.g. ["cs", "en"] for Chandra OCR
 
 
@@ -404,6 +428,7 @@ VALID_STEP_TYPES = frozenset(
         "openclaw",
         "parse",
         "report",
+        "managed-agent",
     }
 )
 
@@ -412,6 +437,7 @@ NON_PROMPT_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
+        "managed-agent",
     }
 )
 
@@ -420,6 +446,7 @@ NON_LLM_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
+        "managed-agent",
     }
 )
 
@@ -442,7 +469,7 @@ class StepDefinition:
     # "standard" | "approval" | "sub_workflow" | "llm" | "http"
     # | "code" | "condition" | "classify" | "loop" | "race"
     # | "sensor" | "gate" | "transform" | "notify" | "delegate"
-    # | "browser" | "composio"
+    # | "browser" | "composio" | "managed-agent"
     approval_config: ApprovalConfig | None = None
     autopilot: AutoPilotConfig | None = None
     sub_workflow: SubWorkflowConfig | None = None
@@ -470,10 +497,13 @@ class StepDefinition:
     openclaw_config: OpenClawConfig | None = None
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
+    managed_agent_config: ManagedAgentConfig | None = None
     # Dynamic context retrieval before execution
     context_query: str = ""  # Search query to fetch relevant context
     context_source: str = "memory"  # "memory" | "web" | "files" | "custom"
     context_max_tokens: int = 2000  # Max tokens of context to inject
+    # Token optimization: truncate step output before passing to dependents
+    output_max_tokens: int = 0  # 0 = no limit, >0 = truncate output before passing to dependents
     # Self-describing metadata
     responsibility: str = ""  # WHAT this step does in one sentence
     source_hint: str = ""  # WHY this step exists (business reason, ticket, who requested)
@@ -1052,6 +1082,38 @@ def _parse_openclaw_config(data: dict | None) -> OpenClawConfig | None:
     )
 
 
+def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
+    """Parse Anthropic Managed Agent configuration from YAML data."""
+    if data is None:
+        return None
+    tools = data.get("tools_enabled")
+    if tools is not None and not isinstance(tools, list):
+        tools = [str(tools)]
+    packages = data.get("packages")
+    if packages is not None and not isinstance(packages, list):
+        packages = [str(packages)]
+    shared = data.get("shared_files")
+    if shared is not None and not isinstance(shared, list):
+        shared = [str(shared)]
+    return ManagedAgentConfig(
+        agent_id=data.get("agent_id", ""),
+        environment_id=data.get("environment_id", ""),
+        message=data.get("message", ""),
+        timeout=data.get("timeout", 600),
+        model=data.get("model", "claude-sonnet-4-6"),
+        tools_enabled=tools,
+        stream=data.get("stream", True),
+        system_prompt=data.get("system_prompt", ""),
+        packages=packages,
+        network_access=data.get("network_access", True),
+        agent_template=data.get("agent_template", ""),
+        describe=data.get("describe", ""),
+        output_format=data.get("output_format", "text"),
+        shared_files=shared,
+        fallback_template=data.get("fallback_template", ""),
+    )
+
+
 def _parse_parse_config(data: dict | None) -> ParseConfig | None:
     """Parse document parsing step configuration from YAML data."""
     if data is None:
@@ -1144,10 +1206,13 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         openclaw_config=_parse_openclaw_config(data.get("openclaw_config")),
         parse_config=_parse_parse_config(data.get("parse_config")),
         report_config=_parse_report_config(data.get("report_config")),
+        managed_agent_config=_parse_managed_agent_config(data.get("managed_agent_config")),
         # Dynamic context retrieval
         context_query=data.get("context_query", ""),
         context_source=_validate_context_source(data.get("context_source", "memory")),
         context_max_tokens=data.get("context_max_tokens", 2000),
+        # Token optimization
+        output_max_tokens=data.get("output_max_tokens", 0),
         # Self-describing metadata
         responsibility=data.get("responsibility", ""),
         source_hint=data.get("source_hint", ""),
@@ -1447,6 +1512,43 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"OpenClaw step '{step.id}' must have openclaw_config with gateway_url"
                 )
+        elif step.type == "managed-agent":
+            cfg = step.managed_agent_config
+            if not cfg:
+                errors.append(
+                    f"Managed-agent step '{step.id}' must have managed_agent_config"
+                )
+            elif not cfg.agent_id and not cfg.agent_template and not cfg.describe:
+                errors.append(
+                    f"Managed-agent step '{step.id}' must have "
+                    "agent_id, agent_template, or describe"
+                )
+            elif cfg.agent_template:
+                from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES
+                if cfg.agent_template not in VALID_AGENT_TEMPLATES:
+                    errors.append(
+                        f"Managed-agent step '{step.id}' has unknown agent_template "
+                        f"'{cfg.agent_template}'. Valid templates: "
+                        f"{', '.join(sorted(VALID_AGENT_TEMPLATES))}"
+                    )
+            if cfg and cfg.fallback_template:
+                from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES as _vat
+                if cfg.fallback_template not in _vat:
+                    errors.append(
+                        f"Managed-agent step '{step.id}' has unknown fallback_template "
+                        f"'{cfg.fallback_template}'. Valid templates: "
+                        f"{', '.join(sorted(_vat))}"
+                    )
+            if cfg and cfg.output_format not in ("text", "json", "files", "markdown"):
+                errors.append(
+                    f"Managed-agent step '{step.id}' has invalid output_format "
+                    f"'{cfg.output_format}'. Must be 'text', 'json', 'files', or 'markdown'"
+                )
+            if cfg and cfg.timeout <= 0:
+                errors.append(
+                    f"Managed-agent step '{step.id}' timeout must be > 0, "
+                    f"got {cfg.timeout}"
+                )
         elif step.type == "parse":
             cfg = step.parse_config or ParseConfig()
             if cfg.output not in ("text", "markdown", "json"):
@@ -1454,10 +1556,10 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Parse step '{step.id}' has invalid output format '{cfg.output}'. "
                     "Must be 'text', 'markdown', or 'json'"
                 )
-            if cfg.ocr_engine not in ("auto", "pymupdf", "chandra"):
+            if cfg.ocr_engine not in ("auto", "pymupdf", "chandra", "glm-ocr"):
                 errors.append(
                     f"Parse step '{step.id}' has invalid ocr_engine '{cfg.ocr_engine}'. "
-                    "Must be 'auto', 'pymupdf', or 'chandra'"
+                    "Must be 'auto', 'pymupdf', 'chandra', or 'glm-ocr'"
                 )
             # Warn when no file reference is provided (prompt is the NON_PROMPT placeholder)
             has_file_ref = (
@@ -1707,6 +1809,10 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         fields.append(step.openclaw_config.gateway_url)
         if step.openclaw_config.message:
             fields.append(step.openclaw_config.message)
+    if step.managed_agent_config:
+        fields.append(step.managed_agent_config.agent_id)
+        if step.managed_agent_config.message:
+            fields.append(step.managed_agent_config.message)
     return fields
 
 
