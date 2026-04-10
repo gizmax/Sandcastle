@@ -30,7 +30,7 @@ interface WorkflowInfo {
   description: string;
   steps_count: number;
   file_name: string;
-  steps?: WorkflowStep[];
+  steps?: Array<{ id: string; owner?: string; [key: string]: unknown }>;
   input_schema?: InputSchema;
   version?: number | null;
   version_status?: string | null;

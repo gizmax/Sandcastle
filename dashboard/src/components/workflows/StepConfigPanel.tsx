@@ -234,7 +234,7 @@ export interface StepConfig {
   notifyConfig: NotifyStepConfig;
   delegateConfig: DelegateStepConfig;
   browserConfig: BrowserStepConfig;
-  agentConfig: AgentStepConfig;
+  agentConfig?: AgentStepConfig;
 }
 
 interface StepConfigPanelProps {
