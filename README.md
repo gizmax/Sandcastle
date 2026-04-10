@@ -2,11 +2,11 @@
 
 **Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
-[![PyPI](https://img.shields.io/pypi/v/sandcastle-ai?style=flat-square&color=blue)](https://pypi.org/project/sandcastle-ai/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.30.1-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.30.1/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-14600%2B%20passing-brightgreen?style=flat-square)]()
-[![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-14600%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
+[![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)](https://sandcastle-ai.eu/security/)
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
