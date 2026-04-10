@@ -309,32 +309,32 @@ function generateYaml(
       yaml += `  - id: "${step.id}"\n`;
       yaml += `    type: ${sType}\n`;
       yaml += `    ${configKey}:\n`;
-      if (step.agentConfig.template) {
-        yaml += `      ${sType === "agent" ? "template" : "agent_template"}: ${step.agentConfig.template}\n`;
+      if (step.agentConfig?.template) {
+        yaml += `      ${sType === "agent" ? "template" : "agent_template"}: ${step.agentConfig?.template}\n`;
       }
-      if (step.agentConfig.describe && !step.agentConfig.template) {
+      if (step.agentConfig?.describe && !step.agentConfig?.template) {
         yaml += `      describe: |\n`;
-        step.agentConfig.describe.split("\n").forEach((line) => {
+        step.agentConfig?.describe.split("\n").forEach((line) => {
           yaml += `        ${line}\n`;
         });
       }
-      if (step.agentConfig.message) {
+      if (step.agentConfig?.message) {
         yaml += `      message: |\n`;
-        step.agentConfig.message.split("\n").forEach((line) => {
+        step.agentConfig?.message.split("\n").forEach((line) => {
           yaml += `        ${line}\n`;
         });
       }
-      if (sType === "agent" && step.agentConfig.runtime !== "auto") {
-        yaml += `      runtime: ${step.agentConfig.runtime}\n`;
+      if (sType === "agent" && step.agentConfig?.runtime !== "auto") {
+        yaml += `      runtime: ${step.agentConfig?.runtime}\n`;
       }
-      if (step.agentConfig.timeout !== 600) {
-        yaml += `      timeout: ${step.agentConfig.timeout}\n`;
+      if (step.agentConfig?.timeout !== 600) {
+        yaml += `      timeout: ${step.agentConfig?.timeout}\n`;
       }
-      if (step.agentConfig.outputFormat !== "text") {
-        yaml += `      output_format: ${step.agentConfig.outputFormat}\n`;
+      if (step.agentConfig?.outputFormat !== "text") {
+        yaml += `      output_format: ${step.agentConfig?.outputFormat}\n`;
       }
-      if (step.agentConfig.fallbackTemplate) {
-        yaml += `      fallback_template: ${step.agentConfig.fallbackTemplate}\n`;
+      if (step.agentConfig?.fallbackTemplate) {
+        yaml += `      fallback_template: ${step.agentConfig?.fallbackTemplate}\n`;
       }
     } else if (sType === "llm") {
       yaml += `  - id: "${step.id}"\n`;
